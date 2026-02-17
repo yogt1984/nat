@@ -1,0 +1,61 @@
+[workspace]
+resolver = "2"
+members = ["ing"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["NAT Team"]
+license = "MIT"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+futures-util = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Data formats
+arrow = { version = "53", features = ["prettyprint"] }
+parquet = { version = "53", features = ["arrow", "zstd", "snap"] }
+
+# Configuration
+toml = "0.8"
+config = "0.14"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Utilities
+ordered-float = { version = "4.2", features = ["serde"] }
+rustc-hash = "2.0"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+
+# Metrics
+metrics = "0.22"
+metrics-exporter-prometheus = "0.13"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 1
+
+[profile.bench]
+lto = true
+codegen-units = 1

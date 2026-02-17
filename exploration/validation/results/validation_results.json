@@ -1,0 +1,17 @@
+{
+  "n_samples": 95,
+  "mi_scores": {
+    "avg_entropy": "0",
+    "avg_imbalance_persist": "0",
+    "avg_aggressor_mom": "0"
+  },
+  "conditional_entropy": {
+    "h_regime": -1.4426951601859516e-10,
+    "h_regime_given_entropy": -1.4426951601859514e-10,
+    "information_gain": -2.5849394142282115e-26,
+    "information_gain_ratio": 0
+  },
+  "correlation_asmm": 0.011519904348526169,
+  "correlation_trend": -0.3090076807142935,
+  "decision": "NO-GO / PIVOT"
+}

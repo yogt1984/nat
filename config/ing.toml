@@ -1,0 +1,46 @@
+# ING Configuration
+# Hyperliquid Market Data Ingestor
+
+[general]
+log_level = "info"
+data_dir = "./data/features"
+
+[websocket]
+url = "wss://api.hyperliquid.xyz/ws"
+reconnect_delay_ms = 1000
+max_reconnect_delay_ms = 30000
+ping_interval_ms = 30000
+
+[symbols]
+# Assets to ingest
+assets = ["BTC", "ETH", "SOL"]
+
+[features]
+# Feature emission interval (milliseconds)
+emission_interval_ms = 100
+
+# Trade buffer window (seconds)
+trade_buffer_seconds = 60
+
+# Number of order book levels to use
+book_levels = 10
+
+# Price buffer size (for volatility/entropy calculations)
+price_buffer_size = 1000
+
+[output]
+# Output format (only parquet supported)
+format = "parquet"
+
+# Rows per row group
+row_group_size = 10000
+
+# Compression: zstd, snappy, gzip, or none
+compression = "zstd"
+
+# File rotation interval: 1h, 1d
+rotate_interval = "1h"
+
+[metrics]
+# Prometheus metrics endpoint (optional)
+# prometheus_addr = "127.0.0.1:9090"
