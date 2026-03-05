@@ -30,11 +30,10 @@ venv/
 ENV/
 
 # Data
-data/features/
-data/labels/
-data/models/
-data/clusters/
+data/
+rust/data/
 *.parquet
+validation_report_*.json
 
 # IDE
 .idea/
