@@ -113,6 +113,10 @@ pub struct WsTrade {
     pub time: u64,
     /// Trade ID
     pub tid: u64,
+    /// [maker_address, taker_address] - Hyperliquid unique!
+    /// May not always be present in public API
+    #[serde(default)]
+    pub users: Option<(String, String)>,
 }
 
 impl WsTrade {
@@ -129,6 +133,21 @@ impl WsTrade {
     /// Returns true if buy aggressor
     pub fn is_buy(&self) -> bool {
         self.side == "B"
+    }
+
+    /// Get maker wallet address (if available)
+    pub fn maker_address(&self) -> Option<&str> {
+        self.users.as_ref().map(|(maker, _)| maker.as_str())
+    }
+
+    /// Get taker wallet address (if available)
+    pub fn taker_address(&self) -> Option<&str> {
+        self.users.as_ref().map(|(_, taker)| taker.as_str())
+    }
+
+    /// Check if wallet addresses are present
+    pub fn has_wallet_info(&self) -> bool {
+        self.users.is_some()
     }
 }
 

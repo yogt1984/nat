@@ -10,6 +10,10 @@ description = "Hyperliquid market data ingestor with feature extraction"
 name = "ing"
 path = "src/main.rs"
 
+[[bin]]
+name = "validate_api"
+path = "src/bin/validate_api.rs"
+
 [dependencies]
 # Workspace dependencies
 tokio.workspace = true
