@@ -41,6 +41,11 @@ validate-positions: release
 	@echo "Running position tracking validation..."
 	cd rust && ./target/release/validate_positions
 
+# Run whale identification validation
+validate-whales: release
+	@echo "Running whale identification validation..."
+	cd rust && ./target/release/validate_whales
+
 # Clean build artifacts
 clean:
 	@echo "Cleaning build artifacts..."
@@ -74,6 +79,7 @@ help:
 	@echo "  test-verbose - Run tests with output"
 	@echo "  validate  - Run API validation (skeptical test)"
 	@echo "  validate-positions - Run position tracking validation"
+	@echo "  validate-whales - Run whale identification validation"
 	@echo "  build     - Build debug version"
 	@echo "  release   - Build release version"
 	@echo "  clean     - Clean build artifacts"

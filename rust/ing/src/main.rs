@@ -11,6 +11,7 @@ mod output;
 mod positions;
 mod rest;
 mod state;
+mod whales;
 mod ws;
 
 use anyhow::Result;
