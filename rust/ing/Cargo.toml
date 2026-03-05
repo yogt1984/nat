@@ -14,6 +14,10 @@ path = "src/main.rs"
 name = "validate_api"
 path = "src/bin/validate_api.rs"
 
+[[bin]]
+name = "validate_positions"
+path = "src/bin/validate_positions.rs"
+
 [dependencies]
 # Workspace dependencies
 tokio.workspace = true
@@ -39,6 +43,7 @@ metrics-exporter-prometheus.workspace = true
 # Additional crate-specific dependencies
 url = "2.5"
 ring_buffer = "0.1"
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
 
 [dev-dependencies]
 tokio-test = "0.4"

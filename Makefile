@@ -36,6 +36,11 @@ validate: release
 	@echo "Running Hyperliquid API validation..."
 	cd rust && ./target/release/validate_api
 
+# Run position tracking validation
+validate-positions: release
+	@echo "Running position tracking validation..."
+	cd rust && ./target/release/validate_positions
+
 # Clean build artifacts
 clean:
 	@echo "Cleaning build artifacts..."
@@ -68,6 +73,7 @@ help:
 	@echo "  test      - Run all tests"
 	@echo "  test-verbose - Run tests with output"
 	@echo "  validate  - Run API validation (skeptical test)"
+	@echo "  validate-positions - Run position tracking validation"
 	@echo "  build     - Build debug version"
 	@echo "  release   - Build release version"
 	@echo "  clean     - Clean build artifacts"
