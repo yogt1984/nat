@@ -8,6 +8,8 @@ mod error;
 mod features;
 mod metrics;
 mod output;
+mod positions;
+mod rest;
 mod state;
 mod ws;
 
