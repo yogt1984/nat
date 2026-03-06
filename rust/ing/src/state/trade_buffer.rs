@@ -191,6 +191,120 @@ impl TradeBuffer {
     pub fn iter(&self) -> impl Iterator<Item = &Trade> {
         self.trades.iter()
     }
+
+    /// Compute tick directions (up/down/neutral) for trades in window
+    /// Returns tuples of (direction, volume) where direction is:
+    /// +1 for price increase, -1 for price decrease, 0 for unchanged
+    pub fn tick_directions_in_window(&self, seconds: u64) -> Vec<(i8, f64)> {
+        let trades = self.trades_in_window(seconds);
+        if trades.len() < 2 {
+            // Need at least 2 trades to compute direction
+            return trades.iter()
+                .map(|t| {
+                    // Use is_buy as direction for single trade
+                    let dir = if t.is_buy { 1i8 } else { -1i8 };
+                    (dir, t.size)
+                })
+                .collect();
+        }
+
+        let mut result = Vec::with_capacity(trades.len());
+        let mut last_price: Option<f64> = None;
+
+        for trade in trades {
+            let direction = match last_price {
+                Some(prev) if trade.price > prev => 1i8,
+                Some(prev) if trade.price < prev => -1i8,
+                Some(_) => {
+                    // Price unchanged, use aggressor side
+                    if trade.is_buy { 1i8 } else { -1i8 }
+                }
+                None => {
+                    // First trade, use aggressor side
+                    if trade.is_buy { 1i8 } else { -1i8 }
+                }
+            };
+
+            last_price = Some(trade.price);
+            result.push((direction, trade.size));
+        }
+
+        result
+    }
+
+    /// Compute tick entropy over a time window
+    /// Entropy = -Σ p * ln(p) where p is probability of each direction
+    pub fn tick_entropy_in_window(&self, seconds: u64) -> Option<f64> {
+        let directions = self.tick_directions_in_window(seconds);
+        if directions.is_empty() {
+            return None;
+        }
+
+        // Count directions: down (-1) -> 0, neutral (0) -> 1, up (+1) -> 2
+        let mut counts = [0u32; 3];
+        for (dir, _) in &directions {
+            let idx = match *dir {
+                -1 => 0,
+                0 => 1,
+                1 => 2,
+                _ => continue,
+            };
+            counts[idx] += 1;
+        }
+
+        let total: u32 = counts.iter().sum();
+        if total == 0 {
+            return None;
+        }
+
+        // Compute Shannon entropy
+        let entropy: f64 = counts.iter()
+            .filter(|&&c| c > 0)
+            .map(|&c| {
+                let p = c as f64 / total as f64;
+                -p * p.ln()
+            })
+            .sum();
+
+        Some(entropy)
+    }
+
+    /// Compute volume-weighted tick entropy over a time window
+    /// Uses volume as weight for each direction
+    pub fn volume_tick_entropy_in_window(&self, seconds: u64) -> Option<f64> {
+        let directions = self.tick_directions_in_window(seconds);
+        if directions.is_empty() {
+            return None;
+        }
+
+        // Sum volumes by direction
+        let mut volumes = [0.0f64; 3];
+        for (dir, vol) in &directions {
+            let idx = match *dir {
+                -1 => 0,
+                0 => 1,
+                1 => 2,
+                _ => continue,
+            };
+            volumes[idx] += vol;
+        }
+
+        let total: f64 = volumes.iter().sum();
+        if total <= 0.0 {
+            return None;
+        }
+
+        // Compute Shannon entropy weighted by volume
+        let entropy: f64 = volumes.iter()
+            .filter(|&&v| v > 0.0)
+            .map(|&v| {
+                let p = v / total;
+                -p * p.ln()
+            })
+            .sum();
+
+        Some(entropy)
+    }
 }
 
 #[cfg(test)]
@@ -252,5 +366,171 @@ mod tests {
         let expected = (50000.0 * 1.0 + 50001.0 * 2.0 + 50002.0 * 1.5) / 4.5;
         let vwap = buffer.vwap_in_window(60).unwrap();
         assert!((vwap - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_tick_directions_empty() {
+        let buffer = TradeBuffer::new(60);
+        let directions = buffer.tick_directions_in_window(60);
+        assert!(directions.is_empty());
+    }
+
+    #[test]
+    fn test_tick_directions_uptrend() {
+        let mut buffer = TradeBuffer::new(60);
+        let base_time = 1704067200000u64;
+
+        // Add ascending price trades (all up ticks)
+        buffer.trades.push_back(Trade {
+            price: 50000.0,
+            size: 1.0,
+            is_buy: true,
+            timestamp: base_time,
+            tid: 1,
+        });
+        buffer.trades.push_back(Trade {
+            price: 50001.0,
+            size: 1.0,
+            is_buy: true,
+            timestamp: base_time + 1000,
+            tid: 2,
+        });
+        buffer.trades.push_back(Trade {
+            price: 50002.0,
+            size: 1.0,
+            is_buy: true,
+            timestamp: base_time + 2000,
+            tid: 3,
+        });
+
+        let directions = buffer.tick_directions_in_window(60);
+        assert_eq!(directions.len(), 3);
+
+        // First trade uses is_buy (+1), second and third are upticks (+1)
+        assert_eq!(directions[0].0, 1);
+        assert_eq!(directions[1].0, 1);
+        assert_eq!(directions[2].0, 1);
+    }
+
+    #[test]
+    fn test_tick_directions_downtrend() {
+        let mut buffer = TradeBuffer::new(60);
+        let base_time = 1704067200000u64;
+
+        // Add descending price trades (all down ticks)
+        buffer.trades.push_back(Trade {
+            price: 50002.0,
+            size: 1.0,
+            is_buy: false,
+            timestamp: base_time,
+            tid: 1,
+        });
+        buffer.trades.push_back(Trade {
+            price: 50001.0,
+            size: 1.0,
+            is_buy: false,
+            timestamp: base_time + 1000,
+            tid: 2,
+        });
+        buffer.trades.push_back(Trade {
+            price: 50000.0,
+            size: 1.0,
+            is_buy: false,
+            timestamp: base_time + 2000,
+            tid: 3,
+        });
+
+        let directions = buffer.tick_directions_in_window(60);
+        assert_eq!(directions.len(), 3);
+
+        // First trade uses is_buy (-1), second and third are downticks (-1)
+        assert_eq!(directions[0].0, -1);
+        assert_eq!(directions[1].0, -1);
+        assert_eq!(directions[2].0, -1);
+    }
+
+    #[test]
+    fn test_tick_entropy_uniform() {
+        let mut buffer = TradeBuffer::new(60);
+        let base_time = 1704067200000u64;
+
+        // Add equal up and down ticks
+        for i in 0..10 {
+            buffer.trades.push_back(Trade {
+                price: 50000.0 + (i % 2) as f64, // Alternates: 50000, 50001, 50000, 50001...
+                size: 1.0,
+                is_buy: i % 2 == 0,
+                timestamp: base_time + i * 1000,
+                tid: i,
+            });
+        }
+
+        let entropy = buffer.tick_entropy_in_window(60);
+        assert!(entropy.is_some());
+
+        // For equal up/down distribution, entropy should be close to ln(2) ≈ 0.693
+        let e = entropy.unwrap();
+        assert!(e > 0.5, "Entropy should be high for uniform distribution: {}", e);
+    }
+
+    #[test]
+    fn test_tick_entropy_single_direction() {
+        let mut buffer = TradeBuffer::new(60);
+        let base_time = 1704067200000u64;
+
+        // Add only upward ticks
+        for i in 0..10 {
+            buffer.trades.push_back(Trade {
+                price: 50000.0 + i as f64,
+                size: 1.0,
+                is_buy: true,
+                timestamp: base_time + i * 1000,
+                tid: i,
+            });
+        }
+
+        let entropy = buffer.tick_entropy_in_window(60);
+        assert!(entropy.is_some());
+
+        // For single direction, entropy should be 0
+        let e = entropy.unwrap();
+        assert!(e < 0.01, "Entropy should be ~0 for single direction: {}", e);
+    }
+
+    #[test]
+    fn test_volume_tick_entropy() {
+        let mut buffer = TradeBuffer::new(60);
+        let base_time = 1704067200000u64;
+
+        // Add trades with different volumes
+        buffer.trades.push_back(Trade {
+            price: 50000.0,
+            size: 10.0, // Large up
+            is_buy: true,
+            timestamp: base_time,
+            tid: 1,
+        });
+        buffer.trades.push_back(Trade {
+            price: 50001.0,
+            size: 1.0, // Small up (price increased)
+            is_buy: true,
+            timestamp: base_time + 1000,
+            tid: 2,
+        });
+        buffer.trades.push_back(Trade {
+            price: 50000.0,
+            size: 1.0, // Small down
+            is_buy: false,
+            timestamp: base_time + 2000,
+            tid: 3,
+        });
+
+        let entropy = buffer.volume_tick_entropy_in_window(60);
+        assert!(entropy.is_some());
+
+        // With volume weighting: up=11.0, down=1.0
+        // Volume-weighted entropy should be lower than uniform tick entropy
+        let e = entropy.unwrap();
+        assert!(e > 0.0, "Volume entropy should be positive: {}", e);
     }
 }

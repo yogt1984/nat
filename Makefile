@@ -14,7 +14,7 @@ build:
 # Build release version
 release:
 	@echo "Building release version..."
-	cd rust && cargo build --release --bin ing --bin validate_api
+	cd rust && cargo build --release --bin ing --bin validate_api --bin validate_entropy
 
 # Run the main ingestor (requires config/ing.toml)
 run: build
@@ -45,6 +45,11 @@ validate-positions: release
 validate-whales: release
 	@echo "Running whale identification validation..."
 	cd rust && ./target/release/validate_whales
+
+# Run tick entropy feature validation
+validate-entropy: release
+	@echo "Running tick entropy feature validation..."
+	cd rust && ./target/release/validate_entropy
 
 # Clean build artifacts
 clean:
@@ -80,6 +85,7 @@ help:
 	@echo "  validate  - Run API validation (skeptical test)"
 	@echo "  validate-positions - Run position tracking validation"
 	@echo "  validate-whales - Run whale identification validation"
+	@echo "  validate-entropy - Run tick entropy feature validation"
 	@echo "  build     - Build debug version"
 	@echo "  release   - Build release version"
 	@echo "  clean     - Clean build artifacts"

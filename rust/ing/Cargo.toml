@@ -22,6 +22,10 @@ path = "src/bin/validate_positions.rs"
 name = "validate_whales"
 path = "src/bin/validate_whales.rs"
 
+[[bin]]
+name = "validate_entropy"
+path = "src/bin/validate_entropy.rs"
+
 [dependencies]
 # Workspace dependencies
 tokio.workspace = true
