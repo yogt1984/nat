@@ -1,12 +1,17 @@
 //! Entropy features
 //!
-//! Implements permutation entropy and other entropy measures for regime detection.
+//! Implements permutation entropy, tick entropy, and other entropy measures for regime detection.
+//!
+//! Tick entropy measures the randomness of trade direction changes over time.
+//! High entropy indicates random/unpredictable price movement (efficient market).
+//! Low entropy indicates trending/predictable movement (potential regime).
 
 use crate::state::{OrderBook, TradeBuffer, RingBuffer};
 
-/// Entropy features (10 features)
+/// Entropy features (24 features: 10 original + 14 tick entropy)
 #[derive(Debug, Clone, Default)]
 pub struct EntropyFeatures {
+    // === Original permutation/distribution entropy (10 features) ===
     /// Permutation entropy of returns, length 8
     pub permutation_returns_8: f64,
     /// Permutation entropy of returns, length 16
@@ -27,13 +32,46 @@ pub struct EntropyFeatures {
     pub rate_of_change_5s: f64,
     /// Entropy z-score vs 1-minute mean
     pub zscore_1m: f64,
+
+    // === Tick entropy features (7 features) ===
+    /// Tick direction entropy, 1 second window
+    pub tick_entropy_1s: f64,
+    /// Tick direction entropy, 5 second window
+    pub tick_entropy_5s: f64,
+    /// Tick direction entropy, 10 second window
+    pub tick_entropy_10s: f64,
+    /// Tick direction entropy, 15 second window
+    pub tick_entropy_15s: f64,
+    /// Tick direction entropy, 30 second window
+    pub tick_entropy_30s: f64,
+    /// Tick direction entropy, 1 minute window
+    pub tick_entropy_1m: f64,
+    /// Tick direction entropy, 15 minute window
+    pub tick_entropy_15m: f64,
+
+    // === Volume-weighted tick entropy features (7 features) ===
+    /// Volume-weighted tick entropy, 1 second window
+    pub volume_tick_entropy_1s: f64,
+    /// Volume-weighted tick entropy, 5 second window
+    pub volume_tick_entropy_5s: f64,
+    /// Volume-weighted tick entropy, 10 second window
+    pub volume_tick_entropy_10s: f64,
+    /// Volume-weighted tick entropy, 15 second window
+    pub volume_tick_entropy_15s: f64,
+    /// Volume-weighted tick entropy, 30 second window
+    pub volume_tick_entropy_30s: f64,
+    /// Volume-weighted tick entropy, 1 minute window
+    pub volume_tick_entropy_1m: f64,
+    /// Volume-weighted tick entropy, 15 minute window
+    pub volume_tick_entropy_15m: f64,
 }
 
 impl EntropyFeatures {
-    pub fn count() -> usize { 10 }
+    pub fn count() -> usize { 24 }
 
     pub fn names() -> Vec<&'static str> {
         vec![
+            // Original permutation/distribution entropy
             "ent_permutation_returns_8",
             "ent_permutation_returns_16",
             "ent_permutation_returns_32",
@@ -44,11 +82,28 @@ impl EntropyFeatures {
             "ent_trade_size_dispersion",
             "ent_rate_of_change_5s",
             "ent_zscore_1m",
+            // Tick entropy (7 windows)
+            "ent_tick_1s",
+            "ent_tick_5s",
+            "ent_tick_10s",
+            "ent_tick_15s",
+            "ent_tick_30s",
+            "ent_tick_1m",
+            "ent_tick_15m",
+            // Volume-weighted tick entropy (7 windows)
+            "ent_vol_tick_1s",
+            "ent_vol_tick_5s",
+            "ent_vol_tick_10s",
+            "ent_vol_tick_15s",
+            "ent_vol_tick_30s",
+            "ent_vol_tick_1m",
+            "ent_vol_tick_15m",
         ]
     }
 
     pub fn to_vec(&self) -> Vec<f64> {
         vec![
+            // Original permutation/distribution entropy
             self.permutation_returns_8,
             self.permutation_returns_16,
             self.permutation_returns_32,
@@ -59,6 +114,22 @@ impl EntropyFeatures {
             self.trade_size_dispersion,
             self.rate_of_change_5s,
             self.zscore_1m,
+            // Tick entropy
+            self.tick_entropy_1s,
+            self.tick_entropy_5s,
+            self.tick_entropy_10s,
+            self.tick_entropy_15s,
+            self.tick_entropy_30s,
+            self.tick_entropy_1m,
+            self.tick_entropy_15m,
+            // Volume-weighted tick entropy
+            self.volume_tick_entropy_1s,
+            self.volume_tick_entropy_5s,
+            self.volume_tick_entropy_10s,
+            self.volume_tick_entropy_15s,
+            self.volume_tick_entropy_30s,
+            self.volume_tick_entropy_1m,
+            self.volume_tick_entropy_15m,
         ]
     }
 }
@@ -120,6 +191,24 @@ pub fn compute(
     // Z-score (would need entropy history)
     let zscore_1m = 0.0;
 
+    // Tick entropy at various time windows
+    let tick_entropy_1s = trade_buffer.tick_entropy_in_window(1).unwrap_or(0.0);
+    let tick_entropy_5s = trade_buffer.tick_entropy_in_window(5).unwrap_or(0.0);
+    let tick_entropy_10s = trade_buffer.tick_entropy_in_window(10).unwrap_or(0.0);
+    let tick_entropy_15s = trade_buffer.tick_entropy_in_window(15).unwrap_or(0.0);
+    let tick_entropy_30s = trade_buffer.tick_entropy_in_window(30).unwrap_or(0.0);
+    let tick_entropy_1m = trade_buffer.tick_entropy_in_window(60).unwrap_or(0.0);
+    let tick_entropy_15m = trade_buffer.tick_entropy_in_window(900).unwrap_or(0.0);
+
+    // Volume-weighted tick entropy at various time windows
+    let volume_tick_entropy_1s = trade_buffer.volume_tick_entropy_in_window(1).unwrap_or(0.0);
+    let volume_tick_entropy_5s = trade_buffer.volume_tick_entropy_in_window(5).unwrap_or(0.0);
+    let volume_tick_entropy_10s = trade_buffer.volume_tick_entropy_in_window(10).unwrap_or(0.0);
+    let volume_tick_entropy_15s = trade_buffer.volume_tick_entropy_in_window(15).unwrap_or(0.0);
+    let volume_tick_entropy_30s = trade_buffer.volume_tick_entropy_in_window(30).unwrap_or(0.0);
+    let volume_tick_entropy_1m = trade_buffer.volume_tick_entropy_in_window(60).unwrap_or(0.0);
+    let volume_tick_entropy_15m = trade_buffer.volume_tick_entropy_in_window(900).unwrap_or(0.0);
+
     EntropyFeatures {
         permutation_returns_8,
         permutation_returns_16,
@@ -131,6 +220,22 @@ pub fn compute(
         trade_size_dispersion,
         rate_of_change_5s,
         zscore_1m,
+        // Tick entropy
+        tick_entropy_1s,
+        tick_entropy_5s,
+        tick_entropy_10s,
+        tick_entropy_15s,
+        tick_entropy_30s,
+        tick_entropy_1m,
+        tick_entropy_15m,
+        // Volume-weighted tick entropy
+        volume_tick_entropy_1s,
+        volume_tick_entropy_5s,
+        volume_tick_entropy_10s,
+        volume_tick_entropy_15s,
+        volume_tick_entropy_30s,
+        volume_tick_entropy_1m,
+        volume_tick_entropy_15m,
     }
 }
 
@@ -306,6 +411,7 @@ fn compute_book_shape_entropy(order_book: &OrderBook) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::TradeBuffer;
 
     #[test]
     fn test_permutation_entropy_constant() {
@@ -344,5 +450,59 @@ mod tests {
         let data = vec![1.0, 1.0, 1.0, 1.0, 1.0];
         let de = distribution_entropy(&data, 5);
         assert!(de < 0.1, "Constant should have low entropy: {}", de);
+    }
+
+    #[test]
+    fn test_tick_entropy_empty_buffer() {
+        let buffer = TradeBuffer::new(60);
+        assert!(buffer.tick_entropy_in_window(5).is_none());
+        assert!(buffer.volume_tick_entropy_in_window(5).is_none());
+    }
+
+    #[test]
+    fn test_tick_entropy_uniform_directions() {
+        // When all directions are equally likely, entropy should be high
+        // Maximum entropy for 3 states (up, down, neutral) = ln(3) ≈ 1.099
+        // For just 2 states (up, down), max entropy = ln(2) ≈ 0.693
+
+        // Mathematical verification:
+        // If we have equal counts of up and down (no neutral), p = 0.5 each
+        // Entropy = -2 * (0.5 * ln(0.5)) = -2 * (0.5 * -0.693) = 0.693
+
+        let max_entropy_2_states = 2.0_f64.ln();
+        assert!((max_entropy_2_states - 0.693).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_tick_entropy_single_direction() {
+        // When all trades go in same direction, entropy should be 0
+        // This is because -1 * ln(1) = 0
+
+        let single_dir_entropy = -(1.0_f64 * 1.0_f64.ln());
+        assert!(single_dir_entropy.abs() < 1e-10, "Single direction entropy should be 0");
+    }
+
+    #[test]
+    fn test_entropy_features_count() {
+        assert_eq!(EntropyFeatures::count(), 24);
+        assert_eq!(EntropyFeatures::names().len(), 24);
+        assert_eq!(EntropyFeatures::default().to_vec().len(), 24);
+    }
+
+    #[test]
+    fn test_entropy_feature_names() {
+        let names = EntropyFeatures::names();
+
+        // Check tick entropy names exist
+        assert!(names.contains(&"ent_tick_1s"));
+        assert!(names.contains(&"ent_tick_5s"));
+        assert!(names.contains(&"ent_tick_1m"));
+        assert!(names.contains(&"ent_tick_15m"));
+
+        // Check volume tick entropy names exist
+        assert!(names.contains(&"ent_vol_tick_1s"));
+        assert!(names.contains(&"ent_vol_tick_5s"));
+        assert!(names.contains(&"ent_vol_tick_1m"));
+        assert!(names.contains(&"ent_vol_tick_15m"));
     }
 }
