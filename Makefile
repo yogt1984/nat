@@ -93,13 +93,25 @@ validate-entropy: release
 # =============================================================================
 
 # Show real-time features (no file output, terminal only)
-# Usage: make show [SYMBOL=BTC]
+# Usage: make show [SYMBOL=BTC] [FREQ=1]
+#   SYMBOL: Trading pair (BTC, ETH, SOL, etc.)
+#   FREQ: Update frequency in Hz (1-50, default: 1)
 SYMBOL ?= BTC
+FREQ ?= 1
 show: release
-	@echo "Starting real-time feature display for $(SYMBOL)..."
+	@echo "Starting real-time feature display..."
+	@echo "  Symbol: $(SYMBOL)"
+	@echo "  Frequency: $(FREQ) Hz"
 	@echo "Press Ctrl+C to stop"
 	@echo ""
-	cd rust && ./target/release/show_features $(SYMBOL)
+	cd rust && ./target/release/show_features $(SYMBOL) $(FREQ)
+
+# Quick frequency presets
+show-fast: FREQ=10
+show-fast: show
+
+show-hft: FREQ=50
+show-hft: show
 
 # =============================================================================
 # DEVELOPMENT TOOLS
@@ -140,7 +152,10 @@ help:
 	@echo "MAIN TARGETS:"
 	@echo "  all             - Build and run the ingestor (default)"
 	@echo "  run             - Run the main ingestor"
-	@echo "  show            - Show real-time features (make show SYMBOL=ETH)"
+	@echo "  show            - Show real-time features"
+	@echo "                    Usage: make show SYMBOL=ETH FREQ=10"
+	@echo "  show-fast       - Show features at 10 Hz"
+	@echo "  show-hft        - Show features at 50 Hz (max)"
 	@echo ""
 	@echo "TESTING:"
 	@echo "  test            - Run all unit tests"
