@@ -2,6 +2,10 @@
 //!
 //! Streams live features from Hyperliquid to the terminal.
 //! No file output - purely for monitoring and validation.
+//!
+//! Usage: show_features [SYMBOL] [FREQ_HZ]
+//!   SYMBOL: Trading pair (default: BTC)
+//!   FREQ_HZ: Update frequency in Hz (default: 1, max: 50)
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
@@ -12,7 +16,8 @@ use std::time::{Duration, Instant};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 const WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
-const FEATURE_INTERVAL_MS: u64 = 1000; // Emit features every 1 second
+const DEFAULT_FREQ_HZ: u64 = 1;
+const MAX_FREQ_HZ: u64 = 50;
 
 /// Trade sample
 #[derive(Debug, Clone)]
@@ -272,9 +277,9 @@ struct FeatureSnapshot {
 }
 
 impl FeatureSnapshot {
-    fn print_header() {
+    fn print_header(freq_hz: u64) {
         println!("\n{}", "=".repeat(120));
-        println!("NAT Feature Ingestor - Real-time Display (Ctrl+C to stop)");
+        println!("NAT Feature Ingestor - Real-time Display @ {} Hz (Ctrl+C to stop)", freq_hz);
         println!("{}", "=".repeat(120));
         println!();
     }
@@ -348,8 +353,26 @@ impl FeatureSnapshot {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let symbol = std::env::args().nth(1).unwrap_or_else(|| "BTC".to_string());
+    let args: Vec<String> = std::env::args().collect();
 
+    let symbol = args.get(1)
+        .filter(|s| !s.parse::<u64>().is_ok()) // Skip if it's a number (freq)
+        .cloned()
+        .unwrap_or_else(|| "BTC".to_string());
+
+    let freq_hz: u64 = args.iter()
+        .skip(1)
+        .find_map(|s| s.parse::<u64>().ok())
+        .unwrap_or(DEFAULT_FREQ_HZ)
+        .min(MAX_FREQ_HZ)
+        .max(1);
+
+    let feature_interval_ms = 1000 / freq_hz;
+
+    println!("Configuration:");
+    println!("  Symbol: {}", symbol);
+    println!("  Frequency: {} Hz ({} ms interval)", freq_hz, feature_interval_ms);
+    println!();
     println!("Connecting to Hyperliquid WebSocket...");
 
     let (mut ws_stream, _) = connect_async(WS_URL)
@@ -384,9 +407,9 @@ async fn main() -> Result<()> {
     let mut order_book = OrderBook::new();
     let mut last_feature_emit = Instant::now();
     let mut update_count = 0u64;
-    let feature_interval = Duration::from_millis(FEATURE_INTERVAL_MS);
+    let feature_interval = Duration::from_millis(feature_interval_ms);
 
-    FeatureSnapshot::print_header();
+    FeatureSnapshot::print_header(freq_hz);
 
     loop {
         tokio::select! {

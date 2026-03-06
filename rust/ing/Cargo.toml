@@ -30,6 +30,10 @@ path = "src/bin/validate_entropy.rs"
 name = "show_features"
 path = "src/bin/show_features.rs"
 
+[[bin]]
+name = "measure_frequency"
+path = "src/bin/measure_frequency.rs"
+
 [dependencies]
 # Workspace dependencies
 tokio.workspace = true
