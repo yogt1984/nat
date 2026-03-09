@@ -6,7 +6,7 @@ mod context;
 mod ring_buffer;
 
 pub use order_book::OrderBook;
-pub use trade_buffer::TradeBuffer;
+pub use trade_buffer::{TradeBuffer, Trade};
 pub use context::MarketContext;
 pub use ring_buffer::RingBuffer;
 
