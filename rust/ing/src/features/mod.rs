@@ -9,6 +9,7 @@ mod context;
 mod trend;
 mod illiquidity;
 mod toxicity;
+mod derived;
 
 pub use raw::RawFeatures;
 pub use imbalance::ImbalanceFeatures;
@@ -19,6 +20,7 @@ pub use context::ContextFeatures;
 pub use trend::TrendFeatures;
 pub use illiquidity::IlliquidityFeatures;
 pub use toxicity::ToxicityFeatures;
+pub use derived::DerivedFeatures;
 
 use crate::config::FeaturesConfig;
 use crate::state::{OrderBook, TradeBuffer, MarketContext, RingBuffer};
@@ -35,6 +37,7 @@ pub struct Features {
     pub trend: TrendFeatures,
     pub illiquidity: IlliquidityFeatures,
     pub toxicity: ToxicityFeatures,
+    pub derived: DerivedFeatures,
 }
 
 impl Features {
@@ -48,7 +51,8 @@ impl Features {
         ContextFeatures::count() +
         TrendFeatures::count() +
         IlliquidityFeatures::count() +
-        ToxicityFeatures::count()
+        ToxicityFeatures::count() +
+        DerivedFeatures::count()
     }
 
     /// Convert to flat vector of f64
@@ -63,6 +67,7 @@ impl Features {
         v.extend(self.trend.to_vec());
         v.extend(self.illiquidity.to_vec());
         v.extend(self.toxicity.to_vec());
+        v.extend(self.derived.to_vec());
         v
     }
 
@@ -78,6 +83,7 @@ impl Features {
         names.extend(TrendFeatures::names());
         names.extend(IlliquidityFeatures::names());
         names.extend(ToxicityFeatures::names());
+        names.extend(DerivedFeatures::names());
         names
     }
 }
@@ -122,6 +128,16 @@ impl FeatureComputer {
         let illiquidity = illiquidity::compute(trade_buffer);
         let toxicity = toxicity::compute(trade_buffer);
 
+        // Compute derived features from base features
+        let derived = derived::compute(
+            &entropy,
+            &trend,
+            &volatility,
+            &illiquidity,
+            &toxicity,
+            &flow,
+        );
+
         Features {
             raw,
             imbalance,
@@ -132,6 +148,7 @@ impl FeatureComputer {
             trend,
             illiquidity,
             toxicity,
+            derived,
         }
     }
 }
