@@ -248,6 +248,108 @@ impl OrderBook {
     }
 }
 
+/// Price buffer for trend computation
+struct PriceBuffer {
+    prices: VecDeque<f64>,
+    capacity: usize,
+}
+
+impl PriceBuffer {
+    fn new(capacity: usize) -> Self {
+        Self {
+            prices: VecDeque::with_capacity(capacity),
+            capacity,
+        }
+    }
+
+    fn push(&mut self, price: f64) {
+        if self.prices.len() >= self.capacity {
+            self.prices.pop_front();
+        }
+        self.prices.push_back(price);
+    }
+
+    fn len(&self) -> usize {
+        self.prices.len()
+    }
+
+    fn to_vec(&self) -> Vec<f64> {
+        self.prices.iter().cloned().collect()
+    }
+
+    /// Compute momentum (linear regression slope) for last n prices
+    fn momentum(&self, window: usize) -> f64 {
+        let n = self.prices.len().min(window);
+        if n < 2 {
+            return 0.0;
+        }
+
+        let start = self.prices.len().saturating_sub(window);
+        let prices: Vec<f64> = self.prices.iter().skip(start).cloned().collect();
+
+        let n_f = prices.len() as f64;
+        let sum_x: f64 = (prices.len() - 1) as f64 * n_f / 2.0;
+        let sum_x2: f64 = (prices.len() - 1) as f64 * n_f * (2 * prices.len() - 1) as f64 / 6.0;
+        let sum_y: f64 = prices.iter().sum();
+        let sum_xy: f64 = prices.iter().enumerate().map(|(i, &p)| i as f64 * p).sum();
+
+        let denominator = n_f * sum_x2 - sum_x * sum_x;
+        if denominator.abs() < 1e-10 {
+            return 0.0;
+        }
+
+        (n_f * sum_xy - sum_x * sum_y) / denominator
+    }
+
+    /// Compute monotonicity (fraction in dominant direction)
+    fn monotonicity(&self, window: usize) -> f64 {
+        let n = self.prices.len().min(window);
+        if n < 2 {
+            return 0.5;
+        }
+
+        let start = self.prices.len().saturating_sub(window);
+        let prices: Vec<f64> = self.prices.iter().skip(start).cloned().collect();
+
+        let mut up = 0;
+        let mut down = 0;
+        for i in 1..prices.len() {
+            if prices[i] > prices[i - 1] {
+                up += 1;
+            } else if prices[i] < prices[i - 1] {
+                down += 1;
+            }
+        }
+
+        let total = up + down;
+        if total == 0 {
+            0.5
+        } else {
+            up.max(down) as f64 / total as f64
+        }
+    }
+
+    /// Compute simple EMAs
+    fn emas(&self, short_period: usize, long_period: usize) -> (f64, f64) {
+        if self.prices.is_empty() {
+            return (0.0, 0.0);
+        }
+
+        let alpha_short = 2.0 / (short_period as f64 + 1.0);
+        let alpha_long = 2.0 / (long_period as f64 + 1.0);
+
+        let mut ema_short = *self.prices.front().unwrap();
+        let mut ema_long = ema_short;
+
+        for &price in self.prices.iter().skip(1) {
+            ema_short = alpha_short * price + (1.0 - alpha_short) * ema_short;
+            ema_long = alpha_long * price + (1.0 - alpha_long) * ema_long;
+        }
+
+        (ema_short, ema_long)
+    }
+}
+
 /// Feature snapshot for display
 struct FeatureSnapshot {
     timestamp: DateTime<Utc>,
@@ -274,6 +376,13 @@ struct FeatureSnapshot {
     // Derived
     trade_intensity_5s: f64,
     vwap_30s: f64,
+    // Trend features
+    momentum_60: f64,
+    momentum_300: f64,
+    monotonicity_60: f64,
+    monotonicity_300: f64,
+    ma_crossover: f64,
+    price_samples: usize,
 }
 
 impl FeatureSnapshot {
@@ -345,8 +454,35 @@ impl FeatureSnapshot {
         println!("  {:<20} {:>15}", "Regime:", regime);
         println!();
 
+        // Trend section
+        println!("  TREND FEATURES");
+        println!("  {:<20} {:>15.6}  {:<20} {:>15.6}",
+            "Momentum (60):", self.momentum_60,
+            "Momentum (300):", self.momentum_300);
+        println!("  {:<20} {:>15.4}  {:<20} {:>15.4}",
+            "Monotonicity (60):", self.monotonicity_60,
+            "Monotonicity (300):", self.monotonicity_300);
+        println!("  {:<20} {:>15.4}  {:<20} {:>15}",
+            "MA Crossover:", self.ma_crossover,
+            "Price samples:", self.price_samples);
+
+        // Trend interpretation
+        let trend = if self.momentum_60 > 0.0 && self.monotonicity_60 > 0.7 {
+            "STRONG UPTREND"
+        } else if self.momentum_60 < 0.0 && self.monotonicity_60 > 0.7 {
+            "STRONG DOWNTREND"
+        } else if self.monotonicity_60 < 0.55 {
+            "CHOPPY / RANGING"
+        } else if self.momentum_60 > 0.0 {
+            "WEAK UPTREND"
+        } else {
+            "WEAK DOWNTREND"
+        };
+        println!("  {:<20} {:>15}", "Trend:", trend);
+        println!();
+
         println!("{}", "-".repeat(100));
-        println!("  Symbol: {} | Features: 24 entropy + flow + volume | Press Ctrl+C to stop", self.symbol);
+        println!("  Symbol: {} | Features: 77 (entropy + flow + volume + trend) | Press Ctrl+C to stop", self.symbol);
         println!("{}", "=".repeat(100));
     }
 }
@@ -405,9 +541,12 @@ async fn main() -> Result<()> {
 
     let mut trade_buffer = TradeBuffer::new();
     let mut order_book = OrderBook::new();
+    let mut price_buffer = PriceBuffer::new(1000); // For trend features
     let mut last_feature_emit = Instant::now();
+    let mut last_price_sample = Instant::now();
     let mut update_count = 0u64;
     let feature_interval = Duration::from_millis(feature_interval_ms);
+    let price_sample_interval = Duration::from_millis(100); // Sample price every 100ms
 
     FeatureSnapshot::print_header(freq_hz);
 
@@ -502,9 +641,22 @@ async fn main() -> Result<()> {
             }
 
             _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                // Sample price at regular intervals for trend features
+                if last_price_sample.elapsed() >= price_sample_interval {
+                    let midprice = order_book.midprice();
+                    if midprice > 0.0 {
+                        price_buffer.push(midprice);
+                    }
+                    last_price_sample = Instant::now();
+                }
+
                 // Check if it's time to emit features
                 if last_feature_emit.elapsed() >= feature_interval {
                     update_count += 1;
+
+                    // Compute trend features
+                    let (ema_short, ema_long) = price_buffer.emas(10, 50);
+                    let ma_crossover = ema_short - ema_long;
 
                     let snapshot = FeatureSnapshot {
                         timestamp: Utc::now(),
@@ -526,6 +678,13 @@ async fn main() -> Result<()> {
                         tick_entropy_1m: trade_buffer.tick_entropy(60).unwrap_or(0.0),
                         trade_intensity_5s: trade_buffer.trade_intensity(5),
                         vwap_30s: trade_buffer.vwap_in_window(30).unwrap_or(0.0),
+                        // Trend features
+                        momentum_60: price_buffer.momentum(60),
+                        momentum_300: price_buffer.momentum(300),
+                        monotonicity_60: price_buffer.monotonicity(60),
+                        monotonicity_300: price_buffer.monotonicity(300),
+                        ma_crossover,
+                        price_samples: price_buffer.len(),
                     };
 
                     snapshot.print(update_count);

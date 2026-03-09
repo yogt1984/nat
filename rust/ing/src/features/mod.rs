@@ -6,6 +6,7 @@ mod flow;
 mod volatility;
 mod entropy;
 mod context;
+mod trend;
 
 pub use raw::RawFeatures;
 pub use imbalance::ImbalanceFeatures;
@@ -13,6 +14,7 @@ pub use flow::FlowFeatures;
 pub use volatility::VolatilityFeatures;
 pub use entropy::EntropyFeatures;
 pub use context::ContextFeatures;
+pub use trend::TrendFeatures;
 
 use crate::config::FeaturesConfig;
 use crate::state::{OrderBook, TradeBuffer, MarketContext, RingBuffer};
@@ -26,6 +28,7 @@ pub struct Features {
     pub volatility: VolatilityFeatures,
     pub entropy: EntropyFeatures,
     pub context: ContextFeatures,
+    pub trend: TrendFeatures,
 }
 
 impl Features {
@@ -36,7 +39,8 @@ impl Features {
         FlowFeatures::count() +
         VolatilityFeatures::count() +
         EntropyFeatures::count() +
-        ContextFeatures::count()
+        ContextFeatures::count() +
+        TrendFeatures::count()
     }
 
     /// Convert to flat vector of f64
@@ -48,6 +52,7 @@ impl Features {
         v.extend(self.volatility.to_vec());
         v.extend(self.entropy.to_vec());
         v.extend(self.context.to_vec());
+        v.extend(self.trend.to_vec());
         v
     }
 
@@ -60,6 +65,7 @@ impl Features {
         names.extend(VolatilityFeatures::names());
         names.extend(EntropyFeatures::names());
         names.extend(ContextFeatures::names());
+        names.extend(TrendFeatures::names());
         names
     }
 }
@@ -100,6 +106,7 @@ impl FeatureComputer {
         let volatility = volatility::compute(price_buffer, order_book);
         let entropy = entropy::compute(price_buffer, order_book, trade_buffer);
         let context = context::compute(market_context);
+        let trend = trend::compute(price_buffer);
 
         Features {
             raw,
@@ -108,6 +115,7 @@ impl FeatureComputer {
             volatility,
             entropy,
             context,
+            trend,
         }
     }
 }
