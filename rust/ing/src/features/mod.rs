@@ -12,6 +12,7 @@ mod toxicity;
 mod derived;
 pub mod whale_flow;
 pub mod liquidation;
+pub mod concentration;
 
 pub use raw::RawFeatures;
 pub use imbalance::ImbalanceFeatures;
@@ -25,6 +26,7 @@ pub use toxicity::ToxicityFeatures;
 pub use derived::DerivedFeatures;
 pub use whale_flow::{WhaleFlowFeatures, WhaleFlowBuffer, WhaleFlowConfig, WhalePositionChange};
 pub use liquidation::{LiquidationRiskFeatures, LiquidationRiskConfig, LiquidationPosition};
+pub use concentration::{ConcentrationFeatures, ConcentrationBuffer, ConcentrationConfig, Position as ConcentrationPosition};
 
 use crate::config::FeaturesConfig;
 use crate::state::{OrderBook, TradeBuffer, MarketContext, RingBuffer};
@@ -46,6 +48,8 @@ pub struct Features {
     pub whale_flow: Option<WhaleFlowFeatures>,
     /// Liquidation risk features (Hyperliquid-unique, requires position tracking)
     pub liquidation_risk: Option<LiquidationRiskFeatures>,
+    /// Position concentration features (Hyperliquid-unique, requires position tracking)
+    pub concentration: Option<ConcentrationFeatures>,
 }
 
 impl Features {
@@ -70,7 +74,7 @@ impl Features {
 
     /// Get total number of features including all Hyperliquid-unique features
     pub fn count_with_hyperliquid_features() -> usize {
-        Self::count() + WhaleFlowFeatures::count() + LiquidationRiskFeatures::count()
+        Self::count() + WhaleFlowFeatures::count() + LiquidationRiskFeatures::count() + ConcentrationFeatures::count()
     }
 
     /// Convert to flat vector of f64
@@ -91,6 +95,9 @@ impl Features {
         }
         if let Some(ref lr) = self.liquidation_risk {
             v.extend(lr.to_vec());
+        }
+        if let Some(ref c) = self.concentration {
+            v.extend(c.to_vec());
         }
         v
     }
@@ -123,6 +130,7 @@ impl Features {
         let mut names = Self::names();
         names.extend(WhaleFlowFeatures::names());
         names.extend(LiquidationRiskFeatures::names());
+        names.extend(ConcentrationFeatures::names());
         names
     }
 
@@ -135,6 +143,12 @@ impl Features {
     /// Set liquidation risk features
     pub fn with_liquidation_risk(mut self, liquidation_risk: LiquidationRiskFeatures) -> Self {
         self.liquidation_risk = Some(liquidation_risk);
+        self
+    }
+
+    /// Set concentration features
+    pub fn with_concentration(mut self, concentration: ConcentrationFeatures) -> Self {
+        self.concentration = Some(concentration);
         self
     }
 }
@@ -202,6 +216,7 @@ impl FeatureComputer {
             derived,
             whale_flow: None, // Computed separately via WhaleFlowBuffer
             liquidation_risk: None, // Computed separately via liquidation::compute()
+            concentration: None, // Computed separately via ConcentrationBuffer
         }
     }
 }
