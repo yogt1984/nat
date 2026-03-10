@@ -10,6 +10,7 @@ mod trend;
 mod illiquidity;
 mod toxicity;
 mod derived;
+pub mod whale_flow;
 
 pub use raw::RawFeatures;
 pub use imbalance::ImbalanceFeatures;
@@ -21,6 +22,7 @@ pub use trend::TrendFeatures;
 pub use illiquidity::IlliquidityFeatures;
 pub use toxicity::ToxicityFeatures;
 pub use derived::DerivedFeatures;
+pub use whale_flow::{WhaleFlowFeatures, WhaleFlowBuffer, WhaleFlowConfig, WhalePositionChange};
 
 use crate::config::FeaturesConfig;
 use crate::state::{OrderBook, TradeBuffer, MarketContext, RingBuffer};
@@ -38,10 +40,12 @@ pub struct Features {
     pub illiquidity: IlliquidityFeatures,
     pub toxicity: ToxicityFeatures,
     pub derived: DerivedFeatures,
+    /// Whale flow features (Hyperliquid-unique, requires position tracking)
+    pub whale_flow: Option<WhaleFlowFeatures>,
 }
 
 impl Features {
-    /// Get total number of features
+    /// Get total number of base features (excluding whale flow)
     pub fn count() -> usize {
         RawFeatures::count() +
         ImbalanceFeatures::count() +
@@ -53,6 +57,11 @@ impl Features {
         IlliquidityFeatures::count() +
         ToxicityFeatures::count() +
         DerivedFeatures::count()
+    }
+
+    /// Get total number of features including whale flow
+    pub fn count_with_whale_flow() -> usize {
+        Self::count() + WhaleFlowFeatures::count()
     }
 
     /// Convert to flat vector of f64
@@ -68,10 +77,13 @@ impl Features {
         v.extend(self.illiquidity.to_vec());
         v.extend(self.toxicity.to_vec());
         v.extend(self.derived.to_vec());
+        if let Some(ref wf) = self.whale_flow {
+            v.extend(wf.to_vec());
+        }
         v
     }
 
-    /// Get feature names
+    /// Get feature names (base features only)
     pub fn names() -> Vec<&'static str> {
         let mut names = Vec::with_capacity(Self::count());
         names.extend(RawFeatures::names());
@@ -85,6 +97,19 @@ impl Features {
         names.extend(ToxicityFeatures::names());
         names.extend(DerivedFeatures::names());
         names
+    }
+
+    /// Get all feature names including whale flow
+    pub fn names_with_whale_flow() -> Vec<&'static str> {
+        let mut names = Self::names();
+        names.extend(WhaleFlowFeatures::names());
+        names
+    }
+
+    /// Set whale flow features
+    pub fn with_whale_flow(mut self, whale_flow: WhaleFlowFeatures) -> Self {
+        self.whale_flow = Some(whale_flow);
+        self
     }
 }
 
@@ -149,6 +174,7 @@ impl FeatureComputer {
             illiquidity,
             toxicity,
             derived,
+            whale_flow: None, // Computed separately via WhaleFlowBuffer
         }
     }
 }
