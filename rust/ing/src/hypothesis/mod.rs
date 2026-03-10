@@ -21,6 +21,7 @@
 
 pub mod stats;
 pub mod h1_whale_flow;
+pub mod h2_entropy_whale;
 
 pub use stats::{
     pearson_correlation, spearman_correlation, mutual_information,
@@ -31,6 +32,12 @@ pub use stats::{
 pub use h1_whale_flow::{
     H1TestResult, H1TestConfig, H1Decision,
     run_h1_whale_flow_test,
+};
+
+pub use h2_entropy_whale::{
+    H2TestResult, H2TestConfig, H2Decision,
+    run_h2_entropy_whale_test,
+    ContingencyTable, InteractionTable,
 };
 
 /// Overall hypothesis test outcome
