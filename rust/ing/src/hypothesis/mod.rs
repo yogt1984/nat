@@ -22,6 +22,7 @@
 pub mod stats;
 pub mod h1_whale_flow;
 pub mod h2_entropy_whale;
+pub mod h3_liquidation_cascade;
 
 pub use stats::{
     pearson_correlation, spearman_correlation, mutual_information,
@@ -38,6 +39,13 @@ pub use h2_entropy_whale::{
     H2TestResult, H2TestConfig, H2Decision,
     run_h2_entropy_whale_test,
     ContingencyTable, InteractionTable,
+};
+
+pub use h3_liquidation_cascade::{
+    H3TestResult, H3TestConfig, H3Decision,
+    run_h3_liquidation_cascade_test,
+    ClassificationMetrics, ThresholdResult,
+    LeadTimeAnalysis, DirectionAnalysis,
 };
 
 /// Overall hypothesis test outcome
