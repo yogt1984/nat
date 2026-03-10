@@ -6,6 +6,7 @@
 mod config;
 mod error;
 mod features;
+mod hypothesis;
 mod metrics;
 mod output;
 mod positions;
