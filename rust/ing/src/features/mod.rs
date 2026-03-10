@@ -11,6 +11,7 @@ mod illiquidity;
 mod toxicity;
 mod derived;
 pub mod whale_flow;
+pub mod liquidation;
 
 pub use raw::RawFeatures;
 pub use imbalance::ImbalanceFeatures;
@@ -23,6 +24,7 @@ pub use illiquidity::IlliquidityFeatures;
 pub use toxicity::ToxicityFeatures;
 pub use derived::DerivedFeatures;
 pub use whale_flow::{WhaleFlowFeatures, WhaleFlowBuffer, WhaleFlowConfig, WhalePositionChange};
+pub use liquidation::{LiquidationRiskFeatures, LiquidationRiskConfig, LiquidationPosition};
 
 use crate::config::FeaturesConfig;
 use crate::state::{OrderBook, TradeBuffer, MarketContext, RingBuffer};
@@ -42,6 +44,8 @@ pub struct Features {
     pub derived: DerivedFeatures,
     /// Whale flow features (Hyperliquid-unique, requires position tracking)
     pub whale_flow: Option<WhaleFlowFeatures>,
+    /// Liquidation risk features (Hyperliquid-unique, requires position tracking)
+    pub liquidation_risk: Option<LiquidationRiskFeatures>,
 }
 
 impl Features {
@@ -64,6 +68,11 @@ impl Features {
         Self::count() + WhaleFlowFeatures::count()
     }
 
+    /// Get total number of features including all Hyperliquid-unique features
+    pub fn count_with_hyperliquid_features() -> usize {
+        Self::count() + WhaleFlowFeatures::count() + LiquidationRiskFeatures::count()
+    }
+
     /// Convert to flat vector of f64
     pub fn to_vec(&self) -> Vec<f64> {
         let mut v = Vec::with_capacity(Self::count());
@@ -79,6 +88,9 @@ impl Features {
         v.extend(self.derived.to_vec());
         if let Some(ref wf) = self.whale_flow {
             v.extend(wf.to_vec());
+        }
+        if let Some(ref lr) = self.liquidation_risk {
+            v.extend(lr.to_vec());
         }
         v
     }
@@ -106,9 +118,23 @@ impl Features {
         names
     }
 
+    /// Get all feature names including all Hyperliquid-unique features
+    pub fn names_with_hyperliquid_features() -> Vec<&'static str> {
+        let mut names = Self::names();
+        names.extend(WhaleFlowFeatures::names());
+        names.extend(LiquidationRiskFeatures::names());
+        names
+    }
+
     /// Set whale flow features
     pub fn with_whale_flow(mut self, whale_flow: WhaleFlowFeatures) -> Self {
         self.whale_flow = Some(whale_flow);
+        self
+    }
+
+    /// Set liquidation risk features
+    pub fn with_liquidation_risk(mut self, liquidation_risk: LiquidationRiskFeatures) -> Self {
+        self.liquidation_risk = Some(liquidation_risk);
         self
     }
 }
@@ -175,6 +201,7 @@ impl FeatureComputer {
             toxicity,
             derived,
             whale_flow: None, // Computed separately via WhaleFlowBuffer
+            liquidation_risk: None, // Computed separately via liquidation::compute()
         }
     }
 }
