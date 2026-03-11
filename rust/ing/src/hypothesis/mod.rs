@@ -26,6 +26,7 @@ pub mod h3_liquidation_cascade;
 pub mod h4_concentration_vol;
 pub mod h5_persistence;
 pub mod feature_analysis;
+pub mod final_decision;
 
 pub use stats::{
     pearson_correlation, spearman_correlation, mutual_information,
@@ -69,6 +70,12 @@ pub use feature_analysis::{
     FeatureAnalysisConfig, FeatureAnalysisResult, FeatureStats,
     FeaturePairCorrelation, FeatureCluster, AnalysisSummary,
     run_feature_analysis, compute_correlation_matrix, compute_mi_matrix,
+};
+
+pub use final_decision::{
+    FinalDecision, FinalDecisionResult, DecisionInput,
+    HypothesisSummary, ConfidenceLevel, StrategyEstimate,
+    HonestAssessment, NextSteps, run_final_decision,
 };
 
 /// Overall hypothesis test outcome
