@@ -24,6 +24,7 @@ pub mod h1_whale_flow;
 pub mod h2_entropy_whale;
 pub mod h3_liquidation_cascade;
 pub mod h4_concentration_vol;
+pub mod h5_persistence;
 
 pub use stats::{
     pearson_correlation, spearman_correlation, mutual_information,
@@ -52,7 +53,15 @@ pub use h3_liquidation_cascade::{
 pub use h4_concentration_vol::{
     H4TestResult, H4TestConfig, H4Decision,
     run_h4_concentration_vol_test,
-    ConcentrationMeasureResult, RegimeAnalysis, CausalityAnalysis,
+    ConcentrationMeasureResult, RegimeAnalysis as H4RegimeAnalysis, CausalityAnalysis,
+};
+
+pub use h5_persistence::{
+    H5TestResult, H5TestConfig, H5Decision,
+    run_h5_persistence_test,
+    FeatureRow, ThreeBarLabel, HorizonResult, FoldResult,
+    RegimeAnalysis as H5RegimeAnalysis, RegimeResult, FeatureImportance,
+    compute_persistence_indicator, compute_future_returns, sharpe_ratio,
 };
 
 /// Overall hypothesis test outcome
