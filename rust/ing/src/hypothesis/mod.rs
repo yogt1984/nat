@@ -23,6 +23,7 @@ pub mod stats;
 pub mod h1_whale_flow;
 pub mod h2_entropy_whale;
 pub mod h3_liquidation_cascade;
+pub mod h4_concentration_vol;
 
 pub use stats::{
     pearson_correlation, spearman_correlation, mutual_information,
@@ -46,6 +47,12 @@ pub use h3_liquidation_cascade::{
     run_h3_liquidation_cascade_test,
     ClassificationMetrics, ThresholdResult,
     LeadTimeAnalysis, DirectionAnalysis,
+};
+
+pub use h4_concentration_vol::{
+    H4TestResult, H4TestConfig, H4Decision,
+    run_h4_concentration_vol_test,
+    ConcentrationMeasureResult, RegimeAnalysis, CausalityAnalysis,
 };
 
 /// Overall hypothesis test outcome
