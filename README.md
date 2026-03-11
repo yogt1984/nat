@@ -606,6 +606,96 @@ The framework is intentionally skeptical — designed to reject weak signals and
 
 ---
 
+## Academic References
+
+NAT's methodology is grounded in peer-reviewed research from quantitative finance, market microstructure, information theory, and statistical learning. Below are the foundational publications underlying our feature extraction and hypothesis testing framework.
+
+### Market Microstructure & Price Impact
+
+| Citation | Contribution |
+|----------|--------------|
+| Kyle, A.S. (1985). "Continuous Auctions and Insider Trading." *Econometrica*, 53(6), 1315-1335. | Kyle's λ — price impact of informed trading |
+| Glosten, L. & Milgrom, P. (1985). "Bid, Ask and Transaction Prices in a Specialist Market with Heterogeneously Informed Traders." *Journal of Financial Economics*, 14(1), 71-100. | Information asymmetry in bid-ask spreads |
+| Roll, R. (1984). "A Simple Implicit Measure of the Effective Bid-Ask Spread in an Efficient Market." *Journal of Finance*, 39(4), 1127-1139. | Roll's implied spread estimator |
+| Hasbrouck, J. (1991). "Measuring the Information Content of Stock Trades." *Journal of Finance*, 46(1), 179-207. | Trade informativeness measurement |
+| Hasbrouck, J. (1991). "The Summary Informativeness of Stock Trades: An Econometric Analysis." *Review of Financial Studies*, 4(3), 571-595. | VAR-based price impact models |
+| O'Hara, M. (1995). *Market Microstructure Theory*. Blackwell Publishers. | Comprehensive microstructure framework |
+| Almgren, R. & Chriss, N. (2000). "Optimal Execution of Portfolio Transactions." *Journal of Risk*, 3(2), 5-39. | Market impact and optimal execution |
+
+### Illiquidity & Toxicity Measures
+
+| Citation | Contribution |
+|----------|--------------|
+| Amihud, Y. (2002). "Illiquidity and Stock Returns: Cross-Section and Time-Series Effects." *Journal of Financial Markets*, 5(1), 31-56. | Amihud illiquidity ratio |
+| Easley, D., Kiefer, N.M., O'Hara, M. & Paperman, J. (1996). "Liquidity, Information, and Infrequently Traded Stocks." *Journal of Finance*, 51(4), 1405-1436. | PIN — Probability of Informed Trading |
+| Easley, D., López de Prado, M. & O'Hara, M. (2012). "Flow Toxicity and Liquidity in a High-Frequency World." *Review of Financial Studies*, 25(5), 1457-1493. | VPIN toxicity metric |
+| Easley, D., López de Prado, M. & O'Hara, M. (2011). "The Microstructure of the 'Flash Crash'." *Journal of Portfolio Management*, 37(2), 118-128. | Toxicity and liquidity crashes |
+| Lee, C. & Ready, M. (1991). "Inferring Trade Direction from Intraday Data." *Journal of Finance*, 46(2), 733-746. | Trade classification algorithm |
+
+### Order Flow & Imbalance
+
+| Citation | Contribution |
+|----------|--------------|
+| Chordia, T., Roll, R. & Subrahmanyam, A. (2002). "Order Imbalance, Liquidity, and Market Returns." *Journal of Financial Economics*, 65(1), 111-130. | Order imbalance effects on returns |
+
+### Volatility Estimation
+
+| Citation | Contribution |
+|----------|--------------|
+| Parkinson, M. (1980). "The Extreme Value Method for Estimating the Variance of the Rate of Return." *Journal of Business*, 53(1), 61-65. | High-low volatility estimator |
+| Garman, M.B. & Klass, M.J. (1980). "On the Estimation of Security Price Volatilities from Historical Data." *Journal of Business*, 53(1), 67-78. | OHLC volatility estimator |
+| Rogers, L.C.G. & Satchell, S.E. (1991). "Estimating Variance from High, Low and Closing Prices." *Annals of Applied Probability*, 1(4), 504-512. | Drift-independent volatility estimator |
+| Bollerslev, T. (1986). "Generalized Autoregressive Conditional Heteroskedasticity." *Journal of Econometrics*, 31(3), 307-327. | GARCH volatility clustering |
+| Black, F. (1976). "Studies of Stock Price Volatility Changes." *Proceedings of the Business and Economic Statistics Section*, American Statistical Association, 177-181. | Leverage effect |
+
+### Information Theory & Entropy
+
+| Citation | Contribution |
+|----------|--------------|
+| Shannon, C.E. (1948). "A Mathematical Theory of Communication." *Bell System Technical Journal*, 27, 379-423, 623-656. | Shannon entropy foundation |
+| Bandt, C. & Pompe, B. (2002). "Permutation Entropy: A Natural Complexity Measure for Time Series." *Physical Review Letters*, 88(17), 174102. | Permutation entropy for time series |
+| Cover, T.M. & Thomas, J.A. (2006). *Elements of Information Theory* (2nd ed.). Wiley-Interscience. | Mutual information theory |
+| Theil, H. (1967). *Economics and Information Theory*. North-Holland, Amsterdam. | Theil entropy index |
+
+### Concentration & Inequality Measures
+
+| Citation | Contribution |
+|----------|--------------|
+| Gini, C. (1912). "Variabilità e Mutabilità." *Reprinted in Memorie di Metodologica Statistica*. | Gini coefficient |
+| Herfindahl, O.C. (1950). "Concentration in the U.S. Steel Industry." Doctoral dissertation, Columbia University. | Herfindahl-Hirschman Index |
+| Hirschman, A.O. (1964). "The Paternity of an Index." *American Economic Review*, 54(5), 761-762. | HHI attribution |
+
+### Time Series & Persistence
+
+| Citation | Contribution |
+|----------|--------------|
+| Hurst, H.E. (1951). "Long-Term Storage Capacity of Reservoirs." *Transactions of the American Society of Civil Engineers*, 116, 770-799. | Hurst exponent — long-range dependence |
+| Lo, A.W. & MacKinlay, A.C. (1988). "Stock Market Prices Do Not Follow Random Walks: Evidence from a Simple Specification Test." *Review of Financial Studies*, 1(1), 41-66. | Variance ratio tests |
+
+### Risk-Adjusted Performance
+
+| Citation | Contribution |
+|----------|--------------|
+| Sharpe, W.F. (1966). "Mutual Fund Performance." *Journal of Business*, 39(1), 119-138. | Sharpe ratio |
+| Fama, E.F. & French, K.R. (1993). "Common Risk Factors in the Returns on Stocks and Bonds." *Journal of Financial Economics*, 33(1), 3-56. | Factor model foundations |
+
+### Statistical Methods
+
+| Citation | Contribution |
+|----------|--------------|
+| Bonferroni, C.E. (1936). "Teoria Statistica delle Classi e Calcolo delle Probabilità." *Pubblicazioni del R Istituto Superiore di Scienze Economiche e Commerciali di Firenze*, 8, 3-62. | Bonferroni correction |
+| Dunn, O.J. (1961). "Multiple Comparisons Among Means." *Journal of the American Statistical Association*, 56(293), 52-64. | Multiple comparison procedures |
+| Pardo, R. (1992). *Design, Testing, and Optimization of Trading Systems*. Wiley. | Walk-forward validation |
+
+### Cryptocurrency & DeFi Markets
+
+| Citation | Contribution |
+|----------|--------------|
+| Makarov, I. & Schoar, A. (2020). "Trading and Arbitrage in Cryptocurrency Markets." *Journal of Financial Economics*, 135(2), 293-319. | Crypto market microstructure |
+| Qin, K., Zhou, L., Gamito, P., Jovanovic, P. & Gervais, A. (2021). "An Empirical Study of DeFi Liquidations: Incentives, Risks, and Instabilities." *ACM Internet Measurement Conference*, 336-350. | DeFi liquidation mechanisms |
+
+---
+
 ## License
 
 Proprietary. All rights reserved.
