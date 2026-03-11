@@ -25,6 +25,7 @@ pub mod h2_entropy_whale;
 pub mod h3_liquidation_cascade;
 pub mod h4_concentration_vol;
 pub mod h5_persistence;
+pub mod feature_analysis;
 
 pub use stats::{
     pearson_correlation, spearman_correlation, mutual_information,
@@ -62,6 +63,12 @@ pub use h5_persistence::{
     FeatureRow, ThreeBarLabel, HorizonResult, FoldResult,
     RegimeAnalysis as H5RegimeAnalysis, RegimeResult, FeatureImportance,
     compute_persistence_indicator, compute_future_returns, sharpe_ratio,
+};
+
+pub use feature_analysis::{
+    FeatureAnalysisConfig, FeatureAnalysisResult, FeatureStats,
+    FeaturePairCorrelation, FeatureCluster, AnalysisSummary,
+    run_feature_analysis, compute_correlation_matrix, compute_mi_matrix,
 };
 
 /// Overall hypothesis test outcome
