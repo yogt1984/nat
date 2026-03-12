@@ -14,7 +14,7 @@ build:
 # Build release version (all binaries)
 release:
 	@echo "Building release version..."
-	cd rust && cargo build --release --bin ing --bin validate_api --bin validate_positions --bin validate_whales --bin validate_entropy --bin show_features
+	cd rust && cargo build --release --bin ing --bin validate_api --bin validate_positions --bin validate_whales --bin validate_entropy --bin show_features --bin test_hypotheses
 
 # Run the main ingestor (requires config/ing.toml)
 run: build
@@ -114,6 +114,20 @@ show-hft: FREQ=50
 show-hft: show
 
 # =============================================================================
+# HYPOTHESIS TESTING
+# =============================================================================
+
+# Run hypothesis tests on collected data
+# Usage: make test_hypotheses [DATA=./data/features]
+DATA ?= ./data/features
+test_hypotheses: release
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║         RUNNING HYPOTHESIS TESTING ON COLLECTED DATA             ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	cd rust && ./target/release/test_hypotheses ../$(DATA)
+
+# =============================================================================
 # DEVELOPMENT TOOLS
 # =============================================================================
 
@@ -160,6 +174,8 @@ help:
 	@echo "TESTING:"
 	@echo "  test            - Run all unit tests"
 	@echo "  test-verbose    - Run tests with output"
+	@echo "  test_hypotheses - Run H1-H5 hypothesis tests on collected data"
+	@echo "                    Usage: make test_hypotheses DATA=./data/features"
 	@echo "  validate        - Run ALL validations (live API tests)"
 	@echo "  validate-api    - Run API connection validation only"
 	@echo "  validate-positions - Run position tracking validation"

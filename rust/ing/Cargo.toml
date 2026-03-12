@@ -34,6 +34,10 @@ path = "src/bin/show_features.rs"
 name = "measure_frequency"
 path = "src/bin/measure_frequency.rs"
 
+[[bin]]
+name = "test_hypotheses"
+path = "src/bin/test_hypotheses.rs"
+
 [dependencies]
 # Workspace dependencies
 tokio.workspace = true
