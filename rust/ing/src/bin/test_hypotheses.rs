@@ -3,292 +3,421 @@
 //! Loads collected market data and runs H1-H5 hypothesis tests.
 //! Generates GO/PIVOT/NO-GO decision with full statistical report.
 
-use anyhow::{Context, Result};
-use std::path::PathBuf;
+use anyhow::Result;
+use std::fs::File;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
-mod hypothesis_runner {
-    use super::*;
-    use std::fs::File;
-    use std::io::Write;
-    use std::path::Path;
+// Import hypothesis modules
+use ing::hypothesis::{
+    data_loader, run_final_decision, run_h1_whale_flow_test, run_h2_entropy_whale_test,
+    run_h3_liquidation_cascade_test, run_h4_concentration_vol_test, run_h5_persistence_test,
+    DecisionInput, FinalDecision, H1Decision, H1TestConfig, H1TestResult, H2Decision, H2TestConfig,
+    H2TestResult, H3Decision, H3TestConfig, H3TestResult, H4Decision, H4TestConfig, H4TestResult,
+    H5Decision, H5TestConfig, H5TestResult,
+};
 
-    pub fn main() -> Result<()> {
-        // Parse command line arguments
-        let args: Vec<String> = std::env::args().collect();
-        let data_dir = if args.len() >= 2 {
-            PathBuf::from(&args[1])
-        } else {
-            PathBuf::from("./data/features")
-        };
+fn main() -> Result<()> {
+    // Parse command line arguments
+    let args: Vec<String> = std::env::args().collect();
+    let data_dir = if args.len() >= 2 {
+        PathBuf::from(&args[1])
+    } else {
+        PathBuf::from("./data/features")
+    };
 
-        print_header();
-        println!("Data directory: {}", data_dir.display());
+    print_header();
+    println!("Data directory: {}", data_dir.display());
+    println!();
+
+    // Check if data directory exists
+    if !data_dir.exists() {
+        println!("⚠️  Data directory does not exist: {}", data_dir.display());
         println!();
-
-        // Check if data directory exists
-        if !data_dir.exists() {
-            println!("⚠️  Data directory does not exist: {}", data_dir.display());
-            println!();
-            println!("Please collect data first by running: make run");
-            println!("Let it run for at least 2-4 weeks before testing hypotheses.");
-            return Ok(());
-        }
-
-        // Check for parquet files
-        let parquet_count = count_parquet_files(&data_dir)?;
-        if parquet_count == 0 {
-            println!("⚠️  No Parquet files found in {}", data_dir.display());
-            println!();
-            println!("Please collect data first by running: make run");
-            return Ok(());
-        }
-
-        println!("📊 Found {} Parquet files", parquet_count);
-        println!();
-
-        // Run hypothesis tests
-        println!("╔══════════════════════════════════════════════════════════════════╗");
-        println!("║              RUNNING HYPOTHESIS TESTS (MOCK DATA)                ║");
-        println!("║                                                                  ║");
-        println!("║  ⚠️  IMPORTANT: Data loader not yet implemented                  ║");
-        println!("║  Tests will run with synthetic data to demonstrate flow         ║");
-        println!("╚══════════════════════════════════════════════════════════════════╝");
-        println!();
-
-        // Run tests with mock data (placeholder)
-        let results = run_all_tests()?;
-
-        // Print results
-        print_results(&results);
-
-        // Generate report
-        let report_path = data_dir.join("hypothesis_test_report.txt");
-        save_report(&report_path, &results)?;
-
-        println!();
-        println!("📄 Report saved to: {}", report_path.display());
-        println!();
-
-        print_next_steps();
-
-        Ok(())
+        println!("Please collect data first by running: make run");
+        println!("Let it run for at least 2-4 weeks before testing hypotheses.");
+        return Ok(());
     }
 
-    fn print_header() {
-        println!("╔══════════════════════════════════════════════════════════════════╗");
-        println!("║            NAT HYPOTHESIS TESTING PIPELINE                       ║");
-        println!("║            Statistical Validation Framework                      ║");
-        println!("╚══════════════════════════════════════════════════════════════════╝");
+    // Check for parquet files
+    let parquet_count = count_parquet_files(&data_dir)?;
+    if parquet_count == 0 {
+        println!("⚠️  No Parquet files found in {}", data_dir.display());
         println!();
+        println!("Please collect data first by running: make run");
+        return Ok(());
     }
 
-    fn count_parquet_files(data_dir: &Path) -> Result<usize> {
-        let mut count = 0;
-        if let Ok(entries) = std::fs::read_dir(data_dir) {
-            for entry in entries.flatten() {
-                if let Some(ext) = entry.path().extension() {
-                    if ext == "parquet" {
-                        count += 1;
-                    }
+    println!("📊 Found {} Parquet files", parquet_count);
+    println!();
+
+    // Load data
+    println!("╔══════════════════════════════════════════════════════════════════╗");
+    println!("║                    LOADING PARQUET DATA                          ║");
+    println!("╚══════════════════════════════════════════════════════════════════╝");
+    println!();
+
+    println!("   Loading all Parquet files...");
+    let batches = data_loader::load_all_data(&data_dir)?;
+    println!("   ✓ Loaded {} batches", batches.len());
+
+    if batches.is_empty() {
+        println!("   ⚠️  No data in Parquet files!");
+        return Ok(());
+    }
+
+    data_loader::summarize_data(&batches)?;
+
+    // Run hypothesis tests
+    println!("╔══════════════════════════════════════════════════════════════════╗");
+    println!("║              RUNNING HYPOTHESIS TESTS                            ║");
+    println!("╚══════════════════════════════════════════════════════════════════╝");
+    println!();
+
+    // H1: Whale Flow Predicts Returns
+    println!("[1/5] H1: Whale Flow Predicts Returns");
+    let h1_result = match data_loader::load_h1_data(&batches) {
+        Ok(h1_data) => {
+            if h1_data.whale_flow_1h.len() < 100 {
+                println!("      ⚠️  Insufficient data ({} samples)", h1_data.whale_flow_1h.len());
+                println!("      Skipping H1 test");
+                None
+            } else {
+                let config = H1TestConfig::default();
+                let result = run_h1_whale_flow_test(&h1_data, &config);
+                print_h1_result(&result);
+                Some(result)
+            }
+        }
+        Err(e) => {
+            println!("      ❌ Failed to load data: {}", e);
+            None
+        }
+    };
+    println!();
+
+    // H2: Entropy + Whale Interaction
+    println!("[2/5] H2: Entropy + Whale Interaction");
+    let h2_result = match data_loader::load_h2_data(&batches) {
+        Ok(h2_data) => {
+            if h2_data.whale_flow.len() < 100 {
+                println!("      ⚠️  Insufficient data ({} samples)", h2_data.whale_flow.len());
+                println!("      Skipping H2 test");
+                None
+            } else {
+                let config = H2TestConfig::default();
+                let result = run_h2_entropy_whale_test(&h2_data, &config);
+                print_h2_result(&result);
+                Some(result)
+            }
+        }
+        Err(e) => {
+            println!("      ❌ Failed to load data: {}", e);
+            None
+        }
+    };
+    println!();
+
+    // H3: Liquidation Cascades
+    println!("[3/5] H3: Liquidation Cascades");
+    let h3_result = match data_loader::load_h3_data(&batches) {
+        Ok(h3_data) => {
+            if h3_data.prices.len() < 100 {
+                println!("      ⚠️  Insufficient data ({} samples)", h3_data.prices.len());
+                println!("      Skipping H3 test");
+                None
+            } else {
+                let config = H3TestConfig::default();
+                let result = run_h3_liquidation_cascade_test(&h3_data, &config);
+                print_h3_result(&result);
+                Some(result)
+            }
+        }
+        Err(e) => {
+            println!("      ❌ Failed to load data: {}", e);
+            None
+        }
+    };
+    println!();
+
+    // H4: Concentration → Volatility
+    println!("[4/5] H4: Concentration → Volatility");
+    let h4_result = match data_loader::load_h4_data(&batches) {
+        Ok(h4_data) => {
+            if h4_data.hhi.len() < 100 {
+                println!("      ⚠️  Insufficient data ({} samples)", h4_data.hhi.len());
+                println!("      Skipping H4 test");
+                None
+            } else {
+                let config = H4TestConfig::default();
+                let result = run_h4_concentration_vol_test(&h4_data, &config);
+                print_h4_result(&result);
+                Some(result)
+            }
+        }
+        Err(e) => {
+            println!("      ❌ Failed to load data: {}", e);
+            None
+        }
+    };
+    println!();
+
+    // H5: Persistence Indicator
+    println!("[5/5] H5: Persistence Indicator");
+    let h5_result = match data_loader::load_h5_data(&batches) {
+        Ok(h5_data) => {
+            if h5_data.features.len() < 100 {
+                println!("      ⚠️  Insufficient data ({} samples)", h5_data.features.len());
+                println!("      Skipping H5 test");
+                None
+            } else {
+                let config = H5TestConfig::default();
+                let volatility_ref = h5_data.volatility.as_ref().map(|v| v.as_slice());
+                let result = run_h5_persistence_test(
+                    &h5_data.features,
+                    &h5_data.prices,
+                    volatility_ref,
+                    &config,
+                );
+                print_h5_result(&result);
+                Some(result)
+            }
+        }
+        Err(e) => {
+            println!("      ❌ Failed to load data: {}", e);
+            None
+        }
+    };
+    println!();
+
+    // Final Decision
+    println!("╔══════════════════════════════════════════════════════════════════╗");
+    println!("║                    FINAL DECISION ANALYSIS                       ║");
+    println!("╚══════════════════════════════════════════════════════════════════╝");
+    println!();
+
+    let decision_input = DecisionInput {
+        h1: h1_result.clone(),
+        h2: h2_result.clone(),
+        h3: h3_result.clone(),
+        h4: h4_result.clone(),
+        h5: h5_result.clone(),
+        feature_analysis: None,
+    };
+
+    let final_decision_result = run_final_decision(&decision_input);
+    print_final_decision(&final_decision_result.decision);
+
+    // Save report
+    let report_path = data_dir.join("hypothesis_test_report.txt");
+    save_report(
+        &report_path,
+        &final_decision_result.decision,
+        &h1_result,
+        &h2_result,
+        &h3_result,
+        &h4_result,
+        &h5_result,
+    )?;
+
+    println!();
+    println!("📄 Report saved to: {}", report_path.display());
+    println!();
+
+    Ok(())
+}
+
+fn print_header() {
+    println!("╔══════════════════════════════════════════════════════════════════╗");
+    println!("║            NAT HYPOTHESIS TESTING PIPELINE                       ║");
+    println!("║            Statistical Validation Framework                      ║");
+    println!("╚══════════════════════════════════════════════════════════════════╝");
+    println!();
+}
+
+fn count_parquet_files(data_dir: &Path) -> Result<usize> {
+    let mut count = 0;
+    if let Ok(entries) = std::fs::read_dir(data_dir) {
+        for entry in entries.flatten() {
+            if let Some(ext) = entry.path().extension() {
+                if ext == "parquet" {
+                    count += 1;
                 }
             }
         }
-        Ok(count)
     }
+    Ok(count)
+}
 
-    #[derive(Debug)]
-    struct TestResults {
-        h1: HypothesisResult,
-        h2: HypothesisResult,
-        h3: HypothesisResult,
-        h4: HypothesisResult,
-        h5: HypothesisResult,
-        decision: Decision,
-    }
+fn print_h1_result(result: &H1TestResult) {
+    let status_icon = match result.decision {
+        H1Decision::Go => "✅",
+        H1Decision::NoGo => "❌",
+        H1Decision::Inconclusive => "⚠️ ",
+    };
 
-    #[derive(Debug)]
-    struct HypothesisResult {
-        name: String,
-        passed: bool,
-        status: String,
-        details: String,
-    }
+    println!("      {} {:?}", status_icon, result.decision);
+    println!("      Passing combinations: {}/{}", result.n_passing, result.n_total);
 
-    #[derive(Debug)]
-    enum Decision {
-        Go,
-        Pivot,
-        NoGo,
-    }
-
-    fn run_all_tests() -> Result<TestResults> {
-        // TODO: Load actual data from Parquet files
-        // TODO: Convert to test format
-        // TODO: Run actual hypothesis tests
-
-        // For now, return mock results to demonstrate the pipeline
-        Ok(TestResults {
-            h1: HypothesisResult {
-                name: "H1: Whale Flow Predicts Returns".to_string(),
-                passed: false,
-                status: "MOCK DATA".to_string(),
-                details: "Data loader not implemented - using synthetic data".to_string(),
-            },
-            h2: HypothesisResult {
-                name: "H2: Entropy + Whale Interaction".to_string(),
-                passed: false,
-                status: "MOCK DATA".to_string(),
-                details: "Data loader not implemented - using synthetic data".to_string(),
-            },
-            h3: HypothesisResult {
-                name: "H3: Liquidation Cascades".to_string(),
-                passed: false,
-                status: "MOCK DATA".to_string(),
-                details: "Data loader not implemented - using synthetic data".to_string(),
-            },
-            h4: HypothesisResult {
-                name: "H4: Concentration → Volatility".to_string(),
-                passed: false,
-                status: "MOCK DATA".to_string(),
-                details: "Data loader not implemented - using synthetic data".to_string(),
-            },
-            h5: HypothesisResult {
-                name: "H5: Persistence Indicator".to_string(),
-                passed: false,
-                status: "MOCK DATA".to_string(),
-                details: "Data loader not implemented - using synthetic data".to_string(),
-            },
-            decision: Decision::NoGo,
-        })
-    }
-
-    fn print_results(results: &TestResults) {
-        println!("[1/5] {}", results.h1.name);
-        println!("      Status: {}", results.h1.status);
-        println!("      {}", results.h1.details);
-        println!();
-
-        println!("[2/5] {}", results.h2.name);
-        println!("      Status: {}", results.h2.status);
-        println!("      {}", results.h2.details);
-        println!();
-
-        println!("[3/5] {}", results.h3.name);
-        println!("      Status: {}", results.h3.status);
-        println!("      {}", results.h3.details);
-        println!();
-
-        println!("[4/5] {}", results.h4.name);
-        println!("      Status: {}", results.h4.status);
-        println!("      {}", results.h4.details);
-        println!();
-
-        println!("[5/5] {}", results.h5.name);
-        println!("      Status: {}", results.h5.status);
-        println!("      {}", results.h5.details);
-        println!();
-
-        println!("╔══════════════════════════════════════════════════════════════════╗");
-        println!("║                    FINAL DECISION ANALYSIS                       ║");
-        println!("╚══════════════════════════════════════════════════════════════════╝");
-        println!();
-
-        match results.decision {
-            Decision::Go => {
-                println!("🚀 GO - Proceed with full deployment");
-                println!("   4-5 hypotheses validated");
-                println!("   Strong statistical evidence for alpha generation");
-            }
-            Decision::Pivot => {
-                println!("🔄 PIVOT - Selective deployment recommended");
-                println!("   2-3 hypotheses validated");
-                println!("   Focus on validated signals only");
-            }
-            Decision::NoGo => {
-                println!("🛑 NO-GO - Do not deploy");
-                println!("   0-1 hypotheses validated");
-                println!("   Insufficient evidence for alpha");
-                println!();
-                println!("   ⚠️  Currently using mock data - implement data loader first");
-            }
-        }
-    }
-
-    fn save_report(path: &Path, results: &TestResults) -> Result<()> {
-        let mut file = File::create(path)?;
-
-        writeln!(file, "NAT HYPOTHESIS TESTING REPORT")?;
-        writeln!(file, "==============================")?;
-        writeln!(file)?;
-        writeln!(file, "Generated: {}", chrono::Utc::now())?;
-        writeln!(file)?;
-
-        writeln!(file, "HYPOTHESIS RESULTS:")?;
-        writeln!(file, "-------------------")?;
-        writeln!(file, "[1] {} - {}", results.h1.name, results.h1.status)?;
-        writeln!(file, "    {}", results.h1.details)?;
-        writeln!(file)?;
-        writeln!(file, "[2] {} - {}", results.h2.name, results.h2.status)?;
-        writeln!(file, "    {}", results.h2.details)?;
-        writeln!(file)?;
-        writeln!(file, "[3] {} - {}", results.h3.name, results.h3.status)?;
-        writeln!(file, "    {}", results.h3.details)?;
-        writeln!(file)?;
-        writeln!(file, "[4] {} - {}", results.h4.name, results.h4.status)?;
-        writeln!(file, "    {}", results.h4.details)?;
-        writeln!(file)?;
-        writeln!(file, "[5] {} - {}", results.h5.name, results.h5.status)?;
-        writeln!(file, "    {}", results.h5.details)?;
-        writeln!(file)?;
-
-        writeln!(file, "FINAL DECISION:")?;
-        writeln!(file, "---------------")?;
-        writeln!(file, "{:?}", results.decision)?;
-        writeln!(file)?;
-
-        writeln!(file, "IMPORTANT:")?;
-        writeln!(file, "----------")?;
-        writeln!(file, "Data loader not yet implemented. Tests ran with synthetic data.")?;
-        writeln!(file, "To run on real data, implement Parquet data loading in test_hypotheses.rs")?;
-
-        Ok(())
-    }
-
-    fn print_next_steps() {
-        println!("╔══════════════════════════════════════════════════════════════════╗");
-        println!("║                         NEXT STEPS                               ║");
-        println!("╚══════════════════════════════════════════════════════════════════╝");
-        println!();
-        println!("TO RUN TESTS ON REAL DATA:");
-        println!();
-        println!("1. Implement Parquet data loader in:");
-        println!("   rust/ing/src/bin/test_hypotheses.rs");
-        println!();
-        println!("2. Extract feature columns:");
-        println!("   - whale_net_flow_1h, whale_net_flow_4h, whale_net_flow_24h");
-        println!("   - returns_1m, returns_5m, returns_15m");
-        println!("   - tick_entropy_1s, tick_entropy_5s, etc.");
-        println!("   - hhi, gini_coefficient, theil_index");
-        println!("   - liq_risk_above_*, liq_risk_below_*");
-        println!("   - realized_vol_1m, realized_vol_5m");
-        println!();
-        println!("3. Convert to test data structures:");
-        println!("   - H1TestData, H2TestData, H3TestData, H4TestData, FeatureRow[]");
-        println!();
-        println!("4. Call actual test functions:");
-        println!("   - run_h1_whale_flow_test(&data, &config)");
-        println!("   - run_h2_entropy_whale_test(&data, &config)");
-        println!("   - run_h3_liquidation_cascade_test(&data, &config)");
-        println!("   - run_h4_concentration_vol_test(&data, &config)");
-        println!("   - run_h5_persistence_test(&features, &config)");
-        println!();
-        println!("5. Generate final decision:");
-        println!("   - run_final_decision(&DecisionInput {{ h1, h2, h3, h4, h5 }})");
-        println!();
-        println!("See docs/HYPOTHESIS_TESTING_GUIDE.md for complete examples.");
+    if let Some(best) = result.window_horizon_results.first() {
+        println!("      Best: {} window / {} horizon", best.flow_window, best.return_horizon);
+        println!("      Pearson r: {:.4}", best.correlation.pearson);
+        println!("      Spearman ρ: {:.4}", best.correlation.spearman);
+        println!("      p-value: {:.6}", best.correlation.p_value);
+        println!("      MI: {:.4} bits", best.mi_bits);
     }
 }
 
-fn main() -> Result<()> {
-    hypothesis_runner::main()
+fn print_h2_result(result: &H2TestResult) {
+    let status_icon = match result.decision {
+        H2Decision::Go => "✅",
+        H2Decision::NoGo => "❌",
+        H2Decision::Inconclusive => "⚠️ ",
+    };
+
+    println!("      {} {:?}", status_icon, result.decision);
+    println!("      Joint lift: {:.1}%", result.joint_lift * 100.0);
+}
+
+fn print_h3_result(result: &H3TestResult) {
+    let status_icon = match result.decision {
+        H3Decision::Go => "✅",
+        H3Decision::NoGo => "❌",
+        H3Decision::Inconclusive => "⚠️ ",
+    };
+
+    println!("      {} {:?}", status_icon, result.decision);
+
+    if let Some(best) = result.threshold_results.first() {
+        println!("      Precision: {:.1}%", best.oos_metrics.precision * 100.0);
+        println!("      Recall: {:.1}%", best.oos_metrics.recall * 100.0);
+        println!("      Lift: {:.2}x", best.conditional_lift);
+    }
+}
+
+fn print_h4_result(result: &H4TestResult) {
+    let status_icon = match result.decision {
+        H4Decision::Go => "✅",
+        H4Decision::NoGo => "❌",
+        H4Decision::Inconclusive => "⚠️ ",
+    };
+
+    println!("      {} {:?}", status_icon, result.decision);
+
+    if let Some(best) = &result.best_measure {
+        println!("      Best measure: {}", best.measure_name);
+        println!("      Pearson r: {:.4}", best.correlation.pearson);
+        println!("      p-value: {:.6}", best.correlation.p_value);
+    }
+}
+
+fn print_h5_result(result: &H5TestResult) {
+    let status_icon = match result.decision {
+        H5Decision::Accept => "✅",
+        H5Decision::Reject => "❌",
+        H5Decision::Inconclusive => "⚠️ ",
+    };
+
+    println!("      {} {:?}", status_icon, result.decision);
+
+    if let Some(horizon) = result.horizon_results.first() {
+        println!("      Horizon: {}", horizon.horizon_name);
+        println!("      Walk-forward Sharpe: {:.2}", horizon.wf_sharpe);
+        println!("      OOS/IS ratio: {:.2}", horizon.oos_is_ratio);
+    }
+}
+
+fn print_final_decision(decision: &FinalDecision) {
+    match decision {
+        FinalDecision::Go => {
+            println!("🚀 GO - Proceed with full deployment");
+            println!("   4-5 hypotheses validated");
+            println!("   Strong statistical evidence for alpha generation");
+        }
+        FinalDecision::Pivot => {
+            println!("🔄 PIVOT - Selective deployment recommended");
+            println!("   2-3 hypotheses validated");
+            println!("   Focus on validated signals only");
+        }
+        FinalDecision::NoGo => {
+            println!("🛑 NO-GO - Do not deploy");
+            println!("   0-1 hypotheses validated");
+            println!("   Insufficient evidence for alpha");
+        }
+    }
+}
+
+fn save_report(
+    path: &Path,
+    decision: &FinalDecision,
+    h1: &Option<H1TestResult>,
+    h2: &Option<H2TestResult>,
+    h3: &Option<H3TestResult>,
+    h4: &Option<H4TestResult>,
+    h5: &Option<H5TestResult>,
+) -> Result<()> {
+    let mut file = File::create(path)?;
+
+    writeln!(file, "NAT HYPOTHESIS TESTING REPORT")?;
+    writeln!(file, "==============================")?;
+    writeln!(file)?;
+    writeln!(file, "Generated: {}", chrono::Utc::now())?;
+    writeln!(file)?;
+
+    writeln!(file, "HYPOTHESIS RESULTS:")?;
+    writeln!(file, "-------------------")?;
+
+    if let Some(h1_result) = h1 {
+        writeln!(file, "[1] H1: Whale Flow Predicts Returns - {:?}", h1_result.decision)?;
+        writeln!(file, "    Passing: {}/{}", h1_result.n_passing, h1_result.n_total)?;
+    } else {
+        writeln!(file, "[1] H1: Whale Flow Predicts Returns - SKIPPED (insufficient data)")?;
+    }
+
+    if let Some(h2_result) = h2 {
+        writeln!(file, "[2] H2: Entropy + Whale Interaction - {:?}", h2_result.decision)?;
+    } else {
+        writeln!(file, "[2] H2: Entropy + Whale Interaction - SKIPPED (insufficient data)")?;
+    }
+
+    if let Some(h3_result) = h3 {
+        writeln!(file, "[3] H3: Liquidation Cascades - {:?}", h3_result.decision)?;
+    } else {
+        writeln!(file, "[3] H3: Liquidation Cascades - SKIPPED (insufficient data)")?;
+    }
+
+    if let Some(h4_result) = h4 {
+        writeln!(file, "[4] H4: Concentration → Volatility - {:?}", h4_result.decision)?;
+    } else {
+        writeln!(file, "[4] H4: Concentration → Volatility - SKIPPED (insufficient data)")?;
+    }
+
+    if let Some(h5_result) = h5 {
+        writeln!(file, "[5] H5: Persistence Indicator - {:?}", h5_result.decision)?;
+    } else {
+        writeln!(file, "[5] H5: Persistence Indicator - SKIPPED (insufficient data)")?;
+    }
+
+    writeln!(file)?;
+    writeln!(file, "FINAL DECISION:")?;
+    writeln!(file, "---------------")?;
+    writeln!(file, "{:?}", decision)?;
+    writeln!(file)?;
+
+    match decision {
+        FinalDecision::Go => {
+            writeln!(file, "RECOMMENDATION: Proceed with full strategy deployment")?;
+            writeln!(file, "Strong statistical evidence for alpha generation")?;
+        }
+        FinalDecision::Pivot => {
+            writeln!(file, "RECOMMENDATION: Selective deployment of validated signals only")?;
+            writeln!(file, "Moderate evidence - focus on passing hypotheses")?;
+        }
+        FinalDecision::NoGo => {
+            writeln!(file, "RECOMMENDATION: Do not deploy trading strategy")?;
+            writeln!(file, "Insufficient statistical evidence for alpha")?;
+        }
+    }
+
+    Ok(())
 }

@@ -6,6 +6,10 @@ authors.workspace = true
 license.workspace = true
 description = "Hyperliquid market data ingestor with feature extraction"
 
+[lib]
+name = "ing"
+path = "src/lib.rs"
+
 [[bin]]
 name = "ing"
 path = "src/main.rs"

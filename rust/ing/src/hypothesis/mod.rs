@@ -20,6 +20,7 @@
 //! - 4-5 hypotheses pass → GO
 
 pub mod stats;
+pub mod data_loader;
 pub mod h1_whale_flow;
 pub mod h2_entropy_whale;
 pub mod h3_liquidation_cascade;

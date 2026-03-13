@@ -3,18 +3,6 @@
 //! Real-time feature extraction from Hyperliquid order book and trade data.
 //! Outputs features to Parquet files for downstream analysis.
 
-mod config;
-mod error;
-mod features;
-mod hypothesis;
-mod metrics;
-mod output;
-mod positions;
-mod rest;
-mod state;
-mod whales;
-mod ws;
-
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,20 +10,13 @@ use tokio::sync::mpsc;
 use tracing::{info, warn, error, Level};
 use tracing_subscriber::{fmt, EnvFilter};
 
-use crate::config::Config;
-use crate::metrics::Metrics;
-use crate::output::ParquetWriter;
-use crate::state::MarketState;
-use crate::ws::HyperliquidClient;
-
-/// Feature vector emitted at regular intervals
-#[derive(Debug, Clone)]
-pub struct FeatureVector {
-    pub timestamp_ns: i64,
-    pub symbol: String,
-    pub sequence_id: u64,
-    pub features: features::Features,
-}
+use ing::config::Config;
+use ing::features;
+use ing::metrics::Metrics;
+use ing::output::ParquetWriter;
+use ing::state::MarketState;
+use ing::ws::HyperliquidClient;
+use ing::FeatureVector;
 
 #[tokio::main]
 async fn main() -> Result<()> {
