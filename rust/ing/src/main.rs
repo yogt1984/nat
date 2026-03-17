@@ -102,6 +102,21 @@ async fn run_symbol_ingestor(
     let mut client = HyperliquidClient::new(&config.websocket, &symbol);
     let mut sequence_id: u64 = 0;
 
+    // Connect to WebSocket before entering the main loop
+    // This ensures connection isn't cancelled by the ticker
+    loop {
+        match client.connect().await {
+            Ok(()) => {
+                info!(%symbol, "WebSocket connected successfully");
+                break;
+            }
+            Err(e) => {
+                error!(%symbol, ?e, "Failed to connect, retrying...");
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            }
+        }
+    }
+
     // Feature emission interval
     let emission_interval = tokio::time::Duration::from_millis(
         config.features.emission_interval_ms
@@ -110,6 +125,8 @@ async fn run_symbol_ingestor(
 
     loop {
         tokio::select! {
+            // Bias towards WebSocket messages to ensure we don't miss data
+            biased;
             // Handle incoming WebSocket messages
             msg = client.recv() => {
                 match msg {
@@ -122,8 +139,13 @@ async fn run_symbol_ingestor(
                         metrics.record_update_latency(&symbol, elapsed);
                     }
                     Ok(None) => {
-                        warn!(%symbol, "WebSocket disconnected, reconnecting...");
-                        client.reconnect().await?;
+                        // Ok(None) means no data message (ping/pong, unparseable, etc.)
+                        // Only reconnect if connection was actually lost
+                        if !client.is_connected() {
+                            warn!(%symbol, "WebSocket disconnected, reconnecting...");
+                            client.reconnect().await?;
+                        }
+                        // Otherwise just continue - this is normal for non-data messages
                     }
                     Err(e) => {
                         error!(%symbol, ?e, "WebSocket error");
