@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
 
     // Start Prometheus exporter if configured
     if let Some(addr) = &config.metrics.prometheus_addr {
-        metrics::start_prometheus_exporter(addr.parse()?)?;
+        ing::metrics::start_prometheus_exporter(addr.parse()?)?;
         info!(%addr, "Prometheus exporter started");
     }
 
