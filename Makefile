@@ -41,6 +41,23 @@ tunnel:
 	cloudflared tunnel --url http://localhost:8080
 
 # =============================================================================
+# DATA VALIDATION
+# =============================================================================
+
+# Validate collected data quality
+validate-data:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║                 VALIDATING COLLECTED DATA                        ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	python scripts/validate_data.py ./data/features --verbose
+
+# Validate last N hours of data (default: 24)
+HOURS ?= 24
+validate-data-recent:
+	@echo "Validating last $(HOURS) hours of data..."
+	python scripts/validate_data.py ./data/features --hours $(HOURS) --verbose
+
+# =============================================================================
 # TESTING
 # =============================================================================
 
@@ -191,6 +208,11 @@ help:
 	@echo "                    Usage: make show SYMBOL=ETH FREQ=10"
 	@echo "  show-fast       - Show features at 10 Hz"
 	@echo "  show-hft        - Show features at 50 Hz (max)"
+	@echo ""
+	@echo "DATA VALIDATION:"
+	@echo "  validate-data        - Validate all collected data quality"
+	@echo "  validate-data-recent - Validate last N hours (default: 24)"
+	@echo "                         Usage: make validate-data-recent HOURS=12"
 	@echo ""
 	@echo "TESTING:"
 	@echo "  test            - Run all unit tests"
