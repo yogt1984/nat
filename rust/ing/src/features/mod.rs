@@ -52,6 +52,8 @@ pub struct Features {
     pub liquidation_risk: Option<LiquidationRiskFeatures>,
     /// Position concentration features (Hyperliquid-unique, requires position tracking)
     pub concentration: Option<ConcentrationFeatures>,
+    /// Regime detection features (accumulation/distribution, minute-level)
+    pub regime: Option<RegimeFeatures>,
 }
 
 impl Features {
@@ -79,6 +81,11 @@ impl Features {
         Self::count() + WhaleFlowFeatures::count() + LiquidationRiskFeatures::count() + ConcentrationFeatures::count()
     }
 
+    /// Get total number of features including all optional features
+    pub fn count_all() -> usize {
+        Self::count() + WhaleFlowFeatures::count() + LiquidationRiskFeatures::count() + ConcentrationFeatures::count() + RegimeFeatures::count()
+    }
+
     /// Convert to flat vector of f64
     pub fn to_vec(&self) -> Vec<f64> {
         let mut v = Vec::with_capacity(Self::count());
@@ -100,6 +107,9 @@ impl Features {
         }
         if let Some(ref c) = self.concentration {
             v.extend(c.to_vec());
+        }
+        if let Some(ref r) = self.regime {
+            v.extend(r.to_vec());
         }
         v
     }
@@ -136,6 +146,16 @@ impl Features {
         names
     }
 
+    /// Get all feature names including all optional features
+    pub fn names_all() -> Vec<&'static str> {
+        let mut names = Self::names();
+        names.extend(WhaleFlowFeatures::names());
+        names.extend(LiquidationRiskFeatures::names());
+        names.extend(ConcentrationFeatures::names());
+        names.extend(RegimeFeatures::names());
+        names
+    }
+
     /// Set whale flow features
     pub fn with_whale_flow(mut self, whale_flow: WhaleFlowFeatures) -> Self {
         self.whale_flow = Some(whale_flow);
@@ -151,6 +171,12 @@ impl Features {
     /// Set concentration features
     pub fn with_concentration(mut self, concentration: ConcentrationFeatures) -> Self {
         self.concentration = Some(concentration);
+        self
+    }
+
+    /// Set regime features
+    pub fn with_regime(mut self, regime: RegimeFeatures) -> Self {
+        self.regime = Some(regime);
         self
     }
 }
@@ -219,6 +245,7 @@ impl FeatureComputer {
             whale_flow: None, // Computed separately via WhaleFlowBuffer
             liquidation_risk: None, // Computed separately via liquidation::compute()
             concentration: None, // Computed separately via ConcentrationBuffer
+            regime: None, // Computed separately via RegimeBuffer at minute intervals
         }
     }
 }
