@@ -13,6 +13,7 @@ mod derived;
 pub mod whale_flow;
 pub mod liquidation;
 pub mod concentration;
+pub mod regime;
 
 pub use raw::RawFeatures;
 pub use imbalance::ImbalanceFeatures;
@@ -27,6 +28,7 @@ pub use derived::DerivedFeatures;
 pub use whale_flow::{WhaleFlowFeatures, WhaleFlowBuffer, WhaleFlowConfig, WhalePositionChange};
 pub use liquidation::{LiquidationRiskFeatures, LiquidationRiskConfig, LiquidationPosition};
 pub use concentration::{ConcentrationFeatures, ConcentrationBuffer, ConcentrationConfig, Position as ConcentrationPosition};
+pub use regime::{RegimeFeatures, RegimeBuffer, RegimeConfig, AbsorptionComputer, DivergenceComputer, ChurnComputer, RangeComputer};
 
 use crate::config::FeaturesConfig;
 use crate::state::{OrderBook, TradeBuffer, MarketContext, RingBuffer};

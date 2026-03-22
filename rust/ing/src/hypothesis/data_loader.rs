@@ -593,18 +593,18 @@ mod tests {
         let batches = load_all_data(&data_dir).unwrap();
         let h1_data = load_h1_data(&batches).unwrap();
 
-        assert!(!h1_data.whale_flows.is_empty(), "Should have whale flow data");
+        assert!(!h1_data.whale_flow_1h.is_empty(), "Should have whale flow data");
         assert_eq!(
-            h1_data.whale_flows.len(),
-            h1_data.returns.len(),
+            h1_data.whale_flow_1h.len(),
+            h1_data.returns_1h.len(),
             "Arrays should be same length"
         );
         assert_eq!(
-            h1_data.whale_flows.len(),
-            h1_data.timestamps.len(),
+            h1_data.whale_flow_1h.len(),
+            h1_data.timestamps_ms.len(),
             "Arrays should be same length"
         );
 
-        println!("H1 data: {} samples", h1_data.whale_flows.len());
+        println!("H1 data: {} samples", h1_data.whale_flow_1h.len());
     }
 }
