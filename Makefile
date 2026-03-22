@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft help fmt lint check
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check
 
 # Default target: run the main ingestor
 all: run
@@ -60,6 +60,11 @@ HOURS ?= 24
 validate_data_recent:
 	@echo "Validating last $(HOURS) hours of data..."
 	python scripts/validate_data.py ./data/features --hours $(HOURS) --verbose
+
+# Launch Jupyter notebook for feature exploration
+explore:
+	@echo "Launching feature exploration notebook..."
+	jupyter notebook notebooks/explore_features.ipynb
 
 # =============================================================================
 # TESTING
@@ -210,10 +215,11 @@ help:
 	@echo "  show_hft          Show features at 50 Hz"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " DATA VALIDATION"
+	@echo " DATA ANALYSIS"
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo "  validate_data          Validate all collected Parquet data"
 	@echo "  validate_data_recent   Validate last N hours (HOURS=24)"
+	@echo "  explore                Launch Jupyter notebook for exploration"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " TESTING"
