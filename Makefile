@@ -1,10 +1,14 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test build release clean validate validate-all validate-api validate-positions validate-whales validate-entropy show help fmt lint check
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft help fmt lint check
 
 # Default target: run the main ingestor
 all: run
+
+# =============================================================================
+# MAIN TARGETS
+# =============================================================================
 
 # Build debug version
 build:
@@ -45,7 +49,7 @@ tunnel:
 # =============================================================================
 
 # Validate collected data quality
-validate-data:
+validate_data:
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║                 VALIDATING COLLECTED DATA                        ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
@@ -53,7 +57,7 @@ validate-data:
 
 # Validate last N hours of data (default: 24)
 HOURS ?= 24
-validate-data-recent:
+validate_data_recent:
 	@echo "Validating last $(HOURS) hours of data..."
 	python scripts/validate_data.py ./data/features --hours $(HOURS) --verbose
 
@@ -74,12 +78,12 @@ test:
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
 
 # Run tests with verbose output
-test-verbose:
+test_verbose:
 	@echo "Running all tests (verbose)..."
 	cd rust && cargo test --package ing -- --nocapture
 
 # =============================================================================
-# VALIDATION (Skeptical Live API Tests)
+# API VALIDATION (Skeptical Live API Tests)
 # =============================================================================
 
 # Run ALL validations (skeptical tests against live Hyperliquid API)
@@ -105,22 +109,22 @@ validate: release
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
 
 # Alias for validate
-validate-all: validate
+validate_all: validate
 
 # Individual validation targets
-validate-api: release
+validate_api: release
 	@echo "Running API connection validation..."
 	cd rust && ./target/release/validate_api
 
-validate-positions: release
+validate_positions: release
 	@echo "Running position tracking validation..."
 	cd rust && ./target/release/validate_positions
 
-validate-whales: release
+validate_whales: release
 	@echo "Running whale identification validation..."
 	cd rust && ./target/release/validate_whales
 
-validate-entropy: release
+validate_entropy: release
 	@echo "Running tick entropy feature validation..."
 	cd rust && ./target/release/validate_entropy
 
@@ -129,9 +133,6 @@ validate-entropy: release
 # =============================================================================
 
 # Show real-time features (no file output, terminal only)
-# Usage: make show [SYMBOL=BTC] [FREQ=1]
-#   SYMBOL: Trading pair (BTC, ETH, SOL, etc.)
-#   FREQ: Update frequency in Hz (1-50, default: 1)
 SYMBOL ?= BTC
 FREQ ?= 1
 show: release
@@ -143,18 +144,17 @@ show: release
 	cd rust && ./target/release/show_features $(SYMBOL) $(FREQ)
 
 # Quick frequency presets
-show-fast: FREQ=10
-show-fast: show
+show_fast: FREQ=10
+show_fast: show
 
-show-hft: FREQ=50
-show-hft: show
+show_hft: FREQ=50
+show_hft: show
 
 # =============================================================================
 # HYPOTHESIS TESTING
 # =============================================================================
 
 # Run hypothesis tests on collected data
-# Usage: make test_hypotheses [DATA=./data/features]
 DATA ?= ./data/features
 test_hypotheses: release
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
@@ -191,47 +191,59 @@ check:
 # HELP
 # =============================================================================
 
-# Show help
 help:
+	@echo ""
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║          NAT Project - Hyperliquid Market Data Ingestor          ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
 	@echo ""
-	@echo "Usage: make [target]"
+	@echo "Usage: make [target] [OPTIONS]"
 	@echo ""
-	@echo "MAIN TARGETS:"
-	@echo "  all             - Build and run the ingestor (default)"
-	@echo "  run             - Run the main ingestor"
-	@echo "  run_and_serve   - Run ingestor with live dashboard at http://localhost:8080"
-	@echo "  tunnel          - Expose dashboard to internet via cloudflare tunnel"
-	@echo "  show            - Show real-time features"
-	@echo "                    Usage: make show SYMBOL=ETH FREQ=10"
-	@echo "  show-fast       - Show features at 10 Hz"
-	@echo "  show-hft        - Show features at 50 Hz (max)"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " RUNNING"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  run               Run ingestor (debug build)"
+	@echo "  run_and_serve     Run ingestor + dashboard at localhost:8080"
+	@echo "  tunnel            Expose dashboard via cloudflare tunnel"
+	@echo "  show              Show real-time features (SYMBOL=BTC FREQ=1)"
+	@echo "  show_fast         Show features at 10 Hz"
+	@echo "  show_hft          Show features at 50 Hz"
 	@echo ""
-	@echo "DATA VALIDATION:"
-	@echo "  validate-data        - Validate all collected data quality"
-	@echo "  validate-data-recent - Validate last N hours (default: 24)"
-	@echo "                         Usage: make validate-data-recent HOURS=12"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " DATA VALIDATION"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  validate_data          Validate all collected Parquet data"
+	@echo "  validate_data_recent   Validate last N hours (HOURS=24)"
 	@echo ""
-	@echo "TESTING:"
-	@echo "  test            - Run all unit tests"
-	@echo "  test-verbose    - Run tests with output"
-	@echo "  test_hypotheses - Run H1-H5 hypothesis tests on collected data"
-	@echo "                    Usage: make test_hypotheses DATA=./data/features"
-	@echo "  validate        - Run ALL validations (live API tests)"
-	@echo "  validate-api    - Run API connection validation only"
-	@echo "  validate-positions - Run position tracking validation"
-	@echo "  validate-whales - Run whale identification validation"
-	@echo "  validate-entropy - Run tick entropy validation"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " TESTING"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  test              Run all unit tests"
+	@echo "  test_verbose      Run tests with output"
+	@echo "  test_hypotheses   Run H1-H5 hypothesis tests (DATA=./data/features)"
 	@echo ""
-	@echo "BUILD:"
-	@echo "  build           - Build debug version"
-	@echo "  release         - Build release version (all binaries)"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " API VALIDATION (Live Hyperliquid)"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  validate          Run all API validations"
+	@echo "  validate_all      Alias for validate"
+	@echo "  validate_api      Test API connection"
+	@echo "  validate_positions Test position tracking"
+	@echo "  validate_whales   Test whale identification"
+	@echo "  validate_entropy  Test entropy features"
 	@echo ""
-	@echo "DEVELOPMENT:"
-	@echo "  clean           - Clean build artifacts"
-	@echo "  fmt             - Format code"
-	@echo "  lint            - Run clippy linter"
-	@echo "  check           - Check code without building"
-	@echo "  help            - Show this help"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " BUILD"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  build             Build debug version"
+	@echo "  release           Build optimized release version"
+	@echo "  clean             Remove build artifacts"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " DEVELOPMENT"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  fmt               Format code with rustfmt"
+	@echo "  lint              Run clippy linter"
+	@echo "  check             Check code without building"
+	@echo "  help              Show this help"
+	@echo ""
