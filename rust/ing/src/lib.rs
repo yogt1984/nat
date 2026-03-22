@@ -4,6 +4,7 @@
 //! and hypothesis testing capabilities.
 
 pub mod config;
+pub mod dashboard;
 pub mod error;
 pub mod features;
 pub mod hypothesis;

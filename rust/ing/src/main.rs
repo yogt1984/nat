@@ -7,11 +7,12 @@ use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::{info, warn, error, Level};
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing::{info, warn, error};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use ing::config::Config;
-use ing::features;
+use ing::dashboard::{BroadcastLayer, DashboardState, run_dashboard_server};
+use ing::dashboard::state::FeaturesSummary;
 use ing::metrics::Metrics;
 use ing::output::ParquetWriter;
 use ing::state::MarketState;
@@ -20,25 +21,34 @@ use ing::FeatureVector;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
-
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(true)
-        .with_thread_ids(true)
-        .init();
-
-    info!("Starting ING - Hyperliquid Ingestor");
-
-    // Load configuration
+    // Load configuration first (before logging setup)
     let config_path = std::env::args()
         .nth(1)
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("config/ing.toml"));
 
     let config = Config::load(&config_path)?;
+
+    // Initialize dashboard state (needed for log broadcast layer)
+    let dashboard_state = Arc::new(DashboardState::new());
+
+    // Initialize logging with broadcast layer for dashboard
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_target(true)
+        .with_thread_ids(true);
+
+    let broadcast_layer = BroadcastLayer::new(Arc::clone(&dashboard_state));
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt_layer)
+        .with(broadcast_layer)
+        .init();
+
+    info!("Starting ING - Hyperliquid Ingestor");
     info!(?config, "Configuration loaded");
 
     // Initialize metrics
@@ -48,6 +58,27 @@ async fn main() -> Result<()> {
     if let Some(addr) = &config.metrics.prometheus_addr {
         ing::metrics::start_prometheus_exporter(addr.parse()?)?;
         info!(%addr, "Prometheus exporter started");
+    }
+
+    // Start dashboard server if enabled
+    if config.dashboard.enabled {
+        let addr = config.dashboard.addr.parse()?;
+        let state = Arc::clone(&dashboard_state);
+
+        // Spawn dashboard server
+        tokio::spawn(async move {
+            if let Err(e) = run_dashboard_server(addr, state).await {
+                error!(?e, "Dashboard server error");
+            }
+        });
+
+        // Spawn state broadcaster
+        let state = Arc::clone(&dashboard_state);
+        tokio::spawn(async move {
+            ing::dashboard::server::run_state_broadcaster(state).await;
+        });
+
+        info!(addr = %config.dashboard.addr, "Dashboard enabled");
     }
 
     // Create channels for feature vectors
@@ -65,9 +96,10 @@ async fn main() -> Result<()> {
         let config = config.clone();
         let metrics = Arc::clone(&metrics);
         let feature_tx = feature_tx.clone();
+        let dashboard_state = Arc::clone(&dashboard_state);
 
         let handle = tokio::spawn(async move {
-            run_symbol_ingestor(symbol, config, metrics, feature_tx).await
+            run_symbol_ingestor(symbol, config, metrics, feature_tx, dashboard_state).await
         });
 
         handles.push(handle);
@@ -95,12 +127,14 @@ async fn run_symbol_ingestor(
     config: Config,
     metrics: Arc<Metrics>,
     feature_tx: mpsc::Sender<FeatureVector>,
+    dashboard_state: Arc<DashboardState>,
 ) -> Result<()> {
     info!(%symbol, "Starting ingestor");
 
     let mut state = MarketState::new(&symbol, &config.features);
     let mut client = HyperliquidClient::new(&config.websocket, &symbol);
     let mut sequence_id: u64 = 0;
+    let mut message_count: u64 = 0;
 
     // Connect to WebSocket before entering the main loop
     // This ensures connection isn't cancelled by the ticker
@@ -108,10 +142,16 @@ async fn run_symbol_ingestor(
         match client.connect().await {
             Ok(()) => {
                 info!(%symbol, "WebSocket connected successfully");
+                dashboard_state.update_symbol(&symbol, |s| {
+                    s.connected = true;
+                });
                 break;
             }
             Err(e) => {
                 error!(%symbol, ?e, "Failed to connect, retrying...");
+                dashboard_state.update_symbol(&symbol, |s| {
+                    s.connected = false;
+                });
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
             }
         }
@@ -134,6 +174,14 @@ async fn run_symbol_ingestor(
                         let start = std::time::Instant::now();
 
                         state.update(&ws_msg);
+                        message_count += 1;
+
+                        // Update dashboard state
+                        dashboard_state.update_symbol(&symbol, |s| {
+                            s.message_count = message_count;
+                            s.last_update_ms = chrono::Utc::now().timestamp_millis();
+                            s.connected = true;
+                        });
 
                         let elapsed = start.elapsed();
                         metrics.record_update_latency(&symbol, elapsed);
@@ -143,15 +191,27 @@ async fn run_symbol_ingestor(
                         // Only reconnect if connection was actually lost
                         if !client.is_connected() {
                             warn!(%symbol, "WebSocket disconnected, reconnecting...");
+                            dashboard_state.update_symbol(&symbol, |s| {
+                                s.connected = false;
+                            });
                             client.reconnect().await?;
+                            dashboard_state.update_symbol(&symbol, |s| {
+                                s.connected = true;
+                            });
                         }
                         // Otherwise just continue - this is normal for non-data messages
                     }
                     Err(e) => {
                         error!(%symbol, ?e, "WebSocket error");
                         metrics.record_error(&symbol, "websocket");
+                        dashboard_state.update_symbol(&symbol, |s| {
+                            s.connected = false;
+                        });
                         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         client.reconnect().await?;
+                        dashboard_state.update_symbol(&symbol, |s| {
+                            s.connected = true;
+                        });
                     }
                 }
             }
@@ -162,6 +222,20 @@ async fn run_symbol_ingestor(
 
                 if let Some(features) = state.compute_features() {
                     sequence_id += 1;
+
+                    // Update dashboard with feature summary
+                    dashboard_state.update_symbol(&symbol, |s| {
+                        s.feature_count = sequence_id;
+                        s.features = FeaturesSummary {
+                            midprice: features.raw.midprice,
+                            spread_bps: features.raw.spread_bps,
+                            imbalance: features.imbalance.qty_l1,
+                            volatility_1m: features.volatility.returns_1m,
+                            vpin: features.toxicity.vpin_10,
+                            whale_flow: features.whale_flow.as_ref().map(|wf| wf.whale_net_flow_1h).unwrap_or(0.0),
+                            kyle_lambda: features.illiquidity.kyle_lambda_100,
+                        };
+                    });
 
                     let feature_vector = FeatureVector {
                         timestamp_ns: chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),

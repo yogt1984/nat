@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run test build release clean validate validate-all validate-api validate-positions validate-whales validate-entropy show help fmt lint check
+.PHONY: all run run_and_serve tunnel test build release clean validate validate-all validate-api validate-positions validate-whales validate-entropy show help fmt lint check
 
 # Default target: run the main ingestor
 all: run
@@ -20,6 +20,25 @@ release:
 run: build
 	@echo "Running ingestor..."
 	cd rust && cargo run --bin ing -- ../config/ing.toml
+
+# Run the ingestor with dashboard enabled
+run_and_serve: release
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║           STARTING INGESTOR WITH LIVE DASHBOARD                  ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Dashboard: http://localhost:8080"
+	@echo ""
+	@echo "To expose to internet, run in another terminal:"
+	@echo "  make tunnel"
+	@echo ""
+	cd rust && ING_DASHBOARD_ENABLED=true ./target/release/ing ../config/ing.toml
+
+# Expose dashboard to internet via cloudflare tunnel
+tunnel:
+	@echo "Starting cloudflare tunnel to localhost:8080..."
+	@echo "Press Ctrl+C to stop"
+	cloudflared tunnel --url http://localhost:8080
 
 # =============================================================================
 # TESTING
@@ -166,6 +185,8 @@ help:
 	@echo "MAIN TARGETS:"
 	@echo "  all             - Build and run the ingestor (default)"
 	@echo "  run             - Run the main ingestor"
+	@echo "  run_and_serve   - Run ingestor with live dashboard at http://localhost:8080"
+	@echo "  tunnel          - Expose dashboard to internet via cloudflare tunnel"
 	@echo "  show            - Show real-time features"
 	@echo "                    Usage: make show SYMBOL=ETH FREQ=10"
 	@echo "  show-fast       - Show features at 10 Hz"

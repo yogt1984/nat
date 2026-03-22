@@ -44,3 +44,9 @@ rotate_interval = "1h"
 [metrics]
 # Prometheus metrics endpoint (optional)
 # prometheus_addr = "127.0.0.1:9090"
+
+[dashboard]
+# Enable real-time dashboard (can override with ING_DASHBOARD_ENABLED=true)
+enabled = false
+# Dashboard server address
+addr = "0.0.0.0:8080"

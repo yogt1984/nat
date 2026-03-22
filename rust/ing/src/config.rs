@@ -14,6 +14,8 @@ pub struct Config {
     pub output: OutputConfig,
     #[serde(default)]
     pub metrics: MetricsConfig,
+    #[serde(default)]
+    pub dashboard: DashboardConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -70,6 +72,23 @@ pub struct MetricsConfig {
     pub prometheus_addr: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct DashboardConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_dashboard_addr")]
+    pub addr: String,
+}
+
+impl Default for DashboardConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            addr: default_dashboard_addr(),
+        }
+    }
+}
+
 // Default values
 fn default_log_level() -> String { "info".to_string() }
 fn default_ws_url() -> String { "wss://api.hyperliquid.xyz/ws".to_string() }
@@ -84,6 +103,7 @@ fn default_format() -> String { "parquet".to_string() }
 fn default_row_group_size() -> usize { 10000 }
 fn default_compression() -> String { "zstd".to_string() }
 fn default_rotate_interval() -> String { "1h".to_string() }
+fn default_dashboard_addr() -> String { "0.0.0.0:8080".to_string() }
 
 impl Config {
     /// Load configuration from a TOML file
@@ -91,8 +111,13 @@ impl Config {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {:?}", path))?;
 
-        let config: Config = toml::from_str(&content)
+        let mut config: Config = toml::from_str(&content)
             .with_context(|| "Failed to parse config file")?;
+
+        // Allow environment variable override for dashboard
+        if let Ok(val) = std::env::var("ING_DASHBOARD_ENABLED") {
+            config.dashboard.enabled = val == "true" || val == "1";
+        }
 
         config.validate()?;
 
@@ -152,6 +177,7 @@ impl Default for Config {
                 data_dir: None,
             },
             metrics: MetricsConfig::default(),
+            dashboard: DashboardConfig::default(),
         }
     }
 }

@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ING Dashboard</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --border: #30363d;
+            --accent: #58a6ff;
+            --success: #3fb950;
+            --warning: #d29922;
+            --error: #f85149;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.875rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--error);
+        }
+
+        .status-dot.connected {
+            background: var(--success);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 900px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+            font-size: 0.875rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-body {
+            padding: 16px;
+        }
+
+        .symbols-panel .panel-body {
+            padding: 0;
+        }
+
+        .symbol-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            overflow-x: auto;
+        }
+
+        .symbol-tab {
+            padding: 10px 16px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            border-bottom: 2px solid transparent;
+            white-space: nowrap;
+        }
+
+        .symbol-tab:hover {
+            color: var(--text-primary);
+        }
+
+        .symbol-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        .symbol-content {
+            padding: 16px;
+        }
+
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+        }
+
+        .metric {
+            background: var(--bg-tertiary);
+            padding: 12px;
+            border-radius: 4px;
+        }
+
+        .metric-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .metric-value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            margin-top: 4px;
+        }
+
+        .metric-value.positive {
+            color: var(--success);
+        }
+
+        .metric-value.negative {
+            color: var(--error);
+        }
+
+        .logs-panel {
+            grid-column: 1 / -1;
+        }
+
+        .logs-container {
+            height: 400px;
+            overflow-y: auto;
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 0.8125rem;
+        }
+
+        .log-entry {
+            padding: 4px 16px;
+            border-bottom: 1px solid var(--bg-tertiary);
+            display: flex;
+            gap: 12px;
+        }
+
+        .log-entry:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .log-time {
+            color: var(--text-muted);
+            flex-shrink: 0;
+        }
+
+        .log-level {
+            flex-shrink: 0;
+            width: 50px;
+            font-weight: 600;
+        }
+
+        .log-level.INFO { color: var(--accent); }
+        .log-level.WARN { color: var(--warning); }
+        .log-level.ERROR { color: var(--error); }
+        .log-level.DEBUG { color: var(--text-muted); }
+        .log-level.TRACE { color: var(--text-muted); }
+
+        .log-target {
+            color: var(--text-secondary);
+            flex-shrink: 0;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .log-message {
+            color: var(--text-primary);
+            word-break: break-word;
+        }
+
+        .filter-buttons {
+            display: flex;
+            gap: 4px;
+        }
+
+        .filter-btn {
+            padding: 4px 8px;
+            border: 1px solid var(--border);
+            background: none;
+            color: var(--text-secondary);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+        }
+
+        .filter-btn:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .filter-btn.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .summary-stats {
+            display: flex;
+            gap: 24px;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .summary-stats span {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .summary-stats strong {
+            color: var(--text-primary);
+            font-variant-numeric: tabular-nums;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>ING Dashboard</h1>
+            <div class="status">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Connecting...</span>
+            </div>
+        </header>
+
+        <div class="summary-stats" style="margin-bottom: 20px;">
+            <span>Uptime: <strong id="uptime">--</strong></span>
+            <span>Messages: <strong id="totalMessages">--</strong></span>
+            <span>Features: <strong id="totalFeatures">--</strong></span>
+        </div>
+
+        <div class="grid">
+            <div class="panel symbols-panel">
+                <div class="panel-header">Market State</div>
+                <div class="symbol-tabs" id="symbolTabs"></div>
+                <div class="symbol-content" id="symbolContent">
+                    <p style="color: var(--text-muted);">Waiting for data...</p>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">Features Summary</div>
+                <div class="panel-body">
+                    <div class="metric-grid" id="featuresGrid">
+                        <div class="metric">
+                            <div class="metric-label">Imbalance</div>
+                            <div class="metric-value" id="featureImbalance">--</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Volatility (1m)</div>
+                            <div class="metric-value" id="featureVolatility">--</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">VPIN</div>
+                            <div class="metric-value" id="featureVpin">--</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Whale Flow</div>
+                            <div class="metric-value" id="featureWhaleFlow">--</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Kyle's Lambda</div>
+                            <div class="metric-value" id="featureKyleLambda">--</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel logs-panel">
+                <div class="panel-header">
+                    <span>Logs</span>
+                    <div class="filter-buttons">
+                        <button class="filter-btn active" data-level="all">All</button>
+                        <button class="filter-btn" data-level="INFO">Info</button>
+                        <button class="filter-btn" data-level="WARN">Warn</button>
+                        <button class="filter-btn" data-level="ERROR">Error</button>
+                    </div>
+                </div>
+                <div class="logs-container" id="logsContainer"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class Dashboard {
+            constructor() {
+                this.logsWs = null;
+                this.stateWs = null;
+                this.selectedSymbol = null;
+                this.logFilter = 'all';
+                this.logs = [];
+                this.maxLogs = 1000;
+                this.state = null;
+
+                this.setupFilterButtons();
+                this.connect();
+            }
+
+            connect() {
+                this.connectLogs();
+                this.connectState();
+            }
+
+            connectLogs() {
+                const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                this.logsWs = new WebSocket(`${protocol}//${location.host}/ws/logs`);
+
+                this.logsWs.onmessage = (e) => {
+                    const log = JSON.parse(e.data);
+                    this.addLog(log);
+                };
+
+                this.logsWs.onclose = () => {
+                    setTimeout(() => this.connectLogs(), 2000);
+                };
+
+                this.logsWs.onerror = () => {
+                    this.logsWs.close();
+                };
+            }
+
+            connectState() {
+                const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                this.stateWs = new WebSocket(`${protocol}//${location.host}/ws/state`);
+
+                this.stateWs.onopen = () => {
+                    this.updateConnectionStatus(true);
+                };
+
+                this.stateWs.onmessage = (e) => {
+                    const state = JSON.parse(e.data);
+                    this.updateState(state);
+                };
+
+                this.stateWs.onclose = () => {
+                    this.updateConnectionStatus(false);
+                    setTimeout(() => this.connectState(), 2000);
+                };
+
+                this.stateWs.onerror = () => {
+                    this.stateWs.close();
+                };
+            }
+
+            updateConnectionStatus(connected) {
+                const dot = document.getElementById('statusDot');
+                const text = document.getElementById('statusText');
+
+                if (connected) {
+                    dot.classList.add('connected');
+                    text.textContent = 'Connected';
+                } else {
+                    dot.classList.remove('connected');
+                    text.textContent = 'Disconnected';
+                }
+            }
+
+            updateState(state) {
+                this.state = state;
+
+                // Update summary stats
+                document.getElementById('uptime').textContent = this.formatUptime(state.uptime_secs);
+                document.getElementById('totalMessages').textContent = state.total_messages.toLocaleString();
+                document.getElementById('totalFeatures').textContent = state.total_features.toLocaleString();
+
+                // Update symbol tabs
+                this.updateSymbolTabs(state.symbols);
+
+                // Update selected symbol display
+                if (this.selectedSymbol) {
+                    const symbol = state.symbols.find(s => s.symbol === this.selectedSymbol);
+                    if (symbol) {
+                        this.updateSymbolDisplay(symbol);
+                    }
+                }
+            }
+
+            updateSymbolTabs(symbols) {
+                const tabsContainer = document.getElementById('symbolTabs');
+                const existingTabs = new Set([...tabsContainer.children].map(t => t.dataset.symbol));
+                const newSymbols = new Set(symbols.map(s => s.symbol));
+
+                // Add new tabs
+                for (const symbol of symbols) {
+                    if (!existingTabs.has(symbol.symbol)) {
+                        const tab = document.createElement('button');
+                        tab.className = 'symbol-tab';
+                        tab.dataset.symbol = symbol.symbol;
+                        tab.textContent = symbol.symbol;
+                        tab.onclick = () => this.selectSymbol(symbol.symbol);
+                        tabsContainer.appendChild(tab);
+                    }
+                }
+
+                // Select first symbol if none selected
+                if (!this.selectedSymbol && symbols.length > 0) {
+                    this.selectSymbol(symbols[0].symbol);
+                }
+            }
+
+            selectSymbol(symbol) {
+                this.selectedSymbol = symbol;
+
+                // Update tab styles
+                document.querySelectorAll('.symbol-tab').forEach(tab => {
+                    tab.classList.toggle('active', tab.dataset.symbol === symbol);
+                });
+
+                // Update display
+                if (this.state) {
+                    const symbolData = this.state.symbols.find(s => s.symbol === symbol);
+                    if (symbolData) {
+                        this.updateSymbolDisplay(symbolData);
+                    }
+                }
+            }
+
+            updateSymbolDisplay(symbol) {
+                const content = document.getElementById('symbolContent');
+                content.innerHTML = `
+                    <div class="metric-grid">
+                        <div class="metric">
+                            <div class="metric-label">Midprice</div>
+                            <div class="metric-value">${this.formatPrice(symbol.features.midprice)}</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Spread</div>
+                            <div class="metric-value">${symbol.features.spread_bps.toFixed(2)} bps</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Status</div>
+                            <div class="metric-value" style="color: ${symbol.connected ? 'var(--success)' : 'var(--error)'}">
+                                ${symbol.connected ? 'Connected' : 'Disconnected'}
+                            </div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Messages</div>
+                            <div class="metric-value">${symbol.message_count.toLocaleString()}</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Features</div>
+                            <div class="metric-value">${symbol.feature_count.toLocaleString()}</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-label">Last Update</div>
+                            <div class="metric-value">${this.formatAge(symbol.last_update_ms)}s ago</div>
+                        </div>
+                    </div>
+                `;
+
+                // Update features summary
+                const f = symbol.features;
+                this.updateMetric('featureImbalance', f.imbalance, true);
+                this.updateMetric('featureVolatility', (f.volatility_1m * 100).toFixed(4) + '%');
+                this.updateMetric('featureVpin', f.vpin.toFixed(4));
+                this.updateMetric('featureWhaleFlow', f.whale_flow.toFixed(2), true);
+                this.updateMetric('featureKyleLambda', f.kyle_lambda.toExponential(2));
+            }
+
+            updateMetric(id, value, colorize = false) {
+                const el = document.getElementById(id);
+                if (typeof value === 'number') {
+                    el.textContent = value.toFixed(4);
+                    if (colorize) {
+                        el.classList.toggle('positive', value > 0);
+                        el.classList.toggle('negative', value < 0);
+                    }
+                } else {
+                    el.textContent = value;
+                }
+            }
+
+            addLog(log) {
+                this.logs.push(log);
+                if (this.logs.length > this.maxLogs) {
+                    this.logs.shift();
+                }
+                this.renderLog(log);
+            }
+
+            renderLog(log) {
+                if (this.logFilter !== 'all' && log.level !== this.logFilter) {
+                    return;
+                }
+
+                const container = document.getElementById('logsContainer');
+                const entry = document.createElement('div');
+                entry.className = 'log-entry';
+                entry.innerHTML = `
+                    <span class="log-time">${this.formatTime(log.timestamp)}</span>
+                    <span class="log-level ${log.level}">${log.level}</span>
+                    <span class="log-target">${log.target}</span>
+                    <span class="log-message">${this.escapeHtml(log.message)}</span>
+                `;
+
+                container.appendChild(entry);
+
+                // Auto-scroll if at bottom
+                if (container.scrollTop + container.clientHeight >= container.scrollHeight - 50) {
+                    container.scrollTop = container.scrollHeight;
+                }
+
+                // Limit DOM nodes
+                while (container.children.length > 500) {
+                    container.removeChild(container.firstChild);
+                }
+            }
+
+            setupFilterButtons() {
+                document.querySelectorAll('.filter-btn').forEach(btn => {
+                    btn.onclick = () => {
+                        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        this.logFilter = btn.dataset.level;
+                        this.rerenderLogs();
+                    };
+                });
+            }
+
+            rerenderLogs() {
+                const container = document.getElementById('logsContainer');
+                container.innerHTML = '';
+                for (const log of this.logs) {
+                    this.renderLog(log);
+                }
+            }
+
+            formatTime(timestamp) {
+                const date = new Date(timestamp);
+                return date.toLocaleTimeString('en-US', { hour12: false }) +
+                       '.' + String(date.getMilliseconds()).padStart(3, '0');
+            }
+
+            formatUptime(secs) {
+                const h = Math.floor(secs / 3600);
+                const m = Math.floor((secs % 3600) / 60);
+                const s = secs % 60;
+                return `${h}h ${m}m ${s}s`;
+            }
+
+            formatPrice(price) {
+                if (price >= 1000) {
+                    return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                } else if (price >= 1) {
+                    return price.toFixed(4);
+                } else {
+                    return price.toFixed(6);
+                }
+            }
+
+            formatAge(timestamp) {
+                const now = Date.now();
+                return ((now - timestamp) / 1000).toFixed(1);
+            }
+
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+        }
+
+        // Start dashboard
+        new Dashboard();
+    </script>
+</body>
+</html>
