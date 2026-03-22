@@ -17,7 +17,7 @@
 
 **NAT** is a production-grade quantitative research platform designed for extracting alpha signals from Hyperliquid's perpetual futures market. Built in Rust for maximum performance, NAT provides real-time feature extraction, rigorous hypothesis testing, and statistically-validated trading signals.
 
-[![Tests](https://img.shields.io/badge/tests-266%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-287%20passing-brightgreen)]()
 [![Rust](https://img.shields.io/badge/rust-1.75+-orange)]()
 [![License](https://img.shields.io/badge/license-proprietary-blue)]()
 
@@ -41,7 +41,7 @@ Most crypto analytics tools are **toys**. NAT is **infrastructure**.
 
 ### Real-Time Feature Extraction Engine
 
-NAT processes Hyperliquid's order book and trade stream in real-time, computing **163 features** across 13 categories:
+NAT processes Hyperliquid's order book and trade stream in real-time, computing **183 features** across 14 categories:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -76,6 +76,7 @@ NAT processes Hyperliquid's order book and trade stream in real-time, computing 
 | **Trade Flow** | 12 | Volume, VWAP, aggressor ratio, intensity | Execution patterns |
 | **Context** | 9 | Funding rate, OI, premium, basis | Market conditions |
 | **Derived** | 15 | Regime indicators, composite signals, interactions | Combined alpha |
+| **Regime** | 20 | Absorption, divergence, churn, range position | Accumulation/distribution detection |
 
 ### Whale Intelligence System
 
@@ -204,7 +205,7 @@ Not all features are created equal. NAT's feature analysis module:
 
 ## Complete Feature Reference
 
-### 163 Features with Mathematical Definitions
+### 183 Features with Mathematical Definitions
 
 <details>
 <summary><b>1. Entropy Features (24)</b> — Regime detection & predictability</summary>
@@ -461,6 +462,120 @@ Not all features are created equal. NAT's feature analysis module:
 
 </details>
 
+<details>
+<summary><b>14. Regime Detection Features (20)</b> — Accumulation & distribution phases</summary>
+
+| Feature | Description | Formula |
+|---------|-------------|---------|
+| `regime_absorption_1h` | Absorption ratio (1h) | AR = Σ(Volume) / (\|ΔPrice\| + ε) |
+| `regime_absorption_4h` | Absorption ratio (4h) | Same, 4h window |
+| `regime_absorption_24h` | Absorption ratio (24h) | Same, 24h window |
+| `regime_absorption_zscore` | Absorption z-score | (AR - μ) / σ over history |
+| `regime_divergence_1h` | Volume-price divergence (1h) | Actual_ΔP - λ × SignedVolume |
+| `regime_divergence_4h` | Volume-price divergence (4h) | Same, 4h window |
+| `regime_divergence_24h` | Volume-price divergence (24h) | Same, 24h window |
+| `regime_divergence_zscore` | Divergence z-score | (div - μ) / σ over history |
+| `regime_kyle_lambda` | Kyle's lambda estimate | λ = Cov(ΔP, SignedVol) / Var(SignedVol) |
+| `regime_churn_1h` | Churn rate (1h) | (BuyVol + SellVol) / (\|BuyVol - SellVol\| + ε) |
+| `regime_churn_4h` | Churn rate (4h) | Same, 4h window |
+| `regime_churn_24h` | Churn rate (24h) | Same, 24h window |
+| `regime_churn_zscore` | Churn z-score | (churn - μ) / σ over history |
+| `regime_range_pos_4h` | Range position (4h) | (Price - Min) / (Max - Min) |
+| `regime_range_pos_24h` | Range position (24h) | Same, 24h window |
+| `regime_range_pos_1w` | Range position (1 week) | Same, 1 week window |
+| `regime_range_width_24h` | Range width (24h) | (Max - Min) / Midpoint |
+| `regime_accumulation_score` | Accumulation score [0,1] | Weighted combination of signals |
+| `regime_distribution_score` | Distribution score [0,1] | Weighted combination of signals |
+| `regime_clarity` | Regime clarity | \|accumulation - distribution\| |
+
+**Regime Signal Interpretation:**
+- **High absorption + negative divergence + low range position** = Accumulation (buying without price rise)
+- **High absorption + positive divergence + high range position** = Distribution (selling without price fall)
+- **Low churn** = One-directional flow (trending)
+- **High churn** = Two-sided activity (position transfer)
+
+</details>
+
+---
+
+## Real-Time Dashboard
+
+Monitor NAT remotely via WebSocket-powered dashboard:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                      LIVE MONITORING DASHBOARD                       │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│   ┌─────────────────────┐     ┌─────────────────────┐              │
+│   │    LIVE LOGS        │     │    MARKET STATE     │              │
+│   │  Real-time tracing  │     │  • Order book depth │              │
+│   │  with severity      │     │  • Trade flow       │              │
+│   │  filtering          │     │  • Whale activity   │              │
+│   └─────────────────────┘     └─────────────────────┘              │
+│                                                                     │
+│   Access: http://localhost:8080                                     │
+│   Remote: cloudflared tunnel --url http://localhost:8080           │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Quick Start:**
+```bash
+make run_and_serve    # Start ingestor + dashboard
+make tunnel           # Expose to internet (requires cloudflared)
+```
+
+---
+
+## Data Validation
+
+Automated quality checks for collected Parquet data:
+
+| Check | Description | Threshold |
+|-------|-------------|-----------|
+| **File Integrity** | Parquet schema validation | All files must load |
+| **Continuity** | Gap detection between files | < 5 min gaps |
+| **NaN Ratio** | Missing value detection | < 1% per column |
+| **Feature Ranges** | Outlier detection | Within 6σ of mean |
+| **Cross-Symbol** | Price correlation check | BTC-ETH r > 0.5 |
+| **Data Rate** | Expected row frequency | > 0.5 rows/sec |
+| **Sequence** | Monotonic sequence IDs | No duplicates |
+
+**Quick Start:**
+```bash
+make validate_data           # Validate all data
+make validate_data_recent HOURS=24   # Validate last 24h
+```
+
+---
+
+## Visualization Module
+
+Python visualization library for feature exploration:
+
+```python
+from scripts.viz import FeaturePlotter, EventPlotter, CorrelationAnalyzer
+
+# Feature time series
+plotter = FeaturePlotter(df)
+plotter.plot_feature_timeseries(['whale_net_flow_1h', 'vpin_10'])
+
+# Event analysis
+events = EventPlotter(df)
+events.plot_event_response('whale_flow_spike', window=60)
+
+# Correlation analysis
+analyzer = CorrelationAnalyzer(df)
+analyzer.plot_correlation_matrix(method='spearman')
+analyzer.plot_feature_clusters()
+```
+
+**Quick Start:**
+```bash
+make explore    # Launch Jupyter notebook
+```
+
 ---
 
 ## Architecture
@@ -473,7 +588,7 @@ nat/
 │   │   ├── ws/                  # WebSocket client (Hyperliquid)
 │   │   ├── rest/                # REST API client
 │   │   ├── state/               # Order book state management
-│   │   ├── features/            # Feature extraction (163 features)
+│   │   ├── features/            # Feature extraction (183 features)
 │   │   │   ├── entropy.rs       # Tick entropy features
 │   │   │   ├── trend.rs         # Momentum, Hurst, monotonicity
 │   │   │   ├── illiquidity.rs   # Kyle, Amihud, Hasbrouck
@@ -481,6 +596,13 @@ nat/
 │   │   │   ├── whale_flow.rs    # Whale tracking features
 │   │   │   ├── concentration.rs # Position concentration
 │   │   │   ├── liquidation.rs   # Liquidation mapping
+│   │   │   ├── regime/          # Regime detection (20 features)
+│   │   │   │   ├── absorption.rs    # Volume absorption ratio
+│   │   │   │   ├── divergence.rs    # Kyle's lambda divergence
+│   │   │   │   ├── churn.rs         # Two-sided activity
+│   │   │   │   ├── range.rs         # Price range position
+│   │   │   │   ├── composite.rs     # Accumulation/distribution scores
+│   │   │   │   └── buffer.rs        # Regime buffer coordinator
 │   │   │   └── ...
 │   │   ├── hypothesis/          # Statistical testing framework
 │   │   │   ├── stats.rs         # Core statistical functions
@@ -491,11 +613,24 @@ nat/
 │   │   │   ├── h5_persistence.rs
 │   │   │   ├── feature_analysis.rs
 │   │   │   └── final_decision.rs
+│   │   ├── dashboard/           # Real-time monitoring
+│   │   │   ├── server.rs        # Axum WebSocket server
+│   │   │   ├── handlers.rs      # HTTP & WS handlers
+│   │   │   ├── state.rs         # Broadcast channels
+│   │   │   └── tracing.rs       # Log capture layer
 │   │   ├── whales/              # Whale registry & classification
 │   │   ├── positions/           # Position tracking
 │   │   ├── output/              # Parquet writer
 │   │   └── metrics/             # Prometheus metrics
 │   └── config/                  # Configuration files
+├── scripts/
+│   ├── validate_data.py         # Data quality validation
+│   └── viz/                     # Visualization library
+│       ├── loader.py            # Parquet data loader
+│       ├── features.py          # Feature plotting
+│       ├── events.py            # Event analysis
+│       ├── correlations.py      # Correlation matrices
+│       └── distributions.py     # Distribution analysis
 └── docs/                        # Documentation & research
 ```
 
@@ -517,16 +652,35 @@ Built in Rust for production workloads:
 ## Quick Start
 
 ```bash
-# Build
-cargo build --release
+# Build release version
+make release
 
-# Run with default config
-./target/release/ing config/ing.toml
+# Run ingestor
+make run
 
-# Run tests
-cargo test
+# Run with live dashboard (http://localhost:8080)
+make run_and_serve
 
-# 266 tests, all passing
+# Expose dashboard to internet
+make tunnel
+
+# Run all tests
+make test
+
+# Validate collected data
+make validate_data
+
+# Launch feature exploration notebook
+make explore
+
+# Run hypothesis tests on data
+make test_hypotheses
+
+# Show real-time features in terminal
+make show SYMBOL=BTC FREQ=10
+
+# See all available commands
+make help
 ```
 
 ---
@@ -559,7 +713,7 @@ NAT generates structured output for downstream analysis:
 **Parquet Schema:**
 - Timestamp (ns precision)
 - Symbol
-- 163 feature columns
+- 183 feature columns (including 20 regime features)
 - Metadata (sequence ID, data quality flags)
 
 **Decision Report:**
@@ -573,8 +727,9 @@ NAT generates structured output for downstream analysis:
 ## Test Coverage
 
 ```
-266 tests across:
-├── Feature extraction (120+ tests)
+287 tests across:
+├── Feature extraction (140+ tests)
+│   └── Regime detection (21 tests)
 ├── Statistical functions (30+ tests)
 ├── Hypothesis H1-H5 (85+ tests)
 ├── Feature analysis (14 tests)
@@ -585,11 +740,15 @@ NAT generates structured output for downstream analysis:
 
 ## Roadmap
 
-- [x] Real-time feature extraction
+- [x] Real-time feature extraction (183 features)
 - [x] Whale tracking & classification
 - [x] Hypothesis testing framework (H1-H5)
 - [x] Feature redundancy analysis
 - [x] GO/PIVOT/NO-GO decision engine
+- [x] Real-time WebSocket dashboard
+- [x] Data validation pipeline
+- [x] Visualization library
+- [x] Regime detection features (accumulation/distribution)
 - [ ] Backtesting infrastructure
 - [ ] Paper trading integration
 - [ ] Live deployment
