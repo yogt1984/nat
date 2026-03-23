@@ -9,6 +9,7 @@ pub mod error;
 pub mod features;
 pub mod hypothesis;
 pub mod metrics;
+pub mod ml;
 pub mod output;
 pub mod positions;
 pub mod rest;
