@@ -6,15 +6,17 @@
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tracing::{info, warn, error};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
+use ing::alerts::{AlertConfig, AlertTracker};
 use ing::config::Config;
 use ing::dashboard::{BroadcastLayer, DashboardState, run_dashboard_server};
 use ing::dashboard::state::FeaturesSummary;
 use ing::metrics::Metrics;
 use ing::output::ParquetWriter;
+use ing::redis_publisher::{RedisConfig, RedisPublisher};
 use ing::state::MarketState;
 use ing::ws::HyperliquidClient;
 use ing::FeatureVector;
@@ -81,6 +83,24 @@ async fn main() -> Result<()> {
         info!(addr = %config.dashboard.addr, "Dashboard enabled");
     }
 
+    // Initialize Redis publisher (optional - gracefully degrades if unavailable)
+    let redis_config = RedisConfig::from_env();
+    let redis_publisher: Option<Arc<Mutex<RedisPublisher>>> =
+        match RedisPublisher::try_new(redis_config).await {
+            Some(publisher) => {
+                info!("Redis publisher initialized");
+                Some(Arc::new(Mutex::new(publisher)))
+            }
+            None => {
+                info!("Redis publisher disabled (will continue without real-time streaming)");
+                None
+            }
+        };
+
+    // Load alert configuration
+    let alert_config = AlertConfig::from_env();
+    info!(?alert_config, "Alert configuration loaded");
+
     // Create channels for feature vectors
     let (feature_tx, feature_rx) = mpsc::channel::<FeatureVector>(10_000);
 
@@ -97,9 +117,19 @@ async fn main() -> Result<()> {
         let metrics = Arc::clone(&metrics);
         let feature_tx = feature_tx.clone();
         let dashboard_state = Arc::clone(&dashboard_state);
+        let redis_publisher = redis_publisher.clone();
+        let alert_config = alert_config.clone();
 
         let handle = tokio::spawn(async move {
-            run_symbol_ingestor(symbol, config, metrics, feature_tx, dashboard_state).await
+            run_symbol_ingestor(
+                symbol,
+                config,
+                metrics,
+                feature_tx,
+                dashboard_state,
+                redis_publisher,
+                alert_config,
+            ).await
         });
 
         handles.push(handle);
@@ -128,6 +158,8 @@ async fn run_symbol_ingestor(
     metrics: Arc<Metrics>,
     feature_tx: mpsc::Sender<FeatureVector>,
     dashboard_state: Arc<DashboardState>,
+    redis_publisher: Option<Arc<Mutex<RedisPublisher>>>,
+    alert_config: AlertConfig,
 ) -> Result<()> {
     info!(%symbol, "Starting ingestor");
 
@@ -135,6 +167,9 @@ async fn run_symbol_ingestor(
     let mut client = HyperliquidClient::new(&config.websocket, &symbol);
     let mut sequence_id: u64 = 0;
     let mut message_count: u64 = 0;
+
+    // Initialize alert tracker for this symbol
+    let mut alert_tracker = AlertTracker::new(alert_config);
 
     // Connect to WebSocket before entering the main loop
     // This ensures connection isn't cancelled by the ticker
@@ -222,6 +257,7 @@ async fn run_symbol_ingestor(
 
                 if let Some(features) = state.compute_features() {
                     sequence_id += 1;
+                    let timestamp_ms = chrono::Utc::now().timestamp_millis() as u64;
 
                     // Update dashboard with feature summary
                     dashboard_state.update_symbol(&symbol, |s| {
@@ -236,6 +272,23 @@ async fn run_symbol_ingestor(
                             kyle_lambda: features.illiquidity.kyle_lambda_100,
                         };
                     });
+
+                    // Publish features to Redis (if available)
+                    if let Some(ref publisher) = redis_publisher {
+                        let mut pub_guard = publisher.lock().await;
+                        if let Err(e) = pub_guard.publish_features(&symbol, &features, timestamp_ms).await {
+                            warn!(%symbol, ?e, "Failed to publish features to Redis");
+                        }
+
+                        // Check for alert conditions
+                        let alerts = alert_tracker.check(&features, &symbol, timestamp_ms);
+                        for alert in alerts {
+                            info!(%symbol, alert_type = ?alert.alert_type, severity = ?alert.severity, "Alert triggered: {}", alert.message);
+                            if let Err(e) = pub_guard.publish_alert(&alert).await {
+                                warn!(%symbol, ?e, "Failed to publish alert to Redis");
+                            }
+                        }
+                    }
 
                     let feature_vector = FeatureVector {
                         timestamp_ns: chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0),

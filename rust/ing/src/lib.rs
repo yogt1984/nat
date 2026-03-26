@@ -3,6 +3,7 @@
 //! Core library providing market data ingestion, feature extraction,
 //! and hypothesis testing capabilities.
 
+pub mod alerts;
 pub mod config;
 pub mod dashboard;
 pub mod error;
@@ -12,6 +13,7 @@ pub mod metrics;
 pub mod ml;
 pub mod output;
 pub mod positions;
+pub mod redis_publisher;
 pub mod rest;
 pub mod state;
 pub mod whales;
