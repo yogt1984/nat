@@ -1,0 +1,30 @@
+# NAT Alert Service Dockerfile
+# Multi-stage build for minimal image size
+
+# Build stage
+FROM rust:1.75-bookworm AS builder
+
+WORKDIR /app
+
+# Copy workspace files
+COPY rust/Cargo.toml rust/Cargo.lock ./
+COPY rust/ing ./ing
+COPY rust/api ./api
+
+# Build release binary
+RUN cargo build --release --bin alert-service
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/target/release/alert-service /app/alert-service
+
+# Default command
+CMD ["/app/alert-service"]

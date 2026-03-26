@@ -1,0 +1,97 @@
+version: '3.8'
+
+# NAT Stack - Hyperliquid Market Data Infrastructure
+#
+# Usage:
+#   docker-compose up -d          # Start all services
+#   docker-compose logs -f        # View logs
+#   docker-compose down           # Stop all services
+#
+# Prerequisites:
+#   - Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env file
+
+services:
+  # Redis for pub/sub and caching
+  redis:
+    image: redis:7-alpine
+    container_name: nat-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  # Market data ingestor
+  ingestor:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ingestor
+    container_name: nat-ingestor
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - RUST_LOG=info
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    restart: unless-stopped
+
+  # REST API + WebSocket server
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: nat-api
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - NAT_API_HOST=0.0.0.0
+      - NAT_API_PORT=3000
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Telegram alert service
+  alerts:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.alerts
+    container_name: nat-alerts
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - RUST_LOG=info
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    name: nat-network

@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs
 
 # Default target: run the main ingestor
 all: run
@@ -156,6 +156,116 @@ show_hft: FREQ=50
 show_hft: show
 
 # =============================================================================
+# API SERVER
+# =============================================================================
+
+# Start API server
+api: release_api
+	@echo "Starting NAT API server..."
+	@echo "  REST API: http://localhost:3000"
+	@echo "  WebSocket: ws://localhost:3000/ws/stream/:symbol"
+	@echo ""
+	cd rust && ./target/release/nat-api
+
+# Build API server (release)
+release_api:
+	@echo "Building API server..."
+	cd rust && cargo build --release --bin nat-api
+
+# Test API endpoints (requires running API server)
+test_api:
+	@echo "Testing API endpoints..."
+	bash scripts/test_api.sh
+
+# Test Redis connection and subscriptions
+test_redis:
+	@echo "Testing Redis connection..."
+	@redis-cli ping && echo "✓ Redis is running" || (echo "✗ Redis not running" && exit 1)
+	@echo ""
+	@echo "Checking cached symbols..."
+	@redis-cli KEYS "nat:latest:*" || true
+	@echo ""
+	@echo "To subscribe to features: redis-cli SUBSCRIBE nat:features:BTC"
+	@echo "To subscribe to alerts:   redis-cli SUBSCRIBE nat:alerts"
+
+# Run full integration test
+test_integration:
+	@echo "Running integration tests..."
+	bash scripts/test_integration.sh
+
+# =============================================================================
+# TELEGRAM ALERTS
+# =============================================================================
+
+# Start Telegram alert service
+alerts: release_api
+	@echo "Starting Telegram Alert Service..."
+	@echo ""
+	@echo "Required environment variables:"
+	@echo "  TELEGRAM_BOT_TOKEN - Bot token from @BotFather"
+	@echo "  TELEGRAM_CHAT_ID   - Your chat ID"
+	@echo ""
+	cd rust && ./target/release/alert-service
+
+# =============================================================================
+# FULL STACK
+# =============================================================================
+
+# Start all services (ingestor + API + alerts)
+# Requires: Redis running, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+serve_all: release release_api
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║              STARTING FULL NAT STACK                             ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Services:"
+	@echo "  - Ingestor:  Publishing features to Redis"
+	@echo "  - API:       http://localhost:3000"
+	@echo "  - Alerts:    Sending to Telegram"
+	@echo ""
+	@echo "Prerequisites:"
+	@echo "  - Redis running on localhost:6379"
+	@echo "  - TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID set"
+	@echo ""
+	@echo "Starting in tmux session 'nat'..."
+	@echo "  (Use 'tmux attach -t nat' to reconnect)"
+	@echo ""
+	@tmux kill-session -t nat 2>/dev/null || true
+	@tmux new-session -d -s nat -n ingestor 'cd rust && ./target/release/ing ../config/ing.toml; read'
+	@tmux new-window -t nat -n api 'cd rust && ./target/release/nat-api; read'
+	@tmux new-window -t nat -n alerts 'cd rust && ./target/release/alert-service; read'
+	@tmux attach -t nat
+
+# =============================================================================
+# DOCKER
+# =============================================================================
+
+# Build all Docker images
+docker_build:
+	@echo "Building Docker images..."
+	docker-compose build
+
+# Start all services with Docker
+docker_up:
+	@echo "Starting NAT stack with Docker..."
+	docker-compose up -d
+	@echo ""
+	@echo "Services:"
+	@echo "  - API: http://localhost:3000"
+	@echo "  - Redis: localhost:6379"
+	@echo ""
+	@echo "View logs: make docker_logs"
+
+# Stop all Docker services
+docker_down:
+	@echo "Stopping NAT stack..."
+	docker-compose down
+
+# View Docker logs
+docker_logs:
+	docker-compose logs -f
+
+# =============================================================================
 # HYPOTHESIS TESTING
 # =============================================================================
 
@@ -227,6 +337,8 @@ help:
 	@echo "  test              Run all unit tests"
 	@echo "  test_verbose      Run tests with output"
 	@echo "  test_hypotheses   Run H1-H5 hypothesis tests (DATA=./data/features)"
+	@echo "  test_redis        Test Redis connection"
+	@echo "  test_integration  Run full integration test suite"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " API VALIDATION (Live Hyperliquid)"
@@ -239,11 +351,28 @@ help:
 	@echo "  validate_entropy  Test entropy features"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " API & ALERTS"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  api               Start API server (REST + WebSocket)"
+	@echo "  alerts            Start Telegram alert service"
+	@echo "  serve_all         Start full stack (ingestor + API + alerts)"
+	@echo "  release_api       Build API server (release)"
+	@echo "  test_api          Test API endpoints (requires running server)"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " BUILD"
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo "  build             Build debug version"
 	@echo "  release           Build optimized release version"
 	@echo "  clean             Remove build artifacts"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " DOCKER"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  docker_build      Build all Docker images"
+	@echo "  docker_up         Start all services with Docker"
+	@echo "  docker_down       Stop all Docker services"
+	@echo "  docker_logs       View Docker logs"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " DEVELOPMENT"

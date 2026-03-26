@@ -1,0 +1,38 @@
+# NAT API Server Dockerfile
+# Multi-stage build for minimal image size
+
+# Build stage
+FROM rust:1.75-bookworm AS builder
+
+WORKDIR /app
+
+# Copy workspace files
+COPY rust/Cargo.toml rust/Cargo.lock ./
+COPY rust/ing ./ing
+COPY rust/api ./api
+
+# Build release binary
+RUN cargo build --release --bin nat-api
+
+# Runtime stage
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /app/target/release/nat-api /app/nat-api
+
+# Expose API port
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
+    CMD curl -f http://localhost:3000/health || exit 1
+
+# Default command
+CMD ["/app/nat-api"]
