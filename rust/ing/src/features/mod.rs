@@ -30,6 +30,12 @@ pub use liquidation::{LiquidationRiskFeatures, LiquidationRiskConfig, Liquidatio
 pub use concentration::{ConcentrationFeatures, ConcentrationBuffer, ConcentrationConfig, Position as ConcentrationPosition};
 pub use regime::{RegimeFeatures, RegimeBuffer, RegimeConfig, AbsorptionComputer, DivergenceComputer, ChurnComputer, RangeComputer};
 
+// Re-export GMM classifier types from ml module
+pub use crate::ml::regime::{
+    RegimeClassifier, GmmParams, Regime,
+    RegimeFeatures as GmmClassificationFeatures,
+};
+
 use crate::config::FeaturesConfig;
 use crate::state::{OrderBook, TradeBuffer, MarketContext, RingBuffer};
 
@@ -54,6 +60,8 @@ pub struct Features {
     pub concentration: Option<ConcentrationFeatures>,
     /// Regime detection features (accumulation/distribution, minute-level)
     pub regime: Option<RegimeFeatures>,
+    /// GMM regime classification output (regime label, probabilities, confidence)
+    pub gmm_classification: Option<GmmClassificationFeatures>,
 }
 
 impl Features {
@@ -83,7 +91,7 @@ impl Features {
 
     /// Get total number of features including all optional features
     pub fn count_all() -> usize {
-        Self::count() + WhaleFlowFeatures::count() + LiquidationRiskFeatures::count() + ConcentrationFeatures::count() + RegimeFeatures::count()
+        Self::count() + WhaleFlowFeatures::count() + LiquidationRiskFeatures::count() + ConcentrationFeatures::count() + RegimeFeatures::count() + GmmClassificationFeatures::count()
     }
 
     /// Convert to flat vector of f64
@@ -110,6 +118,9 @@ impl Features {
         }
         if let Some(ref r) = self.regime {
             v.extend(r.to_vec());
+        }
+        if let Some(ref g) = self.gmm_classification {
+            v.extend(g.to_vec());
         }
         v
     }
@@ -153,6 +164,7 @@ impl Features {
         names.extend(LiquidationRiskFeatures::names());
         names.extend(ConcentrationFeatures::names());
         names.extend(RegimeFeatures::names());
+        names.extend(GmmClassificationFeatures::names());
         names
     }
 
@@ -177,6 +189,12 @@ impl Features {
     /// Set regime features
     pub fn with_regime(mut self, regime: RegimeFeatures) -> Self {
         self.regime = Some(regime);
+        self
+    }
+
+    /// Set GMM classification features
+    pub fn with_gmm_classification(mut self, gmm: GmmClassificationFeatures) -> Self {
+        self.gmm_classification = Some(gmm);
         self
     }
 }
@@ -246,6 +264,7 @@ impl FeatureComputer {
             liquidation_risk: None, // Computed separately via liquidation::compute()
             concentration: None, // Computed separately via ConcentrationBuffer
             regime: None, // Computed separately via RegimeBuffer at minute intervals
+            gmm_classification: None, // Computed when regime features are ready
         }
     }
 }

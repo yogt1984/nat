@@ -52,6 +52,10 @@ pub struct FeaturesConfig {
     pub book_levels: usize,
     #[serde(default = "default_price_buffer_size")]
     pub price_buffer_size: usize,
+    /// Path to trained GMM regime classifier model (JSON)
+    /// If not set, GMM classification features will not be computed
+    #[serde(default)]
+    pub gmm_model_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -168,6 +172,7 @@ impl Default for Config {
                 trade_buffer_seconds: default_trade_buffer_seconds(),
                 book_levels: default_book_levels(),
                 price_buffer_size: default_price_buffer_size(),
+                gmm_model_path: None,
             },
             output: OutputConfig {
                 format: default_format(),

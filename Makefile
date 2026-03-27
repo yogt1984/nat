@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto
 
 # Default target: run the main ingestor
 all: run
@@ -266,6 +266,25 @@ docker_logs:
 	docker-compose logs -f
 
 # =============================================================================
+# REGIME MODEL TRAINING
+# =============================================================================
+
+# Train GMM regime classifier on collected data
+train_gmm:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║               TRAINING GMM REGIME CLASSIFIER                     ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@mkdir -p models
+	python scripts/train_regime_gmm.py --data-dir $(DATA) --output-dir models
+
+# Train with auto BIC selection
+train_gmm_auto:
+	@echo "Training GMM with auto-selected components..."
+	@mkdir -p models
+	python scripts/train_regime_gmm.py --data-dir $(DATA) --output-dir models --auto-select
+
+# =============================================================================
 # HYPOTHESIS TESTING
 # =============================================================================
 
@@ -381,6 +400,12 @@ help:
 	@echo "  test_redis        Test Redis connection"
 	@echo "  test_integration  Run full integration test suite"
 	@echo "  test_backtest     Run backtest unit tests"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " REGIME MODEL"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  train_gmm         Train GMM regime classifier (DATA=./data/features)"
+	@echo "  train_gmm_auto    Train with auto-selected components via BIC"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " BACKTESTING"

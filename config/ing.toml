@@ -28,6 +28,11 @@ book_levels = 10
 # Price buffer size (for volatility/entropy calculations)
 price_buffer_size = 1000
 
+# GMM regime classifier model path (optional)
+# When set, features will include regime classification (Accumulation/Distribution/etc)
+# Train with: make train_gmm
+# gmm_model_path = "models/regime_gmm.json"
+
 [output]
 # Output format (only parquet supported)
 format = "parquet"
