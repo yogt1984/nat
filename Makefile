@@ -279,6 +279,47 @@ test_hypotheses: release
 	cd rust && ./target/release/test_hypotheses ../$(DATA)
 
 # =============================================================================
+# BACKTESTING
+# =============================================================================
+
+# Run backtest on collected data
+STRATEGY ?= whale_flow_simple
+backtest:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║                    RUNNING BACKTEST                              ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Strategy: $(STRATEGY)"
+	@echo "Data: $(DATA)"
+	@echo ""
+	python scripts/run_backtest.py --data-dir $(DATA) --symbol $(SYMBOL) --strategy $(STRATEGY)
+
+# Run walk-forward validation (recommended)
+backtest_validate:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║              WALK-FORWARD VALIDATION                             ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Strategy: $(STRATEGY)"
+	@echo "Data: $(DATA)"
+	@echo ""
+	python scripts/run_backtest.py --data-dir $(DATA) --symbol $(SYMBOL) --strategy $(STRATEGY) --walk-forward
+
+# List available strategies
+backtest_list:
+	@python scripts/run_backtest.py --list-strategies
+
+# Run backtest tests
+test_backtest:
+	@echo "Running backtest tests..."
+	cd scripts && python -m pytest backtest/tests/ -v
+
+# Run backtest tests with coverage
+test_backtest_cov:
+	@echo "Running backtest tests with coverage..."
+	cd scripts && python -m pytest backtest/tests/ -v --cov=backtest --cov-report=term-missing
+
+# =============================================================================
 # DEVELOPMENT TOOLS
 # =============================================================================
 
@@ -339,6 +380,14 @@ help:
 	@echo "  test_hypotheses   Run H1-H5 hypothesis tests (DATA=./data/features)"
 	@echo "  test_redis        Test Redis connection"
 	@echo "  test_integration  Run full integration test suite"
+	@echo "  test_backtest     Run backtest unit tests"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " BACKTESTING"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  backtest          Run backtest (STRATEGY=whale_flow_simple SYMBOL=BTC)"
+	@echo "  backtest_validate Run walk-forward validation (recommended)"
+	@echo "  backtest_list     List available strategies"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " API VALIDATION (Live Hyperliquid)"
