@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov
 
 # Default target: run the main ingestor
 all: run
@@ -339,6 +339,23 @@ test_backtest_cov:
 	cd scripts && python -m pytest backtest/tests/ -v --cov=backtest --cov-report=term-missing
 
 # =============================================================================
+# CLUSTER QUALITY MEASUREMENT
+# =============================================================================
+
+# Run cluster quality metrics tests
+test_cluster_quality:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          TESTING CLUSTER QUALITY METRICS                         ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	python -m pytest scripts/cluster_quality/tests/test_metrics.py -v
+
+# Run cluster quality tests with coverage
+test_cluster_quality_cov:
+	@echo "Running cluster quality tests with coverage..."
+	python -m pytest scripts/cluster_quality/tests/ -v --cov=cluster_quality --cov-report=term-missing
+
+# =============================================================================
 # DEVELOPMENT TOOLS
 # =============================================================================
 
@@ -394,12 +411,13 @@ help:
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " TESTING"
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  test              Run all unit tests"
-	@echo "  test_verbose      Run tests with output"
-	@echo "  test_hypotheses   Run H1-H5 hypothesis tests (DATA=./data/features)"
-	@echo "  test_redis        Test Redis connection"
-	@echo "  test_integration  Run full integration test suite"
-	@echo "  test_backtest     Run backtest unit tests"
+	@echo "  test                    Run all unit tests"
+	@echo "  test_verbose            Run tests with output"
+	@echo "  test_hypotheses         Run H1-H5 hypothesis tests (DATA=./data/features)"
+	@echo "  test_redis              Test Redis connection"
+	@echo "  test_integration        Run full integration test suite"
+	@echo "  test_backtest           Run backtest unit tests"
+	@echo "  test_cluster_quality    Run cluster quality metrics tests"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " REGIME MODEL"
