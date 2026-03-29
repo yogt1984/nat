@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols
 
 # Default target: run the main ingestor
 all: run
@@ -355,6 +355,31 @@ test_cluster_quality_cov:
 	@echo "Running cluster quality tests with coverage..."
 	python -m pytest scripts/cluster_quality/tests/ -v --cov=cluster_quality --cov-report=term-missing
 
+# Analyze cluster quality on collected data
+SYMBOL ?= BTC
+DATA ?= ./data/features
+analyze_clusters:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║              ANALYZING CLUSTER QUALITY                           ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Symbol: $(SYMBOL)"
+	@echo "Data: $(DATA)"
+	@echo ""
+	python scripts/analyze_clusters.py --data-dir $(DATA) --symbol $(SYMBOL) --hours $(HOURS)
+
+# Analyze with trained GMM model
+analyze_clusters_gmm:
+	@echo "Analyzing with trained GMM model..."
+	python scripts/analyze_clusters.py --data-dir $(DATA) --symbol $(SYMBOL) --model models/regime_gmm.json
+
+# Analyze all symbols
+analyze_all_symbols:
+	@for sym in BTC ETH SOL; do \
+		echo "Analyzing $$sym..."; \
+		python scripts/analyze_clusters.py --data-dir $(DATA) --symbol $$sym --output reports/cluster_$$sym.txt; \
+	done
+
 # =============================================================================
 # DEVELOPMENT TOOLS
 # =============================================================================
@@ -422,8 +447,11 @@ help:
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " REGIME MODEL"
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  train_gmm         Train GMM regime classifier (DATA=./data/features)"
-	@echo "  train_gmm_auto    Train with auto-selected components via BIC"
+	@echo "  train_gmm              Train GMM regime classifier (DATA=./data/features)"
+	@echo "  train_gmm_auto         Train with auto-selected components via BIC"
+	@echo "  analyze_clusters       Analyze cluster quality (SYMBOL=BTC HOURS=24)"
+	@echo "  analyze_clusters_gmm   Analyze with trained GMM model"
+	@echo "  analyze_all_symbols    Analyze BTC, ETH, SOL clusters"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " BACKTESTING"
