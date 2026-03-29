@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save
 
 # Default target: run the main ingestor
 all: run
@@ -381,6 +381,49 @@ analyze_all_symbols:
 	done
 
 # =============================================================================
+# BASELINE MODEL TRAINING
+# =============================================================================
+
+# Train baseline models
+SNAPSHOT ?= baseline_30d
+MODEL_TYPE ?= elasticnet
+MODEL_DIR ?= ./models
+train_baseline:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║              TRAINING BASELINE MODEL                             ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Snapshot: $(SNAPSHOT)"
+	@echo "Model: $(MODEL_TYPE)"
+	@echo "Output: $(MODEL_DIR)"
+	@echo ""
+	@mkdir -p $(MODEL_DIR)
+	python scripts/train_baseline.py --snapshot $(SNAPSHOT) --model $(MODEL_TYPE) --output-dir $(MODEL_DIR)
+
+# List saved models
+list_models:
+	@echo "Listing saved models..."
+	python scripts/list_models.py --model-dir $(MODEL_DIR)
+
+# Score data with trained model
+MODEL_PATH ?= models/latest.pkl
+score_data:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║              SCORING DATA WITH TRAINED MODEL                     ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Model: $(MODEL_PATH)"
+	@echo "Data: $(DATA)"
+	@echo ""
+	python scripts/score_data.py --model $(MODEL_PATH) --data $(DATA) --evaluate
+
+# Score and save predictions
+PREDICTIONS ?= ./predictions.parquet
+score_and_save:
+	@echo "Scoring and saving predictions..."
+	python scripts/score_data.py --model $(MODEL_PATH) --data $(DATA) --output $(PREDICTIONS) --evaluate
+
+# =============================================================================
 # DEVELOPMENT TOOLS
 # =============================================================================
 
@@ -452,6 +495,14 @@ help:
 	@echo "  analyze_clusters       Analyze cluster quality (SYMBOL=BTC HOURS=24)"
 	@echo "  analyze_clusters_gmm   Analyze with trained GMM model"
 	@echo "  analyze_all_symbols    Analyze BTC, ETH, SOL clusters"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " BASELINE MODELS (ML)"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  train_baseline         Train baseline ML model (SNAPSHOT=baseline_30d MODEL_TYPE=elasticnet)"
+	@echo "  list_models            List all saved models with metrics"
+	@echo "  score_data             Score data with trained model (MODEL_PATH=models/*.pkl)"
+	@echo "  score_and_save         Score and save predictions to file"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " BACKTESTING"
