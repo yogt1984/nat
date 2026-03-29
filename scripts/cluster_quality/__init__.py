@@ -39,6 +39,11 @@ from .validation import (
     ExternalValidationResults,
 )
 
+from .composite import (
+    ClusterQualityScore,
+    compute_quality_score,
+)
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -67,4 +72,7 @@ __all__ = [
     "VolatilityDifferentiationResult",
     "TransitionMatrixResult",
     "ExternalValidationResults",
+    # Composite
+    "ClusterQualityScore",
+    "compute_quality_score",
 ]
