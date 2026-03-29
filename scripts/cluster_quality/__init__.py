@@ -28,6 +28,17 @@ from .stability import (
     StabilityMetrics,
 )
 
+from .validation import (
+    compute_return_differentiation,
+    compute_volatility_differentiation,
+    compute_transition_matrix,
+    compute_all_external_validation,
+    ReturnDifferentiationResult,
+    VolatilityDifferentiationResult,
+    TransitionMatrixResult,
+    ExternalValidationResults,
+)
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -47,4 +58,13 @@ __all__ = [
     "BootstrapStabilityResult",
     "TemporalStabilityResult",
     "StabilityMetrics",
+    # Validation
+    "compute_return_differentiation",
+    "compute_volatility_differentiation",
+    "compute_transition_matrix",
+    "compute_all_external_validation",
+    "ReturnDifferentiationResult",
+    "VolatilityDifferentiationResult",
+    "TransitionMatrixResult",
+    "ExternalValidationResults",
 ]
