@@ -348,7 +348,7 @@ test_cluster_quality:
 	@echo "║          TESTING CLUSTER QUALITY METRICS                         ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
 	@echo ""
-	python -m pytest scripts/cluster_quality/tests/test_metrics.py -v
+	python -m pytest scripts/cluster_quality/tests/ -v
 
 # Run cluster quality tests with coverage
 test_cluster_quality_cov:

@@ -19,9 +19,19 @@ from .metrics import (
     QualityMetrics,
 )
 
+from .stability import (
+    compute_bootstrap_stability,
+    compute_temporal_stability,
+    compute_cross_symbol_stability,
+    BootstrapStabilityResult,
+    TemporalStabilityResult,
+    StabilityMetrics,
+)
+
 __version__ = "0.1.0"
 
 __all__ = [
+    # Metrics
     "compute_silhouette",
     "compute_davies_bouldin",
     "compute_calinski_harabasz",
@@ -30,4 +40,11 @@ __all__ = [
     "SilhouetteResult",
     "GapStatisticResult",
     "QualityMetrics",
+    # Stability
+    "compute_bootstrap_stability",
+    "compute_temporal_stability",
+    "compute_cross_symbol_stability",
+    "BootstrapStabilityResult",
+    "TemporalStabilityResult",
+    "StabilityMetrics",
 ]
