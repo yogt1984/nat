@@ -20,6 +20,11 @@ from backtest.strategy import get_strategy, get_all_strategies
 from backtest.costs import CostModel, hyperliquid_taker, conservative
 from backtest.engine import run_backtest
 from backtest.walk_forward import walk_forward_validation
+from backtest.ml_strategy import (
+    create_ml_strategy,
+    create_ml_quantile_strategy,
+    join_predictions_with_features,
+)
 
 
 def main():
@@ -36,6 +41,17 @@ Examples:
 
   # Use conservative costs
   python scripts/run_backtest.py --symbol BTC --strategy accumulation_long --cost-model conservative
+
+  # Backtest ML model predictions
+  python scripts/run_backtest.py --symbol BTC --ml-predictions predictions.parquet --walk-forward
+
+  # ML strategy with custom thresholds
+  python scripts/run_backtest.py --symbol BTC --ml-predictions predictions.parquet \\
+      --ml-entry-threshold 0.002 --ml-exit-threshold 0.0
+
+  # ML strategy using quantiles (top 25%)
+  python scripts/run_backtest.py --symbol BTC --ml-predictions predictions.parquet \\
+      --ml-quantile --ml-entry-threshold 0.75 --ml-exit-threshold 0.50
 
   # List available strategies
   python scripts/run_backtest.py --list-strategies
@@ -90,6 +106,37 @@ Examples:
         help="Print detailed output",
     )
 
+    # ML strategy arguments
+    parser.add_argument(
+        "--ml-predictions",
+        type=Path,
+        help="Path to ML predictions Parquet file (enables ML strategy mode)",
+    )
+    parser.add_argument(
+        "--ml-entry-threshold",
+        type=float,
+        default=0.001,
+        help="Entry threshold for ML predictions (default: 0.001 = 0.1%% return)",
+    )
+    parser.add_argument(
+        "--ml-exit-threshold",
+        type=float,
+        default=0.0,
+        help="Exit threshold for ML predictions (default: 0.0)",
+    )
+    parser.add_argument(
+        "--ml-quantile",
+        action="store_true",
+        help="Use quantile-based thresholds instead of absolute values",
+    )
+    parser.add_argument(
+        "--ml-direction",
+        type=str,
+        choices=["long", "short"],
+        default="long",
+        help="Trade direction for ML strategy (default: long)",
+    )
+
     args = parser.parse_args()
 
     # List strategies
@@ -129,27 +176,88 @@ Examples:
         print("  make run")
         return 1
 
-    # Get strategy
-    try:
-        strategy = get_strategy(args.strategy)
-    except ValueError as e:
-        print(f"Error: {e}")
-        return 1
+    # Determine if using ML strategy or rule-based strategy
+    if args.ml_predictions:
+        # ML Strategy Mode
+        print(f"\n{'='*70}")
+        print("ML STRATEGY MODE")
+        print(f"{'='*70}")
 
-    # Validate features exist
-    missing = validate_features_for_strategy(dataset, strategy.required_features)
-    if missing:
-        print(f"\nWarning: Missing features for strategy {strategy.name}:")
-        for f in missing:
-            print(f"  - {f}")
-        print("\nAvailable features:")
-        for f in sorted(dataset.feature_columns)[:20]:
-            print(f"  - {f}")
-        if len(dataset.feature_columns) > 20:
-            print(f"  ... and {len(dataset.feature_columns) - 20} more")
+        if not args.ml_predictions.exists():
+            print(f"Error: Predictions file not found: {args.ml_predictions}")
+            return 1
 
-        print("\nCannot run backtest without required features.")
-        return 1
+        # Create ML strategy
+        try:
+            if args.ml_quantile:
+                print(f"\nCreating quantile-based ML strategy...")
+                strategy, predictions = create_ml_quantile_strategy(
+                    predictions_path=args.ml_predictions,
+                    entry_quantile=args.ml_entry_threshold,
+                    exit_quantile=args.ml_exit_threshold,
+                    direction=args.ml_direction,
+                )
+            else:
+                print(f"\nCreating threshold-based ML strategy...")
+                strategy, predictions = create_ml_strategy(
+                    predictions_path=args.ml_predictions,
+                    entry_threshold=args.ml_entry_threshold,
+                    exit_threshold=args.ml_exit_threshold,
+                    direction=args.ml_direction,
+                )
+
+            print(f"\nStrategy: {strategy.name}")
+            print(f"Description: {strategy.description}")
+
+        except Exception as e:
+            print(f"Error creating ML strategy: {e}")
+            return 1
+
+        # Join predictions with features
+        print(f"\nJoining predictions with feature data...")
+        dataset.df = join_predictions_with_features(
+            dataset.df,
+            predictions,
+            timestamp_col="timestamp",
+        )
+
+        # Check if we have predictions
+        n_with_predictions = dataset.df.filter(
+            dataset.df["prediction"].is_not_nan()
+        ).height
+        if n_with_predictions == 0:
+            print("\nError: No matching timestamps between predictions and features")
+            print("  Predictions time range and features time range must overlap")
+            return 1
+
+        print(f"  Ready for backtest with {n_with_predictions} predictions")
+
+    else:
+        # Rule-based Strategy Mode
+        print(f"\n{'='*70}")
+        print("RULE-BASED STRATEGY MODE")
+        print(f"{'='*70}")
+
+        try:
+            strategy = get_strategy(args.strategy)
+        except ValueError as e:
+            print(f"Error: {e}")
+            return 1
+
+        # Validate features exist
+        missing = validate_features_for_strategy(dataset, strategy.required_features)
+        if missing:
+            print(f"\nWarning: Missing features for strategy {strategy.name}:")
+            for f in missing:
+                print(f"  - {f}")
+            print("\nAvailable features:")
+            for f in sorted(dataset.feature_columns)[:20]:
+                print(f"  - {f}")
+            if len(dataset.feature_columns) > 20:
+                print(f"  ... and {len(dataset.feature_columns) - 20} more")
+
+            print("\nCannot run backtest without required features.")
+            return 1
 
     # Run backtest
     if args.walk_forward:

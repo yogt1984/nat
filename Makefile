@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile
 
 # Default target: run the main ingestor
 all: run
@@ -324,6 +324,62 @@ backtest_validate:
 	@echo ""
 	python scripts/run_backtest.py --data-dir $(DATA) --symbol $(SYMBOL) --strategy $(STRATEGY) --walk-forward
 
+# Backtest ML model predictions
+ML_PREDICTIONS ?= ./predictions.parquet
+ML_ENTRY ?= 0.001
+ML_EXIT ?= 0.0
+backtest_ml:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║                 ML MODEL BACKTEST                                ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Predictions: $(ML_PREDICTIONS)"
+	@echo "Entry Threshold: $(ML_ENTRY)"
+	@echo "Exit Threshold: $(ML_EXIT)"
+	@echo "Data: $(DATA)"
+	@echo ""
+	python scripts/run_backtest.py --data-dir $(DATA) --symbol $(SYMBOL) \
+		--ml-predictions $(ML_PREDICTIONS) \
+		--ml-entry-threshold $(ML_ENTRY) \
+		--ml-exit-threshold $(ML_EXIT)
+
+# ML model walk-forward validation (recommended)
+backtest_ml_validate:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          ML MODEL WALK-FORWARD VALIDATION                        ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Predictions: $(ML_PREDICTIONS)"
+	@echo "Entry Threshold: $(ML_ENTRY)"
+	@echo "Exit Threshold: $(ML_EXIT)"
+	@echo "Data: $(DATA)"
+	@echo ""
+	python scripts/run_backtest.py --data-dir $(DATA) --symbol $(SYMBOL) \
+		--ml-predictions $(ML_PREDICTIONS) \
+		--ml-entry-threshold $(ML_ENTRY) \
+		--ml-exit-threshold $(ML_EXIT) \
+		--walk-forward
+
+# ML model backtest with quantile thresholds
+ML_ENTRY_Q ?= 0.75
+ML_EXIT_Q ?= 0.50
+backtest_ml_quantile:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║            ML MODEL BACKTEST (QUANTILE)                          ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Predictions: $(ML_PREDICTIONS)"
+	@echo "Entry Quantile: $(ML_ENTRY_Q) (top $(shell echo "scale=0; (1-$(ML_ENTRY_Q))*100" | bc)%%)"
+	@echo "Exit Quantile: $(ML_EXIT_Q)"
+	@echo "Data: $(DATA)"
+	@echo ""
+	python scripts/run_backtest.py --data-dir $(DATA) --symbol $(SYMBOL) \
+		--ml-predictions $(ML_PREDICTIONS) \
+		--ml-quantile \
+		--ml-entry-threshold $(ML_ENTRY_Q) \
+		--ml-exit-threshold $(ML_EXIT_Q) \
+		--walk-forward
+
 # List available strategies
 backtest_list:
 	@python scripts/run_backtest.py --list-strategies
@@ -507,9 +563,11 @@ help:
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " BACKTESTING"
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  backtest          Run backtest (STRATEGY=whale_flow_simple SYMBOL=BTC)"
-	@echo "  backtest_validate Run walk-forward validation (recommended)"
-	@echo "  backtest_list     List available strategies"
+	@echo "  backtest                Run backtest (STRATEGY=whale_flow_simple SYMBOL=BTC)"
+	@echo "  backtest_validate       Run walk-forward validation (recommended)"
+	@echo "  backtest_ml             Backtest ML predictions (ML_PREDICTIONS=./predictions.parquet)"
+	@echo "  backtest_ml_validate    ML walk-forward validation (recommended)"
+	@echo "  backtest_ml_quantile    ML backtest with quantile thresholds"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " API VALIDATION (Live Hyperliquid)"
