@@ -205,6 +205,8 @@ def main():
     parser.add_argument("--horizon", type=int, default=600, help="Forward horizon in ticks")
     parser.add_argument("--output-dir", type=Path, default=Path("./models"),
                        help="Output directory for models (default: ./models)")
+    parser.add_argument("--no-tracking", action="store_true",
+                       help="Disable automatic experiment tracking")
 
     args = parser.parse_args()
 
@@ -313,6 +315,22 @@ def main():
     print(f"Test R²: {performance_metrics['test_r2']:.4f}")
     print(f"Test RMSE: {performance_metrics['test_rmse']:.6f}")
     print()
+
+    # Register experiment (unless disabled)
+    if not args.no_tracking:
+        try:
+            from experiment_tracking import ExperimentTracker
+            tracker = ExperimentTracker()
+            experiment_id = tracker.register_training(
+                snapshot_name=args.snapshot,
+                model_path=model_path,
+            )
+            print(f"📊 Experiment tracked: {experiment_id}")
+            print()
+        except Exception as e:
+            print(f"Warning: Failed to track experiment: {e}")
+            print()
+
     print("To use this model:")
     print(f"  python scripts/score_data.py --model {model_path} --data ./data/features")
     print()

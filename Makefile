@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked
 
 # Default target: run the main ingestor
 all: run
@@ -480,6 +480,84 @@ score_and_save:
 	python scripts/score_data.py --model $(MODEL_PATH) --data $(DATA) --output $(PREDICTIONS) --evaluate
 
 # =============================================================================
+# EXPERIMENT TRACKING
+# =============================================================================
+
+# List all tracked experiments
+experiments_list:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║                   TRACKED EXPERIMENTS                            ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	python scripts/experiment_tracking.py list
+
+# List experiments by stage
+STAGE ?= backtest
+experiments_list_stage:
+	@echo "Listing experiments at stage: $(STAGE)"
+	python scripts/experiment_tracking.py list --stage $(STAGE)
+
+# Get experiment details
+EXP_ID ?=
+experiments_get:
+	@echo "Getting experiment details: $(EXP_ID)"
+	python scripts/experiment_tracking.py get $(EXP_ID)
+
+# Compare experiments
+EXP_IDS ?=
+experiments_compare:
+	@echo "Comparing experiments..."
+	python scripts/experiment_tracking.py compare $(EXP_IDS)
+
+# Get best experiment
+METRIC ?= sharpe_ratio
+experiments_best:
+	@echo "Finding best experiment by $(METRIC)..."
+	python scripts/experiment_tracking.py best --metric $(METRIC)
+
+# Run complete tracked ML workflow (train → score → backtest)
+BACKTEST_JSON ?= ./backtest_results.json
+run_ml_workflow:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          COMPLETE ML WORKFLOW WITH TRACKING                      ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Step 1: Training model..."
+	$(MAKE) train_baseline SNAPSHOT=$(SNAPSHOT) MODEL_TYPE=$(MODEL_TYPE)
+	@echo ""
+	@echo "Step 2: Generating predictions..."
+	$(MAKE) score_and_save MODEL_PATH=models/$(MODEL_TYPE)_*.* PREDICTIONS=$(PREDICTIONS)
+	@echo ""
+	@echo "Step 3: Running backtest with tracking..."
+	python scripts/run_backtest_tracked.py \
+		--ml-predictions $(PREDICTIONS) \
+		--ml-entry-threshold $(ML_ENTRY) \
+		--ml-exit-threshold $(ML_EXIT) \
+		--walk-forward \
+		--output $(BACKTEST_JSON)
+	@echo ""
+	@echo "═══════════════════════════════════════════════════════════════════"
+	@echo "WORKFLOW COMPLETE - All stages tracked automatically"
+	@echo "═══════════════════════════════════════════════════════════════════"
+	@echo ""
+	@echo "View experiment:"
+	@echo "  make experiments_list"
+
+# Run tracked backtest only
+backtest_ml_tracked:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          ML BACKTEST WITH TRACKING                               ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	python scripts/run_backtest_tracked.py \
+		--ml-predictions $(ML_PREDICTIONS) \
+		--ml-entry-threshold $(ML_ENTRY) \
+		--ml-exit-threshold $(ML_EXIT) \
+		--ml-direction $(ML_DIRECTION) \
+		--walk-forward \
+		--output $(BACKTEST_JSON)
+
+# =============================================================================
 # DEVELOPMENT TOOLS
 # =============================================================================
 
@@ -568,6 +646,16 @@ help:
 	@echo "  backtest_ml             Backtest ML predictions (ML_PREDICTIONS=./predictions.parquet)"
 	@echo "  backtest_ml_validate    ML walk-forward validation (recommended)"
 	@echo "  backtest_ml_quantile    ML backtest with quantile thresholds"
+	@echo "  backtest_ml_tracked     Backtest with automatic experiment tracking"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " EXPERIMENT TRACKING"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  experiments_list        List all tracked experiments"
+	@echo "  experiments_get         Get experiment details (EXP_ID=exp_xxx)"
+	@echo "  experiments_compare     Compare experiments (EXP_IDS=\"exp1 exp2\")"
+	@echo "  experiments_best        Find best experiment (METRIC=sharpe_ratio)"
+	@echo "  run_ml_workflow         Complete ML pipeline with tracking"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " API VALIDATION (Live Hyperliquid)"

@@ -418,6 +418,30 @@ def main():
     if args.output:
         save_predictions(predictions, df, valid_mask, args.output, metadata, eval_metrics)
 
+        # Register predictions in experiment tracking
+        try:
+            from experiment_tracking import ExperimentTracker
+            tracker = ExperimentTracker()
+
+            # Compute prediction stats
+            valid_preds = predictions[~np.isnan(predictions)]
+            pred_stats = {
+                "mean": float(np.mean(valid_preds)),
+                "std": float(np.std(valid_preds)),
+                "min": float(np.min(valid_preds)),
+                "max": float(np.max(valid_preds)),
+            }
+
+            experiment_id = tracker.register_predictions(
+                model_path=args.model,
+                predictions_path=args.output,
+                n_predictions=len(valid_preds),
+                prediction_stats=pred_stats,
+            )
+            print(f"📊 Predictions tracked: {experiment_id}")
+        except Exception as e:
+            print(f"Warning: Failed to track predictions: {e}")
+
     print()
     print("=" * 70)
     print("SCORING COMPLETE")
