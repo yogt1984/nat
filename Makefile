@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving
 
 # Default target: run the main ingestor
 all: run
@@ -556,6 +556,65 @@ backtest_ml_tracked:
 		--ml-direction $(ML_DIRECTION) \
 		--walk-forward \
 		--output $(BACKTEST_JSON)
+
+# =============================================================================
+# MODEL SERVING (Priority 6)
+# =============================================================================
+
+# Start model serving API
+PORT ?= 8000
+HOST ?= 0.0.0.0
+CACHE_SIZE ?= 5
+serve_models:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          STARTING MODEL SERVING API                              ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Server: http://$(HOST):$(PORT)"
+	@echo "Health: http://$(HOST):$(PORT)/health"
+	@echo "Docs:   http://$(HOST):$(PORT)/docs"
+	@echo ""
+	python scripts/model_serving.py \
+		--host $(HOST) \
+		--port $(PORT) \
+		--cache-size $(CACHE_SIZE)
+
+# Start server with hot-reload (development)
+serve_models_dev:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          MODEL SERVING API (DEV MODE - HOT RELOAD)               ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "Server: http://$(HOST):$(PORT)"
+	@echo "Docs:   http://$(HOST):$(PORT)/docs"
+	@echo ""
+	@echo "Changes to model_serving.py will auto-reload"
+	@echo ""
+	uvicorn scripts.model_serving:app \
+		--reload \
+		--host $(HOST) \
+		--port $(PORT)
+
+# Serve best model by metric
+serve_best:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          SERVING BEST MODEL BY $(METRIC)                         ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	python scripts/model_serving.py \
+		--host $(HOST) \
+		--port $(PORT) \
+		--serve-best \
+		--metric $(METRIC) \
+		--cache-size $(CACHE_SIZE)
+
+# Test model serving endpoints
+test_serving:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          TESTING MODEL SERVING API                               ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	python -m pytest scripts/tests/test_model_serving.py -v
 
 # =============================================================================
 # DEVELOPMENT TOOLS
