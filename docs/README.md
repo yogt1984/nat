@@ -31,6 +31,7 @@ docs/
 │   └── README.md
 │
 ├── specs/                            # Detailed specifications
+│   ├── ALGORITHM_DESIGN_PROPOSAL.md  # 🆕 8 algorithmic approaches (detailed)
 │   ├── TASKS_29_3_26.md              # ⚠️ Week 1 critical tasks (P0)
 │   ├── TASKS_23_3_2026.md            # Regime features (Week 2-3)
 │   ├── STRATEGY_IMPLEMENTATION_PLAN.md  # Trading strategies
@@ -43,6 +44,7 @@ docs/
 │   └── [ML workflow guides]
 │
 └── [Analysis & Guides]               # Strategic docs (this directory)
+    ├── ALGORITHMIC_RESEARCH_DIRECTION.md  # 🆕 Algorithmic strategy proposal
     ├── EXECUTIVE_SUMMARY.md          # Project state summary
     ├── IMMEDIATE_ACTION_PLAN.md      # Get out of analysis paralysis
     ├── NEXT_STEPS_ROADMAP.md         # Comprehensive roadmap
@@ -74,6 +76,29 @@ docs/
 - Honest assessment of originality (30-40%)
 - Alpha probability estimates (40-60%)
 - Cost-benefit analysis of evolution system
+
+### Algorithmic Research (NEW - 2026-04-04)
+
+**ALGORITHMIC_RESEARCH_DIRECTION.md** (10KB) 🆕 **START HERE FOR NEXT PHASE**
+- Executive summary of algorithmic approach
+- 8 proposed algorithms (entropy-gated, momentum, mean-reversion, meta-labeling, etc.)
+- NautilusTrader integration architecture
+- Liquidity heatmap with regime detection
+- Continuous research pipeline (10 phases)
+- Success metrics and decision criteria
+
+**specs/ALGORITHM_DESIGN_PROPOSAL.md** (40KB+) 🆕 **DETAILED TECHNICAL SPECS**
+- Complete mathematical specifications for 8 algorithms
+- Feature usage matrix (which features for which algorithm)
+- NautilusTrader data adapter design
+- Regime classification logic with validation
+- Research lab iteration structure
+- Implementation roadmap (Phase 0-5)
+
+**Key Insight:** Use **entropy as a gating mechanism** to select regime-appropriate algorithms:
+- Low entropy (<0.3) → Momentum continuation strategies
+- High entropy (>0.7) → Mean-reversion strategies
+- Uncertain entropy → No trade
 
 ### Implementation Guides
 
@@ -174,9 +199,16 @@ docs/
 3. Check **refined/specs.md** for completion %
 
 ### Scenario 3: "I want to implement trading strategies"
-1. Read **IMMEDIATE_ACTION_PLAN.md** Phase 0 (validate first)
-2. Read **QUICK_START_DAILY_TRADING.md** (4-week guide)
-3. Follow **specs/STRATEGY_IMPLEMENTATION_PLAN.md**
+1. **NEW APPROACH:** Read **ALGORITHMIC_RESEARCH_DIRECTION.md** (8 algorithms, entropy-gated)
+2. Read **specs/ALGORITHM_DESIGN_PROPOSAL.md** for detailed specs
+3. Alternative: Read **IMMEDIATE_ACTION_PLAN.md** Phase 0 (simple MA validation)
+4. Alternative: Read **QUICK_START_DAILY_TRADING.md** (4-week guide)
+
+### Scenario 3b: "I want to understand the algorithmic approach"
+1. Read **ALGORITHMIC_RESEARCH_DIRECTION.md** (executive summary, 10 min read)
+2. Read **specs/ALGORITHM_DESIGN_PROPOSAL.md** (detailed technical specs, 30 min)
+3. Key concepts: Entropy gating, regime detection, NautilusTrader integration
+4. Critical path: Daily aggregation → regime validation → algorithm prototyping
 
 ### Scenario 4: "I want to build agent system"
 1. **STOP** - Read **ORIGINALITY_AND_REALITY_CHECK.md** first
@@ -225,11 +257,30 @@ docs/
    - Grid search: 0.65 Sharpe in 3 days
    - Opportunity cost matters
 
+6. **Entropy as Regime Detector** (ALGORITHMIC_RESEARCH_DIRECTION.md) 🆕
+   - Low entropy (<0.3) = predictable regimes → momentum strategies work
+   - High entropy (>0.7) = random walk → mean-reversion strategies work
+   - Use entropy to gate which algorithm runs, not force one model everywhere
+   - Regime-specific validation required (test separately in each regime)
+
+7. **Hypothesis-Driven > ML-First** (ALGORITHM_DESIGN_PROPOSAL.md) 🆕
+   - Form testable prediction first, then select algorithm
+   - Use interpretable models (logistic regression, manual thresholds) before complex ML
+   - Validate rigorously: walk-forward, OOS/IS > 0.7, regime-specific
+   - Only deploy if GO criteria met (Sharpe > 0.5, win rate > 52%)
+
+8. **NautilusTrader for Realistic Backtesting** (ALGORITHM_DESIGN_PROPOSAL.md) 🆕
+   - Same code for backtest and live trading
+   - Realistic order matching, slippage, latency simulation
+   - Risk management built-in (position limits, drawdown controls)
+   - Production-ready execution engine (Rust/Cython)
+
 ---
 
 ## Maintenance
 
 **Last Reorganized:** 2026-04-02
+**Last Major Update:** 2026-04-04 (Added algorithmic research direction)
 **Maintained By:** Auto-generated from project state
 **Update Frequency:** After major milestones
 
@@ -243,3 +294,5 @@ docs/
 **Questions?** See IMMEDIATE_ACTION_PLAN.md for decision tree
 **Stuck?** See refined/specs.md for what's actually important
 **Ready to code?** See specs/TASKS_29_3_26.md for Week 1 tasks
+**Want algorithmic strategy?** 🆕 See ALGORITHMIC_RESEARCH_DIRECTION.md (executive summary)
+**Need detailed algorithm specs?** 🆕 See specs/ALGORITHM_DESIGN_PROPOSAL.md (8 algorithms)
