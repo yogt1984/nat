@@ -1,0 +1,643 @@
+{
+  "summary": {
+    "total": 79,
+    "survived": 28,
+    "rejected": 45,
+    "inconclusive": 6,
+    "recommendation": "revisit"
+  },
+  "tests": [
+    {
+      "name": "Entropy Distribution:ent_permutation_8 normality (Jarque-Bera)",
+      "passed": "True",
+      "statistic": 640.6738443090984,
+      "p_value": 7.576041734279438e-140,
+      "detail": "JB=640.7, skew=-0.475, kurt=-0.796",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Entropy Distribution:ent_permutation_16 normality (Jarque-Bera)",
+      "passed": "True",
+      "statistic": 771.5634951475394,
+      "p_value": 2.864941838406659e-168,
+      "detail": "JB=771.6, skew=-0.517, kurt=-0.884",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Entropy Distribution:ent_permutation_32 normality (Jarque-Bera)",
+      "passed": "True",
+      "statistic": 720.4954243434121,
+      "p_value": 3.518896437423134e-157,
+      "detail": "JB=720.5, skew=-0.497, kurt=-0.860",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Entropy Distribution:ent_book_shape normality (Jarque-Bera)",
+      "passed": "True",
+      "statistic": 602.9315570391487,
+      "p_value": 1.1887099728083194e-131,
+      "detail": "JB=602.9, skew=-0.019, kurt=-1.202",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Entropy Distribution:ent_trade_size normality (Jarque-Bera)",
+      "passed": "True",
+      "statistic": 609.3922052204127,
+      "p_value": 4.700715626118176e-133,
+      "detail": "JB=609.4, skew=-0.005, kurt=-1.209",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Entropy Distribution:GMM optimal clusters (BIC)",
+      "passed": true,
+      "statistic": 2.0,
+      "p_value": 0.0,
+      "detail": "Optimal clusters=2. BIC scores: [(1, '-2729'), (2, '-6322'), (3, '-6273'), (4, '-6240'), (5, '-6233'), (6, '-6195')]",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Entropy Persistence:Lag-1 autocorrelation",
+      "passed": "True",
+      "statistic": 0.7703438589333768,
+      "p_value": 0.0,
+      "detail": "ACF(1)=0.7703, half-life=69 ticks, z=102.10",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Entropy Persistence:Ljung-Box serial correlation",
+      "passed": "True",
+      "statistic": 108645.6263398316,
+      "p_value": 0.0,
+      "detail": "LB(20)=108645.6, significant serial correlation=True",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Entropy Persistence:ADF stationarity",
+      "passed": "True",
+      "statistic": -36.015886039959646,
+      "p_value": 0.05,
+      "detail": "ADF=-36.016, critical(-2.86 at 5%). Stationary=True",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Entropy Predicts Returns:Kruskal-Wallis h=1",
+      "passed": "True",
+      "statistic": 9.573496390221408,
+      "p_value": 0.048258770985768765,
+      "detail": "Entropy quintiles predict 1-tick returns? KW=9.57",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Entropy Predicts Returns:Spearman corr h=1",
+      "passed": "True",
+      "statistic": 0.02252872323107716,
+      "p_value": 0.024274037864474116,
+      "detail": "Spearman rho=0.0225 between entropy and 1-tick fwd return",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Entropy Predicts Returns:Kruskal-Wallis h=5",
+      "passed": "False",
+      "statistic": 3.1531577454479702,
+      "p_value": 0.5325298258108275,
+      "detail": "Entropy quintiles predict 5-tick returns? KW=3.15",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Entropy Predicts Returns:Spearman corr h=5",
+      "passed": "False",
+      "statistic": 0.01457487993175703,
+      "p_value": 0.14511121379589703,
+      "detail": "Spearman rho=0.0146 between entropy and 5-tick fwd return",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Entropy Predicts Returns:Kruskal-Wallis h=10",
+      "passed": "False",
+      "statistic": 0.7133087994552625,
+      "p_value": 0.9496775899858173,
+      "detail": "Entropy quintiles predict 10-tick returns? KW=0.71",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Entropy Predicts Returns:Spearman corr h=10",
+      "passed": "False",
+      "statistic": 0.00474108990726329,
+      "p_value": 0.635631663855276,
+      "detail": "Spearman rho=0.0047 between entropy and 10-tick fwd return",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Entropy Predicts Returns:Kruskal-Wallis h=20",
+      "passed": "False",
+      "statistic": 0.44496306054497836,
+      "p_value": 0.9786328853739177,
+      "detail": "Entropy quintiles predict 20-tick returns? KW=0.44",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Entropy Predicts Returns:Spearman corr h=20",
+      "passed": "False",
+      "statistic": 0.00604698168151435,
+      "p_value": 0.545828336332516,
+      "detail": "Spearman rho=0.0060 between entropy and 20-tick fwd return",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Entropy Predicts Returns:Kruskal-Wallis h=50",
+      "passed": "False",
+      "statistic": 4.616125133947207,
+      "p_value": 0.32899922752962923,
+      "detail": "Entropy quintiles predict 50-tick returns? KW=4.62",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Entropy Predicts Returns:Spearman corr h=50",
+      "passed": "False",
+      "statistic": -0.00932639610189351,
+      "p_value": 0.3522631735766947,
+      "detail": "Spearman rho=-0.0093 between entropy and 50-tick fwd return",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Entropy Predicts Returns:Kruskal-Wallis h=100",
+      "passed": "False",
+      "statistic": 6.3721123526920564,
+      "p_value": 0.17302881591742242,
+      "detail": "Entropy quintiles predict 100-tick returns? KW=6.37",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Entropy Predicts Returns:Spearman corr h=100",
+      "passed": "False",
+      "statistic": -0.01864390439564205,
+      "p_value": 0.06360021920932528,
+      "detail": "Spearman rho=-0.0186 between entropy and 100-tick fwd return",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Entropy Predicts Returns:Bonferroni correction note",
+      "passed": true,
+      "statistic": 12.0,
+      "p_value": 0.004166666666666667,
+      "detail": "12 tests run. Bonferroni-corrected alpha=0.0042",
+      "verdict": "INCONCLUSIVE"
+    },
+    {
+      "name": "Momentum Regime:Low entropy sign accuracy",
+      "passed": "True",
+      "statistic": 0.5258517034068136,
+      "p_value": 0.0051879937425726936,
+      "detail": "Sign accuracy=0.5259 (1312/2495) in Low entropy",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Momentum Regime:High entropy sign accuracy",
+      "passed": "False",
+      "statistic": 0.4857715430861723,
+      "p_value": 0.9252774206760911,
+      "detail": "Sign accuracy=0.4858 (1212/2495) in High entropy",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:ent_permutation_8 -> fwd_ret_10",
+      "passed": "False",
+      "statistic": 0.009432082100503166,
+      "p_value": 0.296,
+      "detail": "r=0.0094, permutation p=0.2960, null_std=0.0095",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:ent_permutation_16 -> fwd_ret_10",
+      "passed": "False",
+      "statistic": 0.009448936211024984,
+      "p_value": 0.336,
+      "detail": "r=0.0094, permutation p=0.3360, null_std=0.0094",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:ent_permutation_32 -> fwd_ret_10",
+      "passed": "False",
+      "statistic": 0.010767161671187781,
+      "p_value": 0.31,
+      "detail": "r=0.0108, permutation p=0.3100, null_std=0.0103",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:ent_book_shape -> fwd_ret_10",
+      "passed": "False",
+      "statistic": -0.005986463340365891,
+      "p_value": 0.55,
+      "detail": "r=-0.0060, permutation p=0.5500, null_std=0.0100",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:ent_trade_size -> fwd_ret_10",
+      "passed": "False",
+      "statistic": -0.006440489722708206,
+      "p_value": 0.558,
+      "detail": "r=-0.0064, permutation p=0.5580, null_std=0.0105",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:ent_rate_of_change -> fwd_ret_10",
+      "passed": "False",
+      "statistic": 0.016015202316275498,
+      "p_value": 0.122,
+      "detail": "r=0.0160, permutation p=0.1220, null_std=0.0103",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:ent_zscore -> fwd_ret_10",
+      "passed": "False",
+      "statistic": 0.010322229801025479,
+      "p_value": 0.306,
+      "detail": "r=0.0103, permutation p=0.3060, null_std=0.0099",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:flow_aggressor_ratio -> fwd_ret_10",
+      "passed": "True",
+      "statistic": 0.020667373196237335,
+      "p_value": 0.038,
+      "detail": "r=0.0207, permutation p=0.0380, null_std=0.0102",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Feature Correlation:flow_aggressor_momentum -> fwd_ret_10",
+      "passed": "True",
+      "statistic": 0.02066737319623734,
+      "p_value": 0.044,
+      "detail": "r=0.0207, permutation p=0.0440, null_std=0.0100",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Feature Correlation:flow_volume_5s -> fwd_ret_10",
+      "passed": "False",
+      "statistic": 0.010838578900369222,
+      "p_value": 0.272,
+      "detail": "r=0.0108, permutation p=0.2720, null_std=0.0097",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:flow_trade_count_5s -> fwd_ret_10",
+      "passed": "False",
+      "statistic": -0.006082113492185338,
+      "p_value": 0.542,
+      "detail": "r=-0.0061, permutation p=0.5420, null_std=0.0098",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:imbalance_l5 -> fwd_ret_10",
+      "passed": "False",
+      "statistic": -0.004985092102849112,
+      "p_value": 0.662,
+      "detail": "r=-0.0050, permutation p=0.6620, null_std=0.0103",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:imbalance_l10 -> fwd_ret_10",
+      "passed": "False",
+      "statistic": -0.006470688668966555,
+      "p_value": 0.5,
+      "detail": "r=-0.0065, permutation p=0.5000, null_std=0.0097",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:imbalance_persistence -> fwd_ret_10",
+      "passed": "False",
+      "statistic": -0.0037318216882142223,
+      "p_value": 0.698,
+      "detail": "r=-0.0037, permutation p=0.6980, null_std=0.0097",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:vol_realized_100 -> fwd_ret_10",
+      "passed": "False",
+      "statistic": -0.0035277420555197155,
+      "p_value": 0.752,
+      "detail": "r=-0.0035, permutation p=0.7520, null_std=0.0102",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:vol_realized_20 -> fwd_ret_10",
+      "passed": "False",
+      "statistic": 0.00572971310118248,
+      "p_value": 0.562,
+      "detail": "r=0.0057, permutation p=0.5620, null_std=0.0098",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:vol_ratio -> fwd_ret_10",
+      "passed": "False",
+      "statistic": 0.01823374141592105,
+      "p_value": 0.074,
+      "detail": "r=0.0182, permutation p=0.0740, null_std=0.0101",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:raw_spread_bps -> fwd_ret_10",
+      "passed": "False",
+      "statistic": 0.007170724667476206,
+      "p_value": 0.478,
+      "detail": "r=0.0072, permutation p=0.4780, null_std=0.0100",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:composite_regime_signal -> fwd_ret_10",
+      "passed": "False",
+      "statistic": -0.006517710702932843,
+      "p_value": 0.522,
+      "detail": "r=-0.0065, permutation p=0.5220, null_std=0.0106",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Correlation:Bonferroni-corrected survivors",
+      "passed": false,
+      "statistic": 0.0,
+      "p_value": 0.002631578947368421,
+      "detail": "0/19 features survive Bonferroni (alpha=0.0026)",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Feature Redundancy:Highly correlated pairs (|r|>0.8)",
+      "passed": true,
+      "statistic": 8.0,
+      "p_value": 0.04678362573099415,
+      "detail": "8 pairs with |r|>0.8 out of 19 features. Pairs: [('ent_permutation_8', 'ent_permutation_16', '0.97'), ('ent_permutation_8', 'ent_permutation_32', '0.96'), ('ent_permutation_8', 'composite_regime_signal', '-0.89'), ('ent_permutation_16', 'ent_permutation_32', '0.99'), ('ent_permutation_16', 'composite_regime_signal', '-0.91')]",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Feature Redundancy:Effective dimensionality (PCA)",
+      "passed": "True",
+      "statistic": 13.0,
+      "p_value": 0.6842105263157895,
+      "detail": "90% variance in 12 dims, 95% in 13 dims (out of 19 features)",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Regime Stability:Bootstrap ARI",
+      "passed": "True",
+      "statistic": 0.9382371153738751,
+      "p_value": 0.0,
+      "detail": "Mean ARI=0.938 +/- 0.046, 100% bootstraps with ARI>0.7",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Regime Stability:Cluster center consistency",
+      "passed": "True",
+      "statistic": 0.005882394898412738,
+      "p_value": 0.005882394898412738,
+      "detail": "Cluster center CV: [0.0058, 0.0059, 0.0053]. Stable = all CV < 0.2",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Baseline:Entropy-gated vs best baseline",
+      "passed": "True",
+      "statistic": 351.7431768615391,
+      "p_value": 0.0,
+      "detail": "Entropy-gated Sharpe=351.74 vs best baseline (Mean Reversion (z>2)) Sharpe=172.46",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Baseline:Entropy-gated vs random (95th percentile)",
+      "passed": "True",
+      "statistic": 351.7431768615391,
+      "p_value": 0.0,
+      "detail": "Entropy-gated Sharpe=351.74 vs random 95th pct=85.80",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Transaction Costs:Breakeven at 52% win rate",
+      "passed": "False",
+      "statistic": 0.032499999999999966,
+      "p_value": 0.0,
+      "detail": "Need |return|>3.250%, 0.0% of ticks exceed this",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Transaction Costs:Breakeven at 55% win rate",
+      "passed": "False",
+      "statistic": 0.012999999999999987,
+      "p_value": 0.0,
+      "detail": "Need |return|>1.300%, 0.0% of ticks exceed this",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Transaction Costs:Breakeven at 60% win rate",
+      "passed": "False",
+      "statistic": 0.0065000000000000014,
+      "p_value": 0.0,
+      "detail": "Need |return|>0.650%, 0.0% of ticks exceed this",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Transaction Costs:Net edge after costs",
+      "passed": "False",
+      "statistic": -0.0012767645140502448,
+      "p_value": 0.0,
+      "detail": "Gross edge=0.2bps, costs=13.0bps, net=-12.8bps",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Lead-Lag:Features that lead returns",
+      "passed": true,
+      "statistic": 10.0,
+      "p_value": 0.5263157894736842,
+      "detail": "10/19 features lead returns. Top: [('ent_permutation_8', -1, np.float64(0.014694176067172876)), ('ent_permutation_16', -1, np.float64(0.016258240418855215)), ('ent_permutation_32', -1, np.float64(0.01742862400951334))]",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Regime Signal:Differentiates 5-tick returns",
+      "passed": "False",
+      "statistic": 0.21903341734650894,
+      "p_value": 0.8962671888013921,
+      "detail": "KW=0.22, epsilon^2=-0.0002, mean returns by tercile: ['0.000043', '0.000034', '0.000024']",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Regime Signal:Differentiates 20-tick returns",
+      "passed": "False",
+      "statistic": 0.83901364522535,
+      "p_value": 0.6573709403668972,
+      "detail": "KW=0.84, epsilon^2=-0.0001, mean returns by tercile: ['0.000116', '0.000144', '0.000130']",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Regime Signal:Differentiates 50-tick returns",
+      "passed": "False",
+      "statistic": 5.094795902750775,
+      "p_value": 0.0782851028542874,
+      "detail": "KW=5.09, epsilon^2=0.0003, mean returns by tercile: ['0.000275', '0.000261', '0.000452']",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Returns:Mean significantly different from zero",
+      "passed": "False",
+      "statistic": 0.9162234176556511,
+      "p_value": 0.3595718239174488,
+      "detail": "Mean=0.00000679, t=0.916. Non-zero mean = drift exists",
+      "verdict": "INCONCLUSIVE"
+    },
+    {
+      "name": "Returns:Serial dependence (lag-1 autocorrelation)",
+      "passed": "True",
+      "statistic": -0.12637724794783442,
+      "p_value": 0.0,
+      "detail": "ACF(1)=-0.126377, z=-12.637. Positive = momentum, Negative = reversal",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Returns:Volatility clustering (squared return ACF)",
+      "passed": "True",
+      "statistic": 0.08381023881665835,
+      "p_value": 0.0,
+      "detail": "ACF of r^2=0.0838. High = vol clusters, exploitable for position sizing",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Returns:Fat tails (excess kurtosis)",
+      "passed": "False",
+      "statistic": 0.3106872004353485,
+      "p_value": 0.0,
+      "detail": "Kurtosis=0.31 (normal=0). Fat tails = extreme events more likely than normal",
+      "verdict": "INCONCLUSIVE"
+    },
+    {
+      "name": "Entropy Agreement:Pairwise correlation between entropy measures",
+      "passed": "False",
+      "statistic": 0.28760523168768776,
+      "p_value": 0.0,
+      "detail": "Avg pairwise r=0.288, min=-0.018. High = redundant, Low = different constructs",
+      "verdict": "INCONCLUSIVE"
+    },
+    {
+      "name": "Entropy Agreement:Regime classification consensus",
+      "passed": "True",
+      "statistic": 0.5957,
+      "p_value": 0.0,
+      "detail": "59.6% of ticks have majority agreement on low/high entropy",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Data Sufficiency:Sample size for small effects (d=0.1)",
+      "passed": true,
+      "statistic": 10000.0,
+      "p_value": 6.369426751592357,
+      "detail": "Have 10,000 rows, need 1,570 for d=0.1 at alpha=0.01, power=0.8",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Data Sufficiency:Sample size for medium effects (d=0.2)",
+      "passed": true,
+      "statistic": 10000.0,
+      "p_value": 25.0,
+      "detail": "Have 10,000 rows, need 400 for d=0.2 at alpha=0.01, power=0.8",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Data Sufficiency:Feature completeness",
+      "passed": true,
+      "statistic": 0.0,
+      "p_value": 0.0,
+      "detail": "0 features with >10% NaN. Worst: {'ent_permutation_8': 0.0, 'ent_permutation_16': 0.0, 'ent_permutation_32': 0.0}",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Data Sufficiency:Time span",
+      "passed": false,
+      "statistic": 1.024682,
+      "p_value": 0.0,
+      "detail": "Data spans 0 days 00:00:01.024682. Need >1h minimum for meaningful analysis",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Microstructure:Spread distribution",
+      "passed": true,
+      "statistic": 2.419190532593948,
+      "p_value": 0.0,
+      "detail": "Median spread=2.42bps, mean=3.03bps, P95=7.17bps",
+      "verdict": "INCONCLUSIVE"
+    },
+    {
+      "name": "Microstructure:Spread-volatility relationship",
+      "passed": "False",
+      "statistic": 0.004357817611578176,
+      "p_value": 0.6630331055828315,
+      "detail": "Spearman r=0.0044. Positive = spread widens with volatility (expected)",
+      "verdict": "INCONCLUSIVE"
+    },
+    {
+      "name": "Microstructure:imbalance_l5 predicts 5-tick return",
+      "passed": "False",
+      "statistic": -0.0034125809425133826,
+      "p_value": 0.7330048956348524,
+      "detail": "r=-0.0034. Positive = buy imbalance predicts up move",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Microstructure:imbalance_l10 predicts 5-tick return",
+      "passed": "False",
+      "statistic": -0.007426626569041094,
+      "p_value": 0.4578484456944036,
+      "detail": "r=-0.0074. Positive = buy imbalance predicts up move",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Entropy-Vol:Correlation",
+      "passed": "False",
+      "statistic": -0.0019123700720136874,
+      "p_value": 0.8483585027543888,
+      "detail": "Entropy-Vol Spearman r=-0.0019. Negative = low entropy = low vol (regime alignment)",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Entropy-Vol:Volatility differs by entropy quintile",
+      "passed": "False",
+      "statistic": 1.591698356482084,
+      "p_value": 0.8102834223615716,
+      "detail": "KW=1.59, vol means by quintile: ['0.2589', '0.2559', '0.2539', '0.2566', '0.2566']",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Effect Size:Low vs High entropy return difference (Cohen's d)",
+      "passed": "False",
+      "statistic": -0.03305318673070245,
+      "p_value": 0.0,
+      "detail": "d=-0.0331 (NEGLIGIBLE). Low entropy mean ret=0.000065, High=0.000160",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Walk-Forward:Entropy-return correlation stability",
+      "passed": false,
+      "statistic": 0.0123304084830124,
+      "p_value": 0.03471529106844992,
+      "detail": "Fold correlations: ['-0.0365', '0.0554', '-0.0024', '0.0486', '-0.0035']. Same sign=False, std=0.0347",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Nonlinear:Mutual information entropy->returns",
+      "passed": "False",
+      "statistic": 0.01873294630832119,
+      "p_value": 0.355,
+      "detail": "MI=0.018733, perm p=0.3550, linear r=0.0094. High MI with low r = nonlinear relationship",
+      "verdict": "REJECTED"
+    },
+    {
+      "name": "Data Quality:Synthetic data check (Shapiro-Wilk normality)",
+      "passed": true,
+      "statistic": 2.4223082759403298e-09,
+      "p_value": 2.4223082759403298e-09,
+      "detail": "Shapiro p=0.0000. Real markets NEVER pass normality. p>0.01 = SUSPICIOUS",
+      "verdict": "SURVIVES"
+    },
+    {
+      "name": "Data Quality:Timestamp regularity",
+      "passed": false,
+      "statistic": 0.00010001000100010001,
+      "p_value": 0.0,
+      "detail": "1 unique intervals out of 9999. Very regular = synthetic. Real markets have variable gaps",
+      "verdict": "REJECTED"
+    }
+  ]
+}

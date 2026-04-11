@@ -1,0 +1,9 @@
+NAT Skeptical Validation Summary
+==================================================
+
+Total tests: 79
+Survived:    28
+Rejected:    45
+Inconclusive:6
+
+Recommendation: revisit
