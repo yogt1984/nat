@@ -205,6 +205,7 @@ pub struct FeatureComputer {
     spread_buffer: RingBuffer<f64>,
     midprice_buffer: RingBuffer<f64>,
     entropy_buffer: RingBuffer<f64>,
+    imbalance_buffer: RingBuffer<f64>,
 }
 
 impl FeatureComputer {
@@ -214,26 +215,41 @@ impl FeatureComputer {
             config: config.clone(),
             spread_buffer: RingBuffer::new(600),   // 1 minute at 100ms
             midprice_buffer: RingBuffer::new(3000), // 5 minutes at 100ms
-            entropy_buffer: RingBuffer::new(600),
+            entropy_buffer: RingBuffer::new(600),  // 1 minute at 100ms
+            imbalance_buffer: RingBuffer::new(16), // 16 samples for permutation entropy
         }
     }
 
     /// Compute all features from current state
     pub fn compute(
-        &self,
+        &mut self,
         order_book: &OrderBook,
         trade_buffer: &TradeBuffer,
         market_context: &MarketContext,
         price_buffer: &RingBuffer<f64>,
     ) -> Features {
-        // Update internal buffers (would need &mut self in real impl)
-        // For now, we'll compute from the passed buffers
+        // Update history buffers
+        if let Some(spread) = order_book.spread() {
+            self.spread_buffer.push(spread);
+        }
+        if let Some(mid) = order_book.midprice() {
+            self.midprice_buffer.push(mid);
+        }
+        let imbalance_l1 = order_book.volume_imbalance(1);
+        self.imbalance_buffer.push(imbalance_l1);
 
         let raw = raw::compute(order_book);
         let imbalance = imbalance::compute(order_book);
         let flow = flow::compute(trade_buffer);
         let volatility = volatility::compute(price_buffer, order_book);
-        let entropy = entropy::compute(price_buffer, order_book, trade_buffer);
+        let entropy = entropy::compute(
+            price_buffer, order_book, trade_buffer,
+            &self.imbalance_buffer, &self.spread_buffer, &self.entropy_buffer,
+        );
+
+        // Update entropy history buffer with a representative entropy value (tick_1m)
+        self.entropy_buffer.push(entropy.tick_entropy_1m);
+
         let context = context::compute(market_context);
         let trend = trend::compute(price_buffer);
         let illiquidity = illiquidity::compute(trade_buffer);

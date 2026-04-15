@@ -145,7 +145,7 @@ impl MarketState {
     }
 
     /// Compute features from current state
-    pub fn compute_features(&self) -> Option<Features> {
+    pub fn compute_features(&mut self) -> Option<Features> {
         if !self.initialized {
             return None;
         }

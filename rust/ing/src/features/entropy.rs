@@ -139,6 +139,9 @@ pub fn compute(
     price_buffer: &RingBuffer<f64>,
     order_book: &OrderBook,
     trade_buffer: &TradeBuffer,
+    imbalance_buffer: &RingBuffer<f64>,
+    spread_buffer: &RingBuffer<f64>,
+    entropy_buffer: &RingBuffer<f64>,
 ) -> EntropyFeatures {
     let returns = price_buffer.returns();
 
@@ -161,11 +164,24 @@ pub fn compute(
         0.0
     };
 
-    // Permutation entropy of imbalance (would need imbalance history)
-    let permutation_imbalance_16 = 0.0;  // TODO: track imbalance history
+    // Permutation entropy of imbalance series (16 samples)
+    let permutation_imbalance_16 = if imbalance_buffer.len() >= 16 {
+        let imb_vec = imbalance_buffer.to_vec();
+        let slice = &imb_vec[imb_vec.len()-16..];
+        permutation_entropy(slice, 3)
+    } else {
+        0.0
+    };
 
-    // Spread dispersion (entropy of spread values)
-    let spread_dispersion = 0.0;  // TODO: track spread history
+    // Spread dispersion (entropy of spread history)
+    let spread_dispersion = if spread_buffer.len() >= 10 {
+        let spread_vec = spread_buffer.to_vec();
+        // Use last 300 samples (~30s at 100ms) or whatever is available
+        let start = if spread_vec.len() > 300 { spread_vec.len() - 300 } else { 0 };
+        distribution_entropy(&spread_vec[start..], 10)
+    } else {
+        0.0
+    };
 
     // Volume dispersion
     let trade_sizes = trade_buffer.trade_sizes_in_window(30);
@@ -185,11 +201,30 @@ pub fn compute(
         0.0
     };
 
-    // Rate of change (would need entropy history)
-    let rate_of_change_5s = 0.0;
+    // Rate of change: difference between current and ~5s ago (~50 samples at 100ms)
+    let rate_of_change_5s = if entropy_buffer.len() >= 50 {
+        let ent_vec = entropy_buffer.to_vec();
+        let current = ent_vec[ent_vec.len() - 1];
+        let past = ent_vec[ent_vec.len() - 50];
+        current - past
+    } else {
+        0.0
+    };
 
-    // Z-score (would need entropy history)
-    let zscore_1m = 0.0;
+    // Z-score: (current - mean) / std over 1 minute (~600 samples at 100ms)
+    let zscore_1m = if entropy_buffer.len() >= 10 {
+        let mean = entropy_buffer.mean();
+        let std = entropy_buffer.std();
+        if std > 1e-10 {
+            let ent_vec = entropy_buffer.to_vec();
+            let current = ent_vec[ent_vec.len() - 1];
+            (current - mean) / std
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
 
     // Tick entropy at various time windows
     let tick_entropy_1s = trade_buffer.tick_entropy_in_window(1).unwrap_or(0.0);

@@ -45,11 +45,14 @@ NAT (Next-Gen Alpha Technology) is a crypto market microstructure data system th
 
 ### 2.2 Known Issues
 
-4 of 24 entropy features are hardcoded to 0.0 (need history buffers not yet implemented):
-- `ent_permutation_imbalance_16`
-- `ent_spread_dispersion`
-- `ent_rate_of_change_5s`
-- `ent_zscore_1m`
+~~4 of 24 entropy features were hardcoded to 0.0~~ **RESOLVED** (2026-04-15):
+All 4 features now compute real values via history buffers added to `FeatureComputer`:
+- `ent_permutation_imbalance_16` — permutation entropy of L1 imbalance history (16 samples)
+- `ent_spread_dispersion` — distribution entropy of spread history (~30s window)
+- `ent_rate_of_change_5s` — difference between current and 5s-ago entropy
+- `ent_zscore_1m` — z-score of current entropy vs 1-minute rolling mean/std
+
+All 24 entropy features are now active.
 
 ### 2.3 Hyperliquid-Unique Features
 
@@ -442,7 +445,8 @@ Production-grade backtesting framework (Rust/Cython + Python API):
 
 | Priority | Task | Status | Dependency |
 |----------|------|--------|-----------|
-| **P0** | Collect 5+ weeks live data | DONE | — |
+| **P-1** | Fix hardcoded-to-0.0 entropy features | **DONE** (2026-04-15) | Must complete before ingestion |
+| **P0** | Collect 5+ weeks live data | DONE | P-1 (all features must emit real values) |
 | **P0** | Feature vector config (`config.py`) | DONE (117 tests) | — |
 | **P0** | Bar aggregation (`preprocess.py`) | **MISSING — BLOCKER** | Live data |
 | **P0** | Parquet loader (`loader.py`) | MISSING | — |
