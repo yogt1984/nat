@@ -634,12 +634,12 @@ test_pipeline:
 	@echo "║             RUNNING CLUSTER PIPELINE TESTS                      ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
 	@echo ""
-	cd scripts && python -m pytest tests/test_cluster_loader.py tests/test_cluster_preprocess.py tests/test_cluster_engine.py tests/test_cluster_reduce.py -v
+	cd scripts && python -m pytest tests/test_cluster_loader.py tests/test_cluster_preprocess.py tests/test_cluster_engine.py tests/test_cluster_reduce.py tests/test_cluster_viz.py -v
 
 # Run cluster pipeline tests with coverage
 test_pipeline_cov:
 	@echo "Running cluster pipeline tests with coverage..."
-	cd scripts && python -m pytest tests/test_cluster_loader.py tests/test_cluster_preprocess.py tests/test_cluster_engine.py tests/test_cluster_reduce.py -v --cov=cluster_pipeline --cov-report=term-missing
+	cd scripts && python -m pytest tests/test_cluster_loader.py tests/test_cluster_preprocess.py tests/test_cluster_engine.py tests/test_cluster_reduce.py tests/test_cluster_viz.py -v --cov=cluster_pipeline --cov-report=term-missing
 
 # =============================================================================
 # DEVELOPMENT TOOLS
@@ -745,7 +745,7 @@ help:
 	@echo " CLUSTER PIPELINE"
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo "  scan_schema         Scan parquet files and show vector coverage (DATA=./data/features)"
-	@echo "  test_pipeline       Run cluster pipeline tests (384 tests)"
+	@echo "  test_pipeline       Run cluster pipeline tests (484 tests)"
 	@echo "  test_pipeline_cov   Run pipeline tests with coverage report"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
