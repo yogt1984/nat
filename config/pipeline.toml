@@ -1,0 +1,55 @@
+# NAT Automated Pipeline Configuration
+# State machine: IDLE → INGESTING → COLLECTING → ANALYZING → DONE
+
+[ingestion]
+# Duration of data collection
+duration_days = 7
+# Rust ingestor config path (relative to project root)
+ingestor_config = "config/ing.toml"
+# Data directory (parquet output)
+data_dir = "./data/features"
+# Health check interval (seconds) — how often to verify ingestor is alive
+health_check_interval = 300
+# Maximum allowed gap before restart (seconds)
+max_gap_seconds = 600
+
+[analysis]
+# Primary timeframe for cluster analysis
+timeframe = "15min"
+# Feature vectors to analyze
+vectors = ["entropy", "trend", "volatility", "toxicity", "regime", "micro"]
+# Scaler for preprocessing
+scaler = "zscore"
+# k-sweep range
+k_min = 2
+k_max = 10
+# Bootstrap resamples
+n_bootstrap = 50
+# Random seed
+random_state = 42
+
+[analysis.thresholds]
+silhouette = 0.25
+bootstrap_ari = 0.6
+temporal_ari = 0.5
+self_transition = 0.7
+kruskal_p = 0.05
+eta_squared = 0.01
+
+[output]
+# Where to write analysis results
+report_dir = "./reports/pipeline"
+# Generate HTML report
+html_report = true
+# Save figures
+save_figures = true
+# Figure format
+figure_format = "png"
+# Figure DPI
+figure_dpi = 150
+
+[state]
+# State file tracks pipeline progress (JSON)
+state_file = "./data/pipeline_state.json"
+# Log file
+log_file = "./logs/pipeline.log"

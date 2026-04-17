@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner
 
 # Default target: run the main ingestor
 all: run
@@ -642,6 +642,51 @@ test_pipeline_cov:
 	cd scripts && python -m pytest tests/test_cluster_loader.py tests/test_cluster_preprocess.py tests/test_cluster_engine.py tests/test_cluster_reduce.py tests/test_cluster_viz.py -v --cov=cluster_pipeline --cov-report=term-missing
 
 # =============================================================================
+# AUTOMATED PIPELINE (State machine: IDLE → INGESTING → ANALYZING → DONE)
+# =============================================================================
+
+PIPELINE_CONFIG ?= config/pipeline.toml
+
+# Start the full automated pipeline (ingest for N days, then analyze)
+pipeline_start:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          STARTING AUTOMATED PIPELINE                             ║"
+	@echo "║  State machine: IDLE → BUILD → INGEST → COLLECT → ANALYZE → DONE║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	python scripts/pipeline_runner.py --config $(PIPELINE_CONFIG) start
+
+# Resume pipeline after interruption (picks up from saved state)
+pipeline_resume:
+	@echo "Resuming pipeline from saved state..."
+	python scripts/pipeline_runner.py --config $(PIPELINE_CONFIG) resume
+
+# Skip ingestion — run analysis directly on existing data
+pipeline_analyze:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          ANALYZING EXISTING DATA (skip ingestion)                ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	python scripts/pipeline_runner.py --config $(PIPELINE_CONFIG) analyze
+
+# Stop the ingestor (data is preserved, resume later with pipeline_resume)
+pipeline_stop:
+	@echo "Stopping ingestor..."
+	python scripts/pipeline_runner.py --config $(PIPELINE_CONFIG) stop
+
+# Show current pipeline status
+pipeline_status:
+	@python scripts/pipeline_runner.py --config $(PIPELINE_CONFIG) status
+
+# Run pipeline runner tests
+test_pipeline_runner:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          TESTING PIPELINE RUNNER                                 ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	cd scripts && python -m pytest tests/test_pipeline_runner.py -v
+
+# =============================================================================
 # DEVELOPMENT TOOLS
 # =============================================================================
 
@@ -747,6 +792,16 @@ help:
 	@echo "  scan_schema         Scan parquet files and show vector coverage (DATA=./data/features)"
 	@echo "  test_pipeline       Run cluster pipeline tests (484 tests)"
 	@echo "  test_pipeline_cov   Run pipeline tests with coverage report"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " AUTOMATED PIPELINE (State Machine)"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  pipeline_start      Start full pipeline: ingest N days → analyze → decide"
+	@echo "  pipeline_resume     Resume after interruption (from saved state)"
+	@echo "  pipeline_analyze    Skip ingestion, analyze existing data"
+	@echo "  pipeline_stop       Stop ingestor (preserves data for resume)"
+	@echo "  pipeline_status     Show current pipeline state and progress"
+	@echo "  test_pipeline_runner Run pipeline runner tests"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " API VALIDATION (Live Hyperliquid)"
