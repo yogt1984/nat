@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov
 
 # Default target: run the main ingestor
 all: run
@@ -617,6 +617,31 @@ test_serving:
 	python -m pytest scripts/tests/test_model_serving.py -v
 
 # =============================================================================
+# CLUSTER PIPELINE (Feature vector clustering & analysis)
+# =============================================================================
+
+# Scan parquet schema and show vector coverage
+scan_schema:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║            SCANNING PARQUET SCHEMA & VECTOR COVERAGE            ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	python -c "from cluster_pipeline.loader import print_schema_summary; print_schema_summary('$(DATA)')"
+
+# Run cluster pipeline tests
+test_pipeline:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║             RUNNING CLUSTER PIPELINE TESTS                      ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	cd scripts && python -m pytest tests/test_cluster_loader.py -v
+
+# Run cluster pipeline tests with coverage
+test_pipeline_cov:
+	@echo "Running cluster pipeline tests with coverage..."
+	cd scripts && python -m pytest tests/test_cluster_loader.py -v --cov=cluster_pipeline --cov-report=term-missing
+
+# =============================================================================
 # DEVELOPMENT TOOLS
 # =============================================================================
 
@@ -715,6 +740,13 @@ help:
 	@echo "  experiments_compare     Compare experiments (EXP_IDS=\"exp1 exp2\")"
 	@echo "  experiments_best        Find best experiment (METRIC=sharpe_ratio)"
 	@echo "  run_ml_workflow         Complete ML pipeline with tracking"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " CLUSTER PIPELINE"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  scan_schema         Scan parquet files and show vector coverage (DATA=./data/features)"
+	@echo "  test_pipeline       Run cluster pipeline loader tests (97 tests)"
+	@echo "  test_pipeline_cov   Run pipeline tests with coverage report"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " API VALIDATION (Live Hyperliquid)"
