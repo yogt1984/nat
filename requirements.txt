@@ -1,0 +1,64 @@
+# NAT Project — Consolidated Python Dependencies
+# Install with: pip install -r requirements.txt
+#
+# Covers: cluster pipeline, backtesting, exploration, model serving, and testing.
+# Subsystem-specific requirements files still exist for isolated installs.
+
+# ============================================================================
+# Core (required by all subsystems)
+# ============================================================================
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.11.0
+pyarrow>=14.0.0
+
+# ============================================================================
+# Cluster Pipeline (scripts/cluster_pipeline/)
+# ============================================================================
+scikit-learn>=1.3.0
+
+# Optional: density-based clustering (HDBSCAN)
+# hdbscan>=0.8.0
+
+# Optional: UMAP dimensionality reduction
+# umap-learn>=0.5.0
+
+# ============================================================================
+# Visualization
+# ============================================================================
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.15.0
+
+# ============================================================================
+# Backtesting & Exploration
+# ============================================================================
+polars>=0.20.0
+
+# ============================================================================
+# Model Serving API (optional — only for deployment)
+# ============================================================================
+# fastapi>=0.104.0
+# uvicorn[standard]>=0.24.0
+# pydantic>=2.0.0
+
+# ============================================================================
+# Real-time data collection (optional — only for live ingestor clients)
+# ============================================================================
+# websockets>=12.0
+# aiohttp>=3.9.0
+
+# ============================================================================
+# Testing
+# ============================================================================
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# ============================================================================
+# Optional utilities
+# ============================================================================
+# tqdm>=4.66.0
+# numba>=0.58.0
+# dash>=2.14.0
+# jupyter>=1.0.0
+# notebook>=7.0.0
