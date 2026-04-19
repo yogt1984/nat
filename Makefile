@@ -24,11 +24,11 @@ release:
 	cd rust && cargo build --release --bin ing --bin validate_api --bin validate_positions --bin validate_whales --bin validate_entropy --bin show_features --bin test_hypotheses
 
 # Run the main ingestor (requires config/ing.toml)
-run: build
+run: release
 	@echo "Stopping any existing ingestor processes..."
 	@-pkill -f "target/.*ing.*config/ing.toml" 2>/dev/null; sleep 1
 	@echo "Running ingestor..."
-	cd rust && cargo run --bin ing -- ../config/ing.toml
+	cd rust && ./target/release/ing ../config/ing.toml
 
 # Run the ingestor with dashboard enabled
 run_and_serve: release
