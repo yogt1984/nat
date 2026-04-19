@@ -94,9 +94,10 @@ impl Features {
         Self::count() + WhaleFlowFeatures::count() + LiquidationRiskFeatures::count() + ConcentrationFeatures::count() + RegimeFeatures::count() + GmmClassificationFeatures::count()
     }
 
-    /// Convert to flat vector of f64
+    /// Convert to flat vector of f64 (fixed-length, NaN for missing optional features)
     pub fn to_vec(&self) -> Vec<f64> {
-        let mut v = Vec::with_capacity(Self::count());
+        let mut v = Vec::with_capacity(Self::count_all());
+        // Base features (always present)
         v.extend(self.raw.to_vec());
         v.extend(self.imbalance.to_vec());
         v.extend(self.flow.to_vec());
@@ -107,20 +108,26 @@ impl Features {
         v.extend(self.illiquidity.to_vec());
         v.extend(self.toxicity.to_vec());
         v.extend(self.derived.to_vec());
-        if let Some(ref wf) = self.whale_flow {
-            v.extend(wf.to_vec());
+        // Optional features (NaN when not yet available)
+        match &self.whale_flow {
+            Some(wf) => v.extend(wf.to_vec()),
+            None => v.extend(std::iter::repeat(f64::NAN).take(WhaleFlowFeatures::count())),
         }
-        if let Some(ref lr) = self.liquidation_risk {
-            v.extend(lr.to_vec());
+        match &self.liquidation_risk {
+            Some(lr) => v.extend(lr.to_vec()),
+            None => v.extend(std::iter::repeat(f64::NAN).take(LiquidationRiskFeatures::count())),
         }
-        if let Some(ref c) = self.concentration {
-            v.extend(c.to_vec());
+        match &self.concentration {
+            Some(c) => v.extend(c.to_vec()),
+            None => v.extend(std::iter::repeat(f64::NAN).take(ConcentrationFeatures::count())),
         }
-        if let Some(ref r) = self.regime {
-            v.extend(r.to_vec());
+        match &self.regime {
+            Some(r) => v.extend(r.to_vec()),
+            None => v.extend(std::iter::repeat(f64::NAN).take(RegimeFeatures::count())),
         }
-        if let Some(ref g) = self.gmm_classification {
-            v.extend(g.to_vec());
+        match &self.gmm_classification {
+            Some(g) => v.extend(g.to_vec()),
+            None => v.extend(std::iter::repeat(f64::NAN).take(GmmClassificationFeatures::count())),
         }
         v
     }

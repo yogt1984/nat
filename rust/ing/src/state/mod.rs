@@ -292,11 +292,17 @@ mod tests {
 
         let mut features = Features::default();
 
-        // Without GMM, to_vec should work
+        // to_vec always returns fixed length (NaN for missing optional features)
         let vec_without = features.to_vec();
-        let base_len = vec_without.len();
+        assert_eq!(vec_without.len(), Features::count_all(),
+            "to_vec should always return count_all() elements");
 
-        // With GMM, to_vec should include 8 more features
+        // GMM slots should be NaN when not set
+        let gmm_start = Features::count_all() - GmmClassificationFeatures::count();
+        assert!(vec_without[gmm_start].is_nan(),
+            "GMM features should be NaN when not set");
+
+        // With GMM set, length stays the same but values are filled
         let gmm_output = GmmClassificationFeatures::from_classification(
             Regime::Accumulation,
             &[0.5, 0.1, 0.1, 0.1, 0.2],
@@ -304,11 +310,10 @@ mod tests {
         features.gmm_classification = Some(gmm_output);
 
         let vec_with = features.to_vec();
-        assert_eq!(
-            vec_with.len(),
-            base_len + 8,
-            "to_vec with GMM should have 8 more elements"
-        );
+        assert_eq!(vec_with.len(), Features::count_all(),
+            "to_vec length must be constant regardless of optional features");
+        assert!(!vec_with[gmm_start].is_nan(),
+            "GMM features should be filled when set");
     }
 
     #[test]
