@@ -321,6 +321,7 @@ class TestDataDirStats:
         assert stats["n_files"] == 2
         assert stats["total_bytes"] == 8000
         assert stats["total_mb"] == round(8000 / 1048576, 2)
+        assert "path" in stats
 
     def test_lists_dates(self, tmp_pipeline):
         stats = data_dir_stats(tmp_pipeline["data_dir"])
@@ -330,6 +331,11 @@ class TestDataDirStats:
         stats = data_dir_stats(str(tmp_path / "nope"))
         assert stats["exists"] is False
         assert stats["n_files"] == 0
+        assert "path" in stats
+
+    def test_relative_path_display(self, tmp_pipeline):
+        stats = data_dir_stats(tmp_pipeline["data_dir"], str(tmp_pipeline["root"]))
+        assert stats["path"] == "data/features"
 
     def test_empty_dir(self, tmp_path):
         d = tmp_path / "empty_data"
@@ -378,6 +384,11 @@ class TestHTMLTemplate:
     def test_has_auto_refresh(self):
         assert "auto-refresh" in DASHBOARD_HTML
         assert "setInterval" in DASHBOARD_HTML
+
+    def test_has_data_path_bar(self):
+        assert "data-path" in DASHBOARD_HTML
+        assert "data-path-status" in DASHBOARD_HTML
+        assert "Data folder" in DASHBOARD_HTML
 
     def test_has_state_badges(self):
         for state in ["IDLE", "INGESTING", "ANALYZING", "DONE", "ERROR"]:
@@ -451,6 +462,7 @@ class TestHTTPEndpoints:
         assert status == 200
         assert data["n_files"] == 2
         assert data["exists"] is True
+        assert "path" in data
 
     def test_figure_serving(self, dashboard_server):
         url, _ = dashboard_server

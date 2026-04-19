@@ -109,16 +109,22 @@ def read_report(report_dir: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def data_dir_stats(data_dir: str) -> Dict[str, Any]:
+def data_dir_stats(data_dir: str, project_root: str = "") -> Dict[str, Any]:
     """Quick stats on collected data: file count, total size, date range."""
     p = Path(data_dir)
+    # Compute relative path from project root for display
+    try:
+        rel_path = str(p.relative_to(project_root)) if project_root else str(p)
+    except ValueError:
+        rel_path = str(p)
     if not p.is_dir():
-        return {"exists": False, "n_files": 0, "total_bytes": 0, "dates": []}
+        return {"exists": False, "path": rel_path, "n_files": 0, "total_bytes": 0, "dates": []}
     parquets = sorted(p.rglob("*.parquet"))
     total = sum(f.stat().st_size for f in parquets)
     dates = sorted({f.parent.name for f in parquets if f.parent != p})
     return {
         "exists": True,
+        "path": rel_path,
         "n_files": len(parquets),
         "total_bytes": total,
         "total_mb": round(total / (1024 * 1024), 2),
@@ -184,6 +190,10 @@ DASHBOARD_HTML = """\
 <body>
 
 <h1>NAT Pipeline Dashboard</h1>
+<div id="data-path-bar" style="background:var(--card);border:1px solid var(--border);border-radius:4px;padding:8px 16px;margin-bottom:12px;font-size:0.85em;">
+  Data folder: <span id="data-path" style="color:var(--accent)">loading...</span>
+  &mdash; <span id="data-path-status"></span>
+</div>
 
 <div class="refresh-bar">
   <span>Last refresh: <span id="last-refresh">—</span>
@@ -294,8 +304,19 @@ async function refreshState() {
 async function refreshData() {
   const d = await fetchJSON('/api/data');
   if (!d) return;
+  // Update top-level data path bar
+  const pathEl = document.getElementById('data-path');
+  const statusEl = document.getElementById('data-path-status');
+  pathEl.textContent = d.path || '—';
+  if (d.exists) {
+    statusEl.innerHTML = `<span style="color:var(--green)">${d.n_files} files, ${formatBytes(d.total_bytes)}</span>`;
+  } else {
+    statusEl.innerHTML = '<span style="color:var(--red)">directory does not exist</span>';
+  }
+  // Update data card
   const el = document.getElementById('data-content');
-  let html = kv('Directory exists', d.exists ? 'Yes' : 'No');
+  let html = kv('Path', d.path || '—');
+  html += kv('Directory exists', d.exists ? 'Yes' : 'No');
   html += kv('Parquet files', d.n_files);
   html += kv('Total size', formatBytes(d.total_bytes));
   html += kv('Collection dates', (d.dates || []).join(', ') || '—');
@@ -461,7 +482,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._json_response({"figures": figs})
 
         elif path == "/api/data":
-            stats = data_dir_stats(cfg["_data_dir"])
+            stats = data_dir_stats(cfg["_data_dir"], cfg["_project_root"])
             self._json_response(stats)
 
         elif path.startswith("/figures/"):
