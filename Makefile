@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner dashboard test_dashboard
 
 # Default target: run the main ingestor
 all: run
@@ -687,6 +687,27 @@ test_pipeline_runner:
 	cd scripts && python -m pytest tests/test_pipeline_runner.py -v
 
 # =============================================================================
+# PIPELINE DASHBOARD
+# =============================================================================
+
+DASHBOARD_PORT ?= 8050
+
+# Start the read-only pipeline dashboard
+dashboard:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║           NAT PIPELINE DASHBOARD                                ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	python scripts/dashboard.py --config $(PIPELINE_CONFIG) --port $(DASHBOARD_PORT)
+
+# Run dashboard tests
+test_dashboard:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          TESTING PIPELINE DASHBOARD                              ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	cd scripts && python -m pytest tests/test_dashboard.py -v
+
+# =============================================================================
 # DEVELOPMENT TOOLS
 # =============================================================================
 
@@ -802,6 +823,8 @@ help:
 	@echo "  pipeline_stop       Stop ingestor (preserves data for resume)"
 	@echo "  pipeline_status     Show current pipeline state and progress"
 	@echo "  test_pipeline_runner Run pipeline runner tests"
+	@echo "  dashboard           Start read-only pipeline dashboard (port $(DASHBOARD_PORT))"
+	@echo "  test_dashboard      Run dashboard tests"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " API VALIDATION (Live Hyperliquid)"
