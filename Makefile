@@ -25,6 +25,8 @@ release:
 
 # Run the main ingestor (requires config/ing.toml)
 run: build
+	@echo "Stopping any existing ingestor processes..."
+	@-pkill -f "target/.*ing.*config/ing.toml" 2>/dev/null; sleep 1
 	@echo "Running ingestor..."
 	cd rust && cargo run --bin ing -- ../config/ing.toml
 
