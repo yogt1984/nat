@@ -105,7 +105,7 @@ async fn main() -> Result<()> {
     let (feature_tx, feature_rx) = mpsc::channel::<FeatureVector>(10_000);
 
     // Initialize Parquet writer
-    let writer = ParquetWriter::new(&config.output)?;
+    let writer = ParquetWriter::new(&config.output, config.data_dir())?;
     let writer_handle = tokio::spawn(run_writer(writer, feature_rx));
 
     // Initialize market state for each symbol

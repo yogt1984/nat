@@ -119,9 +119,9 @@ impl FeatureBuffer {
 
 impl ParquetWriter {
     /// Create a new Parquet writer
-    pub fn new(config: &OutputConfig) -> Result<Self> {
+    pub fn new(config: &OutputConfig, general_data_dir: &str) -> Result<Self> {
         let data_dir = config.data_dir.as_deref()
-            .unwrap_or("./data/features");
+            .unwrap_or(general_data_dir);
 
         fs::create_dir_all(data_dir)
             .context("Failed to create data directory")?;
