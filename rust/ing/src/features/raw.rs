@@ -1,4 +1,31 @@
-//! Raw order book features
+//! Raw Order Book Feature Extraction
+//!
+//! Direct measurements from the L2 order book snapshot. These are the
+//! fundamental microstructure observables from which higher-level features
+//! are derived.
+//!
+//! # Features (10 total)
+//!
+//! | Feature | Description | Range | Interpretation |
+//! |---------|-------------|-------|----------------|
+//! | **Midprice** | (best_bid + best_ask) / 2 | [0, +inf) | Reference price level |
+//! | **Spread** | best_ask - best_bid | [0, +inf) | Tightness of market |
+//! | **Spread (bps)** | spread / midprice × 10000 | [0, +inf) | Normalized transaction cost |
+//! | **Microprice** | Volume-weighted mid | [0, +inf) | Better fair-value estimate |
+//! | **Bid/ask depth (L5/L10)** | Cumulative volume on each side | [0, +inf) | Available liquidity |
+//! | **Bid/ask orders (L5)** | Order count on each side | [0, +inf) | Fragmentation measure |
+//!
+//! # Algorithms
+//!
+//! **Microprice** (Gatheral & Oomen 2010):
+//! P_micro = (V_ask × P_bid + V_bid × P_ask) / (V_bid + V_ask)
+//! where V_bid/V_ask are best-level volumes. When the ask side is thinner,
+//! microprice shifts toward the ask, reflecting higher probability of
+//! upward price movement.
+//!
+//! # References
+//!
+//! - Gatheral & Oomen (2010) - Zero-intelligence realized variance estimation
 
 use crate::state::OrderBook;
 

@@ -1,4 +1,24 @@
-//! Market context features
+//! Market Context Feature Extraction
+//!
+//! Hyperliquid-specific market metadata from the activeAssetCtx WebSocket channel.
+//! These features capture macro-level conditions (funding, open interest, premium)
+//! that drive regime transitions and inform position sizing.
+//!
+//! # Features (9 total)
+//!
+//! | Feature | Description | Range | Interpretation |
+//! |---------|-------------|-------|----------------|
+//! | **Funding rate** | Current perp funding rate | (-inf, +inf) | >0 = longs pay shorts |
+//! | **Funding z-score** | Funding vs historical distribution | (-inf, +inf) | |z| > 2 = extreme funding |
+//! | **Open interest** | Total open contracts (USD) | [0, +inf) | Higher = more leveraged |
+//! | **OI change (5m)** | Absolute OI change over ~5 min | (-inf, +inf) | >0 = positions opening |
+//! | **OI change % (5m)** | OI percent change over ~5 min | (-inf, +inf) | Normalized by OI level |
+//! | **Premium (bps)** | Mark price vs index price premium | (-inf, +inf) | >0 = perp trades above spot |
+//! | **Volume 24h** | Rolling 24-hour traded volume | [0, +inf) | Absolute liquidity measure |
+//! | **Volume ratio** | Current vs average 24h volume | [0, +inf) | >1 = above-average activity |
+//! | **Mark-oracle divergence** | Mark price minus oracle price | (-inf, +inf) | Measures pricing dislocation |
+//!
+//! Note: OI change uses a 60-sample lookback (~5 min at ~5s context updates).
 
 use crate::state::MarketContext;
 

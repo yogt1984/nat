@@ -1,4 +1,23 @@
-//! Trade flow features
+//! Trade Flow Feature Extraction
+//!
+//! Captures trade arrival patterns, volume dynamics, and aggressor behaviour.
+//! These features measure the pace and directional conviction of order flow.
+//!
+//! # Features (12 total)
+//!
+//! | Feature | Description | Range | Interpretation |
+//! |---------|-------------|-------|----------------|
+//! | **Count (1s/5s/30s)** | Trade count in window | [0, +inf) | Higher = more active |
+//! | **Volume (1s/5s/30s)** | Total traded volume in window | [0, +inf) | Higher = more liquidity consumed |
+//! | **Aggressor ratio (5s/30s)** | Buy volume / total volume | [0, 1] | >0.5 = buy-dominated |
+//! | **VWAP** | Volume-weighted average price (5s) | [0, +inf) | Where volume transacted |
+//! | **VWAP deviation** | (VWAP - last_price) / last_price | (-inf, +inf) | >0 = buying above market |
+//! | **Avg trade size** | Mean trade size over 30s | [0, +inf) | Larger = institutional flow |
+//! | **Intensity** | Trades per second (5s EMA) | [0, +inf) | Measures urgency |
+//!
+//! Window sizes — 1s: microstructure/HFT timescale. 5s: short-term flow patterns.
+//! 30s: medium-term directional conviction. These correspond to typical market-maker
+//! quote update frequencies (1-5s) and informed trader execution horizons (30s+).
 
 use crate::state::TradeBuffer;
 

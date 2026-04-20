@@ -1,4 +1,37 @@
-//! Feature computation module
+//! Feature Computation Module
+//!
+//! Extracts 191 features from Hyperliquid WebSocket market data across 14 categories.
+//! See `FEATURES.md` at the project root for the full feature manifest with formulas,
+//! interpretation, and paper references.
+//!
+//! # Feature Categories
+//!
+//! | Category | Count | Prefix | Status | Key Reference |
+//! |----------|-------|--------|--------|---------------|
+//! | Raw | 10 | `raw_` | All working | Gatheral & Oomen (2010) |
+//! | Imbalance | 8 | `imbalance_` | All working | Cont, Stoikov & Talreja (2010) |
+//! | Flow | 12 | `flow_` | All working | — |
+//! | Volatility | 8 | `vol_` | 6 working, 2 placeholder | Parkinson (1980) |
+//! | Entropy | 24 | `ent_` | All warmup-dependent | Bandt & Pompe (2002) |
+//! | Context | 9 | `ctx_` | All working | — |
+//! | Trend | 15 | `trend_` | All working | Jegadeesh & Titman (1993) |
+//! | Illiquidity | 12 | `illiq_` | All working | Kyle (1985) |
+//! | Toxicity | 10 | `toxic_` | All working | Easley et al. (2012) |
+//! | Derived | 15 | `derived_` | All working | — |
+//! | *Whale Flow* | 12 | `whale_` | Optional (NaN if absent) | — |
+//! | *Liquidation* | 13 | `liq_` | Optional (NaN if absent) | — |
+//! | *Concentration* | 15 | `conc_` | Optional (NaN if absent) | — |
+//! | *Regime* | 20 | `regime_` | Optional (NaN if absent) | — |
+//! | *GMM* | 8 | `regime`/`prob_` | Optional (NaN if absent) | — |
+//!
+//! Base features (123) are always computed. Optional features (68) require
+//! additional data sources or warmup time and are NaN-padded when absent.
+//!
+//! # Data Contract
+//!
+//! `Features::to_vec()` always returns exactly `count_all()` = 191 elements.
+//! `Features::names_all()` returns the corresponding column names.
+//! The Parquet schema is built from `names_all()` in `output/schema.rs`.
 
 mod raw;
 mod imbalance;

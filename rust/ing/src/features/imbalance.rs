@@ -1,4 +1,31 @@
-//! Order book imbalance features
+//! Order Book Imbalance Feature Extraction
+//!
+//! Measures the asymmetry between bid and ask sides of the order book.
+//! Persistent imbalance is a strong short-term predictor of price direction.
+//!
+//! # Features (8 total)
+//!
+//! | Feature | Description | Range | Interpretation |
+//! |---------|-------------|-------|----------------|
+//! | **Qty imbalance (L1/L5/L10)** | (bid_vol - ask_vol) / (bid + ask) | [-1, 1] | >0 = bid-heavy |
+//! | **Order count imbalance** | Order count asymmetry (L1-L5) | [-1, 1] | >0 = more bid orders |
+//! | **Notional imbalance** | Dollar-value asymmetry (L1-L5) | [-1, 1] | >0 = bid-heavy in $ |
+//! | **Depth-weighted** | Distance-weighted volume imbalance | [-1, 1] | Near-touch matters more |
+//! | **Pressure bid/ask** | Cumulative depth × distance weight | [0, 1] | Normalized support/resistance |
+//!
+//! # Algorithms
+//!
+//! **Volume imbalance**: I = (Σ bid_vol_i - Σ ask_vol_i) / (Σ bid_vol_i + Σ ask_vol_i)
+//! for levels i=1..N. N=1 for L1 (best quote), N=5/10 for deeper book.
+//!
+//! **Pressure score**: For each level, accumulate depth cumulatively and weight
+//! by 1/(1 + distance_bps/10). This gives exponentially decaying importance
+//! to liquidity further from the midprice. Normalized to [0,1] by dividing
+//! by max(bid_pressure, ask_pressure).
+//!
+//! # References
+//!
+//! - Cont, Stoikov & Talreja (2010) - A stochastic model for order book dynamics
 
 use crate::state::OrderBook;
 

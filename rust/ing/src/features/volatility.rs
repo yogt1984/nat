@@ -1,4 +1,33 @@
-//! Volatility features
+//! Volatility Feature Extraction
+//!
+//! Realized and range-based volatility estimators at multiple horizons.
+//! Used for risk regime detection and strategy sizing.
+//!
+//! # Features (8 total)
+//!
+//! | Feature | Description | Range | Interpretation |
+//! |---------|-------------|-------|----------------|
+//! | **Realized vol (1m/5m)** | sqrt(mean(r²)) of tick returns | [0, +inf) | Higher = more volatile |
+//! | **Parkinson vol** | Range-based estimator using high/low | [0, +inf) | More efficient than realized vol |
+//! | **Spread mean** | Average bid-ask spread over 1 min | [0, +inf) | Higher = wider market |
+//! | **Spread std** | Spread variability over 1 min | [0, +inf) | PLACEHOLDER |
+//! | **Midprice std** | Price standard deviation over 1 min | [0, +inf) | Direct dispersion measure |
+//! | **Ratio short/long** | vol_1m / vol_5m | [0, +inf) | >1 = accelerating vol |
+//! | **Z-score** | Current vol vs hourly distribution | (-inf, +inf) | PLACEHOLDER |
+//!
+//! # Algorithms
+//!
+//! **Realized volatility**: RV = sqrt(Σ r_i² / N) where r_i are tick-to-tick returns.
+//! Window sizes: 60 ticks (~1 min) and 300 ticks (~5 min) at 100ms emission.
+//!
+//! **Parkinson (1980)**: σ = ln(H/L) / sqrt(4·ln(2)). Uses only high/low within
+//! the window. More efficient than close-to-close estimator (5x for random walk)
+//! because it uses intra-period price range.
+//!
+//! # References
+//!
+//! - Parkinson (1980) - The extreme value method for estimating the variance of the rate of return
+//! - Garman & Klass (1980) - On the estimation of security price volatilities from historical data
 
 use crate::state::{OrderBook, RingBuffer};
 
@@ -88,7 +117,7 @@ pub fn compute(
 
     // Spread statistics (would need spread buffer in real impl)
     let spread_mean_1m = order_book.spread().unwrap_or(0.0);
-    let spread_std_1m = 0.0;  // Would need historical spreads
+    let spread_std_1m = 0.0;  // PLACEHOLDER: needs historical spread buffer passed to compute()
 
     // Midprice std
     let midprice_std_1m = if price_buffer.len() >= 60 {
@@ -109,7 +138,7 @@ pub fn compute(
     };
 
     // Z-score (simplified - would need longer history)
-    let zscore = 0.0;  // Would need hourly vol history
+    let zscore = 0.0;  // PLACEHOLDER: needs hourly volatility history buffer
 
     VolatilityFeatures {
         returns_1m,

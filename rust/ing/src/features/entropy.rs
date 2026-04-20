@@ -1,10 +1,47 @@
-//! Entropy features
+//! Entropy Feature Extraction
 //!
-//! Implements permutation entropy, tick entropy, and other entropy measures for regime detection.
+//! Measures information content and predictability of price, volume, and order
+//! book dynamics. Low entropy signals trending/ordered markets where momentum
+//! strategies work; high entropy signals efficient/random markets favouring
+//! mean-reversion.
 //!
-//! Tick entropy measures the randomness of trade direction changes over time.
-//! High entropy indicates random/unpredictable price movement (efficient market).
-//! Low entropy indicates trending/predictable movement (potential regime).
+//! # Features (24 total: 10 distribution/permutation + 7 tick + 7 volume-tick)
+//!
+//! | Feature | Description | Range | Interpretation |
+//! |---------|-------------|-------|----------------|
+//! | **Permutation returns** | Ordinal-pattern entropy of returns | [0, 1] | 0 = deterministic, 1 = random |
+//! | **Permutation imbalance** | Ordinal-pattern entropy of L1 imbalance | [0, 1] | Low = persistent imbalance |
+//! | **Spread dispersion** | Shannon entropy of binned spreads | [0, 1] | Low = tight clustering |
+//! | **Volume dispersion** | Shannon entropy of binned trade sizes | [0, 1] | Low = uniform sizes |
+//! | **Book shape** | Shannon entropy of depth distribution | [0, 1] | Low = concentrated depth |
+//! | **Trade size dispersion** | Shannon entropy of trade sizes (5 bins) | [0, 1] | Low = homogeneous flow |
+//! | **Rate of change** | Entropy delta over ~5 s | (-inf, +inf) | Sharp drop = regime onset |
+//! | **Z-score** | Entropy vs 1-min distribution | (-inf, +inf) | |z| > 2 = unusual regime |
+//! | **Tick entropy** | Shannon entropy of {up,down,neutral} ticks | [0, ln(3)] | 0 = single direction |
+//! | **Volume-tick entropy** | Volume-weighted tick direction entropy | [0, ln(3)] | Accounts for trade size |
+//!
+//! Window sizes — permutation: 8/16/32 ticks (short/medium/long ordinal patterns,
+//! order=3 giving 3!=6 possible patterns). Tick entropy: 1s/5s/10s/15s/30s/1m/15m
+//! (microstructure through regime timescales).
+//!
+//! # Algorithms
+//!
+//! **Permutation entropy** (Bandt & Pompe 2002): For embedding dimension d=3,
+//! count occurrences of each of the d!=6 ordinal patterns in sliding windows,
+//! compute Shannon entropy, normalize by ln(d!) to [0,1].
+//!
+//! **Distribution entropy**: Bin continuous values into N equal-width bins,
+//! compute Shannon entropy H = -Σ p_i ln(p_i), normalize by ln(N).
+//!
+//! **Tick entropy**: Classify each trade as up/down/neutral by tick rule
+//! (compare price to previous trade), compute Shannon entropy of the
+//! direction distribution within the time window.
+//!
+//! # References
+//!
+//! - Bandt & Pompe (2002) - Permutation entropy: a natural complexity measure
+//! - Shannon (1948) - A mathematical theory of communication
+//! - Zunino et al. (2009) - Forbidden patterns, permutation entropy, stock market inefficiency
 
 use crate::state::{OrderBook, TradeBuffer, RingBuffer};
 
