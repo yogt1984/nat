@@ -140,3 +140,128 @@ make run  # let it run
 # Copy data to su-35
 rsync -avz data/features/ su-35:~/nat/data/features/
 ```
+
+## Next Step: Built-in Pipeline Traceability
+
+The ingestor currently goes silent after "Opening new Parquet file" — there is no way to tell whether data is flowing without running debug mode. The following logging milestones should be added so that failures are diagnosable in release mode.
+
+### Milestone 1: WebSocket Connection (already exists)
+**File:** `rust/ing/src/main.rs` (lines 177-193)
+- Already logs `WebSocket connected successfully` — no change needed.
+- On failure, already retries with error log.
+
+### Milestone 2: First Data Message Received
+**File:** `rust/ing/src/ws/client.rs`
+- Add a `first_message_logged: bool` flag to `HyperliquidClient`.
+- On the first successful `stream.next()` that returns data, log at INFO level:
+  ```
+  INFO First WebSocket data message received symbol=BTC elapsed_since_connect=1.2s
+  ```
+- If no message arrives within 30 seconds of connection, log a WARNING:
+  ```
+  WARN No WebSocket data received after 30s — possible network/firewall issue symbol=BTC
+  ```
+
+### Milestone 3: State Initialization
+**File:** `rust/ing/src/state/mod.rs`
+- When `initialized` transitions from `false` to `true`, log at INFO:
+  ```
+  INFO Market state initialized (first Book message processed) symbol=ETH
+  ```
+- This confirms the message was not only received but successfully parsed as a Book update.
+
+### Milestone 4: First Feature Computed
+**File:** `rust/ing/src/main.rs` (inside `run_symbol_ingestor`, emission_ticker branch)
+- On the first successful `compute_features()` (sequence_id == 1), log at INFO:
+  ```
+  INFO First feature vector computed symbol=ETH elapsed_since_connect=3.4s
+  ```
+- If `compute_features()` returns `None` for 30+ seconds after connection, log a WARNING:
+  ```
+  WARN No features computed after 30s — state not initialized? symbol=BTC messages_received=0
+  ```
+
+### Milestone 5: Buffer Fill Progress
+**File:** `rust/ing/src/output/writer.rs`
+- Log buffer progress at 25%, 50%, 75%, and 100% of capacity:
+  ```
+  INFO Writer buffer 25% full (2500/10000 rows) elapsed_since_open=1m23s
+  ```
+- On flush, log confirmation:
+  ```
+  INFO Buffer flushed to disk rows=10000 file=20260419_204259.parquet file_size=2.7MB
+  ```
+
+### Milestone 6: Periodic Health Summary (every 60s)
+**File:** `rust/ing/src/main.rs` (inside `run_symbol_ingestor`)
+- Add a second `tokio::time::interval(Duration::from_secs(60))` in the select loop.
+- Every 60 seconds, log a one-line health summary at INFO:
+  ```
+  INFO Health: symbol=BTC connected=true messages=1847 features=612 buffer=612/10000 uptime=5m12s
+  ```
+- If `messages == 0` and uptime > 30s, escalate to WARN:
+  ```
+  WARN Health: symbol=BTC connected=true messages=0 features=0 — NO DATA FLOWING uptime=2m30s
+  ```
+
+### Milestone 7: File Write Confirmation
+**File:** `rust/ing/src/output/writer.rs`
+- After `writer.write(&batch)`, verify file size is non-zero and log:
+  ```
+  INFO Parquet write confirmed rows_in_file=10000 file_size=2.7MB path=../data/features/2026-04-19/20260419_204259.parquet
+  ```
+- On file rotation (close + open), log the closed file's final stats:
+  ```
+  INFO Closed Parquet file rows=30000 size=8.1MB duration=55m path=...
+  INFO Opening new Parquet file path=...
+  ```
+
+### Implementation Notes
+
+- All milestone logs use INFO level (visible in release mode by default).
+- Warnings use WARN level for conditions that indicate probable failure.
+- No debug-level logs — everything must be visible in production.
+- Elapsed times should use `Instant::now()` captured at connection time.
+- The health summary timer should be a third branch in the `tokio::select!` loop (not biased).
+- Buffer progress logging should use a simple threshold check (e.g., `last_logged_pct`) to avoid spamming.
+
+### Expected Output (working system)
+```
+INFO Starting ING - Hyperliquid Ingestor
+INFO WebSocket connected successfully symbol=BTC
+INFO WebSocket connected successfully symbol=ETH
+INFO WebSocket connected successfully symbol=SOL
+INFO Opening new Parquet file path=../data/features/2026-04-19/20260419_204259.parquet
+INFO First WebSocket data message received symbol=BTC elapsed=0.4s
+INFO First WebSocket data message received symbol=ETH elapsed=0.4s
+INFO First WebSocket data message received symbol=SOL elapsed=0.5s
+INFO Market state initialized symbol=BTC
+INFO Market state initialized symbol=ETH
+INFO Market state initialized symbol=SOL
+INFO First feature vector computed symbol=BTC elapsed=1.2s
+INFO First feature vector computed symbol=ETH elapsed=1.3s
+INFO First feature vector computed symbol=SOL elapsed=1.4s
+INFO Health: symbol=BTC connected=true messages=312 features=104 buffer=312/10000 uptime=1m0s
+INFO Writer buffer 25% full (2500/10000 rows) elapsed=1m23s
+INFO Health: symbol=BTC connected=true messages=1847 features=612 buffer=2500/10000 uptime=2m0s
+INFO Writer buffer 50% full (5000/10000 rows) elapsed=2m46s
+INFO Writer buffer 75% full (7500/10000 rows) elapsed=4m10s
+INFO Buffer flushed to disk rows=10000 file_size=2.7MB
+```
+
+### Expected Output (broken system — su-35 scenario)
+```
+INFO Starting ING - Hyperliquid Ingestor
+INFO WebSocket connected successfully symbol=BTC
+INFO WebSocket connected successfully symbol=ETH
+INFO WebSocket connected successfully symbol=SOL
+INFO Opening new Parquet file path=../data/features/2026-04-19/20260419_204259.parquet
+WARN No WebSocket data received after 30s symbol=BTC
+WARN No WebSocket data received after 30s symbol=ETH
+WARN No WebSocket data received after 30s symbol=SOL
+WARN Health: symbol=BTC connected=true messages=0 features=0 — NO DATA FLOWING uptime=1m0s
+WARN Health: symbol=ETH connected=true messages=0 features=0 — NO DATA FLOWING uptime=1m0s
+WARN Health: symbol=SOL connected=true messages=0 features=0 — NO DATA FLOWING uptime=1m0s
+```
+
+This makes the failure point immediately obvious without needing debug mode.

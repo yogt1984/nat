@@ -198,6 +198,14 @@ async fn run_symbol_ingestor(
     );
     let mut emission_ticker = tokio::time::interval(emission_interval);
 
+    // Health summary every 60 seconds
+    let mut health_ticker = tokio::time::interval(tokio::time::Duration::from_secs(60));
+    health_ticker.tick().await; // skip immediate first tick
+
+    let connect_time = std::time::Instant::now();
+    let mut first_feature_logged = false;
+    let mut no_data_warned = false;
+
     loop {
         tokio::select! {
             // Bias towards WebSocket messages to ensure we don't miss data
@@ -255,9 +263,28 @@ async fn run_symbol_ingestor(
             _ = emission_ticker.tick() => {
                 let start = std::time::Instant::now();
 
+                // Warn if no data after 30 seconds
+                if !no_data_warned && message_count == 0 && connect_time.elapsed().as_secs() >= 30 {
+                    no_data_warned = true;
+                    warn!(
+                        %symbol,
+                        elapsed_s = connect_time.elapsed().as_secs(),
+                        "No WebSocket data received after 30s — possible network/firewall issue"
+                    );
+                }
+
                 if let Some(features) = state.compute_features() {
                     sequence_id += 1;
                     let timestamp_ms = chrono::Utc::now().timestamp_millis() as u64;
+
+                    if !first_feature_logged {
+                        first_feature_logged = true;
+                        info!(
+                            %symbol,
+                            elapsed_s = format!("{:.1}", connect_time.elapsed().as_secs_f64()),
+                            "First feature vector computed"
+                        );
+                    }
 
                     // Update dashboard with feature summary
                     dashboard_state.update_symbol(&symbol, |s| {
@@ -305,6 +332,34 @@ async fn run_symbol_ingestor(
                     let elapsed = start.elapsed();
                     metrics.record_feature_latency(&symbol, elapsed);
                     metrics.record_feature_emitted(&symbol);
+                }
+            }
+
+            // Health summary every 60 seconds (not biased — runs when other branches idle)
+            _ = health_ticker.tick() => {
+                let uptime = connect_time.elapsed().as_secs();
+                let mins = uptime / 60;
+                let secs = uptime % 60;
+                let ws_msgs = client.message_count();
+
+                if ws_msgs == 0 && uptime >= 30 {
+                    warn!(
+                        %symbol,
+                        connected = client.is_connected(),
+                        messages = ws_msgs,
+                        features = sequence_id,
+                        uptime = format!("{}m{}s", mins, secs),
+                        "Health: NO DATA FLOWING"
+                    );
+                } else {
+                    info!(
+                        %symbol,
+                        connected = client.is_connected(),
+                        messages = ws_msgs,
+                        features = sequence_id,
+                        uptime = format!("{}m{}s", mins, secs),
+                        "Health summary"
+                    );
                 }
             }
         }

@@ -90,7 +90,14 @@ impl MarketState {
                     self.price_buffer.push(mid);
                     self.minute_last_price = Some(mid);
                 }
-                self.initialized = true;
+                if !self.initialized {
+                    self.initialized = true;
+                    tracing::info!(
+                        symbol = %self.symbol,
+                        midprice = ?self.order_book.midprice(),
+                        "Market state initialized (first Book message processed)"
+                    );
+                }
             }
             WsMessage::Trades(trades) => {
                 for trade in trades {

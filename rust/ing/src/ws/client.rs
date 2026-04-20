@@ -20,6 +20,9 @@ pub struct HyperliquidClient {
     symbol: String,
     stream: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     reconnect_attempts: u32,
+    first_message_logged: bool,
+    connected_at: Option<std::time::Instant>,
+    message_count: u64,
 }
 
 impl HyperliquidClient {
@@ -30,6 +33,9 @@ impl HyperliquidClient {
             symbol: symbol.to_string(),
             stream: None,
             reconnect_attempts: 0,
+            first_message_logged: false,
+            connected_at: None,
+            message_count: 0,
         }
     }
 
@@ -45,6 +51,9 @@ impl HyperliquidClient {
 
         self.stream = Some(stream);
         self.reconnect_attempts = 0;
+        self.connected_at = Some(std::time::Instant::now());
+        self.first_message_logged = false;
+        self.message_count = 0;
 
         // Subscribe to channels
         self.subscribe().await?;
@@ -93,7 +102,21 @@ impl HyperliquidClient {
         match stream.next().await {
             Some(Ok(Message::Text(text))) => {
                 match parse_ws_message(&text) {
-                    Some(msg) => Ok(Some(msg)),
+                    Some(msg) => {
+                        self.message_count += 1;
+                        if !self.first_message_logged {
+                            self.first_message_logged = true;
+                            let elapsed = self.connected_at
+                                .map(|t| t.elapsed().as_secs_f64())
+                                .unwrap_or(0.0);
+                            info!(
+                                symbol = %self.symbol,
+                                elapsed_s = format!("{:.1}", elapsed),
+                                "First WebSocket data message received"
+                            );
+                        }
+                        Ok(Some(msg))
+                    }
                     None => {
                         debug!(text = %text, "Unparseable message");
                         Ok(None)
@@ -151,5 +174,17 @@ impl HyperliquidClient {
     /// Check if connected
     pub fn is_connected(&self) -> bool {
         self.stream.is_some()
+    }
+
+    /// Get the number of parsed data messages received since last connect
+    pub fn message_count(&self) -> u64 {
+        self.message_count
+    }
+
+    /// Get seconds elapsed since connection was established
+    pub fn elapsed_since_connect(&self) -> f64 {
+        self.connected_at
+            .map(|t| t.elapsed().as_secs_f64())
+            .unwrap_or(0.0)
     }
 }

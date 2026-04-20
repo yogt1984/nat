@@ -26,6 +26,8 @@ pub struct ParquetWriter {
     current_file_path: Option<PathBuf>,
     current_hour: Option<u32>,
     rows_written: usize,
+    file_opened_at: Option<std::time::Instant>,
+    last_progress_pct: usize,
 }
 
 /// Buffer for accumulating features before writing
@@ -134,6 +136,8 @@ impl ParquetWriter {
             current_file_path: None,
             current_hour: None,
             rows_written: 0,
+            file_opened_at: None,
+            last_progress_pct: 0,
         })
     }
 
@@ -150,6 +154,23 @@ impl ParquetWriter {
 
         // Add to buffer
         self.buffer.push(fv);
+
+        // Log buffer progress at 25% milestones
+        let pct = (self.buffer.len() * 100) / self.buffer.capacity;
+        let milestone = (pct / 25) * 25;
+        if milestone > 0 && milestone > self.last_progress_pct && milestone < 100 {
+            let elapsed = self.file_opened_at
+                .map(|t| format!("{:.0}s", t.elapsed().as_secs_f64()))
+                .unwrap_or_else(|| "?".to_string());
+            info!(
+                buffer_pct = milestone,
+                rows = self.buffer.len(),
+                capacity = self.buffer.capacity,
+                elapsed,
+                "Writer buffer progress"
+            );
+            self.last_progress_pct = milestone;
+        }
 
         // Flush if buffer is full
         if self.buffer.is_full() {
@@ -169,11 +190,29 @@ impl ParquetWriter {
 
         if let Some(writer) = &mut self.current_file {
             writer.write(&batch)?;
+            // Force the row group to disk so the file is non-zero immediately
+            writer.flush()?;
             self.rows_written += batch.num_rows();
-            debug!(rows = batch.num_rows(), total = self.rows_written, "Wrote batch");
+
+            // Log flush with file size
+            if let Some(ref path) = self.current_file_path {
+                let file_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                let elapsed = self.file_opened_at
+                    .map(|t| format!("{:.0}s", t.elapsed().as_secs_f64()))
+                    .unwrap_or_else(|| "?".to_string());
+                info!(
+                    rows_flushed = batch.num_rows(),
+                    rows_in_file = self.rows_written,
+                    file_size_bytes = file_size,
+                    elapsed,
+                    path = ?path,
+                    "Buffer flushed to disk"
+                );
+            }
         }
 
         self.buffer.clear();
+        self.last_progress_pct = 0;
         Ok(())
     }
 
@@ -211,6 +250,8 @@ impl ParquetWriter {
         self.current_file = Some(writer);
         self.current_file_path = Some(file_path);
         self.rows_written = 0;
+        self.file_opened_at = Some(std::time::Instant::now());
+        self.last_progress_pct = 0;
 
         Ok(())
     }
