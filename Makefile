@@ -29,7 +29,7 @@ run: release
 	@echo "Stopping any existing ingestor processes..."
 	@-pkill -f "target/.*ing.*config/ing.toml" 2>/dev/null; sleep 1
 	@echo "Running ingestor..."
-	cd rust && ./target/release/ing ../config/ing.toml
+	cd rust && exec ./target/release/ing ../config/ing.toml
 
 # Run the ingestor with dashboard enabled
 run_and_serve: release
@@ -42,7 +42,7 @@ run_and_serve: release
 	@echo "To expose to internet, run in another terminal:"
 	@echo "  make tunnel"
 	@echo ""
-	cd rust && ING_DASHBOARD_ENABLED=true ./target/release/ing ../config/ing.toml
+	cd rust && ING_DASHBOARD_ENABLED=true exec ./target/release/ing ../config/ing.toml
 
 # Expose dashboard to internet via cloudflare tunnel
 tunnel:
@@ -152,7 +152,7 @@ show: release
 	@echo "  Frequency: $(FREQ) Hz"
 	@echo "Press Ctrl+C to stop"
 	@echo ""
-	cd rust && ./target/release/show_features $(SYMBOL) $(FREQ)
+	cd rust && exec ./target/release/show_features $(SYMBOL) $(FREQ)
 
 # Quick frequency presets
 show_fast: FREQ=10
@@ -171,7 +171,7 @@ api: release_api
 	@echo "  REST API: http://localhost:3000"
 	@echo "  WebSocket: ws://localhost:3000/ws/stream/:symbol"
 	@echo ""
-	cd rust && ./target/release/nat-api
+	cd rust && exec ./target/release/nat-api
 
 # Build API server (release)
 release_api:
@@ -211,7 +211,7 @@ alerts: release_api
 	@echo "  TELEGRAM_BOT_TOKEN - Bot token from @BotFather"
 	@echo "  TELEGRAM_CHAT_ID   - Your chat ID"
 	@echo ""
-	cd rust && ./target/release/alert-service
+	cd rust && exec ./target/release/alert-service
 
 # =============================================================================
 # FULL STACK
