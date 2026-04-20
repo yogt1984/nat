@@ -3,8 +3,9 @@
 
 .PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner dashboard test_dashboard
 
-# Python interpreter (override with: make dashboard PYTHON=python)
-PYTHON ?= python3
+# Python interpreter — prefer 'python' (often conda/venv) over system 'python3'.
+# Override with: make PYTHON=/usr/bin/python3
+PYTHON ?= $(shell command -v python 2>/dev/null || command -v python3 2>/dev/null || echo python3)
 
 # Default target: run the main ingestor
 all: run
@@ -333,6 +334,7 @@ backtest_validate:
 ML_PREDICTIONS ?= ./predictions.parquet
 ML_ENTRY ?= 0.001
 ML_EXIT ?= 0.0
+ML_DIRECTION ?= long
 backtest_ml:
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║                 ML MODEL BACKTEST                                ║"
@@ -631,7 +633,7 @@ scan_schema:
 	@echo "║            SCANNING PARQUET SCHEMA & VECTOR COVERAGE            ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
 	@echo ""
-	$(PYTHON) -c "from cluster_pipeline.loader import print_schema_summary; print_schema_summary('$(DATA)')"
+	cd scripts && $(PYTHON) -c "from cluster_pipeline.loader import print_schema_summary; print_schema_summary('../$(DATA)')"
 
 # Run cluster pipeline tests
 test_pipeline:
@@ -751,7 +753,7 @@ help:
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " RUNNING"
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  run               Run ingestor (debug build)"
+	@echo "  run               Run ingestor (release build)"
 	@echo "  run_and_serve     Run ingestor + dashboard at localhost:8080"
 	@echo "  tunnel            Expose dashboard via cloudflare tunnel"
 	@echo "  show              Show real-time features (SYMBOL=BTC FREQ=1)"
@@ -802,21 +804,32 @@ help:
 	@echo "  backtest_ml_validate    ML walk-forward validation (recommended)"
 	@echo "  backtest_ml_quantile    ML backtest with quantile thresholds"
 	@echo "  backtest_ml_tracked     Backtest with automatic experiment tracking"
+	@echo "  backtest_list           List available backtest strategies"
+	@echo "  test_backtest           Run backtest unit tests"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " EXPERIMENT TRACKING"
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo "  experiments_list        List all tracked experiments"
+	@echo "  experiments_list_stage  Filter by stage (STAGE=backtest)"
 	@echo "  experiments_get         Get experiment details (EXP_ID=exp_xxx)"
 	@echo "  experiments_compare     Compare experiments (EXP_IDS=\"exp1 exp2\")"
 	@echo "  experiments_best        Find best experiment (METRIC=sharpe_ratio)"
 	@echo "  run_ml_workflow         Complete ML pipeline with tracking"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " MODEL SERVING"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  serve_models            Start model serving API (PORT=8000)"
+	@echo "  serve_models_dev        Start with hot-reload (development)"
+	@echo "  serve_best              Serve best model by metric (METRIC=sharpe_ratio)"
+	@echo "  test_serving            Run model serving API tests"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " CLUSTER PIPELINE"
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo "  scan_schema         Scan parquet files and show vector coverage (DATA=./data/features)"
-	@echo "  test_pipeline       Run cluster pipeline tests (484 tests)"
+	@echo "  test_pipeline       Run cluster pipeline tests"
 	@echo "  test_pipeline_cov   Run pipeline tests with coverage report"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"

@@ -477,7 +477,7 @@ def check_sequence_monotonicity(df: pd.DataFrame) -> CheckResult:
     for symbol in df['symbol'].unique():
         ts_col = get_timestamp_col(df)
         sym_df = df[df['symbol'] == symbol].sort_values(ts_col)
-        seq_ids = sym_df['sequence_id'].values
+        seq_ids = sym_df['sequence_id'].dropna().values
 
         if len(seq_ids) < 2:
             continue
