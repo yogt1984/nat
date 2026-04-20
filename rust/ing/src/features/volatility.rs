@@ -9,7 +9,7 @@
 //! |---------|-------------|-------|----------------|
 //! | **Realized vol (1m/5m)** | sqrt(mean(r²)) of tick returns | [0, +inf) | Higher = more volatile |
 //! | **Parkinson vol** | Range-based estimator using high/low | [0, +inf) | More efficient than realized vol |
-//! | **Spread mean** | Average bid-ask spread over 1 min | [0, +inf) | Higher = wider market |
+//! | **Spread mean** | Current spread (point-in-time, not historical mean) | [0, +inf) | Higher = wider market |
 //! | **Spread std** | Spread variability over 1 min | [0, +inf) | PLACEHOLDER |
 //! | **Midprice std** | Price standard deviation over 1 min | [0, +inf) | Direct dispersion measure |
 //! | **Ratio short/long** | vol_1m / vol_5m | [0, +inf) | >1 = accelerating vol |
@@ -21,13 +21,15 @@
 //! Window sizes: 60 ticks (~1 min) and 300 ticks (~5 min) at 100ms emission.
 //!
 //! **Parkinson (1980)**: σ = ln(H/L) / sqrt(4·ln(2)). Uses only high/low within
-//! the window. More efficient than close-to-close estimator (5x for random walk)
-//! because it uses intra-period price range.
+//! the window. This is a single-window approximation—the classical estimator
+//! averages over multiple subperiods for efficiency, but we use one window
+//! (300 ticks) for simplicity. Still more efficient than close-to-close for
+//! the same window because it captures intra-period range.
 //!
 //! # References
 //!
 //! - Parkinson (1980) - The extreme value method for estimating the variance of the rate of return
-//! - Garman & Klass (1980) - On the estimation of security price volatilities from historical data
+//! - Note: Garman & Klass (1980) is a potential extension but is not currently implemented
 
 use crate::state::{OrderBook, RingBuffer};
 

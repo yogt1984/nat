@@ -15,7 +15,7 @@
 //! | **Volume dispersion** | Shannon entropy of binned trade sizes | [0, 1] | Low = uniform sizes |
 //! | **Book shape** | Shannon entropy of depth distribution | [0, 1] | Low = concentrated depth |
 //! | **Trade size dispersion** | Shannon entropy of trade sizes (5 bins) | [0, 1] | Low = homogeneous flow |
-//! | **Rate of change** | Entropy delta over ~5 s | (-inf, +inf) | Sharp drop = regime onset |
+//! | **Rate of change** | Entropy delta over ~5 s | [-1, 1] | Sharp drop = regime onset |
 //! | **Z-score** | Entropy vs 1-min distribution | (-inf, +inf) | |z| > 2 = unusual regime |
 //! | **Tick entropy** | Shannon entropy of {up,down,neutral} ticks | [0, ln(3)] | 0 = single direction |
 //! | **Volume-tick entropy** | Volume-weighted tick direction entropy | [0, ln(3)] | Accounts for trade size |
@@ -26,9 +26,9 @@
 //!
 //! # Algorithms
 //!
-//! **Permutation entropy** (Bandt & Pompe 2002): For embedding dimension d=3,
-//! count occurrences of each of the d!=6 ordinal patterns in sliding windows,
-//! compute Shannon entropy, normalize by ln(d!) to [0,1].
+//! **Permutation entropy** (Bandt & Pompe 2002): For embedding dimension m=3,
+//! count occurrences of each of the m!=6 ordinal patterns in sliding windows,
+//! compute Shannon entropy, normalize by ln(m!) to [0,1].
 //!
 //! **Distribution entropy**: Bin continuous values into N equal-width bins,
 //! compute Shannon entropy H = -Σ p_i ln(p_i), normalize by ln(N).

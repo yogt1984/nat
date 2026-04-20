@@ -94,8 +94,8 @@ Realized and range-based volatility. Module: `features/volatility.rs`. Ref: Park
 |---------------|---------|-------|--------|
 | `vol_returns_1m` | sqrt(Σ r² / N), 60 ticks | [0, +inf) | Working |
 | `vol_returns_5m` | sqrt(Σ r² / N), 300 ticks | [0, +inf) | Working |
-| `vol_parkinson_5m` | ln(H/L) / sqrt(4·ln(2)), 300 ticks | [0, +inf) | Working |
-| `vol_spread_mean_1m` | Current spread (point-in-time) | [0, +inf) | Working |
+| `vol_parkinson_5m` | ln(H/L) / sqrt(4·ln(2)), single 300-tick window | [0, +inf) | Working (single-window approx) |
+| `vol_spread_mean_1m` | Current spread (point-in-time, not historical mean) | [0, +inf) | Working (misnomer) |
 | `vol_spread_std_1m` | — | 0.0 | **PLACEHOLDER** |
 | `vol_midprice_std_1m` | std(prices), 60 ticks | [0, +inf) | Working |
 | `vol_ratio_short_long` | vol_1m / vol_5m | [0, +inf) | >1 = accelerating |
@@ -110,7 +110,7 @@ Refs: Bandt & Pompe (2002), Shannon (1948), Zunino et al. (2009).
 
 | Parquet Column | Algorithm | Range | Interpretation |
 |---------------|-----------|-------|----------------|
-| `ent_permutation_returns_8` | Ordinal patterns, d=3, last 8 returns | [0, 1] | 0=deterministic, 1=random |
+| `ent_permutation_returns_8` | Ordinal patterns, m=3, last 8 returns | [0, 1] | 0=deterministic, 1=random |
 | `ent_permutation_returns_16` | Same, last 16 returns | [0, 1] | Medium horizon |
 | `ent_permutation_returns_32` | Same, last 32 returns | [0, 1] | Longer horizon |
 | `ent_permutation_imbalance_16` | Ordinal patterns of L1 imbalance | [0, 1] | Low = persistent imbalance |
@@ -118,7 +118,7 @@ Refs: Bandt & Pompe (2002), Shannon (1948), Zunino et al. (2009).
 | `ent_volume_dispersion` | Shannon entropy, binned trade sizes (10 bins) | [0, 1] | Low = uniform sizes |
 | `ent_book_shape` | Shannon entropy of depth proportions | [0, 1] | Low = concentrated depth |
 | `ent_trade_size_dispersion` | Shannon entropy, trade sizes (5 bins) | [0, 1] | Low = homogeneous flow |
-| `ent_rate_of_change_5s` | Entropy delta, current vs ~50 ticks ago | (-inf, +inf) | Sharp drop = regime onset |
+| `ent_rate_of_change_5s` | Entropy delta, current vs ~50 ticks ago | [-1, 1] | Sharp drop = regime onset |
 | `ent_zscore_1m` | (current - mean) / std, ~600 tick buffer | (-inf, +inf) | |z|>2 = unusual regime |
 
 **Tick entropy** (7 features — 1s/5s/10s/15s/30s/1m/15m windows):
@@ -176,12 +176,21 @@ Refs: Kyle (1985), Amihud (2002), Hasbrouck (2009).
 
 | Parquet Column | Formula | Range | Interpretation |
 |---------------|---------|-------|----------------|
-| `illiq_kyle_lambda_{100,500,1000}` | Cov(ΔP, signed_vol) / Var(signed_vol) | [0, +inf) | Higher = more illiquid |
-| `illiq_amihud_lambda_{100,500,1000}` | mean(\|return\| / volume) | [0, +inf) | Higher = more illiquid |
-| `illiq_hasbrouck_lambda_{100,500,1000}` | Permanent price impact component | [0, +inf) | Higher = more illiquid |
-| `illiq_roll_spread_{100,500,1000}` | 2·sqrt(-Cov(ΔP_t, ΔP_{t-1})) | [0, +inf) | Implied spread (Roll 1984) |
+| `illiq_kyle_100` | Cov(ΔP, signed_vol) / Var(signed_vol), 100 trades | [0, +inf) | Higher = more illiquid |
+| `illiq_amihud_100` | Σ\|r\| / Σv × 1e6, 100 trades | [0, +inf) | Higher = more illiquid |
+| `illiq_hasbrouck_100` | Permanent price impact (OLS), 100 trades | [0, +inf) | Higher = more illiquid |
+| `illiq_roll_100` | 2·sqrt(-Cov(ΔP_t, ΔP_{t-1})), 100 trades | [0, +inf) | Implied spread |
+| `illiq_kyle_500` | Same as above, 500-trade window | [0, +inf) | Medium-term impact |
+| `illiq_amihud_500` | Same as above, 500-trade window | [0, +inf) | Medium-term impact |
+| `illiq_hasbrouck_500` | Same as above, 500-trade window | [0, +inf) | Medium-term impact |
+| `illiq_roll_500` | Same as above, 500-trade window | [0, +inf) | Medium-term implied spread |
+| `illiq_kyle_ratio` | kyle_100 / kyle_500 | [0, +inf) | >1 = short-term illiquidity spike |
+| `illiq_amihud_ratio` | amihud_100 / amihud_500 | [0, +inf) | >1 = short-term illiquidity spike |
+| `illiq_composite` | Weighted mean of normalized lambdas | [0, 1] | Overall illiquidity score |
+| `illiq_trade_count` | Trades used in computation | [0, +inf) | Data sufficiency indicator |
 
-Window sizes: 100/500/1000 trades (short/medium/long market impact horizons).
+Note: Amihud implementation uses Σ\|r\|/Σv (ratio of sums), not the canonical mean(\|r\|/v) (mean of ratios).
+Roll spread autocovariance is computed without mean-centering (assumes zero-mean price changes).
 
 ## 9. Toxicity (10 features)
 
@@ -194,8 +203,8 @@ Refs: Easley et al. (2012), Glosten & Milgrom (1985).
 | `toxic_vpin_50` | VPIN, 50-bucket window | [0, 1] | Longer-horizon toxicity |
 | `toxic_vpin_roc` | VPIN rate of change | (-inf, +inf) | Rising = increasing toxicity |
 | `toxic_adverse_selection` | Effective - realized spread | [0, +inf) | Higher = more adverse selection |
-| `toxic_effective_spread` | 2·\|trade_price - mid\| / mid × 10000 | [0, +inf) | Actual execution cost (bps) |
-| `toxic_realized_spread` | 2·sign·(trade_price - mid_future) / mid × 10000 | (-inf, +inf) | Market-maker P&L (bps) |
+| `toxic_effective_spread` | 2 × mean(\|trade_price - VWAP\|) | [0, +inf) | Execution cost (price units, VWAP as midpoint proxy) |
+| `toxic_realized_spread` | mean(direction × (trade_price - price_{t+5}) × 2) | (-inf, +inf) | Market-maker P&L (5-trade lookahead, price units) |
 | `toxic_flow_imbalance` | Signed volume imbalance ratio | [-1, 1] | >0 = net buying |
 | `toxic_flow_imbalance_abs` | \|flow_imbalance\| | [0, 1] | Magnitude of directional flow |
 | `toxic_index` | Composite toxicity score | [0, 1] | Weighted average of indicators |
@@ -205,22 +214,27 @@ Refs: Easley et al. (2012), Glosten & Milgrom (1985).
 
 Composite indicators from base features. Module: `features/derived.rs`.
 
-| Parquet Column | Formula | Interpretation |
-|---------------|---------|----------------|
-| `derived_entropy_trend_interaction` | entropy × (1 - monotonicity) | High = choppy/uncertain |
-| `derived_entropy_trend_zscore` | Z-score of entropy×trend interaction | Regime change signal |
-| `derived_trend_strength_{60,300}` | momentum × R² | Strong trend = high |
-| `derived_trend_strength_ratio` | strength_60 / strength_300 | >1 = short-term acceleration |
-| `derived_entropy_volatility_ratio` | entropy / (1 + volatility) | Regime stability |
-| `derived_regime_type_score` | Hurst-based regime indicator | >0 = trending regime |
-| `derived_illiquidity_trend` | Kyle λ × momentum sign | Informed directional flow |
-| `derived_informed_trend_score` | VPIN × trend strength | Toxic trending |
-| `derived_toxicity_regime` | toxicity_index × (1 - entropy) | Informed flow in ordered market |
-| `derived_toxic_chop_score` | toxicity × entropy | Informed flow in choppy market |
-| `derived_trend_strength_roc` | Δ trend_strength | Trend acceleration |
-| `derived_entropy_momentum` | Δ entropy over time | Regime transition speed |
-| `derived_regime_indicator` | Composite regime signal | Overall regime state |
-| `derived_regime_confidence` | Consistency of regime indicators | How clear the regime is |
+Key inputs: `tick_entropy` = `ent_tick_entropy_30s`, `monotonicity` = `trend_monotonicity_{60,300}`, `momentum` = `trend_momentum_{60,300}`, `vol` = `vol_returns_1m` × 100 clamped to [0,1], `kyle` = `illiq_kyle_100` / 100 clamped to [0,1].
+
+| Parquet Column | Formula | Range | Interpretation |
+|---------------|---------|-------|----------------|
+| `derived_entropy_trend_interaction` | tick_entropy × (1 - monotonicity_60) | [0, ~0.55] | High = choppy/uncertain |
+| `derived_entropy_trend_zscore` | (interaction - 0.2) / 0.15 | (-inf, +inf) | Hardcoded z-score; |z|>2 = extreme regime |
+| `derived_trend_strength_60` | sign(momentum_60) × (monotonicity_60 - 0.5)×2 × (1 - tick_entropy) | [-1, 1] | Strong directional trend |
+| `derived_trend_strength_300` | sign(momentum_300) × (monotonicity_300 - 0.5)×2 × (1 - tick_entropy) | [-1, 1] | Long-window trend |
+| `derived_trend_strength_ratio` | strength_60 / strength_300 (1.0 if denom < 0.01) | (-inf, +inf) | >1 = short-term acceleration |
+| `derived_entropy_volatility_ratio` | tick_entropy / (1 + vol) | [0, ~1.1] | High = orderly low-vol regime |
+| `derived_regime_type_score` | vol × (1 - 2×tick_entropy) | [-1, 1] | >0 = breakout, <0 = chaos |
+| `derived_illiquidity_trend` | kyle × \|momentum_60\| × 1000 | [0, +inf) | Informed directional flow |
+| `derived_informed_trend_score` | kyle × monotonicity_60 | [0, 1] | Persistent informed trading |
+| `derived_toxicity_regime` | toxicity_index × tick_entropy | [0, +inf) | Informed flow in choppy market |
+| `derived_toxic_chop_score` | vpin_50 × (1 - monotonicity_60) | [0, 1] | Toxic when directionless |
+| `derived_trend_strength_roc` | strength_60 - strength_300 | [-2, 2] | Trend acceleration proxy |
+| `derived_entropy_momentum` | ent_tick_entropy_1m - ent_tick_entropy_5s | [-1.1, 1.1] | >0 = regime breaking down |
+| `derived_regime_indicator` | mean_revert - trending - flow_factor, clamped | [-1, 1] | -1 = trending, +1 = mean-reverting |
+| `derived_regime_confidence` | max(trending_agreement, reverting_agreement) × 2 | [0, 1] | Consensus among regime signals |
+
+**Regime indicator internals**: `trending = (1-ent) × (mono-0.5)×2 × |strength|`, `mean_revert = ent × (1-mono)×2 × (1-|strength|)`, `flow_factor = flow_imbalance_abs × 0.5`.
 
 ## 11. Whale Flow (12 features) — Optional
 
@@ -261,7 +275,7 @@ Position crowding metrics. Module: `features/concentration.rs`.
 | `top{5,10,20,50}_concentration` | Top-N share of total OI | [0, 1] |
 | `herfindahl_index` | Σ (share_i)² | [0, 1] |
 | `gini_coefficient` | Lorenz curve area ratio | [0, 1] |
-| `theil_index` | Σ share_i × ln(share_i / (1/N)) | [0, +inf) |
+| `theil_index` | Σ share_i × ln(share_i / (1/N)) | [0, ln(N)] |
 | `whale_retail_ratio` | Whale OI / retail OI | [0, +inf) |
 | `whale_fraction` | Whale accounts / total accounts | [0, 1] |
 | `whale_avg_size_ratio` | Avg whale position / avg overall | [1, +inf) |

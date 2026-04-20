@@ -1,6 +1,6 @@
 //! Feature Computation Module
 //!
-//! Extracts 191 features from Hyperliquid WebSocket market data across 14 categories.
+//! Extracts 191 features from Hyperliquid WebSocket market data across 15 categories.
 //! See `FEATURES.md` at the project root for the full feature manifest with formulas,
 //! interpretation, and paper references.
 //!
@@ -19,8 +19,8 @@
 //! | Toxicity | 10 | `toxic_` | All working | Easley et al. (2012) |
 //! | Derived | 15 | `derived_` | All working | — |
 //! | *Whale Flow* | 12 | `whale_` | Optional (NaN if absent) | — |
-//! | *Liquidation* | 13 | `liq_` | Optional (NaN if absent) | — |
-//! | *Concentration* | 15 | `conc_` | Optional (NaN if absent) | — |
+//! | *Liquidation* | 13 | `liquidation_` | Optional (NaN if absent) | — |
+//! | *Concentration* | 15 | `top`/mixed | Optional (NaN if absent) | — |
 //! | *Regime* | 20 | `regime_` | Optional (NaN if absent) | — |
 //! | *GMM* | 8 | `regime`/`prob_` | Optional (NaN if absent) | — |
 //!
