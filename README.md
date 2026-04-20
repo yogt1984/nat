@@ -14,31 +14,108 @@ Hyperliquid WebSocket → OrderBook + TradeBuffer + MarketContext
 
 Each symbol (BTC, ETH, SOL) runs in its own tokio task. The writer buffers 10,000 rows (~5.5 min at 30 rows/sec for 3 symbols) then flushes a row group.
 
-## Feature Categories
+## Feature Vector (191 dimensions)
 
-191 features across 15 categories. See [`FEATURES.md`](FEATURES.md) for formulas, ranges, and paper references.
+123 base features are always computed. 68 optional features (categories 11-15) require additional data sources or warmup and are NaN-padded when absent. `Features::to_vec()` always returns exactly 191 elements. See [`FEATURES.md`](FEATURES.md) for the full manifest with Parquet column names.
 
-| Category | Count | Prefix | Key References |
-|----------|-------|--------|----------------|
-| Raw | 10 | `raw_` | Gatheral & Oomen (2010) |
-| Imbalance | 8 | `imbalance_` | Cont, Stoikov & Talreja (2010) |
-| Flow | 12 | `flow_` | — |
-| Volatility | 8 | `vol_` | Parkinson (1980) |
-| Entropy | 24 | `ent_` | Bandt & Pompe (2002) |
-| Context | 9 | `ctx_` | — |
-| Trend | 15 | `trend_` | Jegadeesh & Titman (1993) |
-| Illiquidity | 12 | `illiq_` | Kyle (1985), Amihud (2002), Hasbrouck (2009) |
-| Toxicity | 10 | `toxic_` | Easley et al. (2012) |
-| Derived | 15 | `derived_` | — |
-| Whale Flow | 12 | `whale_` | — |
-| Liquidation | 13 | `liquidation_` | — |
-| Concentration | 15 | `top`/mixed | — |
-| Regime | 20 | `regime_` | — |
-| GMM | 8 | `regime`/`prob_` | — |
+### 1. Raw (10) — L2 order book observables
 
-123 base features are always computed. 68 optional features (whale flow, liquidation, concentration, regime, GMM) require additional data sources or warmup and are NaN-padded when absent. `Features::to_vec()` always returns exactly 191 elements.
+Direct measurements from the L2 snapshot. **Microprice** (Gatheral & Oomen 2010): P_micro = (V_ask · P_bid + V_bid · P_ask) / (V_bid + V_ask) — shifts toward the thinner side, reflecting higher probability of price movement in that direction.
 
-**Placeholders**: `vol_spread_std_1m` and `vol_zscore` are hardcoded to 0.0 (need historical buffers not yet wired through).
+`raw_midprice`, `raw_spread`, `raw_spread_bps`, `raw_microprice`, `raw_{bid,ask}_depth_{5,10}`, `raw_{bid,ask}_orders_5`
+
+### 2. Imbalance (8) — Order book asymmetry
+
+Ref: Cont, Stoikov & Talreja (2010). Volume imbalance: I = (Σ bid_vol - Σ ask_vol) / (Σ bid_vol + Σ ask_vol) at L1/L5/L10 depths. Pressure score: cumulative depth weighted by 1/(1 + distance_bps/10), giving exponentially decaying importance to liquidity further from midprice. Normalized to [0,1] by max(bid_pressure, ask_pressure).
+
+`imbalance_qty_{l1,l5,l10}`, `imbalance_orders_l5`, `imbalance_notional_l5`, `imbalance_depth_weighted`, `imbalance_pressure_{bid,ask}`
+
+### 3. Flow (12) — Trade arrival dynamics
+
+Trade count, volume, and aggressor ratio at three windows: 1s (market-maker timescale), 5s (quote update cycle), 30s (informed trader execution horizon). VWAP deviation = (VWAP_5s - last_price) / last_price. Trade intensity = trades/sec via 5s EMA.
+
+`flow_{count,volume}_{1s,5s,30s}`, `flow_aggressor_ratio_{5s,30s}`, `flow_vwap_5s`, `flow_vwap_deviation`, `flow_avg_trade_size_30s`, `flow_intensity`
+
+### 4. Volatility (8) — Realized and range-based estimators
+
+Ref: Parkinson (1980). Realized volatility: RV = sqrt(Σ r_i² / N) over 60 (1m) and 300 (5m) tick windows. Parkinson estimator: σ = ln(H/L) / sqrt(4·ln(2)) — single-window approximation using 300 ticks. Midprice std: sample standard deviation over 60 ticks.
+
+`vol_returns_{1m,5m}`, `vol_parkinson_5m`, `vol_spread_mean_1m` (point-in-time, misnomer), `vol_spread_std_1m` (**placeholder: 0.0**), `vol_midprice_std_1m`, `vol_ratio_short_long`, `vol_zscore` (**placeholder: 0.0**)
+
+### 5. Entropy (24) — Information content and predictability
+
+Refs: Bandt & Pompe (2002), Shannon (1948), Zunino et al. (2009).
+
+**Permutation entropy** (10): For embedding dimension m=3, count occurrences of each of the m!=6 ordinal patterns in windows of 8/16/32 ticks, compute Shannon entropy, normalize by ln(m!) to [0,1]. Applied to returns and L1 imbalance series. Distribution entropy: bin continuous values into N equal-width bins, H = -Σ p_i ln(p_i), normalize by ln(N). Applied to spreads (10 bins), trade volumes (10 bins), book depth proportions, trade sizes (5 bins).
+
+**Tick entropy** (7): Shannon entropy of {up, down, neutral} trade direction counts within each window (1s/5s/10s/15s/30s/1m/15m). Range [0, ln(3)]. Low = trending, high = random.
+
+**Volume-weighted tick entropy** (7): Same windows, but directions weighted by trade volume.
+
+### 6. Context (9) — Hyperliquid market metadata
+
+From the `activeAssetCtx` WebSocket channel. Funding rate and z-score, open interest (USD) with 5-minute absolute and percent change (60-sample lookback at ~5s updates), mark-index premium (bps), 24h volume and volume ratio, mark-oracle divergence.
+
+`ctx_funding_rate`, `ctx_funding_zscore`, `ctx_open_interest`, `ctx_oi_change_{5m,pct_5m}`, `ctx_premium_bps`, `ctx_volume_24h`, `ctx_volume_ratio`, `ctx_mark_oracle_divergence`
+
+### 7. Trend (15) — Persistence and mean-reversion detection
+
+Refs: Jegadeesh & Titman (1993), Mandelbrot (1971). Momentum: linear regression slope over 60/300/600 ticks (~6s/30s/60s). R²: goodness of fit [0,1]. Monotonicity: fraction of ticks in majority direction, range [0.5, 1.0]. Hurst exponent via rescaled range: H < 0.5 = mean-reverting, H > 0.5 = trending. MA crossover: EMA(10) - EMA(50).
+
+`trend_momentum_{60,300,600}`, `trend_momentum_r2_{60,300,600}`, `trend_monotonicity_{60,300,600}`, `trend_hurst_{300,600}`, `trend_ma_crossover`, `trend_ma_crossover_norm`, `trend_ema_{short,long}`
+
+### 8. Illiquidity (12) — Market impact measures
+
+Refs: Kyle (1985), Amihud (2002), Hasbrouck (2009).
+
+- **Kyle's lambda**: λ = Cov(ΔP, signed_vol) / Var(signed_vol) — price impact per unit volume
+- **Amihud**: Σ|r| / Σv × 10⁶ — return per dollar of volume (ratio of sums, not mean of ratios)
+- **Hasbrouck**: permanent price impact via OLS
+- **Roll spread**: S = 2·sqrt(-Cov(ΔP_t, ΔP_{t-1})) — implied spread from autocovariance
+
+Each computed over 100-trade and 500-trade windows, plus kyle_ratio, amihud_ratio (short/long), composite score, and trade count.
+
+### 9. Toxicity (10) — Adverse selection and informed flow
+
+Refs: Easley et al. (2012), Glosten & Milgrom (1985). **VPIN** (Volume-Synchronized Probability of Informed Trading): Σ|V_buy - V_sell| / Σ(V_buy + V_sell) over 10 and 50 volume buckets. Effective spread: 2 × mean(|trade_price - VWAP|) using VWAP as midpoint proxy (price units). Realized spread: mean(direction × (trade_price - price_{t+5}) × 2) with 5-trade lookahead. Adverse selection = effective - realized. Composite toxicity index: weighted combination of VPIN, adverse selection, and flow imbalance, normalized to [0,1].
+
+`toxic_vpin_{10,50}`, `toxic_vpin_roc`, `toxic_adverse_selection`, `toxic_effective_spread`, `toxic_realized_spread`, `toxic_flow_imbalance`, `toxic_flow_imbalance_abs`, `toxic_index`, `toxic_trade_count`
+
+### 10. Derived (15) — Cross-category composites
+
+Interaction terms combining entropy, trend, volatility, illiquidity, and toxicity. Key inputs: tick_entropy = ent_tick_entropy_30s, monotonicity = trend_monotonicity_{60,300}, vol = vol_returns_1m × 100 clamped to [0,1], kyle = illiq_kyle_100 / 100 clamped to [0,1].
+
+- **Trend strength**: sign(momentum) × (monotonicity - 0.5)×2 × (1 - tick_entropy), range [-1, 1]
+- **Regime type score**: vol × (1 - 2·tick_entropy) — positive = breakout, negative = chaotic volatility
+- **Regime indicator**: (mean_revert_score - trending_score - flow_factor), clamped to [-1, 1], where trending = (1-ent)·(mono-0.5)·2·|strength|, mean_revert = ent·(1-mono)·2·(1-|strength|)
+- **Toxicity-regime**: toxicity_index × tick_entropy (toxic in choppy markets)
+- **Illiquidity-trend**: kyle · |momentum_60| × 1000 (informed directional flow)
+
+### 11. Whale Flow (12) — Optional
+
+Net position changes for large accounts across 1h/4h/24h windows. Normalized flow, momentum, intensity, rate of change, buy ratio, directional agreement, active count, total activity.
+
+### 12. Liquidation Risk (13) — Optional
+
+Liquidation volume mapped at ±1%/2%/5%/10% price moves. Asymmetry = (risk_above - risk_below) / total. Intensity = total risk / OI. Nearest cluster distance (%), positions at risk count, largest position at risk.
+
+### 13. Concentration (15) — Optional
+
+Position crowding via inequality metrics: top-{5,10,20,50} share of OI, Herfindahl index (Σ share_i²), Gini coefficient, Theil index (Σ share_i · ln(share_i / (1/N)), range [0, ln(N)]). Whale/retail ratios, concentration change over 1h, HHI rate of change, trend, position counts.
+
+### 14. Regime Detection (20) — Optional
+
+Accumulation/distribution cycle features at minute-level resolution:
+
+- **Absorption**: volume / (|ΔPrice| + ε) at 1h/4h/24h + z-score. High absorption = volume absorbed without price move
+- **Divergence**: actual ΔP - λ·signed_volume at 1h/4h/24h + z-score. Negative = price lagging volume (accumulation)
+- **Churn**: (buy_vol + sell_vol) / (|buy_vol - sell_vol| + ε) at 1h/4h/24h + z-score. High = two-sided activity
+- **Range position**: (price - min) / (max - min) at 4h/24h/1w + 24h range width
+- **Composite**: accumulation_score, distribution_score, clarity
+
+### 15. GMM Classification (8) — Optional
+
+Gaussian Mixture Model fitted on [kyle_lambda, vpin, absorption_zscore, hurst, whale_net_flow_1h]. Outputs: regime label ∈ {0..4}, posterior probabilities for accumulation/markup/distribution/markdown/ranging, confidence = max(p_i), regime entropy = -Σ p_i ln(p_i).
 
 ## Build & Run
 
