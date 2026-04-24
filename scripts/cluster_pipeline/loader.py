@@ -62,16 +62,31 @@ def scan_schema(
             f"(pattern: {glob_pattern})"
         )
 
-    # Read schema from first file
-    schema = pq.read_schema(str(files[0]))
+    # Read schema from first valid file
+    schema = None
+    for f in files:
+        try:
+            schema = pq.read_schema(str(f))
+            break
+        except Exception:
+            continue
+    if schema is None:
+        raise ValueError(f"No readable parquet files in {data_dir}")
     columns = schema.names
     dtypes = {name: str(schema.field(name).type) for name in columns}
 
-    # Count total rows
+    # Count total rows (skip corrupted files)
     total_rows = 0
+    valid_files = []
     for f in files:
-        meta = pq.read_metadata(str(f))
-        total_rows += meta.num_rows
+        try:
+            meta = pq.read_metadata(str(f))
+            total_rows += meta.num_rows
+            valid_files.append(f)
+        except Exception:
+            import warnings
+            warnings.warn(f"Skipping corrupted file in schema scan: {f.name}")
+    files = valid_files
 
     # Check vector coverage
     col_set = set(columns)
