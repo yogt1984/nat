@@ -2,23 +2,29 @@
 Derivative generation engine for NAT profiling pipeline.
 
 Selects the most informative base features, then generates temporal derivatives
-(velocity, acceleration, z-score, rolling volatility) to capture dynamics
-that raw feature levels miss.
+(velocity, acceleration, z-score, rolling volatility) and cross-feature
+derivatives (ratios, correlations, divergences) to capture dynamics that raw
+feature levels miss.
 
 This addresses the Q3 failure mode: raw features find structural separation
-but not predictive states. Derivatives capture *how* features are changing,
-which is what distinguishes actionable regimes.
+but not predictive states. Derivatives capture *how* features are changing
+and *how features relate to each other*, which distinguishes actionable regimes.
 
 Usage:
-    from cluster_pipeline.derivatives import select_top_features, temporal_derivatives
+    from cluster_pipeline.derivatives import (
+        select_top_features, temporal_derivatives, cross_feature_derivatives,
+    )
 
     top_cols = select_top_features(bars, vector="entropy", max_features=15)
-    derivs = temporal_derivatives(bars, columns=top_cols, windows=[5, 15, 30])
+    td = temporal_derivatives(bars, columns=top_cols, windows=[5, 15, 30])
+    cd = cross_feature_derivatives(bars, pairs=DEFAULT_CROSS_PAIRS, windows=[5, 15])
 """
 
 from __future__ import annotations
 
-from typing import List, Optional
+import fnmatch
+import warnings
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -268,3 +274,157 @@ def _rolling_slope(series: pd.Series, window: int) -> np.ndarray:
         slopes[i] = (w * sum_xy - sum_x * sum_y) / denom
 
     return slopes
+
+
+# ---------------------------------------------------------------------------
+# Cross-feature derivative generation
+# ---------------------------------------------------------------------------
+
+# Default cross-feature pairs encoding economic hypotheses about feature
+# relationships. Glob patterns match against bar-aggregated column names.
+DEFAULT_CROSS_PAIRS: List[Dict] = [
+    {"a": "ent_*_mean",           "b": "vol_*_mean",              "ops": ["ratio", "corr"]},
+    {"a": "imbalance_*_mean",     "b": "raw_spread_*",            "ops": ["ratio"]},
+    {"a": "whale_*_sum",          "b": "flow_volume_*_sum",       "ops": ["ratio"]},
+    {"a": "toxic_*_mean",         "b": "illiq_*_mean",            "ops": ["ratio", "corr"]},
+    {"a": "ent_*_mean",           "b": "trend_*_mean",            "ops": ["corr", "divergence"]},
+]
+
+
+def cross_feature_derivatives(
+    bars: pd.DataFrame,
+    pairs: List[Dict],
+    windows: List[int] = [5, 15, 30],
+    ratio_clip: float = 100.0,
+    ratio_eps: float = 1e-10,
+) -> pd.DataFrame:
+    """
+    Compute cross-feature derivatives between economically meaningful pairs.
+
+    For each pair, resolves glob patterns to actual columns, then computes:
+      - Ratio:       a / (b + eps), clipped to [-clip, clip]
+      - Correlation:  rolling Pearson correlation over each window
+      - Divergence:   zscore(a, w) - zscore(b, w) for each window
+
+    Pairs that cannot be resolved (no matching columns) are skipped with a
+    warning, not an error.
+
+    Args:
+        bars: aggregated bar DataFrame
+        pairs: list of pair dicts, each with keys "a", "b", "ops".
+            "a"/"b" are glob patterns or exact column names.
+            "ops" is a list from {"ratio", "corr", "divergence"}.
+        windows: rolling window sizes for correlation and divergence
+        ratio_clip: absolute max for ratio values
+        ratio_eps: epsilon added to denominator in ratio
+
+    Returns:
+        DataFrame with cross-feature derivative columns (same length as bars).
+        Empty DataFrame (0 columns) if no pairs resolve.
+    """
+    if not windows:
+        raise ValueError("windows must be non-empty")
+
+    result = {}
+    bar_cols = bars.columns.tolist()
+
+    for pair in pairs:
+        a_pattern = pair.get("a", "")
+        b_pattern = pair.get("b", "")
+        ops = pair.get("ops", [])
+
+        if not ops:
+            continue
+
+        # Resolve glob patterns to actual columns
+        a_cols = _resolve_glob(a_pattern, bar_cols)
+        b_cols = _resolve_glob(b_pattern, bar_cols)
+
+        if not a_cols:
+            warnings.warn(f"Cross-feature pair: no columns match pattern '{a_pattern}'")
+            continue
+        if not b_cols:
+            warnings.warn(f"Cross-feature pair: no columns match pattern '{b_pattern}'")
+            continue
+
+        # Use first matching column from each side
+        a_col = a_cols[0]
+        b_col = b_cols[0]
+
+        a_series = bars[a_col].astype(np.float64)
+        b_series = bars[b_col].astype(np.float64)
+
+        # Short names for output columns
+        a_short = _shorten_col(a_col)
+        b_short = _shorten_col(b_col)
+        prefix = f"cross_{a_short}_{b_short}"
+
+        if "ratio" in ops:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                raw_ratio = a_series.values / (b_series.values + ratio_eps)
+            # Where b is NaN, ratio should be NaN
+            raw_ratio = np.where(np.isnan(b_series.values) | np.isnan(a_series.values),
+                                 np.nan, raw_ratio)
+            clipped = np.clip(raw_ratio, -ratio_clip, ratio_clip)
+            # Replace any remaining inf
+            clipped = np.where(np.isinf(clipped), 0.0, clipped)
+            result[f"{prefix}_ratio"] = clipped
+
+        if "corr" in ops:
+            for w in windows:
+                corr = a_series.rolling(window=w, min_periods=w).corr(b_series)
+                result[f"{prefix}_corr_{w}"] = corr.values
+
+        if "divergence" in ops:
+            for w in windows:
+                a_mean = a_series.rolling(window=w, min_periods=w).mean()
+                a_std = a_series.rolling(window=w, min_periods=w).std()
+                b_mean = b_series.rolling(window=w, min_periods=w).mean()
+                b_std = b_series.rolling(window=w, min_periods=w).std()
+
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    a_z = (a_series.values - a_mean.values) / a_std.values
+                    b_z = (b_series.values - b_mean.values) / b_std.values
+
+                # Guard zero-std: zscore=0 when std<eps
+                a_z = np.where(a_std.values < 1e-10, 0.0, a_z)
+                b_z = np.where(b_std.values < 1e-10, 0.0, b_z)
+
+                # Preserve NaN during warmup
+                a_z = np.where(np.isnan(a_mean.values), np.nan, a_z)
+                b_z = np.where(np.isnan(b_mean.values), np.nan, b_z)
+
+                result[f"{prefix}_div_{w}"] = a_z - b_z
+
+    out = pd.DataFrame(result, index=bars.index)
+
+    # Final safety: replace any inf
+    out.replace([np.inf, -np.inf], 0.0, inplace=True)
+
+    return out
+
+
+def _resolve_glob(pattern: str, columns: List[str]) -> List[str]:
+    """
+    Resolve a glob pattern against column names.
+
+    If the pattern is an exact match, returns [pattern].
+    Otherwise uses fnmatch to find all matching columns.
+    """
+    if pattern in columns:
+        return [pattern]
+    return [c for c in columns if fnmatch.fnmatch(c, pattern)]
+
+
+def _shorten_col(col: str) -> str:
+    """
+    Shorten a bar column name for use in cross-derivative naming.
+
+    Strips common suffixes (_mean, _std, _last, _sum, _slope) to keep
+    output column names readable. E.g. "ent_tick_1s_mean" → "ent_tick_1s".
+    """
+    for suffix in ("_mean", "_std", "_last", "_sum", "_slope",
+                    "_open", "_high", "_low", "_close"):
+        if col.endswith(suffix):
+            return col[: -len(suffix)]
+    return col
