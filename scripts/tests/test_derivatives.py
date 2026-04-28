@@ -1,5 +1,6 @@
 """
-Skeptical tests for cluster_pipeline.derivatives — feature selection.
+Skeptical tests for cluster_pipeline.derivatives — feature selection and
+temporal derivative generation.
 
 These tests are adversarial by design: they check that the feature selector
 doesn't just return plausible-looking results, but actually selects features
@@ -21,8 +22,10 @@ import pytest
 
 from cluster_pipeline.derivatives import (
     select_top_features,
+    temporal_derivatives,
     _select_by_variance,
     _select_by_autocorrelation_range,
+    _rolling_slope,
 )
 from cluster_pipeline.config import FEATURE_VECTORS
 
@@ -331,3 +334,261 @@ class TestCrossVector:
         vol_result = set(select_top_features(bars, vector="volatility", max_features=5))
         overlap = ent_result & vol_result
         assert len(overlap) == 0, f"Vectors should not overlap, got shared: {overlap}"
+
+
+# ===========================================================================
+# TEMPORAL DERIVATIVE TESTS
+# ===========================================================================
+
+def _make_simple_bars(data: dict[str, list | np.ndarray]) -> pd.DataFrame:
+    """Create minimal bars with given feature columns + required meta."""
+    n = len(next(iter(data.values())))
+    df = pd.DataFrame(data)
+    df["bar_start"] = pd.date_range("2026-01-01", periods=n, freq="15min")
+    df["bar_end"] = df["bar_start"] + pd.Timedelta("15min")
+    df["symbol"] = "BTC"
+    df["tick_count"] = 100
+    return df
+
+
+class TestTemporalDerivativesVelocity:
+    """Tests for velocity (1st difference) computation."""
+
+    def test_velocity_constant_is_zero(self):
+        """Velocity of a constant series must be 0 everywhere (except row 0 = NaN)."""
+        bars = _make_simple_bars({"feat_a": np.full(50, 5.0)})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[5])
+        vel = out["feat_a_vel"]
+        assert np.isnan(vel.iloc[0]), "First velocity value must be NaN"
+        assert (vel.iloc[1:] == 0.0).all(), "Constant input → zero velocity"
+
+    def test_velocity_linear_ramp(self):
+        """Velocity of [0,1,2,3,4,5] must be [NaN,1,1,1,1,1]."""
+        bars = _make_simple_bars({"feat_a": [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[3])
+        vel = out["feat_a_vel"]
+        assert np.isnan(vel.iloc[0])
+        np.testing.assert_array_almost_equal(vel.iloc[1:].values, [1, 1, 1, 1, 1])
+
+    def test_velocity_step_function(self):
+        """Velocity of a step [0,0,0,5,5,5] must spike at the transition."""
+        bars = _make_simple_bars({"feat_a": [0.0, 0.0, 0.0, 5.0, 5.0, 5.0]})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[3])
+        vel = out["feat_a_vel"]
+        assert vel.iloc[3] == 5.0, "Step transition should produce velocity=5"
+        assert vel.iloc[4] == 0.0, "After step, velocity returns to 0"
+
+
+class TestTemporalDerivativesAcceleration:
+    """Tests for acceleration (2nd difference) computation."""
+
+    def test_acceleration_linear_is_zero(self):
+        """Acceleration of a linear ramp must be 0 (constant velocity)."""
+        bars = _make_simple_bars({"feat_a": np.arange(50, dtype=float)})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[5])
+        accel = out["feat_a_accel"]
+        # First two rows are NaN (need two diffs)
+        assert np.isnan(accel.iloc[0])
+        assert np.isnan(accel.iloc[1])
+        np.testing.assert_array_almost_equal(accel.iloc[2:].values, 0.0)
+
+    def test_acceleration_quadratic(self):
+        """Acceleration of t^2 = [0,1,4,9,16,25,...] must be constant = 2."""
+        t = np.arange(50, dtype=float)
+        bars = _make_simple_bars({"feat_a": t ** 2})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[5])
+        accel = out["feat_a_accel"]
+        # Skip first 2 NaN rows
+        np.testing.assert_array_almost_equal(accel.iloc[2:].values, 2.0)
+
+
+class TestTemporalDerivativesZscore:
+    """Tests for rolling z-score computation."""
+
+    def test_zscore_centered(self):
+        """Z-score of random normal data should have mean ≈ 0, std ≈ 1."""
+        rng = np.random.RandomState(42)
+        bars = _make_simple_bars({"feat_a": rng.normal(0, 1, 500)})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[20])
+        zs = out["feat_a_zscore_20"].dropna()
+        assert abs(zs.mean()) < 0.15, f"Z-score mean should be ≈0, got {zs.mean():.3f}"
+        assert abs(zs.std() - 1.0) < 0.3, f"Z-score std should be ≈1, got {zs.std():.3f}"
+
+    def test_zscore_constant_is_zero(self):
+        """Z-score of a constant series must be 0 (not inf or NaN after warmup)."""
+        bars = _make_simple_bars({"feat_a": np.full(100, 3.14)})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[10])
+        zs = out["feat_a_zscore_10"]
+        # After warmup, z-score of constant should be 0 (guarded division)
+        valid = zs.iloc[10:]
+        assert not np.any(np.isinf(valid)), "Z-score must not produce inf"
+        assert (valid.dropna() == 0.0).all(), "Z-score of constant must be 0"
+
+
+class TestTemporalDerivativesSlope:
+    """Tests for rolling OLS slope computation."""
+
+    def test_slope_linear(self):
+        """Slope of a perfect linear series [0,2,4,6,...] with window=3 must be 2.0."""
+        bars = _make_simple_bars({"feat_a": np.arange(0, 100, 2, dtype=float)})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[3])
+        slope = out["feat_a_slope_3"]
+        valid = slope.dropna()
+        np.testing.assert_array_almost_equal(valid.values, 2.0)
+
+    def test_slope_constant_is_zero(self):
+        """Slope of a constant series must be 0."""
+        bars = _make_simple_bars({"feat_a": np.full(50, 7.0)})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[5])
+        slope = out["feat_a_slope_5"]
+        valid = slope.dropna()
+        np.testing.assert_array_almost_equal(valid.values, 0.0)
+
+    def test_slope_negative_trend(self):
+        """Slope of a decreasing series must be negative."""
+        bars = _make_simple_bars({"feat_a": np.arange(100, 0, -1, dtype=float)})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[5])
+        slope = out["feat_a_slope_5"]
+        valid = slope.dropna()
+        assert (valid < 0).all(), "Decreasing series must have negative slope"
+
+
+class TestTemporalDerivativesRvol:
+    """Tests for rolling volatility computation."""
+
+    def test_rvol_constant_is_zero(self):
+        """Rolling vol of a constant series must be 0 (or NaN during warmup)."""
+        bars = _make_simple_bars({"feat_a": np.full(50, 5.0)})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[5])
+        rvol = out["feat_a_rvol_5"]
+        valid = rvol.dropna()
+        np.testing.assert_array_almost_equal(valid.values, 0.0)
+
+    def test_rvol_positive_for_noisy_data(self):
+        """Rolling vol of random data must be positive after warmup."""
+        rng = np.random.RandomState(42)
+        bars = _make_simple_bars({"feat_a": rng.normal(0, 3, 200)})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[10])
+        rvol = out["feat_a_rvol_10"]
+        valid = rvol.dropna()
+        assert (valid > 0).all(), "Noisy data must have positive rolling vol"
+
+
+class TestTemporalDerivativesShape:
+    """Tests for output shape, column naming, and NaN structure."""
+
+    def test_output_column_count(self):
+        """Output must have exactly n_cols * (2 + 3 * len(windows)) columns."""
+        rng = np.random.RandomState(42)
+        cols = [f"feat_{i}" for i in range(5)]
+        data = {c: rng.normal(0, 1, 100) for c in cols}
+        bars = _make_simple_bars(data)
+        windows = [5, 15]
+        out = temporal_derivatives(bars, columns=cols, windows=windows)
+        expected = 5 * (2 + 3 * 2)  # 5 cols × (vel, accel, zscore×2, slope×2, rvol×2)
+        assert out.shape[1] == expected, (
+            f"Expected {expected} columns, got {out.shape[1]}"
+        )
+
+    def test_output_length_equals_input(self):
+        """Output must have same number of rows as input (NaN-padded, not truncated)."""
+        rng = np.random.RandomState(42)
+        bars = _make_simple_bars({"feat_a": rng.normal(0, 1, 100)})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[5, 30])
+        assert len(out) == 100, f"Expected 100 rows, got {len(out)}"
+
+    def test_nan_padding_structure(self):
+        """
+        First max(windows)-1 rows of rolling derivatives must be NaN.
+        Rows after warmup must have no NaN (given clean input).
+        """
+        rng = np.random.RandomState(42)
+        bars = _make_simple_bars({"feat_a": rng.normal(0, 1, 100)})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[30])
+
+        # Rolling columns should have NaN for first 29 rows
+        zscore = out["feat_a_zscore_30"]
+        slope = out["feat_a_slope_30"]
+        rvol = out["feat_a_rvol_30"]
+
+        assert zscore.iloc[:29].isna().all(), "First 29 rows of zscore_30 should be NaN"
+        assert slope.iloc[:28].isna().all(), "First 28 rows of slope_30 should be NaN"
+        assert rvol.iloc[:29].isna().all(), "First 29 rows of rvol_30 should be NaN"
+
+        # After warmup: no NaN
+        assert not zscore.iloc[30:].isna().any(), "zscore after warmup should have no NaN"
+        assert not slope.iloc[30:].isna().any(), "slope after warmup should have no NaN"
+        assert not rvol.iloc[30:].isna().any(), "rvol after warmup should have no NaN"
+
+    def test_no_inf_values(self):
+        """No inf values in output, even with zeros and constant segments."""
+        data = np.zeros(100)
+        data[50:] = 1.0  # step in the middle
+        data[70:80] = 0.0  # constant zero segment
+        bars = _make_simple_bars({"feat_a": data})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[5, 10])
+        for col in out.columns:
+            assert not np.any(np.isinf(out[col].values)), (
+                f"Column {col} contains inf values"
+            )
+
+    def test_column_naming_parseable(self):
+        """All output column names must follow the {base}_{deriv_type}[_{window}] pattern."""
+        rng = np.random.RandomState(42)
+        bars = _make_simple_bars({"feat_a": rng.normal(0, 1, 50)})
+        out = temporal_derivatives(bars, columns=["feat_a"], windows=[5, 10])
+
+        expected_cols = {
+            "feat_a_vel", "feat_a_accel",
+            "feat_a_zscore_5", "feat_a_zscore_10",
+            "feat_a_slope_5", "feat_a_slope_10",
+            "feat_a_rvol_5", "feat_a_rvol_10",
+        }
+        assert set(out.columns) == expected_cols, (
+            f"Column names mismatch.\nExpected: {sorted(expected_cols)}\n"
+            f"Got: {sorted(out.columns)}"
+        )
+
+    def test_multiple_columns(self):
+        """Works correctly with multiple input columns."""
+        rng = np.random.RandomState(42)
+        bars = _make_simple_bars({
+            "feat_a": rng.normal(0, 1, 100),
+            "feat_b": rng.normal(5, 2, 100),
+            "feat_c": np.arange(100, dtype=float),
+        })
+        out = temporal_derivatives(bars, columns=["feat_a", "feat_b", "feat_c"], windows=[5])
+        # 3 cols × (2 + 3×1) = 15
+        assert out.shape[1] == 15
+        # feat_c velocity should be 1.0 (linear ramp)
+        np.testing.assert_array_almost_equal(out["feat_c_vel"].iloc[1:].values, 1.0)
+
+
+class TestTemporalDerivativesErrors:
+    """Tests for error conditions in temporal_derivatives."""
+
+    def test_empty_columns_raises(self):
+        bars = _make_simple_bars({"feat_a": np.ones(10)})
+        with pytest.raises(ValueError, match="columns must be non-empty"):
+            temporal_derivatives(bars, columns=[], windows=[5])
+
+    def test_missing_column_raises(self):
+        bars = _make_simple_bars({"feat_a": np.ones(10)})
+        with pytest.raises(ValueError, match="Columns not in bars"):
+            temporal_derivatives(bars, columns=["feat_nonexistent"], windows=[5])
+
+    def test_empty_windows_raises(self):
+        bars = _make_simple_bars({"feat_a": np.ones(10)})
+        with pytest.raises(ValueError, match="windows must be non-empty"):
+            temporal_derivatives(bars, columns=["feat_a"], windows=[])
+
+
+class TestTemporalDerivativesDeterminism:
+    """Determinism: same input always produces same output."""
+
+    def test_deterministic(self):
+        rng = np.random.RandomState(42)
+        bars = _make_simple_bars({"feat_a": rng.normal(0, 1, 200)})
+        out1 = temporal_derivatives(bars, columns=["feat_a"], windows=[5, 15])
+        out2 = temporal_derivatives(bars, columns=["feat_a"], windows=[5, 15])
+        pd.testing.assert_frame_equal(out1, out2)
