@@ -531,14 +531,24 @@ def _match_vector_columns(vector_name: str, bar_columns: List[str]) -> List[str]
 
     Bar columns have suffixes like _mean, _std, _last, _slope, etc.
     We match by checking if a bar column starts with any config vector column + "_".
+    Uses longest-prefix matching to avoid duplicates when one base column
+    name is a prefix of another (e.g. trend_ma_crossover vs trend_ma_crossover_norm).
     """
     base_cols = get_vector_columns(vector_name)
     bar_set = set(bar_columns)
-    matched = []
+    matched = set()
 
-    for base in base_cols:
-        for bar_col in bar_columns:
-            if bar_col.startswith(base + "_") and bar_col in bar_set:
-                matched.append(bar_col)
+    for bar_col in bar_columns:
+        if bar_col not in bar_set:
+            continue
+        # Find the longest matching base column
+        best_base = None
+        for base in base_cols:
+            if bar_col.startswith(base + "_"):
+                if best_base is None or len(base) > len(best_base):
+                    best_base = base
+        if best_base is not None:
+            matched.add(bar_col)
 
-    return matched
+    # Preserve original column order
+    return [c for c in bar_columns if c in matched]
