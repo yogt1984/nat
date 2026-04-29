@@ -30,6 +30,7 @@ from cluster_pipeline.reduction import (
     PCAResult,
     save_pca_basis,
     load_pca_basis,
+    reduce,
 )
 
 
@@ -1871,3 +1872,375 @@ class TestSaveLoadDeterminism:
         json1 = (tmp_path / "basis1.json").read_text()
         json2 = (tmp_path / "basis2.json").read_text()
         assert json1 == json2
+
+
+# ===========================================================================
+# Full Reduction Pipeline tests (Task 2.4)
+# ===========================================================================
+
+
+def _make_derivative_df(
+    n_rows: int = 500,
+    n_cols: int = 50,
+    n_constant: int = 3,
+    n_correlated: int = 2,
+    nan_frac: float = 0.0,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """Build a DataFrame mimicking derivative engine output.
+
+    Creates n_cols independent columns, then adds n_constant constant columns
+    and n_correlated columns that are copies of existing ones (with tiny noise).
+    Optionally sprinkles NaN.
+    """
+    rng = np.random.RandomState(seed)
+    data = {}
+    for i in range(n_cols):
+        data[f"deriv_{i}"] = rng.normal(0, (i + 1) * 0.3, n_rows)
+
+    for i in range(n_constant):
+        data[f"const_{i}"] = np.full(n_rows, float(i))
+
+    for i in range(n_correlated):
+        src = f"deriv_{i}"
+        data[f"dup_{i}"] = data[src] + rng.normal(0, 0.001, n_rows)
+
+    df = pd.DataFrame(data)
+
+    if nan_frac > 0:
+        mask = rng.random(df.shape) < nan_frac
+        df = df.mask(mask)
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Core pipeline tests
+# ---------------------------------------------------------------------------
+
+
+class TestReducePipeline:
+    """Tests for the reduce() orchestrator."""
+
+    def test_output_types(self):
+        """reduce() returns (ndarray, PCAResult, dict)."""
+        df = _make_derivative_df()
+        X_reduced, pca_result, filter_report = reduce(df)
+
+        assert isinstance(X_reduced, np.ndarray)
+        assert isinstance(pca_result, PCAResult)
+        assert isinstance(filter_report, dict)
+
+    def test_output_shape_rows_preserved(self):
+        """Row count must match input."""
+        n = 300
+        df = _make_derivative_df(n_rows=n)
+        X_reduced, _, _ = reduce(df)
+        assert X_reduced.shape[0] == n
+
+    def test_output_dimensionality_reduced(self):
+        """n_components < n_input_columns."""
+        df = _make_derivative_df(n_cols=50)
+        X_reduced, pca_result, filter_report = reduce(df)
+        assert X_reduced.shape[1] < filter_report["n_input"]
+
+    def test_X_reduced_matches_pca_result(self):
+        """X_reduced return value must be identical to pca_result.X_reduced."""
+        df = _make_derivative_df()
+        X_reduced, pca_result, _ = reduce(df)
+        np.testing.assert_array_equal(X_reduced, pca_result.X_reduced)
+
+    def test_no_nan_in_output(self):
+        """Output must not contain NaN even if input has NaN."""
+        df = _make_derivative_df(nan_frac=0.05)
+        X_reduced, _, _ = reduce(df)
+        assert not np.any(np.isnan(X_reduced))
+
+    def test_no_inf_in_output(self):
+        """Output must not contain Inf."""
+        df = _make_derivative_df()
+        X_reduced, _, _ = reduce(df)
+        assert not np.any(np.isinf(X_reduced))
+
+
+# ---------------------------------------------------------------------------
+# Parameter passthrough
+# ---------------------------------------------------------------------------
+
+
+class TestReduceParameterPassthrough:
+    """Verify that reduce() passes parameters to sub-functions correctly."""
+
+    def test_variance_percentile_affects_filtering(self):
+        """Higher variance_percentile → more columns dropped."""
+        df = _make_derivative_df(n_cols=40, seed=42)
+
+        _, _, report_low = reduce(df, variance_percentile=5.0)
+        _, _, report_high = reduce(df, variance_percentile=50.0)
+
+        assert report_high["n_after_variance"] <= report_low["n_after_variance"]
+
+    def test_correlation_threshold_affects_filtering(self):
+        """Lower correlation_threshold → more columns dropped."""
+        df = _make_derivative_df(n_cols=30, n_correlated=5)
+
+        _, _, report_strict = reduce(df, correlation_threshold=0.5)
+        _, _, report_lax = reduce(df, correlation_threshold=0.99)
+
+        assert report_strict["n_after_correlation"] <= report_lax["n_after_correlation"]
+
+    def test_pca_variance_affects_components(self):
+        """Lower pca_variance → fewer components."""
+        df = _make_derivative_df(n_cols=30)
+
+        _, result_low, _ = reduce(df, pca_variance=0.50)
+        _, result_high, _ = reduce(df, pca_variance=0.99)
+
+        assert result_low.n_components <= result_high.n_components
+
+    def test_pca_max_components_cap(self):
+        """max_components caps the output dimensionality."""
+        df = _make_derivative_df(n_cols=50)
+        _, result, _ = reduce(df, pca_max_components=5)
+        assert result.n_components <= 5
+        assert result.X_reduced.shape[1] <= 5
+
+    def test_default_parameters_reasonable(self):
+        """Default parameters should produce reasonable output."""
+        df = _make_derivative_df(n_cols=50)
+        X_reduced, result, report = reduce(df)
+
+        # With 50 derivatives + constants + duplicates, should filter some
+        assert report["n_after_correlation"] < report["n_input"]
+        # PCA at 95% should compress further
+        assert result.n_components < report["n_after_correlation"]
+        # Should have between 1 and 50 components
+        assert 1 <= result.n_components <= 50
+
+
+# ---------------------------------------------------------------------------
+# Filter report consistency
+# ---------------------------------------------------------------------------
+
+
+class TestReduceReportConsistency:
+    """Verify filter_report from reduce() is consistent."""
+
+    def test_report_n_input_matches(self):
+        """filter_report n_input must match input column count."""
+        n_cols = 40
+        df = _make_derivative_df(n_cols=n_cols, n_constant=2, n_correlated=3)
+        _, _, report = reduce(df)
+        assert report["n_input"] == n_cols + 2 + 3  # derivs + constants + dups
+
+    def test_report_counts_add_up(self):
+        """n_input = n_after_variance + len(dropped_variance)."""
+        df = _make_derivative_df()
+        _, _, report = reduce(df)
+        assert report["n_input"] == report["n_after_variance"] + len(report["dropped_variance"])
+        assert report["n_after_variance"] == report["n_after_correlation"] + len(report["dropped_correlation"])
+
+    def test_constant_columns_dropped(self):
+        """Constant columns must appear in dropped_variance."""
+        df = _make_derivative_df(n_cols=10, n_constant=5)
+        _, _, report = reduce(df)
+        const_dropped = [c for c in report["dropped_variance"] if c.startswith("const_")]
+        assert len(const_dropped) == 5
+
+    def test_duplicate_columns_dropped(self):
+        """Near-duplicate columns should appear in dropped_correlation."""
+        df = _make_derivative_df(n_cols=10, n_correlated=3)
+        _, _, report = reduce(df)
+        # At least some duplicates should be caught
+        dup_dropped = [c for c in report["dropped_correlation"] if c.startswith("dup_")]
+        assert len(dup_dropped) >= 1
+
+
+# ---------------------------------------------------------------------------
+# PCA result properties within reduce()
+# ---------------------------------------------------------------------------
+
+
+class TestReducePCAProperties:
+    """Verify PCA result from reduce() has correct properties."""
+
+    def test_components_shape_matches_filtered(self):
+        """components cols must match the number of surviving filter columns."""
+        df = _make_derivative_df(n_cols=30)
+        _, result, report = reduce(df)
+        assert result.components.shape[1] == report["n_after_correlation"]
+
+    def test_column_names_from_surviving_columns(self):
+        """PCA column_names must be the surviving filter column names."""
+        df = _make_derivative_df(n_cols=10, n_constant=2)
+        _, result, report = reduce(df)
+        # column_names should not include any dropped columns
+        dropped = set(report["dropped_variance"] + report["dropped_correlation"])
+        for name in result.column_names:
+            assert name not in dropped
+
+    def test_cumulative_variance_reaches_threshold(self):
+        """Cumulative variance should reach or exceed pca_variance."""
+        df = _make_derivative_df(n_cols=30)
+        threshold = 0.90
+        _, result, _ = reduce(df, pca_variance=threshold)
+        n_features = result.components.shape[1]
+        if result.n_components < n_features:
+            assert result.cumulative_variance[-1] >= threshold - 1e-10
+
+    def test_regularization_flag_correct(self):
+        """Regularization should trigger when few samples relative to features."""
+        # Few samples, many features → regularized
+        df_small = _make_derivative_df(n_rows=30, n_cols=80, n_constant=0, n_correlated=0)
+        _, result_small, report_small = reduce(df_small, variance_percentile=0.0)
+        n_surviving = report_small["n_after_correlation"]
+        if 30 < 2 * n_surviving:
+            assert result_small.regularized is True
+
+        # Many samples, few features → not regularized
+        df_large = _make_derivative_df(n_rows=1000, n_cols=10, n_constant=0, n_correlated=0)
+        _, result_large, _ = reduce(df_large, variance_percentile=0.0)
+        assert result_large.regularized is False
+
+    def test_loadings_present(self):
+        """PCA result must have loadings for each component."""
+        df = _make_derivative_df(n_cols=20)
+        _, result, _ = reduce(df)
+        assert len(result.loadings) == result.n_components
+        for pc_idx in range(result.n_components):
+            assert pc_idx in result.loadings
+            assert len(result.loadings[pc_idx]) > 0
+
+
+# ---------------------------------------------------------------------------
+# Edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestReduceEdgeCases:
+    """Edge and adversarial inputs for reduce()."""
+
+    def test_all_constant_raises(self):
+        """All-constant input should raise (all columns filtered out)."""
+        df = pd.DataFrame({f"c_{i}": np.full(100, float(i)) for i in range(10)})
+        with pytest.raises(ValueError, match="All derivative columns were filtered"):
+            reduce(df)
+
+    def test_single_valid_column(self):
+        """Single non-constant column should still work."""
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame({
+            "const": np.full(100, 1.0),
+            "valid": rng.normal(0, 1, 100),
+        })
+        X_reduced, result, _ = reduce(df, variance_percentile=0.0)
+        assert X_reduced.shape == (100, 1)
+        assert result.n_components == 1
+
+    def test_two_columns(self):
+        """Minimum viable: two non-constant columns."""
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame({
+            "a": rng.normal(0, 1, 200),
+            "b": rng.normal(0, 2, 200),
+        })
+        X_reduced, result, _ = reduce(df, variance_percentile=0.0)
+        assert X_reduced.shape[0] == 200
+        assert result.n_components <= 2
+
+    def test_heavy_nan_input(self):
+        """20% NaN should still produce valid output."""
+        df = _make_derivative_df(n_cols=20, nan_frac=0.20)
+        X_reduced, _, _ = reduce(df, variance_percentile=0.0)
+        assert not np.any(np.isnan(X_reduced))
+        assert X_reduced.shape[0] == 500
+
+    def test_large_input(self):
+        """Performance: 2000 rows × 200 columns should complete."""
+        df = _make_derivative_df(n_rows=2000, n_cols=200, n_constant=10, n_correlated=5)
+        X_reduced, result, report = reduce(df)
+        assert X_reduced.shape[0] == 2000
+        assert result.n_components > 0
+        assert report["n_input"] == 215  # 200 + 10 + 5
+
+    def test_empty_dataframe_raises(self):
+        """Empty DataFrame should raise."""
+        with pytest.raises(ValueError):
+            reduce(pd.DataFrame())
+
+    def test_single_row_raises(self):
+        """Single-row DataFrame should raise (PCA needs ≥ 2 samples)."""
+        df = pd.DataFrame({"a": [1.0], "b": [2.0]})
+        with pytest.raises(ValueError):
+            reduce(df, variance_percentile=0.0)
+
+
+# ---------------------------------------------------------------------------
+# Determinism
+# ---------------------------------------------------------------------------
+
+
+class TestReduceDeterminism:
+    """Same input → same output."""
+
+    def test_deterministic(self):
+        """Run reduce() twice on identical input → identical output."""
+        df = _make_derivative_df(seed=42)
+
+        X1, r1, rep1 = reduce(df)
+        X2, r2, rep2 = reduce(df)
+
+        np.testing.assert_array_equal(X1, X2)
+        assert r1.n_components == r2.n_components
+        np.testing.assert_array_equal(r1.components, r2.components)
+        assert rep1 == rep2
+
+    def test_deterministic_with_nan(self):
+        """Deterministic even with NaN values."""
+        df = _make_derivative_df(nan_frac=0.05, seed=42)
+
+        X1, _, _ = reduce(df)
+        X2, _, _ = reduce(df)
+
+        np.testing.assert_array_equal(X1, X2)
+
+
+# ---------------------------------------------------------------------------
+# Integration with save/load
+# ---------------------------------------------------------------------------
+
+
+class TestReduceWithSaveLoad:
+    """reduce() output can be saved and reloaded."""
+
+    def test_save_load_reduce_result(self, tmp_path):
+        """PCA result from reduce() survives save/load round-trip."""
+        df = _make_derivative_df()
+        X_reduced, pca_result, _ = reduce(df)
+
+        save_pca_basis(pca_result, tmp_path / "basis")
+        loaded = load_pca_basis(tmp_path / "basis")
+
+        np.testing.assert_array_equal(loaded.X_reduced, X_reduced)
+        np.testing.assert_array_equal(loaded.components, pca_result.components)
+        assert loaded.n_components == pca_result.n_components
+        assert loaded.column_names == pca_result.column_names
+
+    def test_project_new_data_with_loaded_basis(self, tmp_path):
+        """Load saved basis from reduce() and project new data."""
+        df = _make_derivative_df(n_rows=500, seed=42)
+        _, pca_result, filter_report = reduce(df)
+
+        save_pca_basis(pca_result, tmp_path / "basis")
+        loaded = load_pca_basis(tmp_path / "basis")
+
+        # Simulate new data with same columns that survived filtering
+        rng = np.random.RandomState(99)
+        n_surviving = len(loaded.column_names)
+        X_new = rng.normal(0, 1, (50, n_surviving))
+
+        Z_new = (X_new - loaded.mean) / loaded.std
+        projected = Z_new @ loaded.components.T
+
+        assert projected.shape == (50, loaded.n_components)
+        assert not np.any(np.isnan(projected))

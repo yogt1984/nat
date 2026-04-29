@@ -508,3 +508,65 @@ def load_pca_basis(path: Path) -> PCAResult:
         loadings=loadings,
         regularized=regularized,
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 2.4: Full Reduction Pipeline
+# ---------------------------------------------------------------------------
+
+
+def reduce(
+    derivatives: pd.DataFrame,
+    variance_percentile: float = 10.0,
+    correlation_threshold: float = 0.95,
+    pca_variance: float = 0.95,
+    pca_max_components: int = 50,
+) -> Tuple[np.ndarray, PCAResult, Dict]:
+    """
+    Single entry point: raw derivative DataFrame → reduced numpy array.
+
+    Chains filter_derivatives() → pca_reduce() into one call.
+
+    Args:
+        derivatives: DataFrame of derivative columns (from generate_derivatives).
+            NaN values are filled with 0 before PCA.
+        variance_percentile: percentile threshold for variance filtering (0-100).
+        correlation_threshold: |corr| above which redundant columns are dropped.
+        pca_variance: cumulative explained variance target for PCA (0, 1].
+        pca_max_components: hard cap on PCA components.
+
+    Returns:
+        (X_reduced, pca_result, filter_report) where:
+          - X_reduced: np.ndarray of shape (n_samples, n_components)
+          - pca_result: PCAResult with saved basis for projection
+          - filter_report: dict from filter_derivatives with drop counts
+
+    Raises:
+        ValueError: if derivatives is empty or all columns are filtered out.
+    """
+    # Step 1: Filter low-variance and redundant columns
+    filtered_df, filter_report = filter_derivatives(
+        derivatives,
+        variance_percentile=variance_percentile,
+        correlation_threshold=correlation_threshold,
+    )
+
+    if filtered_df.shape[1] == 0:
+        raise ValueError(
+            "All derivative columns were filtered out — no features remain for PCA. "
+            f"Input had {filter_report['n_input']} columns."
+        )
+
+    # Step 2: Fill NaN for PCA (filter preserves original NaN)
+    X = filtered_df.fillna(0.0).values
+    column_names = filtered_df.columns.tolist()
+
+    # Step 3: PCA reduction
+    pca_result = pca_reduce(
+        X,
+        column_names,
+        variance_threshold=pca_variance,
+        max_components=pca_max_components,
+    )
+
+    return pca_result.X_reduced, pca_result, filter_report
