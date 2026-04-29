@@ -1,25 +1,24 @@
 """
 Dimensionality reduction pipeline for NAT profiling system.
 
-Pre-PCA filtering: removes near-constant and highly correlated derivative
-columns to prevent PCA from wasting components on noise or redundancy.
-
-This module sits between the derivative engine (Phase 1) and PCA (Task 2.2).
-The derivative engine produces ~150-200 columns; this module reduces that to
-a cleaner set before eigendecomposition.
+Pre-PCA filtering and regularized PCA for the derivative feature space.
+Sits between the derivative engine (Phase 1) and clustering (Phase 3).
 
 Usage:
-    from cluster_pipeline.reduction import filter_derivatives
+    from cluster_pipeline.reduction import filter_derivatives, pca_reduce
 
     filtered_df, report = filter_derivatives(derivatives_df)
+    pca_result = pca_reduce(filtered_df.values, filtered_df.columns.tolist())
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
+from sklearn.covariance import LedoitWolf
 
 
 def filter_derivatives(
@@ -177,3 +176,172 @@ def _greedy_correlation_filter(
             dropped.add(col_a)
 
     return list(dropped)
+
+
+# ---------------------------------------------------------------------------
+# Task 2.2: PCA with Ledoit-Wolf regularization
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PCAResult:
+    """Result of regularized PCA reduction."""
+
+    X_reduced: np.ndarray  # (n_samples, n_components)
+    n_components: int
+    explained_variance_ratio: np.ndarray  # (n_components,)
+    cumulative_variance: np.ndarray  # (n_components,)
+    components: np.ndarray  # (n_components, n_features)
+    mean: np.ndarray  # (n_features,)
+    std: np.ndarray  # (n_features,)
+    column_names: List[str]
+    loadings: Dict[int, List[Tuple[str, float]]]  # top 10 loadings per PC
+    regularized: bool  # whether Ledoit-Wolf was used
+
+
+def pca_reduce(
+    X: np.ndarray,
+    column_names: List[str],
+    variance_threshold: float = 0.95,
+    max_components: int = 50,
+) -> PCAResult:
+    """
+    PCA reduction with optional Ledoit-Wolf regularization.
+
+    When n_samples < 2 * n_features, uses Ledoit-Wolf shrinkage to estimate
+    the covariance matrix, preventing unstable components when data is scarce.
+
+    Args:
+        X: array of shape (n_samples, n_features). Must not contain NaN.
+        column_names: feature names matching X's columns.
+        variance_threshold: cumulative explained variance target in (0, 1].
+            Selects the smallest k components reaching this threshold.
+        max_components: hard cap on number of components.
+
+    Returns:
+        PCAResult with reduced data, saved basis, and per-PC loadings.
+
+    Raises:
+        ValueError: if inputs are invalid or contain NaN.
+    """
+    if X.ndim != 2:
+        raise ValueError(f"X must be 2-D, got shape {X.shape}")
+
+    n_samples, n_features = X.shape
+
+    if n_samples < 2:
+        raise ValueError(f"Need at least 2 samples, got {n_samples}")
+
+    if n_features == 0:
+        raise ValueError("X has no features (0 columns)")
+
+    if len(column_names) != n_features:
+        raise ValueError(
+            f"column_names length ({len(column_names)}) != n_features ({n_features})"
+        )
+
+    if np.any(np.isnan(X)):
+        raise ValueError("X contains NaN values — filter before PCA")
+
+    if not (0 < variance_threshold <= 1.0):
+        raise ValueError(
+            f"variance_threshold must be in (0, 1], got {variance_threshold}"
+        )
+
+    if max_components < 1:
+        raise ValueError(f"max_components must be >= 1, got {max_components}")
+
+    # ----- Step 1: Standardize -----
+    mean = X.mean(axis=0)
+    std = X.std(axis=0, ddof=0)
+
+    # Replace zero-std columns with 1.0 to avoid division by zero
+    # (these columns are constant and will produce zero-variance PCs)
+    std_safe = std.copy()
+    std_safe[std_safe < 1e-20] = 1.0
+
+    Z = (X - mean) / std_safe
+
+    # ----- Step 2: Covariance estimation -----
+    regularized = n_samples < 2 * n_features
+
+    if regularized:
+        lw = LedoitWolf()
+        lw.fit(Z)
+        cov_matrix = lw.covariance_
+    else:
+        cov_matrix = np.cov(Z, rowvar=False)
+
+    # np.cov returns a scalar for 1 feature — reshape to 2D
+    cov_matrix = np.atleast_2d(cov_matrix)
+
+    # ----- Step 3: Eigendecomposition -----
+    eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+
+    # eigh returns ascending order — reverse to descending
+    idx = np.argsort(eigenvalues)[::-1]
+    eigenvalues = eigenvalues[idx]
+    eigenvectors = eigenvectors[:, idx]
+
+    # Clamp negative eigenvalues to zero (numerical noise)
+    eigenvalues = np.maximum(eigenvalues, 0.0)
+
+    total_variance = eigenvalues.sum()
+    if total_variance < 1e-20:
+        # All data is constant — return 1 component of zeros
+        return PCAResult(
+            X_reduced=np.zeros((n_samples, 1)),
+            n_components=1,
+            explained_variance_ratio=np.array([1.0]),
+            cumulative_variance=np.array([1.0]),
+            components=eigenvectors[:, :1].T,
+            mean=mean,
+            std=std_safe,
+            column_names=column_names,
+            loadings={0: []},
+            regularized=regularized,
+        )
+
+    explained_ratio = eigenvalues / total_variance
+    cumulative = np.cumsum(explained_ratio)
+
+    # ----- Step 4: Select n_components -----
+    # Smallest k where cumulative >= threshold, capped at max_components
+    max_possible = min(n_samples, n_features)
+    candidates = min(max_possible, max_components)
+
+    k = 1
+    for i in range(candidates):
+        if cumulative[i] >= variance_threshold:
+            k = i + 1
+            break
+    else:
+        # Threshold not reached within candidates — use all candidates
+        k = candidates
+
+    # ----- Step 5: Project -----
+    components = eigenvectors[:, :k].T  # (k, n_features)
+    X_reduced = Z @ components.T  # (n_samples, k)
+
+    # ----- Step 6: Compute loadings -----
+    loadings: Dict[int, List[Tuple[str, float]]] = {}
+    for pc_idx in range(k):
+        weights = components[pc_idx]
+        # Sort by |weight| descending, take top 10
+        sorted_indices = np.argsort(np.abs(weights))[::-1][:10]
+        loadings[pc_idx] = [
+            (column_names[j], float(weights[j])) for j in sorted_indices
+        ]
+
+    return PCAResult(
+        X_reduced=X_reduced,
+        n_components=k,
+        explained_variance_ratio=explained_ratio[:k],
+        cumulative_variance=cumulative[:k],
+        components=components,
+        mean=mean,
+        std=std_safe,
+        column_names=column_names,
+        loadings=loadings,
+        regularized=regularized,
+    )

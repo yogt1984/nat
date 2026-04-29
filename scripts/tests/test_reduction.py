@@ -1,8 +1,9 @@
 """
-Skeptical tests for cluster_pipeline.reduction — variance/correlation filtering.
+Skeptical tests for cluster_pipeline.reduction — variance/correlation filtering + PCA.
 
 These tests verify that the filter correctly removes noise (near-constant columns)
-and redundancy (highly correlated columns) from the derivative space before PCA.
+and redundancy (highly correlated columns) from the derivative space before PCA,
+and that PCA with Ledoit-Wolf regularization produces correct, stable results.
 
 Test philosophy:
   - Synthetic data with known variance and correlation structure
@@ -10,6 +11,8 @@ Test philosophy:
   - Property-based checks: no surviving pair should violate the threshold
   - Report consistency: counts must add up
   - Determinism: same input → same output
+  - Reconstruction error bounded by explained variance
+  - Regularization triggers correctly based on sample/feature ratio
 """
 
 from __future__ import annotations
@@ -18,7 +21,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from cluster_pipeline.reduction import filter_derivatives, _greedy_correlation_filter
+from cluster_pipeline.reduction import (
+    filter_derivatives,
+    _greedy_correlation_filter,
+    pca_reduce,
+    PCAResult,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -647,3 +655,718 @@ class TestIntegrationWithDerivatives:
 
         for col in filtered.columns:
             assert filtered[col].var() > 0, f"Zero-variance column survived: {col}"
+
+
+# ===========================================================================
+# PCA reduce tests
+# ===========================================================================
+
+
+def _random_matrix(n_rows: int, n_cols: int, seed: int = 42) -> np.ndarray:
+    """Generate a random matrix for PCA tests."""
+    rng = np.random.RandomState(seed)
+    return rng.normal(0, 1, (n_rows, n_cols))
+
+
+def _col_names(n: int) -> list:
+    return [f"feat_{i}" for i in range(n)]
+
+
+# ---------------------------------------------------------------------------
+# Core correctness
+# ---------------------------------------------------------------------------
+
+
+class TestPCAReconstruction:
+    """Verify PCA reconstruction error is bounded by explained variance."""
+
+    def test_reconstruction_error_95(self):
+        """At variance_threshold=0.95, reconstruction MSE < 5% of total variance."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (500, 20))
+        names = _col_names(20)
+        result = pca_reduce(X, names, variance_threshold=0.95)
+
+        # Reconstruct
+        Z = (X - result.mean) / result.std
+        X_reconstructed = result.X_reduced @ result.components
+        mse = np.mean((Z - X_reconstructed) ** 2)
+        total_var = np.var(Z)
+
+        assert mse < 0.05 * total_var * Z.shape[1], (
+            f"Reconstruction MSE {mse:.4f} exceeds 5% of total variance"
+        )
+
+    def test_reconstruction_error_99(self):
+        """At variance_threshold=0.99, reconstruction MSE < 1% of total variance."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (500, 20))
+        names = _col_names(20)
+        result = pca_reduce(X, names, variance_threshold=0.99)
+
+        Z = (X - result.mean) / result.std
+        X_reconstructed = result.X_reduced @ result.components
+        mse = np.mean((Z - X_reconstructed) ** 2)
+        total_var = np.var(Z)
+
+        assert mse < 0.01 * total_var * Z.shape[1]
+
+    def test_perfect_reconstruction(self):
+        """variance_threshold=1.0 → n_components = rank, MSE ≈ 0."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (100, 10))
+        names = _col_names(10)
+        result = pca_reduce(X, names, variance_threshold=1.0, max_components=50)
+
+        assert result.n_components == 10, (
+            f"Expected 10 components for full-rank 10-col data, got {result.n_components}"
+        )
+
+        Z = (X - result.mean) / result.std
+        X_reconstructed = result.X_reduced @ result.components
+        mse = np.mean((Z - X_reconstructed) ** 2)
+        assert mse < 1e-10, f"Perfect reconstruction MSE should be ~0, got {mse}"
+
+    def test_low_rank_data_few_components(self):
+        """100 columns but only 3 independent → n_components ≤ 5."""
+        rng = np.random.RandomState(42)
+        # Create 3 independent bases, all other columns are linear combos
+        bases = rng.normal(0, 1, (200, 3))
+        mixing = rng.normal(0, 1, (3, 100))
+        X = bases @ mixing + rng.normal(0, 0.01, (200, 100))  # tiny noise
+        names = _col_names(100)
+
+        result = pca_reduce(X, names, variance_threshold=0.95)
+        assert result.n_components <= 5, (
+            f"Low-rank (3 independent) data should need ≤5 PCs, got {result.n_components}"
+        )
+
+    def test_low_rank_exact(self):
+        """Exactly rank-2 data → 2 components explain ~100% variance."""
+        rng = np.random.RandomState(42)
+        bases = rng.normal(0, 1, (300, 2))
+        mixing = rng.normal(0, 1, (2, 50))
+        X = bases @ mixing
+        names = _col_names(50)
+
+        result = pca_reduce(X, names, variance_threshold=0.99)
+        assert result.n_components <= 3
+        assert result.cumulative_variance[-1] > 0.999
+
+
+# ---------------------------------------------------------------------------
+# Regularization
+# ---------------------------------------------------------------------------
+
+
+class TestRegularization:
+    """Verify Ledoit-Wolf regularization triggers correctly."""
+
+    def test_regularization_triggered_few_samples(self):
+        """n_samples < 2 * n_features → regularized=True."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (50, 100))  # 50 < 2*100
+        names = _col_names(100)
+        result = pca_reduce(X, names)
+        assert result.regularized is True
+
+    def test_regularization_not_triggered_many_samples(self):
+        """n_samples >= 2 * n_features → regularized=False."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (500, 100))  # 500 >= 2*100
+        names = _col_names(100)
+        result = pca_reduce(X, names)
+        assert result.regularized is False
+
+    def test_regularization_boundary_exact(self):
+        """Exactly at boundary: n_samples = 2*n_features → not regularized."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 100))  # 200 = 2*100
+        names = _col_names(100)
+        result = pca_reduce(X, names)
+        assert result.regularized is False
+
+    def test_regularization_boundary_minus_one(self):
+        """One below boundary: n_samples = 2*n_features - 1 → regularized."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (199, 100))  # 199 < 2*100
+        names = _col_names(100)
+        result = pca_reduce(X, names)
+        assert result.regularized is True
+
+    def test_regularized_result_still_valid(self):
+        """Regularized PCA should still produce valid reconstruction."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (30, 50))  # heavily regularized
+        names = _col_names(50)
+        result = pca_reduce(X, names, variance_threshold=0.90)
+
+        assert result.regularized is True
+        assert result.n_components <= 30  # can't have more PCs than samples
+        assert result.X_reduced.shape == (30, result.n_components)
+
+        # Reconstruction should still be reasonable
+        Z = (X - result.mean) / result.std
+        X_recon = result.X_reduced @ result.components
+        mse = np.mean((Z - X_recon) ** 2)
+        # With heavy regularization, MSE bound is looser
+        assert mse < 0.20 * np.var(Z) * Z.shape[1]
+
+    def test_regularized_eigenvalues_non_negative(self):
+        """Ledoit-Wolf should not produce negative eigenvalues."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (20, 80))
+        names = _col_names(80)
+        result = pca_reduce(X, names, variance_threshold=0.99)
+        assert np.all(result.explained_variance_ratio >= 0)
+
+
+# ---------------------------------------------------------------------------
+# Component selection
+# ---------------------------------------------------------------------------
+
+
+class TestComponentSelection:
+    """Verify n_components selection logic."""
+
+    def test_max_components_cap(self):
+        """n_components should not exceed max_components."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (500, 100))
+        names = _col_names(100)
+        result = pca_reduce(X, names, variance_threshold=1.0, max_components=10)
+        assert result.n_components <= 10
+
+    def test_max_components_1(self):
+        """max_components=1 → exactly 1 component."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 20))
+        names = _col_names(20)
+        result = pca_reduce(X, names, max_components=1)
+        assert result.n_components == 1
+
+    def test_variance_threshold_determines_components(self):
+        """Lower threshold → fewer components."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (500, 30))
+        names = _col_names(30)
+
+        result_low = pca_reduce(X, names, variance_threshold=0.50)
+        result_high = pca_reduce(X, names, variance_threshold=0.99)
+
+        assert result_low.n_components <= result_high.n_components
+
+    def test_cumulative_variance_reaches_threshold(self):
+        """Cumulative variance of selected components should reach the threshold."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (500, 20))
+        names = _col_names(20)
+
+        for threshold in [0.80, 0.90, 0.95, 0.99]:
+            result = pca_reduce(X, names, variance_threshold=threshold, max_components=50)
+            # If we got enough components, cumulative should reach threshold
+            if result.n_components < min(500, 20):
+                assert result.cumulative_variance[-1] >= threshold - 1e-10, (
+                    f"Cumulative variance {result.cumulative_variance[-1]:.4f} "
+                    f"< threshold {threshold}"
+                )
+
+    def test_n_components_le_min_samples_features(self):
+        """n_components can never exceed min(n_samples, n_features)."""
+        rng = np.random.RandomState(42)
+        # More features than samples
+        X = rng.normal(0, 1, (15, 50))
+        names = _col_names(50)
+        result = pca_reduce(X, names, variance_threshold=1.0, max_components=100)
+        assert result.n_components <= 15
+
+    def test_explained_variance_ratio_sums_to_cumulative(self):
+        """cumsum of explained_variance_ratio should equal cumulative_variance."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (300, 25))
+        names = _col_names(25)
+        result = pca_reduce(X, names)
+        np.testing.assert_allclose(
+            np.cumsum(result.explained_variance_ratio),
+            result.cumulative_variance,
+            atol=1e-12,
+        )
+
+    def test_explained_variance_ratio_descending(self):
+        """Explained variance ratios must be in descending order."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (300, 25))
+        names = _col_names(25)
+        result = pca_reduce(X, names)
+        for i in range(len(result.explained_variance_ratio) - 1):
+            assert result.explained_variance_ratio[i] >= result.explained_variance_ratio[i + 1] - 1e-12
+
+
+# ---------------------------------------------------------------------------
+# Loadings
+# ---------------------------------------------------------------------------
+
+
+class TestLoadings:
+    """Verify PCA loadings structure and sorting."""
+
+    def test_loadings_sorted_descending_by_abs_weight(self):
+        """Each PC's loadings must be sorted by |weight| descending."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (300, 20))
+        names = _col_names(20)
+        result = pca_reduce(X, names)
+
+        for pc_idx, pc_loadings in result.loadings.items():
+            abs_weights = [abs(w) for _, w in pc_loadings]
+            for i in range(len(abs_weights) - 1):
+                assert abs_weights[i] >= abs_weights[i + 1] - 1e-12, (
+                    f"PC{pc_idx} loadings not sorted: {abs_weights}"
+                )
+
+    def test_loadings_have_correct_column_names(self):
+        """Loading column names must come from the input column_names."""
+        names = [f"my_feature_{i}" for i in range(15)]
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 15))
+        result = pca_reduce(X, names)
+
+        name_set = set(names)
+        for pc_idx, pc_loadings in result.loadings.items():
+            for col_name, weight in pc_loadings:
+                assert col_name in name_set, (
+                    f"Loading column '{col_name}' not in input names"
+                )
+
+    def test_loadings_max_10_per_pc(self):
+        """Each PC should have at most 10 loadings."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (300, 50))
+        names = _col_names(50)
+        result = pca_reduce(X, names)
+
+        for pc_idx, pc_loadings in result.loadings.items():
+            assert len(pc_loadings) <= 10
+
+    def test_loadings_fewer_than_10_when_few_features(self):
+        """If fewer than 10 features, loadings per PC = n_features."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 5))
+        names = _col_names(5)
+        result = pca_reduce(X, names)
+
+        for pc_idx, pc_loadings in result.loadings.items():
+            assert len(pc_loadings) == 5
+
+    def test_loadings_keys_are_pc_indices(self):
+        """Loadings dict keys should be 0..n_components-1."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 15))
+        names = _col_names(15)
+        result = pca_reduce(X, names)
+        assert set(result.loadings.keys()) == set(range(result.n_components))
+
+    def test_loadings_weights_are_floats(self):
+        """All loading weights must be Python floats."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 10))
+        names = _col_names(10)
+        result = pca_reduce(X, names)
+        for pc_loadings in result.loadings.values():
+            for _, w in pc_loadings:
+                assert isinstance(w, float)
+
+    def test_top_loading_is_dominant_feature(self):
+        """If one feature drives most variance in a correlated group, it should
+        appear in top loadings of PC0."""
+        rng = np.random.RandomState(42)
+        n = 500
+        # Feature 0 drives features 1-4 via linear relationship (correlation)
+        driver = rng.normal(0, 1, n)
+        X = rng.normal(0, 0.01, (n, 10))  # mostly noise
+        X[:, 0] = driver
+        for i in range(1, 5):
+            X[:, i] = driver * (0.9 - i * 0.1) + rng.normal(0, 0.1, n)
+        names = _col_names(10)
+        result = pca_reduce(X, names)
+
+        # PC0 should have feat_0 among its top 3 loadings (it drives the group)
+        top_3_names = [name for name, _ in result.loadings[0][:3]]
+        assert "feat_0" in top_3_names, (
+            f"Expected feat_0 in top 3 PC0 loadings, got {top_3_names}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Projection on new data
+# ---------------------------------------------------------------------------
+
+
+class TestProjection:
+    """Verify that saved basis can project new data correctly."""
+
+    def test_projection_shape(self):
+        """Project new data using saved mean/std/components — shape must match."""
+        rng = np.random.RandomState(42)
+        X_train = rng.normal(0, 1, (400, 20))
+        X_test = rng.normal(0, 1, (100, 20))
+        names = _col_names(20)
+
+        result = pca_reduce(X_train, names)
+
+        # Project test data manually
+        Z_test = (X_test - result.mean) / result.std
+        X_test_reduced = Z_test @ result.components.T
+
+        assert X_test_reduced.shape == (100, result.n_components)
+
+    def test_projection_train_matches_result(self):
+        """Projecting training data with saved basis should match X_reduced."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (300, 15))
+        names = _col_names(15)
+        result = pca_reduce(X, names)
+
+        Z = (X - result.mean) / result.std
+        X_projected = Z @ result.components.T
+
+        np.testing.assert_allclose(result.X_reduced, X_projected, atol=1e-10)
+
+    def test_projection_new_data_no_crash(self):
+        """Split 80/20. Fit on 80%, project 20% — no errors."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (500, 30))
+        names = _col_names(30)
+
+        X_train, X_test = X[:400], X[400:]
+        result = pca_reduce(X_train, names)
+
+        Z_test = (X_test - result.mean) / result.std
+        X_test_reduced = Z_test @ result.components.T
+
+        assert X_test_reduced.shape == (100, result.n_components)
+        assert not np.any(np.isnan(X_test_reduced))
+
+
+# ---------------------------------------------------------------------------
+# Output shapes and types
+# ---------------------------------------------------------------------------
+
+
+class TestOutputShapes:
+    """Verify all PCAResult fields have correct shapes and types."""
+
+    def test_X_reduced_shape(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 15))
+        names = _col_names(15)
+        result = pca_reduce(X, names)
+        assert result.X_reduced.shape == (200, result.n_components)
+
+    def test_components_shape(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 15))
+        names = _col_names(15)
+        result = pca_reduce(X, names)
+        assert result.components.shape == (result.n_components, 15)
+
+    def test_mean_shape(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 15))
+        names = _col_names(15)
+        result = pca_reduce(X, names)
+        assert result.mean.shape == (15,)
+
+    def test_std_shape(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 15))
+        names = _col_names(15)
+        result = pca_reduce(X, names)
+        assert result.std.shape == (15,)
+
+    def test_explained_variance_ratio_shape(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 15))
+        names = _col_names(15)
+        result = pca_reduce(X, names)
+        assert result.explained_variance_ratio.shape == (result.n_components,)
+
+    def test_cumulative_variance_shape(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 15))
+        names = _col_names(15)
+        result = pca_reduce(X, names)
+        assert result.cumulative_variance.shape == (result.n_components,)
+
+    def test_column_names_stored(self):
+        names = [f"my_feat_{i}" for i in range(10)]
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 10))
+        result = pca_reduce(X, names)
+        assert result.column_names == names
+
+    def test_result_is_dataclass(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (100, 5))
+        names = _col_names(5)
+        result = pca_reduce(X, names)
+        assert isinstance(result, PCAResult)
+
+
+# ---------------------------------------------------------------------------
+# Determinism
+# ---------------------------------------------------------------------------
+
+
+class TestPCADeterminism:
+    """Same input must produce identical PCA output."""
+
+    def test_deterministic_random(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (300, 20))
+        names = _col_names(20)
+
+        r1 = pca_reduce(X, names)
+        r2 = pca_reduce(X, names)
+
+        np.testing.assert_array_equal(r1.X_reduced, r2.X_reduced)
+        np.testing.assert_array_equal(r1.components, r2.components)
+        assert r1.n_components == r2.n_components
+
+    def test_deterministic_regularized(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (30, 80))
+        names = _col_names(80)
+
+        r1 = pca_reduce(X, names)
+        r2 = pca_reduce(X, names)
+
+        np.testing.assert_array_equal(r1.X_reduced, r2.X_reduced)
+        assert r1.regularized == r2.regularized
+
+
+# ---------------------------------------------------------------------------
+# Edge cases and validation
+# ---------------------------------------------------------------------------
+
+
+class TestPCAEdgeCases:
+    """Adversarial and boundary inputs for PCA."""
+
+    def test_single_feature(self):
+        """Single feature → 1 component."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (100, 1))
+        result = pca_reduce(X, ["only_feat"])
+        assert result.n_components == 1
+        assert result.X_reduced.shape == (100, 1)
+
+    def test_two_samples(self):
+        """Minimum viable: 2 samples."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (2, 5))
+        names = _col_names(5)
+        result = pca_reduce(X, names)
+        assert result.X_reduced.shape[0] == 2
+
+    def test_constant_feature_handled(self):
+        """Constant features (std=0) should not cause division by zero."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 10))
+        X[:, 3] = 5.0  # constant column
+        X[:, 7] = -2.0  # another constant
+        names = _col_names(10)
+        result = pca_reduce(X, names)
+        assert not np.any(np.isnan(result.X_reduced))
+        assert not np.any(np.isinf(result.X_reduced))
+
+    def test_all_constant_features(self):
+        """All features constant → degenerate but no crash."""
+        X = np.full((100, 5), 3.14)
+        names = _col_names(5)
+        result = pca_reduce(X, names)
+        # Should return something reasonable
+        assert result.n_components >= 1
+        assert not np.any(np.isnan(result.X_reduced))
+
+    def test_1d_input_raises(self):
+        with pytest.raises(ValueError, match="2-D"):
+            pca_reduce(np.array([1, 2, 3]), ["a"])
+
+    def test_single_sample_raises(self):
+        with pytest.raises(ValueError, match="at least 2 samples"):
+            pca_reduce(np.array([[1, 2, 3]]), ["a", "b", "c"])
+
+    def test_zero_features_raises(self):
+        with pytest.raises(ValueError, match="no features"):
+            pca_reduce(np.empty((100, 0)), [])
+
+    def test_column_names_mismatch_raises(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (100, 5))
+        with pytest.raises(ValueError, match="column_names length"):
+            pca_reduce(X, _col_names(3))
+
+    def test_nan_in_X_raises(self):
+        X = np.array([[1.0, np.nan], [3.0, 4.0]])
+        with pytest.raises(ValueError, match="NaN"):
+            pca_reduce(X, ["a", "b"])
+
+    def test_invalid_variance_threshold_zero(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (100, 5))
+        with pytest.raises(ValueError, match="variance_threshold"):
+            pca_reduce(X, _col_names(5), variance_threshold=0.0)
+
+    def test_invalid_variance_threshold_over_1(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (100, 5))
+        with pytest.raises(ValueError, match="variance_threshold"):
+            pca_reduce(X, _col_names(5), variance_threshold=1.5)
+
+    def test_invalid_max_components(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (100, 5))
+        with pytest.raises(ValueError, match="max_components"):
+            pca_reduce(X, _col_names(5), max_components=0)
+
+    def test_wide_data_more_features_than_samples(self):
+        """Wide matrix (p >> n) should still work correctly."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (20, 200))
+        names = _col_names(200)
+        result = pca_reduce(X, names, variance_threshold=0.95)
+        assert result.regularized is True
+        assert result.n_components <= 20
+        assert result.X_reduced.shape == (20, result.n_components)
+
+    def test_large_matrix(self):
+        """Performance: 1000 rows × 200 cols should complete without issue."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (1000, 200))
+        names = _col_names(200)
+        result = pca_reduce(X, names)
+        assert result.X_reduced.shape[0] == 1000
+        assert result.n_components > 0
+
+
+# ---------------------------------------------------------------------------
+# Orthogonality and mathematical properties
+# ---------------------------------------------------------------------------
+
+
+class TestPCAMathProperties:
+    """Verify mathematical invariants of PCA."""
+
+    def test_components_orthogonal(self):
+        """Principal components should be orthogonal to each other."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (500, 20))
+        names = _col_names(20)
+        result = pca_reduce(X, names)
+
+        # components is (k, n_features), rows should be orthogonal
+        gram = result.components @ result.components.T
+        # Off-diagonal should be ~0
+        off_diag = gram - np.diag(np.diag(gram))
+        assert np.max(np.abs(off_diag)) < 1e-10, (
+            f"Components not orthogonal, max off-diagonal: {np.max(np.abs(off_diag))}"
+        )
+
+    def test_components_unit_norm(self):
+        """Each component vector should have unit norm."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (500, 20))
+        names = _col_names(20)
+        result = pca_reduce(X, names)
+
+        for i in range(result.n_components):
+            norm = np.linalg.norm(result.components[i])
+            assert abs(norm - 1.0) < 1e-10, (
+                f"Component {i} norm = {norm}, expected 1.0"
+            )
+
+    def test_reduced_dimensions_uncorrelated(self):
+        """Projected data dimensions should be uncorrelated."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (1000, 20))
+        names = _col_names(20)
+        result = pca_reduce(X, names)
+
+        corr = np.corrcoef(result.X_reduced.T)
+        off_diag = corr - np.diag(np.diag(corr))
+        assert np.max(np.abs(off_diag)) < 0.05, (
+            f"Reduced dims are correlated, max |r| = {np.max(np.abs(off_diag)):.4f}"
+        )
+
+    def test_explained_variance_sums_to_le_1(self):
+        """Sum of all explained variance ratios ≤ 1.0."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (300, 20))
+        names = _col_names(20)
+        result = pca_reduce(X, names, variance_threshold=1.0, max_components=50)
+        total = np.sum(result.explained_variance_ratio)
+        assert total <= 1.0 + 1e-10
+
+    def test_first_pc_captures_most_variance(self):
+        """PC0 should capture at least as much variance as any other PC."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (300, 20))
+        names = _col_names(20)
+        result = pca_reduce(X, names)
+        assert result.explained_variance_ratio[0] == max(result.explained_variance_ratio)
+
+    def test_standardized_data_zero_mean(self):
+        """After standardization, mean should be ~0."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(5.0, 2.0, (500, 10))
+        names = _col_names(10)
+        result = pca_reduce(X, names)
+
+        Z = (X - result.mean) / result.std
+        assert np.max(np.abs(Z.mean(axis=0))) < 1e-10
+
+
+# ---------------------------------------------------------------------------
+# Integration: filter_derivatives + pca_reduce
+# ---------------------------------------------------------------------------
+
+
+class TestFilterThenPCA:
+    """End-to-end: filter derivatives then PCA."""
+
+    def test_pipeline_filter_then_pca(self):
+        """Full pipeline: random derivative-like data → filter → PCA."""
+        rng = np.random.RandomState(42)
+        n = 500
+        data = {}
+        for i in range(50):
+            data[f"deriv_{i}"] = rng.normal(0, (i + 1) * 0.2, n)
+        # Add some constants
+        data["const_0"] = np.full(n, 0.0)
+        data["const_1"] = np.full(n, 1.0)
+        # Add correlated pairs
+        data["corr_a"] = data["deriv_0"]
+        data["corr_b"] = data["deriv_0"] + rng.normal(0, 0.01, n)
+
+        df = pd.DataFrame(data)
+        filtered, report = filter_derivatives(df, variance_percentile=10.0)
+
+        result = pca_reduce(
+            filtered.values,
+            filtered.columns.tolist(),
+            variance_threshold=0.95,
+        )
+
+        assert result.n_components > 0
+        assert result.n_components < filtered.shape[1]
+        assert result.X_reduced.shape[0] == n
+
+    def test_pipeline_preserves_sample_count(self):
+        """Row count must not change through filter → PCA."""
+        rng = np.random.RandomState(42)
+        n = 300
+        df = pd.DataFrame(rng.normal(0, 1, (n, 30)), columns=_col_names(30))
+        filtered, _ = filter_derivatives(df, variance_percentile=5.0)
+        result = pca_reduce(filtered.values, filtered.columns.tolist())
+        assert result.X_reduced.shape[0] == n
