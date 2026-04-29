@@ -24,6 +24,8 @@ from cluster_pipeline.derivatives import (
     select_top_features,
     temporal_derivatives,
     cross_feature_derivatives,
+    generate_derivatives,
+    DerivativeResult,
     DEFAULT_CROSS_PAIRS,
     _select_by_variance,
     _select_by_autocorrelation_range,
@@ -1222,3 +1224,250 @@ class TestCrossTemporalIntegration:
         td_expected = 2 * (2 + 3 * 2)  # 2 cols × (vel, accel, 2×zscore, 2×slope, 2×rvol)
         cd_expected = 1 + 2 + 2  # 1 ratio + 2 corr + 2 div
         assert combined.shape[1] == td_expected + cd_expected
+
+
+# ===========================================================================
+# ORCHESTRATOR TESTS (generate_derivatives)
+# ===========================================================================
+
+
+def _make_vector_bars(vector: str, n_bars: int = 200, seed: int = 42) -> pd.DataFrame:
+    """
+    Create bar DataFrame with columns matching a real feature vector's
+    bar-aggregated naming (base_col + _mean/_std/_slope etc).
+    """
+    rng = np.random.RandomState(seed)
+    cols = FEATURE_VECTORS[vector]["columns"]
+    data = {}
+    for i, base in enumerate(cols):
+        suffixes = ["mean", "std", "slope"] if base.startswith("ent_") else ["mean", "std", "last"]
+        for suffix in suffixes:
+            data[f"{base}_{suffix}"] = rng.normal(0, (i + 1) * 0.5, size=n_bars)
+    return _make_bars_with_columns(data)
+
+
+class TestOrchestratorBasic:
+    """Core tests for generate_derivatives orchestrator."""
+
+    def test_returns_derivative_result(self):
+        """Must return a DerivativeResult dataclass."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy")
+        assert isinstance(result, DerivativeResult)
+
+    def test_derivatives_is_dataframe(self):
+        """result.derivatives must be a DataFrame."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy")
+        assert isinstance(result.derivatives, pd.DataFrame)
+
+    def test_default_config_produces_output(self):
+        """Calling with just (bars, vector) should work with sensible defaults."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy")
+        assert result.n_total > 0, "Should produce derivative columns"
+        assert result.n_base_features > 0, "Should select base features"
+        assert result.n_temporal > 0, "Should have temporal derivatives"
+
+    def test_output_length_matches_input(self):
+        """Output DataFrame must have same number of rows as input bars."""
+        bars = _make_vector_bars("entropy", n_bars=150)
+        result = generate_derivatives(bars, vector="entropy")
+        assert len(result.derivatives) == 150
+
+
+class TestOrchestratorMetadata:
+    """Tests for metadata accuracy."""
+
+    def test_n_total_equals_column_count(self):
+        """metadata n_total must match actual column count."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy")
+        assert result.n_total == len(result.derivatives.columns)
+
+    def test_n_temporal_plus_cross_equals_total(self):
+        """n_temporal + n_cross must equal n_total."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy")
+        assert result.n_temporal + result.n_cross == result.n_total
+
+    def test_base_features_length_matches_count(self):
+        """len(base_features) must equal n_base_features."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy")
+        assert len(result.base_features) == result.n_base_features
+
+    def test_base_features_are_real_columns(self):
+        """All base_features must exist in the input bars."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy")
+        for col in result.base_features:
+            assert col in bars.columns, f"Base feature {col} not in bars"
+
+    def test_warmup_rows_equals_max_window(self):
+        """warmup_rows must equal max(temporal_windows)."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy", temporal_windows=[5, 20])
+        assert result.warmup_rows == 20
+
+    def test_metadata_dict_populated(self):
+        """metadata dict should contain vector and window info."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy")
+        assert result.metadata["vector"] == "entropy"
+        assert "temporal_windows" in result.metadata
+
+
+class TestOrchestratorColumnIntegrity:
+    """Tests for column uniqueness, naming, and sanity."""
+
+    def test_column_uniqueness(self):
+        """All output column names must be unique — no duplicates."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy")
+        cols = result.derivatives.columns.tolist()
+        assert len(cols) == len(set(cols)), (
+            f"Duplicate columns: {[c for c in cols if cols.count(c) > 1]}"
+        )
+
+    def test_no_inf_after_warmup(self):
+        """No inf values in the valid region (after warmup)."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy", temporal_windows=[5, 15])
+        valid = result.derivatives.iloc[result.warmup_rows:]
+        for col in valid.columns:
+            assert not np.any(np.isinf(valid[col].values)), f"inf in {col}"
+
+    def test_reasonable_total_size(self):
+        """Total derivative count must be < 500 (not the 3000 explosion from v1)."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy", max_base_features=15)
+        assert result.n_total < 500, (
+            f"Too many derivatives: {result.n_total} (should be < 500)"
+        )
+
+    def test_temporal_column_count_formula(self):
+        """Temporal columns must equal n_base × (2 + 3 × len(windows))."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        windows = [5, 10]
+        result = generate_derivatives(
+            bars, vector="entropy", max_base_features=10, temporal_windows=windows,
+        )
+        expected_temporal = result.n_base_features * (2 + 3 * len(windows))
+        assert result.n_temporal == expected_temporal, (
+            f"Expected {expected_temporal} temporal cols, got {result.n_temporal}"
+        )
+
+
+class TestOrchestratorParameters:
+    """Tests for parameter variations."""
+
+    def test_max_base_features_respected(self):
+        """n_base_features must not exceed max_base_features."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        for max_f in [3, 5, 10]:
+            result = generate_derivatives(bars, vector="entropy", max_base_features=max_f)
+            assert result.n_base_features <= max_f
+
+    def test_different_vectors(self):
+        """Works with different feature vectors."""
+        for vec in ["entropy", "orderflow", "volatility"]:
+            bars = _make_vector_bars(vec, n_bars=200)
+            result = generate_derivatives(bars, vector=vec, max_base_features=5)
+            assert result.n_total > 0, f"No output for vector {vec}"
+
+    def test_custom_temporal_windows(self):
+        """Custom temporal windows produce different output sizes."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        r1 = generate_derivatives(bars, vector="entropy", temporal_windows=[5])
+        r2 = generate_derivatives(bars, vector="entropy", temporal_windows=[5, 10, 20])
+        assert r2.n_temporal > r1.n_temporal, "More windows should produce more columns"
+
+    def test_no_cross_pairs(self):
+        """Passing empty cross_pairs produces only temporal derivatives."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy", cross_pairs=[])
+        assert result.n_cross == 0
+        assert result.n_total == result.n_temporal
+
+    def test_custom_cross_pairs(self):
+        """Custom cross pairs that resolve produce cross columns."""
+        rng = np.random.RandomState(42)
+        bars = _make_vector_bars("entropy", n_bars=200)
+        # Add a volatility column that a custom pair can match
+        bars["vol_returns_1m_mean"] = rng.normal(0, 1, 200)
+        custom_pairs = [
+            {"a": "ent_*_mean", "b": "vol_*_mean", "ops": ["ratio"]},
+        ]
+        result = generate_derivatives(
+            bars, vector="entropy", cross_pairs=custom_pairs,
+        )
+        assert result.n_cross >= 1, "Custom pair should produce cross columns"
+
+    def test_selection_method_autocorrelation(self):
+        """autocorrelation_range selection method works via orchestrator."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(
+            bars, vector="entropy", selection_method="autocorrelation_range",
+        )
+        assert result.n_total > 0
+
+    def test_separate_cross_windows(self):
+        """cross_windows can differ from temporal_windows."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(
+            bars, vector="entropy",
+            temporal_windows=[5, 10],
+            cross_windows=[20],
+        )
+        assert result.warmup_rows == 10  # max of temporal, not cross
+
+
+class TestOrchestratorDeterminism:
+    """Determinism tests."""
+
+    def test_deterministic(self):
+        """Same input always produces identical output."""
+        bars = _make_vector_bars("entropy", n_bars=200, seed=42)
+        r1 = generate_derivatives(bars, vector="entropy", temporal_windows=[5, 10])
+        r2 = generate_derivatives(bars, vector="entropy", temporal_windows=[5, 10])
+        pd.testing.assert_frame_equal(r1.derivatives, r2.derivatives)
+        assert r1.base_features == r2.base_features
+        assert r1.n_total == r2.n_total
+
+
+class TestOrchestratorEdgeCases:
+    """Edge cases for the orchestrator."""
+
+    def test_very_few_bars(self):
+        """Should not crash with fewer bars than window size."""
+        bars = _make_vector_bars("entropy", n_bars=3)
+        result = generate_derivatives(bars, vector="entropy", temporal_windows=[5])
+        assert len(result.derivatives) == 3
+        # All rolling derivatives will be NaN, but no crash
+
+    def test_single_base_feature(self):
+        """max_base_features=1 produces minimal but valid output."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        result = generate_derivatives(bars, vector="entropy", max_base_features=1)
+        assert result.n_base_features == 1
+        assert result.n_temporal > 0
+
+    def test_large_max_features_capped_by_vector_size(self):
+        """max_base_features=100 on a small vector returns all available features."""
+        bars = _make_vector_bars("orderflow", n_bars=200)  # orderflow has 8 base cols
+        result = generate_derivatives(bars, vector="orderflow", max_base_features=100)
+        # Should get all available (non-constant) orderflow bar columns
+        assert result.n_base_features <= 100
+        assert result.n_base_features > 0
+
+    def test_unresolvable_cross_pairs_still_produce_temporal(self):
+        """If all cross pairs fail to resolve, temporal derivatives still work."""
+        bars = _make_vector_bars("entropy", n_bars=200)
+        bad_pairs = [
+            {"a": "nonexistent_*", "b": "also_missing_*", "ops": ["ratio"]},
+        ]
+        result = generate_derivatives(bars, vector="entropy", cross_pairs=bad_pairs)
+        assert result.n_cross == 0
+        assert result.n_temporal > 0
+        assert result.n_total == result.n_temporal

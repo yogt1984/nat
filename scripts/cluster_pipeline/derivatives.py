@@ -24,7 +24,8 @@ from __future__ import annotations
 
 import fnmatch
 import warnings
-from typing import Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -428,3 +429,114 @@ def _shorten_col(col: str) -> str:
         if col.endswith(suffix):
             return col[: -len(suffix)]
     return col
+
+
+# ---------------------------------------------------------------------------
+# Derivative orchestrator
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DerivativeResult:
+    """Output of the generate_derivatives orchestrator."""
+
+    derivatives: pd.DataFrame
+    n_base_features: int
+    base_features: List[str]
+    n_temporal: int
+    n_cross: int
+    n_total: int
+    warmup_rows: int
+    metadata: Dict = field(default_factory=dict)
+
+
+def generate_derivatives(
+    bars: pd.DataFrame,
+    vector: str,
+    max_base_features: int = 15,
+    selection_method: str = "variance",
+    temporal_windows: List[int] = [5, 15, 30],
+    cross_pairs: Optional[List[Dict]] = None,
+    cross_windows: Optional[List[int]] = None,
+) -> DerivativeResult:
+    """
+    Single entry point for the full derivative generation pipeline.
+
+    Runs:
+      1. select_top_features() — pick the most informative base features
+      2. temporal_derivatives() — velocity, acceleration, z-score, slope, rvol
+      3. cross_feature_derivatives() — ratios, correlations, divergences
+      4. Concatenate into a single DataFrame
+
+    Args:
+        bars: aggregated bar DataFrame (from aggregate_bars)
+        vector: feature vector name (e.g. "entropy", "orderflow")
+        max_base_features: max features to select before derivation
+        selection_method: "variance" or "autocorrelation_range"
+        temporal_windows: window sizes for temporal derivatives
+        cross_pairs: cross-feature pair definitions (default: DEFAULT_CROSS_PAIRS)
+        cross_windows: window sizes for cross derivatives (default: temporal_windows)
+
+    Returns:
+        DerivativeResult with combined derivative DataFrame and metadata.
+
+    Raises:
+        ValueError: if vector has no matching columns in bars.
+    """
+    if cross_pairs is None:
+        cross_pairs = DEFAULT_CROSS_PAIRS
+    if cross_windows is None:
+        cross_windows = temporal_windows
+
+    # Step 1: Feature selection
+    base_features = select_top_features(
+        bars, vector=vector, max_features=max_base_features, method=selection_method,
+    )
+
+    if not base_features:
+        return DerivativeResult(
+            derivatives=pd.DataFrame(index=bars.index),
+            n_base_features=0,
+            base_features=[],
+            n_temporal=0,
+            n_cross=0,
+            n_total=0,
+            warmup_rows=0,
+        )
+
+    # Step 2: Temporal derivatives
+    td = temporal_derivatives(bars, columns=base_features, windows=temporal_windows)
+
+    # Step 3: Cross-feature derivatives (warnings suppressed for unresolvable pairs)
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        cd = cross_feature_derivatives(
+            bars, pairs=cross_pairs, windows=cross_windows,
+        )
+
+    # Step 4: Concatenate
+    parts = [td]
+    if cd.shape[1] > 0:
+        parts.append(cd)
+    combined = pd.concat(parts, axis=1)
+
+    # Compute warmup: largest temporal window determines when all derivatives are valid
+    warmup = max(temporal_windows) if temporal_windows else 0
+
+    return DerivativeResult(
+        derivatives=combined,
+        n_base_features=len(base_features),
+        base_features=base_features,
+        n_temporal=td.shape[1],
+        n_cross=cd.shape[1],
+        n_total=combined.shape[1],
+        warmup_rows=warmup,
+        metadata={
+            "vector": vector,
+            "selection_method": selection_method,
+            "temporal_windows": temporal_windows,
+            "cross_windows": cross_windows,
+            "n_cross_pairs_attempted": len(cross_pairs),
+            "n_cross_pairs_resolved": cd.shape[1] > 0,
+        },
+    )
