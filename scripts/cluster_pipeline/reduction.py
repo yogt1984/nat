@@ -6,14 +6,19 @@ Sits between the derivative engine (Phase 1) and clustering (Phase 3).
 
 Usage:
     from cluster_pipeline.reduction import filter_derivatives, pca_reduce
+    from cluster_pipeline.reduction import save_pca_basis, load_pca_basis
 
     filtered_df, report = filter_derivatives(derivatives_df)
     pca_result = pca_reduce(filtered_df.values, filtered_df.columns.tolist())
+    save_pca_basis(pca_result, Path("basis.npz"))
+    loaded = load_pca_basis(Path("basis.npz"))
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -341,6 +346,164 @@ def pca_reduce(
         components=components,
         mean=mean,
         std=std_safe,
+        column_names=column_names,
+        loadings=loadings,
+        regularized=regularized,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 2.3: Save/Load PCA Basis
+# ---------------------------------------------------------------------------
+
+
+def save_pca_basis(result: PCAResult, path: Path) -> None:
+    """
+    Serialize a PCAResult to disk.
+
+    Creates two files:
+      - <path>.npz  — numpy arrays (X_reduced, components, mean, std,
+        explained_variance_ratio, cumulative_variance)
+      - <path>.json — metadata (n_components, column_names, loadings,
+        regularized)
+
+    The .npz/.json extensions are appended automatically if *path* has
+    neither.  If *path* already ends in .npz the JSON sidecar is placed
+    next to it with .json instead.
+
+    Args:
+        result: PCAResult from pca_reduce().
+        path: Base path (e.g. Path("models/pca_basis")).
+
+    Raises:
+        ValueError: if result is not a PCAResult.
+    """
+    if not isinstance(result, PCAResult):
+        raise ValueError(f"Expected PCAResult, got {type(result).__name__}")
+
+    path = Path(path)
+
+    # Resolve file paths
+    if path.suffix == ".npz":
+        npz_path = path
+        json_path = path.with_suffix(".json")
+    elif path.suffix == ".json":
+        json_path = path
+        npz_path = path.with_suffix(".npz")
+    else:
+        npz_path = path.with_suffix(".npz")
+        json_path = path.with_suffix(".json")
+
+    # Ensure parent directory exists
+    npz_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Save arrays
+    np.savez_compressed(
+        npz_path,
+        X_reduced=result.X_reduced,
+        components=result.components,
+        mean=result.mean,
+        std=result.std,
+        explained_variance_ratio=result.explained_variance_ratio,
+        cumulative_variance=result.cumulative_variance,
+    )
+
+    # Save metadata as JSON
+    # Convert loadings: Dict[int, List[Tuple[str, float]]] → JSON-safe form
+    # JSON keys must be strings
+    loadings_json = {
+        str(k): [[name, weight] for name, weight in v]
+        for k, v in result.loadings.items()
+    }
+
+    metadata = {
+        "n_components": result.n_components,
+        "column_names": result.column_names,
+        "loadings": loadings_json,
+        "regularized": result.regularized,
+    }
+
+    with open(json_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+
+
+def load_pca_basis(path: Path) -> PCAResult:
+    """
+    Deserialize a PCAResult from disk.
+
+    Reads the .npz and .json files written by save_pca_basis().
+
+    Args:
+        path: Base path used during save (e.g. Path("models/pca_basis")).
+            Accepts paths ending in .npz, .json, or no extension.
+
+    Returns:
+        Reconstructed PCAResult.
+
+    Raises:
+        FileNotFoundError: if either the .npz or .json file is missing.
+        ValueError: if the files are corrupt or inconsistent.
+    """
+    path = Path(path)
+
+    # Resolve file paths
+    if path.suffix == ".npz":
+        npz_path = path
+        json_path = path.with_suffix(".json")
+    elif path.suffix == ".json":
+        json_path = path
+        npz_path = path.with_suffix(".npz")
+    else:
+        npz_path = path.with_suffix(".npz")
+        json_path = path.with_suffix(".json")
+
+    if not npz_path.exists():
+        raise FileNotFoundError(f"Array file not found: {npz_path}")
+    if not json_path.exists():
+        raise FileNotFoundError(f"Metadata file not found: {json_path}")
+
+    # Load arrays
+    with np.load(npz_path) as data:
+        X_reduced = data["X_reduced"]
+        components = data["components"]
+        mean = data["mean"]
+        std = data["std"]
+        explained_variance_ratio = data["explained_variance_ratio"]
+        cumulative_variance = data["cumulative_variance"]
+
+    # Load metadata
+    with open(json_path, "r") as f:
+        metadata = json.load(f)
+
+    n_components = metadata["n_components"]
+    column_names = metadata["column_names"]
+    regularized = metadata["regularized"]
+
+    # Reconstruct loadings: JSON keys are strings → convert back to int
+    loadings: Dict[int, List[Tuple[str, float]]] = {
+        int(k): [(name, float(weight)) for name, weight in v]
+        for k, v in metadata["loadings"].items()
+    }
+
+    # Consistency checks
+    if components.shape[0] != n_components:
+        raise ValueError(
+            f"components rows ({components.shape[0]}) != n_components ({n_components})"
+        )
+    if len(column_names) != components.shape[1]:
+        raise ValueError(
+            f"column_names length ({len(column_names)}) != "
+            f"components cols ({components.shape[1]})"
+        )
+
+    return PCAResult(
+        X_reduced=X_reduced,
+        n_components=n_components,
+        explained_variance_ratio=explained_variance_ratio,
+        cumulative_variance=cumulative_variance,
+        components=components,
+        mean=mean,
+        std=std,
         column_names=column_names,
         loadings=loadings,
         regularized=regularized,

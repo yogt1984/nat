@@ -17,6 +17,8 @@ Test philosophy:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -26,6 +28,8 @@ from cluster_pipeline.reduction import (
     _greedy_correlation_filter,
     pca_reduce,
     PCAResult,
+    save_pca_basis,
+    load_pca_basis,
 )
 
 
@@ -1370,3 +1374,500 @@ class TestFilterThenPCA:
         filtered, _ = filter_derivatives(df, variance_percentile=5.0)
         result = pca_reduce(filtered.values, filtered.columns.tolist())
         assert result.X_reduced.shape[0] == n
+
+
+# ===========================================================================
+# Save/Load PCA Basis tests (Task 2.3)
+# ===========================================================================
+
+
+def _fit_pca(n_rows=300, n_cols=20, seed=42, **kwargs):
+    """Helper: fit PCA on random data and return (result, X)."""
+    rng = np.random.RandomState(seed)
+    X = rng.normal(0, 1, (n_rows, n_cols))
+    names = _col_names(n_cols)
+    result = pca_reduce(X, names, **kwargs)
+    return result, X
+
+
+# ---------------------------------------------------------------------------
+# Round-trip fidelity
+# ---------------------------------------------------------------------------
+
+
+class TestSaveLoadRoundtrip:
+    """Core invariant: save → load must produce identical PCAResult."""
+
+    def test_roundtrip_arrays_identical(self, tmp_path):
+        """All numpy arrays must survive round-trip exactly."""
+        result, _ = _fit_pca()
+        path = tmp_path / "basis"
+        save_pca_basis(result, path)
+        loaded = load_pca_basis(path)
+
+        np.testing.assert_array_equal(loaded.X_reduced, result.X_reduced)
+        np.testing.assert_array_equal(loaded.components, result.components)
+        np.testing.assert_array_equal(loaded.mean, result.mean)
+        np.testing.assert_array_equal(loaded.std, result.std)
+        np.testing.assert_array_equal(
+            loaded.explained_variance_ratio, result.explained_variance_ratio
+        )
+        np.testing.assert_array_equal(
+            loaded.cumulative_variance, result.cumulative_variance
+        )
+
+    def test_roundtrip_metadata_identical(self, tmp_path):
+        """Scalar metadata must survive round-trip exactly."""
+        result, _ = _fit_pca()
+        path = tmp_path / "basis"
+        save_pca_basis(result, path)
+        loaded = load_pca_basis(path)
+
+        assert loaded.n_components == result.n_components
+        assert loaded.column_names == result.column_names
+        assert loaded.regularized == result.regularized
+
+    def test_roundtrip_loadings_identical(self, tmp_path):
+        """Loadings dict must survive round-trip: same keys, same (name, weight) tuples."""
+        result, _ = _fit_pca()
+        path = tmp_path / "basis"
+        save_pca_basis(result, path)
+        loaded = load_pca_basis(path)
+
+        assert set(loaded.loadings.keys()) == set(result.loadings.keys())
+        for pc_idx in result.loadings:
+            orig = result.loadings[pc_idx]
+            reloaded = loaded.loadings[pc_idx]
+            assert len(orig) == len(reloaded)
+            for (n1, w1), (n2, w2) in zip(orig, reloaded):
+                assert n1 == n2
+                assert w1 == pytest.approx(w2)
+
+    def test_roundtrip_projection_identical(self, tmp_path):
+        """Project new data with original vs loaded basis — results must match."""
+        result, X = _fit_pca(n_rows=400, n_cols=20)
+        path = tmp_path / "basis"
+        save_pca_basis(result, path)
+        loaded = load_pca_basis(path)
+
+        # Project the last 100 rows as "new" data
+        X_new = X[300:]
+        Z_orig = (X_new - result.mean) / result.std
+        Z_loaded = (X_new - loaded.mean) / loaded.std
+
+        proj_orig = Z_orig @ result.components.T
+        proj_loaded = Z_loaded @ loaded.components.T
+
+        np.testing.assert_array_equal(proj_orig, proj_loaded)
+
+    def test_roundtrip_regularized_result(self, tmp_path):
+        """Regularized PCA result (Ledoit-Wolf) survives round-trip."""
+        result, _ = _fit_pca(n_rows=30, n_cols=80)  # triggers regularization
+        assert result.regularized is True
+
+        path = tmp_path / "reg_basis"
+        save_pca_basis(result, path)
+        loaded = load_pca_basis(path)
+
+        assert loaded.regularized is True
+        np.testing.assert_array_equal(loaded.components, result.components)
+        np.testing.assert_array_equal(loaded.X_reduced, result.X_reduced)
+
+    def test_roundtrip_single_component(self, tmp_path):
+        """Edge: single-component PCA survives round-trip."""
+        result, _ = _fit_pca(max_components=1)
+        assert result.n_components == 1
+
+        path = tmp_path / "single"
+        save_pca_basis(result, path)
+        loaded = load_pca_basis(path)
+
+        assert loaded.n_components == 1
+        np.testing.assert_array_equal(loaded.X_reduced, result.X_reduced)
+
+    def test_roundtrip_many_components(self, tmp_path):
+        """Full variance PCA with many components survives round-trip."""
+        result, _ = _fit_pca(
+            n_rows=500, n_cols=50, variance_threshold=1.0, max_components=50
+        )
+
+        path = tmp_path / "many"
+        save_pca_basis(result, path)
+        loaded = load_pca_basis(path)
+
+        assert loaded.n_components == result.n_components
+        np.testing.assert_array_equal(loaded.components, result.components)
+
+    def test_roundtrip_wide_data(self, tmp_path):
+        """Wide matrix (p >> n) PCA survives round-trip."""
+        result, _ = _fit_pca(n_rows=15, n_cols=200)
+
+        path = tmp_path / "wide"
+        save_pca_basis(result, path)
+        loaded = load_pca_basis(path)
+
+        assert loaded.n_components == result.n_components
+        assert loaded.regularized == result.regularized
+        np.testing.assert_array_equal(loaded.X_reduced, result.X_reduced)
+
+
+# ---------------------------------------------------------------------------
+# File paths and extensions
+# ---------------------------------------------------------------------------
+
+
+class TestSaveLoadPaths:
+    """Verify file path handling for different extension inputs."""
+
+    def test_no_extension(self, tmp_path):
+        """Path without extension → creates .npz and .json."""
+        result, _ = _fit_pca(n_rows=50, n_cols=5)
+        path = tmp_path / "basis"
+        save_pca_basis(result, path)
+
+        assert (tmp_path / "basis.npz").exists()
+        assert (tmp_path / "basis.json").exists()
+
+    def test_npz_extension(self, tmp_path):
+        """Path with .npz → creates .npz and .json sidecar."""
+        result, _ = _fit_pca(n_rows=50, n_cols=5)
+        path = tmp_path / "basis.npz"
+        save_pca_basis(result, path)
+
+        assert (tmp_path / "basis.npz").exists()
+        assert (tmp_path / "basis.json").exists()
+
+    def test_json_extension(self, tmp_path):
+        """Path with .json → creates .json and .npz sidecar."""
+        result, _ = _fit_pca(n_rows=50, n_cols=5)
+        path = tmp_path / "basis.json"
+        save_pca_basis(result, path)
+
+        assert (tmp_path / "basis.npz").exists()
+        assert (tmp_path / "basis.json").exists()
+
+    def test_load_with_npz_extension(self, tmp_path):
+        """load_pca_basis with .npz path works."""
+        result, _ = _fit_pca(n_rows=50, n_cols=5)
+        save_pca_basis(result, tmp_path / "basis")
+        loaded = load_pca_basis(tmp_path / "basis.npz")
+        assert loaded.n_components == result.n_components
+
+    def test_load_with_json_extension(self, tmp_path):
+        """load_pca_basis with .json path works."""
+        result, _ = _fit_pca(n_rows=50, n_cols=5)
+        save_pca_basis(result, tmp_path / "basis")
+        loaded = load_pca_basis(tmp_path / "basis.json")
+        assert loaded.n_components == result.n_components
+
+    def test_load_with_no_extension(self, tmp_path):
+        """load_pca_basis with bare path works."""
+        result, _ = _fit_pca(n_rows=50, n_cols=5)
+        save_pca_basis(result, tmp_path / "basis")
+        loaded = load_pca_basis(tmp_path / "basis")
+        assert loaded.n_components == result.n_components
+
+    def test_nested_directory_created(self, tmp_path):
+        """Save to a non-existent nested directory → parent dirs created."""
+        result, _ = _fit_pca(n_rows=50, n_cols=5)
+        path = tmp_path / "deep" / "nested" / "dir" / "basis"
+        save_pca_basis(result, path)
+
+        assert (tmp_path / "deep" / "nested" / "dir" / "basis.npz").exists()
+        assert (tmp_path / "deep" / "nested" / "dir" / "basis.json").exists()
+
+    def test_path_as_string(self, tmp_path):
+        """String path (not Path object) should also work."""
+        result, _ = _fit_pca(n_rows=50, n_cols=5)
+        save_pca_basis(result, str(tmp_path / "basis"))
+        loaded = load_pca_basis(str(tmp_path / "basis"))
+        assert loaded.n_components == result.n_components
+
+
+# ---------------------------------------------------------------------------
+# File content and size
+# ---------------------------------------------------------------------------
+
+
+class TestFileContent:
+    """Verify file content properties."""
+
+    def test_npz_is_compressed(self, tmp_path):
+        """The .npz file should be compressed (savez_compressed)."""
+        result, _ = _fit_pca(n_rows=500, n_cols=50, variance_threshold=1.0)
+        path = tmp_path / "basis"
+        save_pca_basis(result, path)
+
+        npz_size = (tmp_path / "basis.npz").stat().st_size
+        # Uncompressed would be much larger; compressed should be reasonable
+        assert npz_size > 0
+
+    def test_file_size_under_10mb(self, tmp_path):
+        """Total file size (npz + json) must be < 10MB even for large PCA."""
+        result, _ = _fit_pca(
+            n_rows=1000, n_cols=200, variance_threshold=0.99, max_components=50
+        )
+        path = tmp_path / "basis"
+        save_pca_basis(result, path)
+
+        npz_size = (tmp_path / "basis.npz").stat().st_size
+        json_size = (tmp_path / "basis.json").stat().st_size
+        total = npz_size + json_size
+
+        assert total < 10 * 1024 * 1024, (
+            f"Total file size {total / 1024:.1f} KB exceeds 10MB limit"
+        )
+
+    def test_json_is_valid_json(self, tmp_path):
+        """The .json sidecar must be valid JSON."""
+        import json
+
+        result, _ = _fit_pca(n_rows=50, n_cols=5)
+        save_pca_basis(result, tmp_path / "basis")
+
+        with open(tmp_path / "basis.json") as f:
+            data = json.load(f)
+
+        assert "n_components" in data
+        assert "column_names" in data
+        assert "loadings" in data
+        assert "regularized" in data
+
+    def test_json_loadings_structure(self, tmp_path):
+        """JSON loadings should be dict of string keys → list of [name, weight]."""
+        import json
+
+        result, _ = _fit_pca(n_rows=100, n_cols=10)
+        save_pca_basis(result, tmp_path / "basis")
+
+        with open(tmp_path / "basis.json") as f:
+            data = json.load(f)
+
+        for key, entries in data["loadings"].items():
+            assert isinstance(key, str)  # JSON keys are always strings
+            assert isinstance(entries, list)
+            for entry in entries:
+                assert len(entry) == 2
+                assert isinstance(entry[0], str)  # column name
+                assert isinstance(entry[1], (int, float))  # weight
+
+    def test_npz_contains_expected_arrays(self, tmp_path):
+        """The .npz file must contain all 6 expected arrays."""
+        result, _ = _fit_pca(n_rows=50, n_cols=5)
+        save_pca_basis(result, tmp_path / "basis")
+
+        with np.load(tmp_path / "basis.npz") as data:
+            expected_keys = {
+                "X_reduced", "components", "mean", "std",
+                "explained_variance_ratio", "cumulative_variance",
+            }
+            assert set(data.files) == expected_keys
+
+
+# ---------------------------------------------------------------------------
+# Error handling
+# ---------------------------------------------------------------------------
+
+
+class TestSaveLoadErrors:
+    """Verify error handling for invalid inputs."""
+
+    def test_save_non_pca_result_raises(self, tmp_path):
+        """Saving a non-PCAResult should raise ValueError."""
+        with pytest.raises(ValueError, match="Expected PCAResult"):
+            save_pca_basis({"not": "a result"}, tmp_path / "basis")
+
+    def test_load_missing_npz_raises(self, tmp_path):
+        """Loading when .npz is missing should raise FileNotFoundError."""
+        # Create only the .json
+        import json
+        with open(tmp_path / "basis.json", "w") as f:
+            json.dump({}, f)
+
+        with pytest.raises(FileNotFoundError, match="Array file"):
+            load_pca_basis(tmp_path / "basis")
+
+    def test_load_missing_json_raises(self, tmp_path):
+        """Loading when .json is missing should raise FileNotFoundError."""
+        # Create only the .npz
+        np.savez(tmp_path / "basis.npz", dummy=np.array([1]))
+
+        with pytest.raises(FileNotFoundError, match="Metadata file"):
+            load_pca_basis(tmp_path / "basis")
+
+    def test_load_nonexistent_path_raises(self, tmp_path):
+        """Loading from a path where neither file exists should raise."""
+        with pytest.raises(FileNotFoundError):
+            load_pca_basis(tmp_path / "does_not_exist")
+
+    def test_load_corrupt_json_raises(self, tmp_path):
+        """Corrupt JSON sidecar should raise an error."""
+        result, _ = _fit_pca(n_rows=50, n_cols=5)
+        save_pca_basis(result, tmp_path / "basis")
+
+        # Corrupt the JSON
+        with open(tmp_path / "basis.json", "w") as f:
+            f.write("{invalid json!!!}")
+
+        with pytest.raises(Exception):  # json.JSONDecodeError
+            load_pca_basis(tmp_path / "basis")
+
+    def test_load_inconsistent_n_components_raises(self, tmp_path):
+        """If JSON n_components doesn't match array shape, raise ValueError."""
+        import json
+
+        result, _ = _fit_pca(n_rows=50, n_cols=5)
+        save_pca_basis(result, tmp_path / "basis")
+
+        # Tamper with n_components in JSON
+        with open(tmp_path / "basis.json") as f:
+            data = json.load(f)
+        data["n_components"] = 999
+        with open(tmp_path / "basis.json", "w") as f:
+            json.dump(data, f)
+
+        with pytest.raises(ValueError, match="n_components"):
+            load_pca_basis(tmp_path / "basis")
+
+    def test_load_inconsistent_column_names_raises(self, tmp_path):
+        """If JSON column_names length doesn't match components cols, raise."""
+        import json
+
+        result, _ = _fit_pca(n_rows=50, n_cols=5)
+        save_pca_basis(result, tmp_path / "basis")
+
+        # Tamper with column_names
+        with open(tmp_path / "basis.json") as f:
+            data = json.load(f)
+        data["column_names"] = ["a", "b"]  # wrong length
+        with open(tmp_path / "basis.json", "w") as f:
+            json.dump(data, f)
+
+        with pytest.raises(ValueError, match="column_names"):
+            load_pca_basis(tmp_path / "basis")
+
+
+# ---------------------------------------------------------------------------
+# Overwrite and idempotency
+# ---------------------------------------------------------------------------
+
+
+class TestSaveOverwrite:
+    """Verify save overwrites existing files cleanly."""
+
+    def test_overwrite_existing(self, tmp_path):
+        """Saving to the same path twice should overwrite, not corrupt."""
+        result1, _ = _fit_pca(n_rows=100, n_cols=10, seed=42)
+        result2, _ = _fit_pca(n_rows=200, n_cols=15, seed=99)
+
+        path = tmp_path / "basis"
+        save_pca_basis(result1, path)
+        save_pca_basis(result2, path)
+
+        loaded = load_pca_basis(path)
+        assert loaded.n_components == result2.n_components
+        assert loaded.column_names == result2.column_names
+        np.testing.assert_array_equal(loaded.X_reduced, result2.X_reduced)
+
+    def test_save_load_save_load(self, tmp_path):
+        """Double round-trip: save → load → save again → load again."""
+        result, _ = _fit_pca()
+        path1 = tmp_path / "basis1"
+        path2 = tmp_path / "basis2"
+
+        save_pca_basis(result, path1)
+        loaded1 = load_pca_basis(path1)
+
+        save_pca_basis(loaded1, path2)
+        loaded2 = load_pca_basis(path2)
+
+        np.testing.assert_array_equal(loaded2.X_reduced, result.X_reduced)
+        np.testing.assert_array_equal(loaded2.components, result.components)
+        assert loaded2.column_names == result.column_names
+        assert loaded2.n_components == result.n_components
+
+
+# ---------------------------------------------------------------------------
+# Column names with special characters
+# ---------------------------------------------------------------------------
+
+
+class TestSpecialColumnNames:
+    """Verify column names with special characters survive serialization."""
+
+    def test_unicode_column_names(self, tmp_path):
+        """Unicode column names must survive round-trip."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (100, 3))
+        names = ["α_entropy", "β_volatility", "γ_trend"]
+        result = pca_reduce(X, names)
+
+        save_pca_basis(result, tmp_path / "basis")
+        loaded = load_pca_basis(tmp_path / "basis")
+        assert loaded.column_names == names
+
+    def test_column_names_with_spaces(self, tmp_path):
+        """Column names with spaces must survive."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (100, 3))
+        names = ["my feature 1", "feature (2)", "feat/3"]
+        result = pca_reduce(X, names)
+
+        save_pca_basis(result, tmp_path / "basis")
+        loaded = load_pca_basis(tmp_path / "basis")
+        assert loaded.column_names == names
+
+    def test_long_column_names(self, tmp_path):
+        """Very long column names must survive."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (100, 3))
+        names = [f"feature_{'x' * 200}_{i}" for i in range(3)]
+        result = pca_reduce(X, names)
+
+        save_pca_basis(result, tmp_path / "basis")
+        loaded = load_pca_basis(tmp_path / "basis")
+        assert loaded.column_names == names
+
+    def test_empty_string_column_name(self, tmp_path):
+        """Empty string as column name must survive."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (100, 3))
+        names = ["", "b", "c"]
+        result = pca_reduce(X, names)
+
+        save_pca_basis(result, tmp_path / "basis")
+        loaded = load_pca_basis(tmp_path / "basis")
+        assert loaded.column_names == names
+
+
+# ---------------------------------------------------------------------------
+# Determinism of save/load
+# ---------------------------------------------------------------------------
+
+
+class TestSaveLoadDeterminism:
+    """Verify save/load is deterministic."""
+
+    def test_load_twice_identical(self, tmp_path):
+        """Loading the same file twice should produce identical results."""
+        result, _ = _fit_pca()
+        save_pca_basis(result, tmp_path / "basis")
+
+        loaded1 = load_pca_basis(tmp_path / "basis")
+        loaded2 = load_pca_basis(tmp_path / "basis")
+
+        np.testing.assert_array_equal(loaded1.X_reduced, loaded2.X_reduced)
+        np.testing.assert_array_equal(loaded1.components, loaded2.components)
+        assert loaded1.column_names == loaded2.column_names
+
+    def test_save_twice_files_identical(self, tmp_path):
+        """Saving the same result twice produces identical files."""
+        result, _ = _fit_pca()
+
+        save_pca_basis(result, tmp_path / "basis1")
+        save_pca_basis(result, tmp_path / "basis2")
+
+        # JSON should be identical
+        json1 = (tmp_path / "basis1.json").read_text()
+        json2 = (tmp_path / "basis2.json").read_text()
+        assert json1 == json2
