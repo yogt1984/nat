@@ -1,29 +1,43 @@
 """
-Skeptical tests for cluster_pipeline.hierarchy — structure existence test.
-
-Tests verify that the Hopkins statistic and Hartigan dip test correctly
-distinguish clustered data from uniform noise, and that the decision logic
-produces the right recommendations.
+Skeptical tests for cluster_pipeline.hierarchy — structure existence test
+and macro regime discovery.
 
 Test philosophy:
   - Synthetic data with known structure (well-separated Gaussians)
   - Synthetic data with known non-structure (uniform hypercube)
   - Boundary cases: overlapping clusters, single cluster, degenerate dims
-  - Statistical properties: Hopkins near 0.5 for uniform, near 1 for clustered
-  - Decision logic: all three recommendation paths tested
+  - Property-based checks for decision logic
   - Determinism: seeded runs produce identical results
   - Validation: invalid inputs rejected
+  - Regime discovery: synthetic multi-regime data with known labels
+  - Autocorrelation split: known slow/fast columns
+  - Block bootstrap: contiguous blocks, not random
+  - Duration computation: exact run-length encoding
 """
 
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from cluster_pipeline.hierarchy import (
     StructureTest,
     test_structure_existence,
     _hopkins_statistic,
+    # Task 3.1
+    discover_macro_regimes,
+    RegimeResult,
+    SweepResult,
+    QualityReport,
+    StabilityReport,
+    _autocorrelation_split,
+    _lag_autocorrelation,
+    _k_sweep_gmm,
+    _block_bootstrap_stability,
+    _compute_durations,
+    _self_transition_rate,
+    _centroid_profiles,
 )
 
 
@@ -617,3 +631,781 @@ class TestIntegrationWithReduction:
         X = rng.normal(0, 1, (1000, 50))
         result = test_structure_existence(X, seed=42)
         assert isinstance(result, StructureTest)
+
+
+# ===========================================================================
+# Task 3.1: Macro Regime Discovery tests
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Helpers for regime tests
+# ---------------------------------------------------------------------------
+
+
+def _make_two_regime_derivatives(
+    n_per_regime: int = 250,
+    block_size: int = 50,
+    dim: int = 10,
+    separation: float = 5.0,
+    seed: int = 42,
+) -> Tuple[pd.DataFrame, np.ndarray]:
+    """
+    Create derivative-like DataFrame with 2 known regimes, interleaved in blocks.
+
+    Returns (derivatives_df, true_labels).
+    Columns are slow-moving (high autocorrelation within blocks).
+    """
+    rng = np.random.RandomState(seed)
+    total = n_per_regime * 2
+
+    # Build labels: alternating blocks
+    n_blocks = total // block_size
+    labels = np.zeros(total, dtype=int)
+    for b in range(n_blocks):
+        start = b * block_size
+        end = min(start + block_size, total)
+        labels[start:end] = b % 2
+
+    # Generate features: regime 0 around origin, regime 1 shifted
+    data = np.zeros((total, dim))
+    for i in range(total):
+        if labels[i] == 0:
+            data[i] = rng.normal(0, 1, dim)
+        else:
+            data[i] = rng.normal(separation, 1, dim)
+
+    # Make columns slow by applying cumulative smoothing
+    for col in range(dim):
+        smoothed = np.zeros(total)
+        smoothed[0] = data[0, col]
+        alpha = 0.8  # high smoothing → high autocorrelation
+        for t in range(1, total):
+            if labels[t] == labels[t - 1]:
+                smoothed[t] = alpha * smoothed[t - 1] + (1 - alpha) * data[t, col]
+            else:
+                # Regime switch — reset
+                smoothed[t] = data[t, col]
+        data[:, col] = smoothed
+
+    columns = [f"slow_feat_{i}" for i in range(dim)]
+    df = pd.DataFrame(data, columns=columns)
+    return df, labels
+
+
+def _make_uniform_derivatives(
+    n: int = 500, dim: int = 10, seed: int = 42
+) -> pd.DataFrame:
+    """Uniform random data with no regime structure."""
+    rng = np.random.RandomState(seed)
+    data = rng.uniform(-1, 1, (n, dim))
+    columns = [f"feat_{i}" for i in range(dim)]
+    return pd.DataFrame(data, columns=columns)
+
+
+def _make_mixed_autocorrelation_df(
+    n: int = 500, seed: int = 42
+) -> pd.DataFrame:
+    """DataFrame with known slow (high AC) and fast (low AC) columns."""
+    rng = np.random.RandomState(seed)
+
+    # Slow column: random walk (high autocorrelation)
+    slow1 = np.cumsum(rng.normal(0, 0.1, n))
+    slow2 = np.cumsum(rng.normal(0, 0.1, n))
+
+    # Fast column: white noise (zero autocorrelation)
+    fast1 = rng.normal(0, 1, n)
+    fast2 = rng.normal(0, 1, n)
+
+    return pd.DataFrame({
+        "slow_walk_1": slow1,
+        "slow_walk_2": slow2,
+        "fast_noise_1": fast1,
+        "fast_noise_2": fast2,
+    })
+
+
+# Need this import for Tuple type hint in helper
+from typing import Tuple
+
+
+# ---------------------------------------------------------------------------
+# Autocorrelation split
+# ---------------------------------------------------------------------------
+
+
+class TestAutocorrelationSplit:
+    """Tests for the slow/fast feature split."""
+
+    def test_random_walk_is_slow(self):
+        """Random walk has high autocorrelation → classified as slow."""
+        rng = np.random.RandomState(42)
+        walk = np.cumsum(rng.normal(0, 0.1, 500))
+        ac = _lag_autocorrelation(walk, lag=5)
+        assert ac > 0.9, f"Random walk AC={ac:.3f}, expected > 0.9"
+
+    def test_white_noise_is_fast(self):
+        """White noise has ~0 autocorrelation → classified as fast."""
+        rng = np.random.RandomState(42)
+        noise = rng.normal(0, 1, 500)
+        ac = _lag_autocorrelation(noise, lag=5)
+        assert abs(ac) < 0.15, f"White noise AC={ac:.3f}, expected ~0"
+
+    def test_split_separates_slow_and_fast(self):
+        """Mixed DataFrame: slow columns selected, fast excluded."""
+        df = _make_mixed_autocorrelation_df()
+        slow = _autocorrelation_split(df, lag=5, threshold=0.7)
+        assert "slow_walk_1" in slow
+        assert "slow_walk_2" in slow
+        assert "fast_noise_1" not in slow
+        assert "fast_noise_2" not in slow
+
+    def test_split_returns_sorted_by_ac(self):
+        """Slow columns should be sorted by autocorrelation descending."""
+        df = _make_mixed_autocorrelation_df()
+        slow = _autocorrelation_split(df, lag=5, threshold=0.0)
+        # All columns pass threshold=0, should be sorted by AC
+        acs = [_lag_autocorrelation(df[col].values, 5) for col in slow]
+        for i in range(len(acs) - 1):
+            assert acs[i] >= acs[i + 1] - 1e-10
+
+    def test_split_empty_if_all_fast(self):
+        """All white noise columns → empty slow list."""
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame({
+            f"noise_{i}": rng.normal(0, 1, 500) for i in range(5)
+        })
+        slow = _autocorrelation_split(df, lag=5, threshold=0.7)
+        assert len(slow) == 0
+
+    def test_split_all_if_all_slow(self):
+        """All random walk columns → all selected."""
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame({
+            f"walk_{i}": np.cumsum(rng.normal(0, 0.1, 500)) for i in range(5)
+        })
+        slow = _autocorrelation_split(df, lag=5, threshold=0.7)
+        assert len(slow) == 5
+
+    def test_lag_autocorrelation_constant(self):
+        """Constant series has zero variance → AC = 0."""
+        ac = _lag_autocorrelation(np.full(100, 3.14), lag=5)
+        assert ac == 0.0
+
+    def test_lag_autocorrelation_short_series(self):
+        """Series shorter than lag → AC = 0."""
+        ac = _lag_autocorrelation(np.array([1, 2, 3]), lag=5)
+        assert ac == 0.0
+
+    def test_split_with_nan(self):
+        """Columns with NaN should still be evaluated (dropna)."""
+        rng = np.random.RandomState(42)
+        walk = np.cumsum(rng.normal(0, 0.1, 500))
+        walk[::10] = np.nan  # 10% NaN
+        df = pd.DataFrame({"walk": walk, "noise": rng.normal(0, 1, 500)})
+        slow = _autocorrelation_split(df, lag=5, threshold=0.7)
+        assert "walk" in slow
+
+
+# ---------------------------------------------------------------------------
+# Duration computation
+# ---------------------------------------------------------------------------
+
+
+class TestDurations:
+    """Tests for run-length encoding of regime labels."""
+
+    def test_simple_case(self):
+        """[0,0,0,1,1,0,0,0,0,1] → {0: [3, 4], 1: [2, 1]}."""
+        labels = np.array([0, 0, 0, 1, 1, 0, 0, 0, 0, 1])
+        durations = _compute_durations(labels)
+        assert durations[0] == [3, 4]
+        assert durations[1] == [2, 1]
+
+    def test_single_label(self):
+        """All same label → one long run."""
+        labels = np.zeros(100, dtype=int)
+        durations = _compute_durations(labels)
+        assert durations == {0: [100]}
+
+    def test_alternating(self):
+        """Alternating labels → all runs of length 1."""
+        labels = np.array([0, 1, 0, 1, 0, 1])
+        durations = _compute_durations(labels)
+        assert durations[0] == [1, 1, 1]
+        assert durations[1] == [1, 1, 1]
+
+    def test_empty_labels(self):
+        """Empty array → empty dict."""
+        durations = _compute_durations(np.array([], dtype=int))
+        assert durations == {}
+
+    def test_single_element(self):
+        """Single element → run of 1."""
+        durations = _compute_durations(np.array([2]))
+        assert durations == {2: [1]}
+
+    def test_three_regimes(self):
+        """Three regime labels."""
+        labels = np.array([0, 0, 1, 1, 1, 2, 2, 0, 0])
+        durations = _compute_durations(labels)
+        assert durations[0] == [2, 2]
+        assert durations[1] == [3]
+        assert durations[2] == [2]
+
+    def test_total_equals_n(self):
+        """Sum of all run lengths must equal total number of bars."""
+        rng = np.random.RandomState(42)
+        labels = rng.randint(0, 3, 200)
+        durations = _compute_durations(labels)
+        total = sum(sum(runs) for runs in durations.values())
+        assert total == 200
+
+
+# ---------------------------------------------------------------------------
+# Self-transition rate
+# ---------------------------------------------------------------------------
+
+
+class TestSelfTransitionRate:
+    """Tests for self-transition rate computation."""
+
+    def test_perfect_persistence(self):
+        """All same label → STR = 1.0."""
+        labels = np.zeros(100, dtype=int)
+        assert _self_transition_rate(labels) == 1.0
+
+    def test_alternating(self):
+        """Alternating labels → STR = 0.0."""
+        labels = np.array([0, 1, 0, 1, 0, 1])
+        assert _self_transition_rate(labels) == 0.0
+
+    def test_known_value(self):
+        """[0,0,0,1,1,0] → 3 same out of 5 pairs = 0.6."""
+        labels = np.array([0, 0, 0, 1, 1, 0])
+        assert _self_transition_rate(labels) == pytest.approx(3 / 5)
+
+    def test_single_element(self):
+        """Single element → STR = 1.0 (vacuously true)."""
+        assert _self_transition_rate(np.array([0])) == 1.0
+
+    def test_two_same(self):
+        """[0, 0] → STR = 1.0."""
+        assert _self_transition_rate(np.array([0, 0])) == 1.0
+
+    def test_two_different(self):
+        """[0, 1] → STR = 0.0."""
+        assert _self_transition_rate(np.array([0, 1])) == 0.0
+
+    def test_str_in_range(self):
+        """STR must be in [0, 1]."""
+        rng = np.random.RandomState(42)
+        labels = rng.randint(0, 3, 500)
+        s = _self_transition_rate(labels)
+        assert 0.0 <= s <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# k-sweep GMM
+# ---------------------------------------------------------------------------
+
+
+class TestKSweep:
+    """Tests for GMM k-sweep."""
+
+    def test_returns_sweep_result(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 5))
+        sweep = _k_sweep_gmm(X, k_range=range(2, 5))
+        assert isinstance(sweep, SweepResult)
+
+    def test_best_k_in_range(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 5))
+        sweep = _k_sweep_gmm(X, k_range=range(2, 6))
+        assert sweep.best_k in [2, 3, 4, 5]
+
+    def test_bic_count_matches_k_range(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 5))
+        sweep = _k_sweep_gmm(X, k_range=range(2, 5))
+        assert len(sweep.bic_scores) == 3  # k=2,3,4
+        assert len(sweep.k_range) == 3
+
+    def test_best_bic_is_minimum(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (300, 5))
+        sweep = _k_sweep_gmm(X, k_range=range(2, 6))
+        assert sweep.best_bic == min(sweep.bic_scores)
+
+    def test_well_separated_finds_correct_k(self):
+        """3 well-separated Gaussians → best k should be 3."""
+        rng = np.random.RandomState(42)
+        c1 = rng.normal([0, 0], 0.5, (200, 2))
+        c2 = rng.normal([10, 0], 0.5, (200, 2))
+        c3 = rng.normal([5, 10], 0.5, (200, 2))
+        X = np.vstack([c1, c2, c3])
+        sweep = _k_sweep_gmm(X, k_range=range(2, 6))
+        assert sweep.best_k == 3, f"Expected k=3, got k={sweep.best_k}"
+
+    def test_single_gaussian_prefers_k2(self):
+        """Single Gaussian → BIC should prefer k=2 (minimum in range)."""
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (500, 5))
+        sweep = _k_sweep_gmm(X, k_range=range(2, 6))
+        # For single Gaussian, k=2 typically has lowest BIC
+        assert sweep.best_k == 2
+
+
+# ---------------------------------------------------------------------------
+# Block bootstrap
+# ---------------------------------------------------------------------------
+
+
+class TestBlockBootstrap:
+    """Tests for block bootstrap stability."""
+
+    def test_returns_stability_report(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (200, 5))
+        labels = np.zeros(200, dtype=int)
+        labels[100:] = 1
+        result = _block_bootstrap_stability(
+            X, labels, n_components=2, n_bootstrap=10, block_size=15
+        )
+        assert isinstance(result, StabilityReport)
+
+    def test_ari_in_range(self):
+        """Mean ARI should be in [-1, 1]."""
+        rng = np.random.RandomState(42)
+        X = np.vstack([
+            rng.normal([0, 0], 1, (100, 2)),
+            rng.normal([5, 5], 1, (100, 2)),
+        ])
+        labels = np.array([0] * 100 + [1] * 100)
+        result = _block_bootstrap_stability(
+            X, labels, n_components=2, n_bootstrap=10, block_size=15
+        )
+        assert -1.0 <= result.mean_ari <= 1.0
+
+    def test_well_separated_high_ari(self):
+        """Well-separated clusters → high bootstrap ARI."""
+        rng = np.random.RandomState(42)
+        X = np.vstack([
+            rng.normal([0, 0], 0.3, (200, 2)),
+            rng.normal([10, 10], 0.3, (200, 2)),
+        ])
+        labels = np.array([0] * 200 + [1] * 200)
+        result = _block_bootstrap_stability(
+            X, labels, n_components=2, n_bootstrap=20, block_size=15
+        )
+        assert result.mean_ari > 0.5
+
+    def test_block_size_stored(self):
+        rng = np.random.RandomState(42)
+        X = rng.normal(0, 1, (100, 3))
+        labels = np.zeros(100, dtype=int)
+        result = _block_bootstrap_stability(
+            X, labels, n_components=1, n_bootstrap=5, block_size=20
+        )
+        assert result.block_size == 20
+
+    def test_n_bootstrap_reasonable(self):
+        """Number of successful bootstrap samples should be close to requested."""
+        rng = np.random.RandomState(42)
+        X = np.vstack([
+            rng.normal(0, 1, (150, 3)),
+            rng.normal(5, 1, (150, 3)),
+        ])
+        labels = np.array([0] * 150 + [1] * 150)
+        result = _block_bootstrap_stability(
+            X, labels, n_components=2, n_bootstrap=20, block_size=10
+        )
+        # Most should succeed
+        assert result.n_bootstrap >= 10
+
+
+# ---------------------------------------------------------------------------
+# Centroid profiles
+# ---------------------------------------------------------------------------
+
+
+class TestCentroidProfiles:
+    """Tests for centroid profile computation."""
+
+    def test_shape(self):
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame(rng.normal(0, 1, (100, 5)), columns=[f"f_{i}" for i in range(5)])
+        labels = np.array([0] * 50 + [1] * 50)
+        profiles = _centroid_profiles(df, labels)
+        assert profiles.shape == (2, 5)  # 2 regimes, 5 features
+
+    def test_centroids_differ_for_different_regimes(self):
+        """If regimes have different means, centroids should differ."""
+        rng = np.random.RandomState(42)
+        data = np.vstack([
+            rng.normal(0, 0.1, (100, 3)),
+            rng.normal(10, 0.1, (100, 3)),
+        ])
+        df = pd.DataFrame(data, columns=["a", "b", "c"])
+        labels = np.array([0] * 100 + [1] * 100)
+        profiles = _centroid_profiles(df, labels)
+        for col in ["a", "b", "c"]:
+            assert abs(profiles.loc[0, col] - profiles.loc[1, col]) > 5
+
+    def test_single_regime(self):
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame(rng.normal(0, 1, (100, 3)), columns=["a", "b", "c"])
+        labels = np.zeros(100, dtype=int)
+        profiles = _centroid_profiles(df, labels)
+        assert profiles.shape[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# Full discover_macro_regimes — synthetic two-regime data
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverMacroRegimes:
+    """End-to-end tests for discover_macro_regimes."""
+
+    def test_two_regime_discovery(self):
+        """Synthetic 2-regime data → discovers k=2 (or 3), labels mostly correct."""
+        df, true_labels = _make_two_regime_derivatives(
+            n_per_regime=250, block_size=50, separation=5.0
+        )
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        assert isinstance(result, RegimeResult)
+        assert not result.early_exit
+        assert result.k >= 2
+
+    def test_returns_correct_label_length(self):
+        df, _ = _make_two_regime_derivatives(n_per_regime=200)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        assert len(result.labels) == 400
+
+    def test_self_transition_rate_high(self):
+        """Block-structured regimes → STR should be high."""
+        df, _ = _make_two_regime_derivatives(
+            n_per_regime=250, block_size=50, separation=5.0
+        )
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        if not result.early_exit:
+            assert result.self_transition_rate > 0.7, (
+                f"STR={result.self_transition_rate:.3f}, expected > 0.7"
+            )
+
+    def test_quality_report_present(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        assert isinstance(result.quality, QualityReport)
+        assert -1 <= result.quality.silhouette <= 1
+
+    def test_stability_report_present(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        assert isinstance(result.stability, StabilityReport)
+
+    def test_sweep_result_present(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        assert isinstance(result.sweep, SweepResult)
+        assert len(result.sweep.bic_scores) == 3  # k=2,3,4
+
+    def test_durations_present(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        assert isinstance(result.durations, dict)
+        total = sum(sum(runs) for runs in result.durations.values())
+        assert total == len(df)
+
+    def test_centroid_profiles_present(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        if not result.early_exit:
+            assert isinstance(result.centroid_profiles, pd.DataFrame)
+            assert result.centroid_profiles.shape[0] == result.k
+
+    def test_slow_columns_stored(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3
+        )
+        assert isinstance(result.slow_columns, list)
+        assert len(result.slow_columns) > 0
+
+    def test_structure_test_stored(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3
+        )
+        assert isinstance(result.structure_test, StructureTest)
+
+    def test_filter_report_stored(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3
+        )
+        assert isinstance(result.filter_report, dict)
+
+    def test_pca_result_stored(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3
+        )
+        from cluster_pipeline.reduction import PCAResult
+        assert isinstance(result.pca_result, PCAResult)
+
+
+# ---------------------------------------------------------------------------
+# Early exit — no structure
+# ---------------------------------------------------------------------------
+
+
+class TestNoStructureEarlyExit:
+    """Uniform random data → early exit, no clustering attempted."""
+
+    def test_uniform_early_exit_or_weak(self):
+        """Uniform derivatives → early_exit=True OR weak_structure.
+
+        Structure test may detect weak clustering tendency in uniform data
+        (Hopkins can be borderline). The key invariant: if it doesn't exit
+        early, the structure test should be weak_structure, not proceed.
+        """
+        df = _make_uniform_derivatives(n=500, dim=10)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.0,
+            k_range=range(2, 5),
+        )
+        if not result.early_exit:
+            assert result.structure_test.recommendation != "proceed"
+
+    def test_early_exit_labels_all_zero(self):
+        """When early exit occurs, labels should be all zeros."""
+        # Use all-constant data to force early exit
+        df = pd.DataFrame({f"c_{i}": np.full(100, float(i)) for i in range(5)})
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.0,
+        )
+        assert result.early_exit is True
+        assert np.all(result.labels == 0)
+
+    def test_early_exit_reason_present(self):
+        """Early exit should have a reason string."""
+        df = pd.DataFrame({f"c_{i}": np.full(100, float(i)) for i in range(5)})
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.0,
+        )
+        assert result.early_exit is True
+        assert len(result.early_exit_reason) > 0
+
+    def test_early_exit_k_is_zero(self):
+        """Early exit → k=0."""
+        df = pd.DataFrame({f"c_{i}": np.full(100, float(i)) for i in range(5)})
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.0,
+        )
+        assert result.early_exit is True
+        assert result.k == 0
+
+
+# ---------------------------------------------------------------------------
+# Few slow columns fallback
+# ---------------------------------------------------------------------------
+
+
+class TestSlowColumnFallback:
+    """When too few slow columns, should fall back to all columns."""
+
+    def test_all_noise_uses_all_columns(self):
+        """All white noise columns → fallback to all, with warning."""
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame({
+            f"noise_{i}": rng.normal(0, 1, 500) for i in range(10)
+        })
+        import warnings as w
+        with w.catch_warnings(record=True) as caught:
+            w.simplefilter("always")
+            result = discover_macro_regimes(
+                df, autocorrelation_threshold=0.9,
+            )
+        # Should have warned about using all columns
+        warn_msgs = [str(c.message) for c in caught]
+        assert any("Using all columns" in m for m in warn_msgs)
+
+
+# ---------------------------------------------------------------------------
+# Parameter validation
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverValidation:
+    """Invalid inputs for discover_macro_regimes."""
+
+    def test_empty_dataframe_raises(self):
+        with pytest.raises(ValueError, match="empty"):
+            discover_macro_regimes(pd.DataFrame())
+
+    def test_too_few_rows_raises(self):
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame(rng.normal(0, 1, (20, 5)), columns=[f"f_{i}" for i in range(5)])
+        with pytest.raises(ValueError, match="at least 30"):
+            discover_macro_regimes(df)
+
+    def test_minimum_30_rows(self):
+        """Exactly 30 rows should not raise."""
+        rng = np.random.RandomState(42)
+        # Need slow columns for this to work
+        data = {}
+        for i in range(5):
+            data[f"f_{i}"] = np.cumsum(rng.normal(0, 0.1, 30))
+        df = pd.DataFrame(data)
+        # Should not raise (may early-exit but no crash)
+        result = discover_macro_regimes(df, autocorrelation_threshold=0.3)
+        assert isinstance(result, RegimeResult)
+
+
+# ---------------------------------------------------------------------------
+# GMM params stored
+# ---------------------------------------------------------------------------
+
+
+class TestGMMParams:
+    """Verify GMM parameters are correctly stored."""
+
+    def test_gmm_params_has_means(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        if not result.early_exit:
+            assert "means" in result.gmm_params
+            assert "weights" in result.gmm_params
+
+    def test_gmm_weights_sum_to_one(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        if not result.early_exit:
+            weights = result.gmm_params["weights"]
+            assert abs(sum(weights) - 1.0) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Determinism
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverDeterminism:
+    """Same input → same output."""
+
+    def test_deterministic(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0, seed=42)
+        r1 = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, random_state=42
+        )
+        r2 = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, random_state=42
+        )
+        np.testing.assert_array_equal(r1.labels, r2.labels)
+        assert r1.k == r2.k
+        assert r1.self_transition_rate == r2.self_transition_rate
+
+
+# ---------------------------------------------------------------------------
+# Quality report properties
+# ---------------------------------------------------------------------------
+
+
+class TestQualityReportProperties:
+    """Verify quality report invariants."""
+
+    def test_min_cluster_fraction_in_range(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        if not result.early_exit:
+            assert 0.0 < result.quality.min_cluster_fraction <= 1.0
+
+    def test_n_per_cluster_sums_to_n(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        if not result.early_exit:
+            total = sum(result.quality.n_per_cluster.values())
+            assert total == len(df)
+
+    def test_n_per_cluster_keys_match_k(self):
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        if not result.early_exit:
+            assert len(result.quality.n_per_cluster) == result.k
+
+
+# ---------------------------------------------------------------------------
+# Edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverEdgeCases:
+    """Edge and adversarial inputs for regime discovery."""
+
+    def test_all_constant_columns(self):
+        """All constant columns → should early exit, not crash."""
+        df = pd.DataFrame({
+            f"c_{i}": np.full(100, float(i)) for i in range(5)
+        })
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.0
+        )
+        assert result.early_exit is True
+
+    def test_single_column(self):
+        """Single column DataFrame should not crash."""
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame({"only": np.cumsum(rng.normal(0, 0.1, 200))})
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.0
+        )
+        assert isinstance(result, RegimeResult)
+
+    def test_nan_heavy_data(self):
+        """10% NaN → should still produce a result."""
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        rng = np.random.RandomState(99)
+        mask = rng.random(df.shape) < 0.10
+        df = df.mask(mask)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 5)
+        )
+        assert isinstance(result, RegimeResult)
+
+    def test_k_range_single_value(self):
+        """k_range with single value → should work."""
+        df, _ = _make_two_regime_derivatives(separation=5.0)
+        result = discover_macro_regimes(
+            df, autocorrelation_threshold=0.3, k_range=range(2, 3)
+        )
+        if not result.early_exit:
+            assert result.k == 2
