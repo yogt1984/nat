@@ -44,6 +44,11 @@ from cluster_pipeline.hierarchy import (
     # Task 3.3
     assemble_hierarchy,
     HierarchicalLabels,
+    # Task 3.4
+    profile,
+    ProfilingResult,
+    _longest_segment,
+    _detect_breaks_safe,
 )
 
 
@@ -2605,3 +2610,394 @@ class TestMacroLabelsPassedThrough:
         micros = {0: None, 1: None}
         h = assemble_hierarchy(regime, micros)
         assert h.macro_labels is macro
+
+
+# ===========================================================================
+# Task 3.4: Full Hierarchy Pipeline Tests
+# ===========================================================================
+
+
+def _make_synthetic_bars(n_bars: int = 200, n_features: int = 8, seed: int = 42,
+                         regime_shift: bool = False) -> pd.DataFrame:
+    """
+    Create synthetic pre-aggregated bars with entropy-like column names
+    that match the 'entropy' vector pattern: ent_*_mean, ent_*_std, etc.
+
+    If regime_shift=True, the first half has mean=0 and second half has mean=5,
+    creating a detectable structural break or regime separation.
+    """
+    rng = np.random.RandomState(seed)
+    # Use real entropy column names with bar aggregation suffixes
+    base_names = [
+        "ent_tick_1s", "ent_tick_5s", "ent_tick_10s", "ent_tick_15s",
+        "ent_tick_30s", "ent_tick_1m", "ent_vol_tick_1s", "ent_vol_tick_5s",
+    ][:n_features]
+    suffixes = ["_mean", "_std"]
+    columns = []
+    for base in base_names:
+        for suf in suffixes:
+            columns.append(base + suf)
+
+    if regime_shift:
+        half = n_bars // 2
+        data_a = rng.normal(0, 1, (half, len(columns)))
+        data_b = rng.normal(5, 1, (n_bars - half, len(columns)))
+        data = np.vstack([data_a, data_b])
+    else:
+        data = rng.normal(0, 1, (n_bars, len(columns)))
+
+    df = pd.DataFrame(data, columns=columns)
+    return df
+
+
+def _make_uniform_bars(n_bars: int = 200, n_features: int = 8, seed: int = 42) -> pd.DataFrame:
+    """Create bars from uniform distribution (no structure)."""
+    rng = np.random.RandomState(seed)
+    base_names = [
+        "ent_tick_1s", "ent_tick_5s", "ent_tick_10s", "ent_tick_15s",
+        "ent_tick_30s", "ent_tick_1m", "ent_vol_tick_1s", "ent_vol_tick_5s",
+    ][:n_features]
+    suffixes = ["_mean", "_std"]
+    columns = []
+    for base in base_names:
+        for suf in suffixes:
+            columns.append(base + suf)
+    data = rng.uniform(-1, 1, (n_bars, len(columns)))
+    df = pd.DataFrame(data, columns=columns)
+    return df
+
+
+class TestLongestSegment:
+    """Unit tests for _longest_segment helper."""
+
+    def test_no_breaks(self):
+        assert _longest_segment(100, []) == (0, 100)
+
+    def test_single_break_at_middle(self):
+        start, end = _longest_segment(100, [50])
+        assert (end - start) == 50
+
+    def test_single_break_near_start(self):
+        start, end = _longest_segment(100, [10])
+        assert start == 10
+        assert end == 100
+
+    def test_single_break_near_end(self):
+        start, end = _longest_segment(100, [90])
+        assert start == 0
+        assert end == 90
+
+    def test_two_breaks(self):
+        start, end = _longest_segment(100, [20, 80])
+        assert start == 20
+        assert end == 80
+
+    def test_three_equal_segments(self):
+        # breaks at 33 and 66 → segments [0,33), [33,66), [66,100)
+        # last segment is longest (34)
+        start, end = _longest_segment(100, [33, 66])
+        assert end - start == 34
+        assert start == 66
+
+    def test_unsorted_breaks(self):
+        """Breaks don't need to be pre-sorted."""
+        start, end = _longest_segment(100, [80, 20])
+        assert start == 20
+        assert end == 80
+
+    def test_break_at_zero(self):
+        """Break at index 0 → first segment is empty."""
+        start, end = _longest_segment(100, [0])
+        assert start == 0
+        assert end == 100
+
+
+class TestDetectBreaksSafe:
+    """Tests for _detect_breaks_safe (graceful fallback)."""
+
+    def test_returns_list(self):
+        """Always returns a list (even without ruptures)."""
+        bars = _make_synthetic_bars(100)
+        result = _detect_breaks_safe(bars, bars.columns.tolist())
+        assert isinstance(result, list)
+
+    def test_short_data_returns_empty(self):
+        """Data shorter than 2*min_segment_length → empty."""
+        bars = _make_synthetic_bars(30)
+        result = _detect_breaks_safe(bars, bars.columns.tolist(), min_segment_length=50)
+        assert result == []
+
+    def test_no_columns_returns_empty(self):
+        """No usable columns → empty."""
+        bars = _make_synthetic_bars(100)
+        result = _detect_breaks_safe(bars, ["nonexistent_col"])
+        assert result == []
+
+    def test_empty_dataframe(self):
+        bars = pd.DataFrame()
+        result = _detect_breaks_safe(bars, [])
+        assert result == []
+
+
+class TestProfileReturnType:
+    """profile() returns ProfilingResult with correct types."""
+
+    def test_returns_profiling_result(self):
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert isinstance(result, ProfilingResult)
+
+    def test_hierarchy_is_hierarchical_labels(self):
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert isinstance(result.hierarchy, HierarchicalLabels)
+
+    def test_macro_is_regime_result(self):
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert isinstance(result.macro, RegimeResult)
+
+    def test_micros_is_dict(self):
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert isinstance(result.micros, dict)
+
+    def test_breaks_detected_is_list(self):
+        bars = _make_synthetic_bars(200)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert isinstance(result.breaks_detected, list)
+
+    def test_structure_test_is_structure_test(self):
+        bars = _make_synthetic_bars(200)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert isinstance(result.structure_test, StructureTest)
+
+    def test_derivative_columns_is_list(self):
+        bars = _make_synthetic_bars(200)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert isinstance(result.derivative_columns, list)
+        assert len(result.derivative_columns) > 0
+
+
+class TestProfileEndToEnd:
+    """End-to-end smoke tests for the full pipeline."""
+
+    def test_smoke_with_regime_shift(self):
+        """Data with two clear regimes → profiling completes."""
+        bars = _make_synthetic_bars(300, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert result.hierarchy.n_macro >= 1
+        assert len(result.hierarchy.macro_labels) > 0
+
+    def test_every_bar_labeled(self):
+        """Every bar in the output gets a label."""
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        n = len(result.bars)
+        assert len(result.hierarchy.macro_labels) == n
+        assert len(result.hierarchy.micro_labels) == n
+        assert len(result.hierarchy.composite_labels) == n
+
+    def test_derivatives_meta_populated(self):
+        """derivatives_meta contains expected keys."""
+        bars = _make_synthetic_bars(200)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        meta = result.derivatives_meta
+        assert "n_base_features" in meta
+        assert "base_features" in meta
+        assert "n_temporal" in meta
+        assert "n_total" in meta
+        assert meta["n_base_features"] > 0
+
+    def test_bars_in_result(self):
+        """Result contains the bars used for profiling."""
+        bars = _make_synthetic_bars(200)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert isinstance(result.bars, pd.DataFrame)
+        assert len(result.bars) > 0
+
+
+class TestProfileNoStructure:
+    """Pipeline handles no-structure data gracefully."""
+
+    def test_uniform_data_completes(self):
+        """Uniform random data → pipeline completes without error."""
+        bars = _make_uniform_bars(200)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert isinstance(result, ProfilingResult)
+
+    def test_uniform_data_early_exit(self):
+        """Uniform data → macro result may have early_exit."""
+        bars = _make_uniform_bars(200)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        # Either finds weak structure or exits early — both valid
+        assert isinstance(result.macro, RegimeResult)
+
+    def test_uniform_data_still_has_labels(self):
+        """Even with no structure, every bar gets a label."""
+        bars = _make_uniform_bars(200)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        n = len(result.bars)
+        assert len(result.hierarchy.macro_labels) == n
+        assert len(result.hierarchy.micro_labels) == n
+
+
+class TestProfileValidation:
+    """Invalid inputs raise appropriate errors."""
+
+    def test_empty_dataframe(self):
+        with pytest.raises(ValueError, match="empty"):
+            profile(pd.DataFrame(), vector="entropy", skip_aggregation=True)
+
+    def test_too_few_bars(self):
+        """Fewer than 30 bars → ValueError."""
+        bars = _make_synthetic_bars(10)
+        with pytest.raises(ValueError, match="at least 30"):
+            profile(bars, vector="entropy", skip_aggregation=True)
+
+    def test_wrong_vector(self):
+        """Vector with no matching columns → ValueError."""
+        bars = _make_synthetic_bars(200)
+        # Rename columns to not match any vector
+        bars.columns = [f"xyz_{i}" for i in range(len(bars.columns))]
+        with pytest.raises(ValueError):
+            profile(bars, vector="entropy", skip_aggregation=True)
+
+
+class TestProfileParameters:
+    """Parameters are passed through correctly."""
+
+    def test_custom_k_range(self):
+        """Custom macro_k_range is respected."""
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True,
+                         macro_k_range=range(2, 4))
+        if not result.macro.early_exit:
+            assert result.macro.k in [2, 3]
+
+    def test_custom_pca_variance(self):
+        """Custom pca_variance is passed through."""
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True,
+                         pca_variance=0.80)
+        assert isinstance(result, ProfilingResult)
+
+    def test_custom_temporal_windows(self):
+        """Custom temporal_windows are used."""
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True,
+                         temporal_windows=[3, 7])
+        assert isinstance(result, ProfilingResult)
+        assert result.derivatives_meta["n_total"] > 0
+
+    def test_default_temporal_windows(self):
+        """Default temporal_windows=[5,15,30] when None."""
+        bars = _make_synthetic_bars(200)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert isinstance(result, ProfilingResult)
+
+
+class TestProfileDeterminism:
+    """Same inputs + same seed → same results."""
+
+    def test_deterministic(self):
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        r1 = profile(bars, vector="entropy", skip_aggregation=True, random_state=42)
+        r2 = profile(bars, vector="entropy", skip_aggregation=True, random_state=42)
+        np.testing.assert_array_equal(r1.hierarchy.macro_labels,
+                                      r2.hierarchy.macro_labels)
+        np.testing.assert_array_equal(r1.hierarchy.micro_labels,
+                                      r2.hierarchy.micro_labels)
+
+    def test_different_seed_may_differ(self):
+        """Different seeds can produce different results (not guaranteed)."""
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        r1 = profile(bars, vector="entropy", skip_aggregation=True, random_state=1)
+        r2 = profile(bars, vector="entropy", skip_aggregation=True, random_state=999)
+        # Just check both complete — may or may not differ
+        assert isinstance(r1, ProfilingResult)
+        assert isinstance(r2, ProfilingResult)
+
+
+class TestProfileHierarchyConsistency:
+    """Hierarchy fields are internally consistent."""
+
+    def test_global_ids_contiguous(self):
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        h = result.hierarchy
+        assert set(h.micro_labels) == set(range(h.n_micro_total))
+
+    def test_label_map_invertible(self):
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        h = result.hierarchy
+        for i in range(len(h.macro_labels)):
+            gid = h.micro_labels[i]
+            rid, _ = h.label_map[gid]
+            assert rid == h.macro_labels[i]
+
+    def test_composite_format(self):
+        import re
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        pattern = re.compile(r"R\d+_S\d+")
+        for label in result.hierarchy.composite_labels:
+            assert pattern.fullmatch(label)
+
+    def test_n_macro_matches_labels(self):
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert result.hierarchy.n_macro == len(np.unique(result.hierarchy.macro_labels))
+
+    def test_micros_keys_match_regimes(self):
+        """micros dict has one entry per macro regime."""
+        bars = _make_synthetic_bars(200, regime_shift=True)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        if not result.macro.early_exit:
+            assert set(result.micros.keys()) == set(range(result.macro.k))
+
+
+class TestProfileEdgeCases:
+    """Edge cases for the full pipeline."""
+
+    def test_minimum_viable_bars(self):
+        """Exactly 30 bars + warmup → should work or raise clear error."""
+        # Need enough rows to survive warmup (default window=30)
+        bars = _make_synthetic_bars(80)
+        # May or may not have enough after warmup
+        try:
+            result = profile(bars, vector="entropy", skip_aggregation=True,
+                             temporal_windows=[3, 5])
+            assert isinstance(result, ProfilingResult)
+        except ValueError as e:
+            assert "at least 30" in str(e) or "warmup" in str(e).lower()
+
+    def test_many_features(self):
+        """8 base features × 2 suffixes = 16 columns → many derivatives."""
+        bars = _make_synthetic_bars(200, n_features=8)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert result.derivatives_meta["n_total"] > 0
+
+    def test_single_feature(self):
+        """Single base feature → pipeline still works."""
+        bars = _make_synthetic_bars(200, n_features=1)
+        try:
+            result = profile(bars, vector="entropy", skip_aggregation=True)
+            assert isinstance(result, ProfilingResult)
+        except ValueError:
+            # May fail if single feature produces too few derivatives
+            pass
+
+    def test_skip_aggregation_flag(self):
+        """skip_aggregation=True passes bars directly without aggregate_bars."""
+        bars = _make_synthetic_bars(200)
+        # No timestamp_ns column → would fail if aggregation ran
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert isinstance(result, ProfilingResult)
+
+    def test_reduction_report_present(self):
+        """reduction_report is populated from macro regime discovery."""
+        bars = _make_synthetic_bars(200)
+        result = profile(bars, vector="entropy", skip_aggregation=True)
+        assert isinstance(result.reduction_report, dict)

@@ -33,6 +33,8 @@ from sklearn.metrics import adjusted_rand_score, silhouette_score
 from sklearn.neighbors import NearestNeighbors
 
 from cluster_pipeline.reduction import PCAResult, reduce
+from cluster_pipeline.derivatives import generate_derivatives, DerivativeResult
+from cluster_pipeline.preprocess import aggregate_bars
 
 logger = logging.getLogger(__name__)
 
@@ -981,4 +983,242 @@ def assemble_hierarchy(
         n_micro_per_regime=n_micro_per_regime,
         n_micro_total=n_micro_total,
         label_map=label_map,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 3.4: Full Hierarchy Pipeline
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ProfilingResult:
+    """Complete output of the profiling pipeline."""
+
+    hierarchy: HierarchicalLabels
+    macro: RegimeResult
+    micros: Dict[int, Optional[MicroStateResult]]
+    derivatives_meta: Dict
+    reduction_report: Dict
+    bars: pd.DataFrame
+    derivative_columns: List[str]
+    breaks_detected: List[int]
+    structure_test: StructureTest
+
+
+def _detect_breaks_safe(
+    bars: pd.DataFrame,
+    columns: List[str],
+    min_segment_length: int = 50,
+) -> List[int]:
+    """
+    Attempt structural break detection using ruptures (PELT).
+
+    Returns empty list if ruptures is not installed or detection fails.
+    """
+    try:
+        import ruptures as rpt
+    except ImportError:
+        logger.info("ruptures not installed — skipping structural break detection")
+        return []
+
+    if len(bars) < 2 * min_segment_length:
+        return []
+
+    # Use numeric columns only
+    usable = [c for c in columns if c in bars.columns]
+    if not usable:
+        return []
+
+    data = bars[usable].fillna(0).values
+
+    try:
+        algo = rpt.Pelt(model="rbf", min_size=min_segment_length).fit(data)
+        # PELT returns breakpoints including the last index (len(data))
+        bkpts = algo.predict(pen=np.log(len(data)) * data.shape[1])
+        # Remove the terminal breakpoint (always == len(data))
+        breaks = [b for b in bkpts if b < len(data)]
+        return breaks
+    except Exception as e:
+        logger.warning(f"Break detection failed: {e}")
+        return []
+
+
+def _longest_segment(n: int, breaks: List[int]) -> Tuple[int, int]:
+    """
+    Given total length n and break indices, return (start, end) of the
+    longest continuous segment.
+    """
+    if not breaks:
+        return 0, n
+
+    boundaries = [0] + sorted(breaks) + [n]
+    best_start, best_end = 0, n
+    best_len = 0
+    for i in range(len(boundaries) - 1):
+        seg_len = boundaries[i + 1] - boundaries[i]
+        if seg_len > best_len:
+            best_len = seg_len
+            best_start = boundaries[i]
+            best_end = boundaries[i + 1]
+    return best_start, best_end
+
+
+def profile(
+    df: pd.DataFrame,
+    vector: str,
+    timeframe: str = "15min",
+    max_base_features: int = 15,
+    temporal_windows: Optional[List[int]] = None,
+    autocorrelation_threshold: float = 0.7,
+    macro_k_range: range = range(2, 6),
+    micro_k_range: range = range(2, 6),
+    pca_variance: float = 0.95,
+    include_spectral: bool = True,
+    random_state: int = 42,
+    skip_aggregation: bool = False,
+) -> ProfilingResult:
+    """
+    Full profiling pipeline: raw data → hierarchical regime labels.
+
+    Steps:
+      1. Aggregate raw tick data into time bars (unless skip_aggregation=True)
+      2. Detect structural breaks; use longest segment if breaks found
+      3. Generate derivatives (feature selection + temporal + cross)
+      4. Discover macro regimes (autocorrelation split → PCA → GMM)
+      5. Discover micro states per regime (all derivatives → PCA → GMM)
+      6. Assemble hierarchical labels
+
+    Args:
+        df: Raw tick DataFrame (with timestamp_ns, symbol columns) or
+            pre-aggregated bars if skip_aggregation=True.
+        vector: Feature vector name (e.g. "entropy", "orderflow").
+        timeframe: Bar aggregation timeframe (e.g. "15min", "1h").
+        max_base_features: Max features to select before derivation.
+        temporal_windows: Windows for temporal derivatives. Default [5, 15, 30].
+        autocorrelation_threshold: Lag-5 autocorrelation cutoff for slow features.
+        macro_k_range: k range for macro regime GMM sweep.
+        micro_k_range: k range for micro state GMM sweep.
+        pca_variance: Cumulative variance threshold for PCA.
+        include_spectral: Include spectral features (placeholder for future).
+        random_state: Random seed for reproducibility.
+        skip_aggregation: If True, treat df as pre-aggregated bars.
+
+    Returns:
+        ProfilingResult with hierarchy, macro, micro, and diagnostics.
+
+    Raises:
+        ValueError: if df is empty or has insufficient data.
+    """
+    if temporal_windows is None:
+        temporal_windows = [5, 15, 30]
+
+    if df.empty:
+        raise ValueError("Input DataFrame is empty")
+
+    # ----- Step 1: Aggregate bars -----
+    if skip_aggregation:
+        bars = df.copy()
+    else:
+        bars = aggregate_bars(df, timeframe=timeframe)
+
+    if len(bars) < 30:
+        raise ValueError(
+            f"Need at least 30 bars for profiling, got {len(bars)}"
+        )
+
+    # ----- Step 2: Structural break detection -----
+    # Use all numeric columns for break detection
+    numeric_cols = bars.select_dtypes(include=[np.number]).columns.tolist()
+    breaks_detected = _detect_breaks_safe(bars, numeric_cols)
+
+    if breaks_detected:
+        start, end = _longest_segment(len(bars), breaks_detected)
+        logger.info(
+            f"Structural breaks at {breaks_detected}. "
+            f"Using longest segment [{start}:{end}] ({end - start} bars)"
+        )
+        bars = bars.iloc[start:end].reset_index(drop=True)
+
+        if len(bars) < 30:
+            raise ValueError(
+                f"Longest segment after break detection has only {len(bars)} "
+                f"bars (need at least 30)"
+            )
+
+    # ----- Step 3: Generate derivatives -----
+    deriv_result = generate_derivatives(
+        bars,
+        vector=vector,
+        max_base_features=max_base_features,
+        temporal_windows=temporal_windows,
+    )
+
+    derivatives = deriv_result.derivatives
+
+    if derivatives.empty or derivatives.shape[1] == 0:
+        raise ValueError(
+            f"No derivatives generated for vector '{vector}'. "
+            f"Check that bar columns match the vector name."
+        )
+
+    # Drop warmup rows where derivatives are NaN
+    if deriv_result.warmup_rows > 0:
+        derivatives = derivatives.iloc[deriv_result.warmup_rows:].reset_index(drop=True)
+        bars = bars.iloc[deriv_result.warmup_rows:].reset_index(drop=True)
+
+    if len(derivatives) < 30:
+        raise ValueError(
+            f"Only {len(derivatives)} rows after warmup (need at least 30)"
+        )
+
+    derivative_columns = derivatives.columns.tolist()
+
+    derivatives_meta = {
+        "n_base_features": deriv_result.n_base_features,
+        "base_features": deriv_result.base_features,
+        "n_temporal": deriv_result.n_temporal,
+        "n_cross": deriv_result.n_cross,
+        "n_total": deriv_result.n_total,
+        "warmup_rows": deriv_result.warmup_rows,
+    }
+
+    # ----- Step 4: Discover macro regimes -----
+    macro = discover_macro_regimes(
+        derivatives,
+        autocorrelation_threshold=autocorrelation_threshold,
+        k_range=macro_k_range,
+        pca_variance=pca_variance,
+        random_state=random_state,
+    )
+
+    # ----- Step 5: Discover micro states per regime -----
+    micros: Dict[int, Optional[MicroStateResult]] = {}
+    if not macro.early_exit:
+        for rid in range(macro.k):
+            micro = discover_micro_states(
+                derivatives,
+                macro.labels,
+                regime_id=rid,
+                k_range=micro_k_range,
+                pca_variance=pca_variance,
+                random_state=random_state,
+            )
+            micros[rid] = micro
+    else:
+        micros[0] = None
+
+    # ----- Step 6: Assemble hierarchy -----
+    hierarchy = assemble_hierarchy(macro, micros)
+
+    return ProfilingResult(
+        hierarchy=hierarchy,
+        macro=macro,
+        micros=micros,
+        derivatives_meta=derivatives_meta,
+        reduction_report=macro.filter_report,
+        bars=bars,
+        derivative_columns=derivative_columns,
+        breaks_detected=breaks_detected,
+        structure_test=macro.structure_test,
     )
