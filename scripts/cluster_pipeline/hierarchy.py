@@ -1,15 +1,21 @@
 """
 Hierarchical state discovery for NAT profiling system.
 
-Phase 3: Structure existence tests and macro regime discovery.
+Phase 3: Structure existence tests, macro regime discovery, micro-state
+discovery, and hierarchical label assembly.
 
 Usage:
     from cluster_pipeline.hierarchy import test_structure_existence
     from cluster_pipeline.hierarchy import discover_macro_regimes
+    from cluster_pipeline.hierarchy import discover_micro_states
+    from cluster_pipeline.hierarchy import assemble_hierarchy
 
     result = test_structure_existence(X_reduced)
     if result.has_structure:
         regime = discover_macro_regimes(derivatives_df)
+        micros = {r: discover_micro_states(derivatives_df, regime.labels, r)
+                  for r in range(regime.k)}
+        hierarchy = assemble_hierarchy(regime, micros)
 """
 
 from __future__ import annotations
@@ -845,4 +851,134 @@ def discover_micro_states(
         structure_test=structure,
         filter_report=filter_report,
         n_bars=n_regime,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 3.3: Hierarchical Label Assembly
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class HierarchicalLabels:
+    """Unified hierarchical labeling combining macro regimes and micro states."""
+
+    macro_labels: np.ndarray  # (n_bars,) macro regime IDs
+    micro_labels: np.ndarray  # (n_bars,) global micro-state IDs (contiguous)
+    composite_labels: np.ndarray  # (n_bars,) string labels "R{macro}_S{local}"
+    n_macro: int
+    n_micro_per_regime: Dict[int, int]  # regime_id → number of micro states
+    n_micro_total: int  # total unique global micro IDs
+    label_map: Dict[int, Tuple[int, int]]  # global_micro → (regime_id, local_state)
+
+
+def assemble_hierarchy(
+    macro_result: RegimeResult,
+    micro_results: Dict[int, Optional[MicroStateResult]],
+) -> HierarchicalLabels:
+    """
+    Combine macro regime labels with per-regime micro-state labels into
+    a unified hierarchical labeling system.
+
+    For regimes without micro results (None), all bars in that regime
+    are assigned a single micro state (the regime itself is the finest
+    granularity).
+
+    Global micro IDs are assigned contiguously starting from 0, ordered
+    by regime ID then local state ID.
+
+    Args:
+        macro_result: Result from discover_macro_regimes().
+        micro_results: Dict mapping regime_id → MicroStateResult or None.
+
+    Returns:
+        HierarchicalLabels with macro, micro, and composite labels.
+
+    Raises:
+        ValueError: if macro_result has no labels or micro_results keys
+            reference regimes not present in macro_labels.
+    """
+    macro_labels = macro_result.labels
+    n_bars = len(macro_labels)
+
+    if n_bars == 0:
+        raise ValueError("macro_result has empty labels")
+
+    unique_regimes = sorted(np.unique(macro_labels).tolist())
+
+    # Validate micro_results keys reference valid regimes
+    for rid in micro_results:
+        if rid not in unique_regimes:
+            raise ValueError(
+                f"micro_results contains regime_id={rid} which is not "
+                f"in macro_labels (unique regimes: {unique_regimes})"
+            )
+
+    # ----- Build the mapping: (regime_id, local_state) → global_micro_id -----
+    # Process regimes in sorted order for deterministic global ID assignment
+    global_id = 0
+    # (regime_id, local_state) → global_micro_id
+    local_to_global: Dict[Tuple[int, int], int] = {}
+    # global_micro_id → (regime_id, local_state)
+    label_map: Dict[int, Tuple[int, int]] = {}
+    n_micro_per_regime: Dict[int, int] = {}
+
+    for rid in unique_regimes:
+        micro = micro_results.get(rid)
+        if micro is not None:
+            # Regime has micro states
+            local_ids = sorted(np.unique(micro.labels).tolist())
+            n_micro_per_regime[rid] = len(local_ids)
+            for local_id in local_ids:
+                local_to_global[(rid, local_id)] = global_id
+                label_map[global_id] = (rid, local_id)
+                global_id += 1
+        else:
+            # No micro states — single state for the whole regime
+            n_micro_per_regime[rid] = 1
+            local_to_global[(rid, 0)] = global_id
+            label_map[global_id] = (rid, 0)
+            global_id += 1
+
+    n_micro_total = global_id
+
+    # ----- Assign per-bar labels -----
+    micro_labels = np.empty(n_bars, dtype=int)
+    composite_labels = np.empty(n_bars, dtype=object)
+
+    # Build per-regime local label arrays for efficient lookup
+    # For regimes with micro results, we need to map original bar positions
+    # to local micro labels
+    regime_bar_counters: Dict[int, int] = {rid: 0 for rid in unique_regimes}
+
+    # Pre-build ordered local labels for each regime with micro results
+    regime_local_labels: Dict[int, np.ndarray] = {}
+    for rid in unique_regimes:
+        micro = micro_results.get(rid)
+        if micro is not None:
+            regime_local_labels[rid] = micro.labels
+
+    for i in range(n_bars):
+        rid = int(macro_labels[i])
+        micro = micro_results.get(rid)
+
+        if micro is not None:
+            # Get the local micro label for this bar within the regime
+            bar_idx = regime_bar_counters[rid]
+            local_id = int(regime_local_labels[rid][bar_idx])
+            regime_bar_counters[rid] = bar_idx + 1
+        else:
+            local_id = 0
+
+        micro_labels[i] = local_to_global[(rid, local_id)]
+        composite_labels[i] = f"R{rid}_S{local_id}"
+
+    return HierarchicalLabels(
+        macro_labels=macro_labels,
+        micro_labels=micro_labels,
+        composite_labels=composite_labels,
+        n_macro=len(unique_regimes),
+        n_micro_per_regime=n_micro_per_regime,
+        n_micro_total=n_micro_total,
+        label_map=label_map,
     )

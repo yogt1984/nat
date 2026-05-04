@@ -41,6 +41,9 @@ from cluster_pipeline.hierarchy import (
     # Task 3.2
     discover_micro_states,
     MicroStateResult,
+    # Task 3.3
+    assemble_hierarchy,
+    HierarchicalLabels,
 )
 
 
@@ -1921,3 +1924,684 @@ class TestMicroEdgeCases:
         labels = np.zeros(400, dtype=int)
         result = discover_micro_states(df, labels, regime_id=0, min_bars=50)
         assert result is None or isinstance(result, MicroStateResult)
+
+
+# ===========================================================================
+# Task 3.3: Hierarchical Label Assembly Tests
+# ===========================================================================
+
+def _make_fake_regime_result(labels: np.ndarray) -> RegimeResult:
+    """Build a minimal RegimeResult for testing assemble_hierarchy."""
+    n = len(labels)
+    return RegimeResult(
+        labels=labels,
+        k=len(np.unique(labels)) if n > 0 else 0,
+        pca_result=PCAResult(
+            X_reduced=np.zeros((n, 1)),
+            n_components=1,
+            explained_variance_ratio=np.array([1.0]),
+            cumulative_variance=np.array([1.0]),
+            components=np.eye(1),
+            mean=np.zeros(1),
+            std=np.ones(1),
+            column_names=["f0"],
+            loadings={"f0": [1.0]},
+            regularized=False,
+        ),
+        gmm_params={"means": [], "weights": []},
+        quality=QualityReport(silhouette=0.5, min_cluster_fraction=0.3,
+                              n_per_cluster={int(k): int(np.sum(labels == k))
+                                             for k in np.unique(labels)} if n > 0 else {}),
+        stability=StabilityReport(mean_ari=0.8, std_ari=0.1, n_bootstrap=30, block_size=15),
+        sweep=SweepResult(k_range=[2, 3], bic_scores=[100, 90],
+                          best_k=len(np.unique(labels)) if n > 0 else 0, best_bic=90.0),
+        centroid_profiles=pd.DataFrame(),
+        self_transition_rate=0.9,
+        durations={},
+        structure_test=StructureTest(hopkins_statistic=0.8, dip_test_p=0.01,
+                                     has_structure=True, recommendation="proceed"),
+        slow_columns=["f0"],
+        filter_report={},
+    )
+
+
+def _make_fake_micro_result(regime_id: int, labels: np.ndarray) -> MicroStateResult:
+    """Build a minimal MicroStateResult for testing assemble_hierarchy."""
+    n = len(labels)
+    return MicroStateResult(
+        regime_id=regime_id,
+        labels=labels,
+        k=len(np.unique(labels)),
+        pca_result=PCAResult(
+            X_reduced=np.zeros((n, 1)),
+            n_components=1,
+            explained_variance_ratio=np.array([1.0]),
+            cumulative_variance=np.array([1.0]),
+            components=np.eye(1),
+            mean=np.zeros(1),
+            std=np.ones(1),
+            column_names=["f0"],
+            loadings={"f0": [1.0]},
+            regularized=False,
+        ),
+        gmm_params={"means": [], "weights": []},
+        quality=QualityReport(silhouette=0.5, min_cluster_fraction=0.3,
+                              n_per_cluster={}),
+        stability=StabilityReport(mean_ari=0.8, std_ari=0.1, n_bootstrap=10, block_size=5),
+        sweep=SweepResult(k_range=[2, 3], bic_scores=[100, 90], best_k=2, best_bic=90.0),
+        centroid_profiles=pd.DataFrame(),
+        structure_test=StructureTest(hopkins_statistic=0.8, dip_test_p=0.01,
+                                     has_structure=True, recommendation="proceed"),
+        filter_report={},
+        n_bars=n,
+    )
+
+
+# Need PCAResult for helpers
+from cluster_pipeline.reduction import PCAResult
+
+
+class TestGlobalIDsContiguous:
+    """Global micro IDs must be contiguous from 0 to n_micro_total - 1."""
+
+    def test_two_regimes_both_with_micros(self):
+        """Two regimes each with 2 micro states → global IDs 0,1,2,3."""
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+            1: _make_fake_micro_result(1, np.array([0]*30 + [1]*20)),
+        }
+        h = assemble_hierarchy(regime, micros)
+        assert set(h.micro_labels) == set(range(h.n_micro_total))
+
+    def test_three_regimes_varying_micros(self):
+        """3 regimes with 2, 3, 1 micro states → IDs 0..5."""
+        macro = np.array([0]*30 + [1]*30 + [2]*40)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*15 + [1]*15)),
+            1: _make_fake_micro_result(1, np.array([0]*10 + [1]*10 + [2]*10)),
+            2: None,  # single state
+        }
+        h = assemble_hierarchy(regime, micros)
+        assert set(h.micro_labels) == set(range(h.n_micro_total))
+        assert h.n_micro_total == 2 + 3 + 1
+
+    def test_all_regimes_none(self):
+        """All regimes have None micro → one global ID per regime."""
+        macro = np.array([0]*40 + [1]*60)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert set(h.micro_labels) == set(range(2))
+        assert h.n_micro_total == 2
+
+    def test_single_regime_single_state(self):
+        """One regime, no micro → single global ID."""
+        macro = np.zeros(100, dtype=int)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None}
+        h = assemble_hierarchy(regime, micros)
+        assert set(h.micro_labels) == {0}
+        assert h.n_micro_total == 1
+
+    def test_contiguous_even_with_missing_micro_keys(self):
+        """If micro_results doesn't include a regime key, treat as None."""
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        # Only regime 0 has micro results, regime 1 is missing from dict
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+        }
+        h = assemble_hierarchy(regime, micros)
+        assert set(h.micro_labels) == set(range(h.n_micro_total))
+        assert h.n_micro_total == 3  # 2 from regime 0 + 1 from regime 1
+
+
+class TestRegimeWithoutMicros:
+    """Regimes with None micro result get a single micro state."""
+
+    def test_none_regime_same_micro_id(self):
+        """All bars in a None regime get the same global micro ID."""
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+            1: None,
+        }
+        h = assemble_hierarchy(regime, micros)
+        regime_1_micro = h.micro_labels[50:]
+        assert len(set(regime_1_micro)) == 1
+
+    def test_none_regime_composite_label(self):
+        """None regime bars get composite 'R{r}_S0'."""
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert all(h.composite_labels[i] == "R0_S0" for i in range(50))
+        assert all(h.composite_labels[i] == "R1_S0" for i in range(50, 100))
+
+    def test_n_micro_per_regime_is_one(self):
+        """None regime → n_micro_per_regime[rid] == 1."""
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert h.n_micro_per_regime[0] == 1
+        assert h.n_micro_per_regime[1] == 1
+
+    def test_mixed_none_and_micro(self):
+        """One regime None, one with micros → correct IDs."""
+        macro = np.array([0]*30 + [1]*70)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: None,
+            1: _make_fake_micro_result(1, np.array([0]*35 + [1]*35)),
+        }
+        h = assemble_hierarchy(regime, micros)
+        # Regime 0 → 1 state (global 0)
+        # Regime 1 → 2 states (global 1, 2)
+        assert h.n_micro_per_regime[0] == 1
+        assert h.n_micro_per_regime[1] == 2
+        assert all(h.micro_labels[i] == 0 for i in range(30))
+
+
+class TestCompositeFormat:
+    """All composite labels must match 'R{int}_S{int}' format."""
+
+    def test_all_match_format(self):
+        import re
+        macro = np.array([0]*50 + [1]*50 + [2]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+            1: None,
+            2: _make_fake_micro_result(2, np.array([0]*20 + [1]*15 + [2]*15)),
+        }
+        h = assemble_hierarchy(regime, micros)
+        pattern = re.compile(r"R\d+_S\d+")
+        for label in h.composite_labels:
+            assert pattern.fullmatch(label), f"Bad composite label: {label}"
+
+    def test_composite_matches_macro_and_local(self):
+        """Composite R{macro}_S{local} must match macro_labels and local IDs."""
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+            1: None,
+        }
+        h = assemble_hierarchy(regime, micros)
+        for i in range(len(macro)):
+            parts = h.composite_labels[i].split("_")
+            r = int(parts[0][1:])
+            assert r == macro[i]
+
+    def test_composite_unique_count(self):
+        """Number of unique composite labels == n_micro_total."""
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+            1: _make_fake_micro_result(1, np.array([0]*30 + [1]*20)),
+        }
+        h = assemble_hierarchy(regime, micros)
+        assert len(set(h.composite_labels)) == h.n_micro_total
+
+    def test_composite_has_correct_local_ids(self):
+        """Local state IDs in composite match the micro result labels."""
+        macro = np.array([0]*60 + [1]*40)
+        regime = _make_fake_regime_result(macro)
+        micro_labels_0 = np.array([0]*20 + [1]*20 + [2]*20)
+        micros = {
+            0: _make_fake_micro_result(0, micro_labels_0),
+            1: None,
+        }
+        h = assemble_hierarchy(regime, micros)
+        # First 60 bars belong to regime 0
+        for i in range(60):
+            parts = h.composite_labels[i].split("_")
+            local = int(parts[1][1:])
+            assert local == micro_labels_0[i]
+
+
+class TestLabelMapInvertible:
+    """For each bar: label_map[micro_labels[i]] == (macro_labels[i], local_state)."""
+
+    def test_invertible_with_micros(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micro_0 = np.array([0]*25 + [1]*25)
+        micro_1 = np.array([0]*30 + [1]*20)
+        micros = {
+            0: _make_fake_micro_result(0, micro_0),
+            1: _make_fake_micro_result(1, micro_1),
+        }
+        h = assemble_hierarchy(regime, micros)
+        for i in range(100):
+            gid = h.micro_labels[i]
+            rid, local = h.label_map[gid]
+            assert rid == macro[i]
+
+    def test_invertible_with_none_regimes(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        for i in range(100):
+            gid = h.micro_labels[i]
+            rid, local = h.label_map[gid]
+            assert rid == macro[i]
+            assert local == 0
+
+    def test_label_map_covers_all_global_ids(self):
+        """label_map keys == set(range(n_micro_total))."""
+        macro = np.array([0]*50 + [1]*50 + [2]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+            1: None,
+            2: _make_fake_micro_result(2, np.array([0]*20 + [1]*15 + [2]*15)),
+        }
+        h = assemble_hierarchy(regime, micros)
+        assert set(h.label_map.keys()) == set(range(h.n_micro_total))
+
+    def test_label_map_values_unique(self):
+        """Each (regime, local) pair maps to exactly one global ID."""
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+            1: _make_fake_micro_result(1, np.array([0]*30 + [1]*20)),
+        }
+        h = assemble_hierarchy(regime, micros)
+        values = list(h.label_map.values())
+        assert len(values) == len(set(values))
+
+
+class TestEveryBarHasLabels:
+    """Every bar has exactly one macro and one micro label."""
+
+    def test_macro_labels_length(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert len(h.macro_labels) == 100
+
+    def test_micro_labels_length(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert len(h.micro_labels) == 100
+
+    def test_composite_labels_length(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert len(h.composite_labels) == 100
+
+    def test_no_negative_micro_labels(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+            1: None,
+        }
+        h = assemble_hierarchy(regime, micros)
+        assert np.all(h.micro_labels >= 0)
+
+
+class TestNMacroCount:
+    """n_macro must equal number of unique macro regimes."""
+
+    def test_two_regimes(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert h.n_macro == 2
+
+    def test_five_regimes(self):
+        macro = np.concatenate([np.full(20, i) for i in range(5)])
+        regime = _make_fake_regime_result(macro)
+        micros = {i: None for i in range(5)}
+        h = assemble_hierarchy(regime, micros)
+        assert h.n_macro == 5
+
+    def test_single_regime(self):
+        macro = np.zeros(100, dtype=int)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None}
+        h = assemble_hierarchy(regime, micros)
+        assert h.n_macro == 1
+
+
+class TestAssemblyOrdering:
+    """Global IDs assigned in regime order then local state order."""
+
+    def test_regime_order(self):
+        """Regime 0's micro IDs come before regime 1's."""
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+            1: _make_fake_micro_result(1, np.array([0]*30 + [1]*20)),
+        }
+        h = assemble_hierarchy(regime, micros)
+        r0_ids = set(h.micro_labels[:50])
+        r1_ids = set(h.micro_labels[50:])
+        assert max(r0_ids) < min(r1_ids)
+
+    def test_local_states_ordered_within_regime(self):
+        """Within a regime, local state 0 gets lower global ID than state 1."""
+        macro = np.array([0]*60)
+        regime = _make_fake_regime_result(macro)
+        local = np.array([0]*20 + [1]*20 + [2]*20)
+        micros = {0: _make_fake_micro_result(0, local)}
+        h = assemble_hierarchy(regime, micros)
+        # Global IDs for local 0, 1, 2 should be 0, 1, 2
+        for i in range(60):
+            assert h.micro_labels[i] == local[i]
+
+
+class TestInterleavedMacroLabels:
+    """Macro labels that alternate (not contiguous blocks) work correctly."""
+
+    def test_alternating_regimes(self):
+        """Labels like [0,1,0,1,...] with micros in each."""
+        macro = np.array([0, 1] * 50)
+        regime = _make_fake_regime_result(macro)
+        # 50 bars per regime
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+            1: _make_fake_micro_result(1, np.array([0]*25 + [1]*25)),
+        }
+        h = assemble_hierarchy(regime, micros)
+        assert len(h.micro_labels) == 100
+        assert set(h.micro_labels) == set(range(4))
+
+    def test_alternating_label_map_correct(self):
+        """label_map still inverts correctly with interleaved labels."""
+        macro = np.array([0, 1, 0, 1, 0, 1] * 10)  # 60 bars, 30 per regime
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*15 + [1]*15)),
+            1: None,
+        }
+        h = assemble_hierarchy(regime, micros)
+        for i in range(60):
+            gid = h.micro_labels[i]
+            rid, _ = h.label_map[gid]
+            assert rid == macro[i]
+
+    def test_alternating_composite_correct(self):
+        """Composite labels correct when regimes interleave."""
+        macro = np.array([0, 1] * 30)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        for i in range(60):
+            expected = f"R{macro[i]}_S0"
+            assert h.composite_labels[i] == expected
+
+
+class TestValidationErrors:
+    """Invalid inputs must raise ValueError."""
+
+    def test_empty_labels(self):
+        macro = np.array([], dtype=int)
+        regime = _make_fake_regime_result(macro)
+        with pytest.raises(ValueError, match="empty"):
+            assemble_hierarchy(regime, {})
+
+    def test_invalid_regime_key(self):
+        """micro_results key not in macro_labels → ValueError."""
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: None,
+            1: None,
+            99: _make_fake_micro_result(99, np.array([0]*10)),
+        }
+        with pytest.raises(ValueError, match="regime_id=99"):
+            assemble_hierarchy(regime, micros)
+
+    def test_micro_labels_length_mismatch(self):
+        """Micro result has wrong number of labels → IndexError at runtime."""
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        # Micro result for regime 0 has 30 labels but regime 0 has 50 bars
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*30)),
+            1: None,
+        }
+        with pytest.raises(IndexError):
+            assemble_hierarchy(regime, micros)
+
+
+class TestReturnType:
+    """assemble_hierarchy returns HierarchicalLabels with correct types."""
+
+    def test_return_type(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert isinstance(h, HierarchicalLabels)
+
+    def test_macro_labels_is_ndarray(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert isinstance(h.macro_labels, np.ndarray)
+
+    def test_micro_labels_is_ndarray(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert isinstance(h.micro_labels, np.ndarray)
+
+    def test_composite_labels_is_ndarray(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert isinstance(h.composite_labels, np.ndarray)
+
+    def test_label_map_is_dict(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert isinstance(h.label_map, dict)
+
+    def test_n_micro_per_regime_is_dict(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert isinstance(h.n_micro_per_regime, dict)
+
+
+class TestEarlyExitRegime:
+    """assemble_hierarchy works with early_exit RegimeResult."""
+
+    def test_early_exit_all_zeros(self):
+        """Early exit regime → all labels zero, single micro state."""
+        macro = np.zeros(100, dtype=int)
+        regime = _make_fake_regime_result(macro)
+        regime.early_exit = True
+        regime.early_exit_reason = "no structure"
+        micros = {0: None}
+        h = assemble_hierarchy(regime, micros)
+        assert h.n_macro == 1
+        assert h.n_micro_total == 1
+        assert np.all(h.micro_labels == 0)
+
+    def test_early_exit_composite(self):
+        """Early exit → all composite labels 'R0_S0'."""
+        macro = np.zeros(50, dtype=int)
+        regime = _make_fake_regime_result(macro)
+        regime.early_exit = True
+        micros = {}
+        h = assemble_hierarchy(regime, micros)
+        assert all(h.composite_labels[i] == "R0_S0" for i in range(50))
+
+
+class TestLargeNumberOfRegimes:
+    """Stress test with many regimes."""
+
+    def test_ten_regimes_each_with_micros(self):
+        """10 regimes × 3 micro states = 30 global IDs."""
+        parts = [np.full(20, i) for i in range(10)]
+        macro = np.concatenate(parts)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            i: _make_fake_micro_result(i, np.array([0]*7 + [1]*7 + [2]*6))
+            for i in range(10)
+        }
+        h = assemble_hierarchy(regime, micros)
+        assert h.n_macro == 10
+        assert h.n_micro_total == 30
+        assert set(h.micro_labels) == set(range(30))
+
+    def test_ten_regimes_mixed_none(self):
+        """10 regimes, odd ones have micro, even ones None."""
+        parts = [np.full(20, i) for i in range(10)]
+        macro = np.concatenate(parts)
+        regime = _make_fake_regime_result(macro)
+        micros = {}
+        for i in range(10):
+            if i % 2 == 1:
+                micros[i] = _make_fake_micro_result(i, np.array([0]*10 + [1]*10))
+            else:
+                micros[i] = None
+        h = assemble_hierarchy(regime, micros)
+        # 5 None regimes × 1 + 5 micro regimes × 2 = 15
+        assert h.n_micro_total == 15
+        assert set(h.micro_labels) == set(range(15))
+
+
+class TestNonContiguousRegimeIDs:
+    """Regime IDs don't have to be 0,1,2,... — can be e.g. 0,2,5."""
+
+    def test_sparse_regime_ids(self):
+        """Macro labels are 0 and 5 — still works."""
+        macro = np.array([0]*50 + [5]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+            5: None,
+        }
+        h = assemble_hierarchy(regime, micros)
+        assert h.n_macro == 2
+        assert h.n_micro_total == 3
+        assert set(h.micro_labels) == set(range(3))
+
+    def test_sparse_label_map(self):
+        """label_map correctly references sparse regime IDs."""
+        macro = np.array([3]*40 + [7]*60)
+        regime = _make_fake_regime_result(macro)
+        micros = {3: None, 7: None}
+        h = assemble_hierarchy(regime, micros)
+        assert h.label_map[0] == (3, 0)
+        assert h.label_map[1] == (7, 0)
+
+
+class TestNMicroPerRegime:
+    """n_micro_per_regime correctly counts micro states per regime."""
+
+    def test_counts_match(self):
+        macro = np.array([0]*60 + [1]*40)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*20 + [1]*20 + [2]*20)),
+            1: _make_fake_micro_result(1, np.array([0]*20 + [1]*20)),
+        }
+        h = assemble_hierarchy(regime, micros)
+        assert h.n_micro_per_regime[0] == 3
+        assert h.n_micro_per_regime[1] == 2
+
+    def test_all_regimes_covered(self):
+        """Every regime ID in macro_labels appears in n_micro_per_regime."""
+        macro = np.array([0]*30 + [1]*30 + [2]*40)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None, 2: None}
+        h = assemble_hierarchy(regime, micros)
+        assert set(h.n_micro_per_regime.keys()) == {0, 1, 2}
+
+    def test_sum_equals_total(self):
+        """Sum of n_micro_per_regime values == n_micro_total."""
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+            1: None,
+        }
+        h = assemble_hierarchy(regime, micros)
+        assert sum(h.n_micro_per_regime.values()) == h.n_micro_total
+
+
+class TestDeterminismAssembly:
+    """Same inputs always produce identical outputs."""
+
+    def test_deterministic(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {
+            0: _make_fake_micro_result(0, np.array([0]*25 + [1]*25)),
+            1: _make_fake_micro_result(1, np.array([0]*30 + [1]*20)),
+        }
+        h1 = assemble_hierarchy(regime, micros)
+        h2 = assemble_hierarchy(regime, micros)
+        np.testing.assert_array_equal(h1.micro_labels, h2.micro_labels)
+        np.testing.assert_array_equal(h1.composite_labels, h2.composite_labels)
+        assert h1.label_map == h2.label_map
+
+
+class TestEdgeCaseSingleBar:
+    """Edge case: single bar."""
+
+    def test_single_bar(self):
+        macro = np.array([0])
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None}
+        h = assemble_hierarchy(regime, micros)
+        assert len(h.micro_labels) == 1
+        assert h.micro_labels[0] == 0
+        assert h.composite_labels[0] == "R0_S0"
+        assert h.n_micro_total == 1
+
+
+class TestMicroLabelsNonContiguous:
+    """Micro result labels that skip values (e.g. [0, 2]) still work."""
+
+    def test_skipped_local_ids(self):
+        """If GMM assigns labels 0 and 2 (skipping 1), assembly handles it."""
+        macro = np.array([0]*60)
+        regime = _make_fake_regime_result(macro)
+        # Labels skip value 1
+        local = np.array([0]*30 + [2]*30)
+        micros = {0: _make_fake_micro_result(0, local)}
+        h = assemble_hierarchy(regime, micros)
+        # Should still produce contiguous global IDs
+        assert set(h.micro_labels) == set(range(h.n_micro_total))
+        assert h.n_micro_total == 2  # two unique local states
+
+
+class TestMacroLabelsPassedThrough:
+    """macro_labels in result is the same object from RegimeResult."""
+
+    def test_macro_labels_identity(self):
+        macro = np.array([0]*50 + [1]*50)
+        regime = _make_fake_regime_result(macro)
+        micros = {0: None, 1: None}
+        h = assemble_hierarchy(regime, micros)
+        assert h.macro_labels is macro
