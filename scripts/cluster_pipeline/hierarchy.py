@@ -681,3 +681,168 @@ def _early_exit_result(
         early_exit=True,
         early_exit_reason=reason,
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 3.2: Micro State Discovery (Per Regime)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class MicroStateResult:
+    """Result of micro-state discovery within one macro regime."""
+
+    regime_id: int
+    labels: np.ndarray  # (n_regime_bars,) local cluster assignments
+    k: int
+    pca_result: PCAResult  # separate PCA fitted on this regime's subset
+    gmm_params: Dict
+    quality: QualityReport
+    stability: StabilityReport
+    sweep: SweepResult
+    centroid_profiles: pd.DataFrame
+    structure_test: StructureTest
+    filter_report: Dict
+    n_bars: int  # number of bars in this regime
+
+
+def discover_micro_states(
+    derivatives: pd.DataFrame,
+    macro_labels: np.ndarray,
+    regime_id: int,
+    k_range: range = range(2, 6),
+    pca_variance: float = 0.95,
+    n_bootstrap: int = 30,
+    block_size: int = 10,
+    min_bars: int = 100,
+    random_state: int = 42,
+) -> Optional[MicroStateResult]:
+    """
+    Discover 2-5 micro-states within a single macro regime.
+
+    Uses ALL derivative columns (not just slow), since micro-states capture
+    fast dynamics within a regime. PCA is fitted per-regime and will
+    automatically use Ledoit-Wolf regularization when the regime subset
+    is small relative to feature count.
+
+    Args:
+        derivatives: Full DataFrame of derivative columns (all bars).
+        macro_labels: Macro regime labels for all bars (from discover_macro_regimes).
+        regime_id: Which macro regime to analyze.
+        k_range: Range of cluster counts to sweep.
+        pca_variance: Cumulative variance threshold for per-regime PCA.
+        n_bootstrap: Number of block bootstrap resamples.
+        block_size: Block size for block bootstrap.
+        min_bars: Minimum bars required in the regime to attempt clustering.
+        random_state: Random seed for reproducibility.
+
+    Returns:
+        MicroStateResult if clustering succeeds, None if regime is too small
+        or has no discoverable structure.
+    """
+    if len(derivatives) != len(macro_labels):
+        raise ValueError(
+            f"derivatives rows ({len(derivatives)}) != "
+            f"macro_labels length ({len(macro_labels)})"
+        )
+
+    # ----- Step 1: Subset to this regime -----
+    mask = macro_labels == regime_id
+    n_regime = int(np.sum(mask))
+
+    if n_regime < min_bars:
+        warnings.warn(
+            f"Regime {regime_id} has only {n_regime} bars "
+            f"(< {min_bars} minimum). Skipping micro-state discovery."
+        )
+        return None
+
+    regime_df = derivatives.loc[mask].reset_index(drop=True)
+
+    # ----- Step 2: Reduce dimensionality (all columns, per-regime PCA) -----
+    try:
+        X_reduced, pca_result, filter_report = reduce(
+            regime_df, pca_variance=pca_variance
+        )
+    except ValueError as e:
+        warnings.warn(
+            f"Regime {regime_id}: reduction failed ({e}). "
+            "Skipping micro-state discovery."
+        )
+        return None
+
+    # ----- Step 3: Structure existence test -----
+    if n_regime < 10:
+        # Too few samples even for structure test
+        return None
+
+    structure = test_structure_existence(X_reduced, seed=random_state)
+
+    if not structure.has_structure:
+        warnings.warn(
+            f"Regime {regime_id}: no structure found "
+            f"(Hopkins={structure.hopkins_statistic:.3f}, "
+            f"dip_p={structure.dip_test_p:.3f}). "
+            "Skipping micro-state discovery."
+        )
+        return None
+
+    # ----- Step 4: k-sweep -----
+    # Cap k_range so max k < n_regime (can't have more clusters than data)
+    effective_k_range = [k for k in k_range if k < n_regime]
+    if len(effective_k_range) < 1:
+        warnings.warn(
+            f"Regime {regime_id}: not enough bars ({n_regime}) "
+            f"for any k in {list(k_range)}."
+        )
+        return None
+
+    sweep = _k_sweep_gmm(
+        X_reduced, k_range=range(effective_k_range[0], effective_k_range[-1] + 1),
+        random_state=random_state,
+    )
+
+    # ----- Step 5: Fit final GMM -----
+    gmm = GaussianMixture(
+        n_components=sweep.best_k,
+        covariance_type="full",
+        n_init=5,
+        random_state=random_state,
+    )
+    labels = gmm.fit_predict(X_reduced)
+
+    gmm_params = {
+        "means": gmm.means_.tolist(),
+        "weights": gmm.weights_.tolist(),
+        "covariance_type": gmm.covariance_type,
+    }
+
+    # ----- Step 6: Quality + stability -----
+    quality = _compute_quality(X_reduced, labels)
+
+    stability = _block_bootstrap_stability(
+        X_reduced,
+        labels,
+        n_components=sweep.best_k,
+        n_bootstrap=n_bootstrap,
+        block_size=block_size,
+        random_state=random_state,
+    )
+
+    # ----- Step 7: Centroid profiles -----
+    centroid_profiles = _centroid_profiles(regime_df, labels)
+
+    return MicroStateResult(
+        regime_id=regime_id,
+        labels=labels,
+        k=sweep.best_k,
+        pca_result=pca_result,
+        gmm_params=gmm_params,
+        quality=quality,
+        stability=stability,
+        sweep=sweep,
+        centroid_profiles=centroid_profiles,
+        structure_test=structure,
+        filter_report=filter_report,
+        n_bars=n_regime,
+    )

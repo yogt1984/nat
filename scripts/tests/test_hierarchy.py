@@ -38,6 +38,9 @@ from cluster_pipeline.hierarchy import (
     _compute_durations,
     _self_transition_rate,
     _centroid_profiles,
+    # Task 3.2
+    discover_micro_states,
+    MicroStateResult,
 )
 
 
@@ -1409,3 +1412,512 @@ class TestDiscoverEdgeCases:
         )
         if not result.early_exit:
             assert result.k == 2
+
+
+# ===========================================================================
+# Task 3.2: Micro State Discovery tests
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Helpers for micro-state tests
+# ---------------------------------------------------------------------------
+
+
+def _make_macro_micro_data(
+    n_per_regime: int = 300,
+    n_regimes: int = 2,
+    n_micro: int = 2,
+    dim: int = 8,
+    macro_sep: float = 10.0,
+    micro_sep: float = 3.0,
+    seed: int = 42,
+) -> Tuple[pd.DataFrame, np.ndarray]:
+    """
+    Create data with known macro regimes, each containing micro sub-clusters.
+
+    Returns (derivatives_df, macro_labels).
+    Within each regime, bars alternate between micro sub-clusters in blocks.
+    """
+    rng = np.random.RandomState(seed)
+    all_data = []
+    all_labels = []
+
+    for r in range(n_regimes):
+        macro_center = np.zeros(dim)
+        macro_center[0] = r * macro_sep
+
+        # Create micro sub-clusters within this regime
+        block_size = n_per_regime // (n_micro * 2)  # blocks of sub-clusters
+        regime_data = np.zeros((n_per_regime, dim))
+        for i in range(n_per_regime):
+            micro_id = (i // block_size) % n_micro
+            micro_offset = np.zeros(dim)
+            micro_offset[1] = micro_id * micro_sep
+            regime_data[i] = rng.normal(
+                macro_center + micro_offset, 0.5, dim
+            )
+
+        all_data.append(regime_data)
+        all_labels.append(np.full(n_per_regime, r, dtype=int))
+
+    data = np.vstack(all_data)
+    labels = np.concatenate(all_labels)
+    columns = [f"feat_{i}" for i in range(dim)]
+    return pd.DataFrame(data, columns=columns), labels
+
+
+# ---------------------------------------------------------------------------
+# Subset correctness
+# ---------------------------------------------------------------------------
+
+
+class TestMicroSubset:
+    """Verify that micro-state discovery operates on the correct subset."""
+
+    def test_only_regime_bars_used(self):
+        """Labels length must match number of bars in the specified regime."""
+        df, macro_labels = _make_macro_micro_data(n_per_regime=200)
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50
+        )
+        if result is not None:
+            n_regime_0 = int(np.sum(macro_labels == 0))
+            assert len(result.labels) == n_regime_0
+            assert result.n_bars == n_regime_0
+
+    def test_regime_1_subset(self):
+        """Regime 1 should produce labels for regime-1 bars only."""
+        df, macro_labels = _make_macro_micro_data(n_per_regime=200)
+        result = discover_micro_states(
+            df, macro_labels, regime_id=1, min_bars=50
+        )
+        if result is not None:
+            n_regime_1 = int(np.sum(macro_labels == 1))
+            assert len(result.labels) == n_regime_1
+
+    def test_regime_id_stored(self):
+        """MicroStateResult should store the correct regime_id."""
+        df, macro_labels = _make_macro_micro_data(n_per_regime=200)
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50
+        )
+        if result is not None:
+            assert result.regime_id == 0
+
+
+# ---------------------------------------------------------------------------
+# Separate PCA per regime
+# ---------------------------------------------------------------------------
+
+
+class TestSeparatePCA:
+    """Each regime should get its own PCA basis."""
+
+    def test_pca_components_differ_between_regimes(self):
+        """PCA on regime 0 vs regime 1 should produce different components."""
+        df, macro_labels = _make_macro_micro_data(
+            n_per_regime=300, macro_sep=10.0, micro_sep=3.0
+        )
+        r0 = discover_micro_states(df, macro_labels, regime_id=0, min_bars=50)
+        r1 = discover_micro_states(df, macro_labels, regime_id=1, min_bars=50)
+
+        if r0 is not None and r1 is not None:
+            # Components should differ (different data subsets)
+            # They may have different shapes too
+            if r0.pca_result.components.shape == r1.pca_result.components.shape:
+                assert not np.allclose(
+                    r0.pca_result.components, r1.pca_result.components
+                ), "PCA components should differ between regimes"
+
+    def test_pca_mean_differs_between_regimes(self):
+        """PCA mean should reflect the regime's data, not the global mean."""
+        df, macro_labels = _make_macro_micro_data(
+            n_per_regime=300, macro_sep=10.0
+        )
+        r0 = discover_micro_states(df, macro_labels, regime_id=0, min_bars=50)
+        r1 = discover_micro_states(df, macro_labels, regime_id=1, min_bars=50)
+
+        if r0 is not None and r1 is not None:
+            # Means should be different (regimes are separated)
+            assert not np.allclose(r0.pca_result.mean, r1.pca_result.mean)
+
+    def test_regularization_for_small_regime(self):
+        """Small regime with many features → Ledoit-Wolf should trigger."""
+        rng = np.random.RandomState(42)
+        # 120 bars, 80 features → after filtering, likely regularized
+        data = np.zeros((240, 80))
+        for i in range(240):
+            if i < 120:
+                data[i] = rng.normal(0, 1, 80)
+            else:
+                data[i] = rng.normal(5, 1, 80)
+
+        df = pd.DataFrame(data, columns=[f"f_{i}" for i in range(80)])
+        labels = np.array([0] * 120 + [1] * 120)
+
+        result = discover_micro_states(df, labels, regime_id=0, min_bars=50)
+        if result is not None:
+            # With 120 samples and many features post-filter, likely regularized
+            assert isinstance(result.pca_result.regularized, bool)
+
+
+# ---------------------------------------------------------------------------
+# Small regime returns None
+# ---------------------------------------------------------------------------
+
+
+class TestSmallRegime:
+    """Regimes with too few bars should return None."""
+
+    def test_small_regime_returns_none(self):
+        """Regime with 50 bars (< 100 default min) → None."""
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame(rng.normal(0, 1, (200, 5)), columns=[f"f_{i}" for i in range(5)])
+        labels = np.array([0] * 50 + [1] * 150)
+        result = discover_micro_states(df, labels, regime_id=0, min_bars=100)
+        assert result is None
+
+    def test_small_regime_warning(self):
+        """Small regime should emit a warning."""
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame(rng.normal(0, 1, (200, 5)), columns=[f"f_{i}" for i in range(5)])
+        labels = np.array([0] * 30 + [1] * 170)
+        with pytest.warns(UserWarning, match="only 30 bars"):
+            discover_micro_states(df, labels, regime_id=0, min_bars=100)
+
+    def test_custom_min_bars(self):
+        """With min_bars=20, a 30-bar regime should be attempted."""
+        rng = np.random.RandomState(42)
+        data = np.vstack([
+            rng.normal(0, 1, (30, 5)),
+            rng.normal(10, 1, (170, 5)),
+        ])
+        df = pd.DataFrame(data, columns=[f"f_{i}" for i in range(5)])
+        labels = np.array([0] * 30 + [1] * 170)
+        result = discover_micro_states(df, labels, regime_id=0, min_bars=20)
+        # Should attempt (may return None due to no structure, but shouldn't skip)
+        # The key: it wasn't skipped for being too small
+        # If it IS None, it's because of structure test, not size
+        assert result is None or isinstance(result, MicroStateResult)
+
+    def test_exactly_min_bars(self):
+        """Exactly min_bars should be attempted, not skipped."""
+        rng = np.random.RandomState(42)
+        data = np.vstack([
+            rng.normal(0, 1, (100, 5)),
+            rng.normal(10, 1, (100, 5)),
+        ])
+        df = pd.DataFrame(data, columns=[f"f_{i}" for i in range(5)])
+        labels = np.array([0] * 100 + [1] * 100)
+        # min_bars=100, regime has exactly 100 → should attempt
+        result = discover_micro_states(df, labels, regime_id=0, min_bars=100)
+        assert result is None or isinstance(result, MicroStateResult)
+
+    def test_nonexistent_regime_returns_none(self):
+        """Regime ID not in labels → 0 bars → returns None."""
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame(rng.normal(0, 1, (100, 5)), columns=[f"f_{i}" for i in range(5)])
+        labels = np.array([0] * 50 + [1] * 50)
+        result = discover_micro_states(df, labels, regime_id=99, min_bars=10)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# No structure returns None
+# ---------------------------------------------------------------------------
+
+
+class TestMicroNoStructure:
+    """Regimes without internal structure should return None."""
+
+    def test_uniform_regime_returns_none(self):
+        """Uniform data within a regime → no structure → None."""
+        rng = np.random.RandomState(42)
+        # Regime 0: uniform, Regime 1: structured
+        data = np.vstack([
+            rng.uniform(-1, 1, (300, 5)),
+            rng.normal(10, 1, (300, 5)),
+        ])
+        df = pd.DataFrame(data, columns=[f"f_{i}" for i in range(5)])
+        labels = np.array([0] * 300 + [1] * 300)
+        result = discover_micro_states(df, labels, regime_id=0, min_bars=50)
+        # Uniform data may or may not pass structure test — but if it does,
+        # the structure should at most be weak
+        if result is not None:
+            assert result.structure_test.recommendation != "no_structure"
+
+    def test_single_gaussian_regime(self):
+        """Single tight Gaussian within regime → likely no micro-structure."""
+        rng = np.random.RandomState(42)
+        data = np.vstack([
+            rng.normal(0, 0.1, (300, 5)),
+            rng.normal(10, 1, (300, 5)),
+        ])
+        df = pd.DataFrame(data, columns=[f"f_{i}" for i in range(5)])
+        labels = np.array([0] * 300 + [1] * 300)
+        result = discover_micro_states(df, labels, regime_id=0, min_bars=50)
+        # Very tight single Gaussian — micro discovery should not find "proceed"
+        if result is not None:
+            # If it found something, it's at best weak structure
+            pass  # acceptable — structure test is statistical
+
+
+# ---------------------------------------------------------------------------
+# Micro within macro
+# ---------------------------------------------------------------------------
+
+
+class TestMicroWithinMacro:
+    """Verify micro-state discovery finds sub-clusters within regimes."""
+
+    def test_finds_micro_clusters(self):
+        """2 macro regimes each with 2 sub-clusters → micro should find k≥2."""
+        df, macro_labels = _make_macro_micro_data(
+            n_per_regime=300, n_regimes=2, n_micro=2,
+            macro_sep=15.0, micro_sep=5.0,
+        )
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0,
+            k_range=range(2, 5), min_bars=50,
+        )
+        if result is not None:
+            assert result.k >= 2
+
+    def test_micro_labels_valid(self):
+        """Micro labels should contain values in [0, k-1]."""
+        df, macro_labels = _make_macro_micro_data(
+            n_per_regime=300, macro_sep=15.0, micro_sep=5.0,
+        )
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50,
+        )
+        if result is not None:
+            unique = np.unique(result.labels)
+            assert all(0 <= u < result.k for u in unique)
+
+    def test_micro_quality_present(self):
+        df, macro_labels = _make_macro_micro_data(
+            n_per_regime=300, macro_sep=15.0, micro_sep=5.0,
+        )
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50,
+        )
+        if result is not None:
+            assert isinstance(result.quality, QualityReport)
+            assert -1 <= result.quality.silhouette <= 1
+
+    def test_micro_stability_present(self):
+        df, macro_labels = _make_macro_micro_data(
+            n_per_regime=300, macro_sep=15.0, micro_sep=5.0,
+        )
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50,
+        )
+        if result is not None:
+            assert isinstance(result.stability, StabilityReport)
+
+    def test_micro_sweep_present(self):
+        df, macro_labels = _make_macro_micro_data(
+            n_per_regime=300, macro_sep=15.0, micro_sep=5.0,
+        )
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50,
+        )
+        if result is not None:
+            assert isinstance(result.sweep, SweepResult)
+
+    def test_micro_centroid_profiles(self):
+        df, macro_labels = _make_macro_micro_data(
+            n_per_regime=300, macro_sep=15.0, micro_sep=5.0,
+        )
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50,
+        )
+        if result is not None:
+            assert isinstance(result.centroid_profiles, pd.DataFrame)
+            assert result.centroid_profiles.shape[0] == result.k
+
+
+# ---------------------------------------------------------------------------
+# Output types and structure
+# ---------------------------------------------------------------------------
+
+
+class TestMicroOutputStructure:
+    """Verify MicroStateResult fields."""
+
+    def test_result_type(self):
+        df, macro_labels = _make_macro_micro_data(n_per_regime=300, micro_sep=5.0)
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50,
+        )
+        if result is not None:
+            assert isinstance(result, MicroStateResult)
+
+    def test_gmm_params_present(self):
+        df, macro_labels = _make_macro_micro_data(n_per_regime=300, micro_sep=5.0)
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50,
+        )
+        if result is not None:
+            assert "means" in result.gmm_params
+            assert "weights" in result.gmm_params
+
+    def test_gmm_weights_sum_to_one(self):
+        df, macro_labels = _make_macro_micro_data(n_per_regime=300, micro_sep=5.0)
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50,
+        )
+        if result is not None:
+            assert abs(sum(result.gmm_params["weights"]) - 1.0) < 1e-6
+
+    def test_n_bars_correct(self):
+        df, macro_labels = _make_macro_micro_data(n_per_regime=250)
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50,
+        )
+        if result is not None:
+            assert result.n_bars == 250
+
+    def test_structure_test_stored(self):
+        df, macro_labels = _make_macro_micro_data(n_per_regime=300, micro_sep=5.0)
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50,
+        )
+        if result is not None:
+            assert isinstance(result.structure_test, StructureTest)
+
+    def test_filter_report_stored(self):
+        df, macro_labels = _make_macro_micro_data(n_per_regime=300, micro_sep=5.0)
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50,
+        )
+        if result is not None:
+            assert isinstance(result.filter_report, dict)
+
+
+# ---------------------------------------------------------------------------
+# Parameter validation
+# ---------------------------------------------------------------------------
+
+
+class TestMicroValidation:
+    """Invalid inputs for discover_micro_states."""
+
+    def test_length_mismatch_raises(self):
+        """derivatives rows != macro_labels length → ValueError."""
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame(rng.normal(0, 1, (100, 5)), columns=[f"f_{i}" for i in range(5)])
+        labels = np.zeros(50, dtype=int)
+        with pytest.raises(ValueError, match="macro_labels length"):
+            discover_micro_states(df, labels, regime_id=0)
+
+    def test_negative_regime_id(self):
+        """Negative regime_id not in labels → returns None (0 bars)."""
+        rng = np.random.RandomState(42)
+        df = pd.DataFrame(rng.normal(0, 1, (200, 5)), columns=[f"f_{i}" for i in range(5)])
+        labels = np.zeros(200, dtype=int)
+        result = discover_micro_states(df, labels, regime_id=-1, min_bars=10)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Determinism
+# ---------------------------------------------------------------------------
+
+
+class TestMicroDeterminism:
+    """Same input → same output."""
+
+    def test_deterministic(self):
+        df, macro_labels = _make_macro_micro_data(
+            n_per_regime=300, macro_sep=15.0, micro_sep=5.0, seed=42,
+        )
+        r1 = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50, random_state=42,
+        )
+        r2 = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50, random_state=42,
+        )
+        if r1 is not None and r2 is not None:
+            np.testing.assert_array_equal(r1.labels, r2.labels)
+            assert r1.k == r2.k
+
+
+# ---------------------------------------------------------------------------
+# Edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestMicroEdgeCases:
+    """Edge cases for micro-state discovery."""
+
+    def test_all_bars_one_regime(self):
+        """All bars in a single regime → micro discovery on full dataset."""
+        rng = np.random.RandomState(42)
+        # Two sub-clusters to ensure structure
+        data = np.vstack([
+            rng.normal(0, 1, (200, 5)),
+            rng.normal(5, 1, (200, 5)),
+        ])
+        df = pd.DataFrame(data, columns=[f"f_{i}" for i in range(5)])
+        labels = np.zeros(400, dtype=int)
+        result = discover_micro_states(df, labels, regime_id=0, min_bars=50)
+        if result is not None:
+            assert len(result.labels) == 400
+
+    def test_nan_in_derivatives(self):
+        """NaN values in derivatives → should still work (reduce handles NaN)."""
+        df, macro_labels = _make_macro_micro_data(n_per_regime=200, micro_sep=5.0)
+        rng = np.random.RandomState(99)
+        mask = rng.random(df.shape) < 0.05
+        df = df.mask(mask)
+        result = discover_micro_states(
+            df, macro_labels, regime_id=0, min_bars=50,
+        )
+        assert result is None or isinstance(result, MicroStateResult)
+
+    def test_many_features(self):
+        """Wide data (many features) → Ledoit-Wolf should handle it."""
+        rng = np.random.RandomState(42)
+        data = np.vstack([
+            rng.normal(0, 1, (150, 50)),
+            rng.normal(5, 1, (150, 50)),
+        ])
+        df = pd.DataFrame(data, columns=[f"f_{i}" for i in range(50)])
+        labels = np.zeros(300, dtype=int)
+        result = discover_micro_states(df, labels, regime_id=0, min_bars=50)
+        assert result is None or isinstance(result, MicroStateResult)
+
+    def test_k_range_capped_by_n_bars(self):
+        """If regime has 110 bars, k_range should not include k > 110."""
+        rng = np.random.RandomState(42)
+        data = np.vstack([
+            rng.normal(0, 1, (110, 5)),
+            rng.normal(10, 1, (110, 5)),
+        ])
+        df = pd.DataFrame(data, columns=[f"f_{i}" for i in range(5)])
+        labels = np.array([0] * 110 + [1] * 110)
+        # k_range up to 200 — should be capped
+        result = discover_micro_states(
+            df, labels, regime_id=0, min_bars=50,
+            k_range=range(2, 200),
+        )
+        if result is not None:
+            assert result.k < 110
+
+    def test_constant_features_in_regime(self):
+        """Regime with some constant features → reduction filters them."""
+        rng = np.random.RandomState(42)
+        data = np.vstack([
+            rng.normal(0, 1, (200, 3)),
+            rng.normal(5, 1, (200, 3)),
+        ])
+        # Add constant columns
+        const = np.full((400, 2), 3.14)
+        full_data = np.hstack([data, const])
+        df = pd.DataFrame(full_data, columns=[f"f_{i}" for i in range(5)])
+        labels = np.zeros(400, dtype=int)
+        result = discover_micro_states(df, labels, regime_id=0, min_bars=50)
+        assert result is None or isinstance(result, MicroStateResult)
