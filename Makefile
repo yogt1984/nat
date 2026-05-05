@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner dashboard test_dashboard
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner dashboard test_dashboard signal_test signal_test_all exp_start exp_stop exp_status exp_check exp_midweek exp_analyze
 
 # Python interpreter — prefer 'python' (often conda/venv) over system 'python3'.
 # Override with: make PYTHON=/usr/bin/python3
@@ -739,6 +739,93 @@ check:
 	cd rust && cargo check
 
 # =============================================================================
+# PHASE 1: SIGNAL EXISTENCE TEST
+# =============================================================================
+
+# Run the Phase 1 signal test on collected data.
+# Tests whether LightGBM can predict 5-min return direction out-of-sample.
+# Three tests: in-sample accuracy, walk-forward validation, confidence-filtered PnL.
+#
+# Options:
+#   SYMBOL      Asset to test (default: BTC)
+#   HORIZON     Prediction horizon in rows, 1 row = 100ms (default: 3000 = 5 min)
+#   SPREAD_BPS  Assumed spread in basis points (default: 1.0)
+#   REMOVE_LEAKY  Set to 1 to remove absolute-value features that leak regime identity
+#                 (raw_midprice, ctx_open_interest, ctx_volume_24h, etc.)
+#
+# Examples:
+#   make signal_test                              # BTC, 5 min horizon, with all features
+#   make signal_test REMOVE_LEAKY=1               # BTC, 5 min, without leaky features
+#   make signal_test SYMBOL=ETH HORIZON=18000     # ETH, 30 min horizon
+#   make signal_test SYMBOL=SOL HORIZON=36000     # SOL, 1 hour horizon
+#
+HORIZON ?= 3000
+SPREAD_BPS ?= 1.0
+REMOVE_LEAKY ?= 0
+
+signal_test:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          PHASE 1: SIGNAL EXISTENCE TEST                          ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "  Symbol:       $(SYMBOL)"
+	@echo "  Horizon:      $(HORIZON) rows ($$(echo "$(HORIZON) * 0.1" | bc)s)"
+	@echo "  Spread:       $(SPREAD_BPS) bps"
+	@echo "  Remove leaky: $(REMOVE_LEAKY)"
+	@echo ""
+	$(PYTHON) scripts/phase1_signal_test.py \
+		--symbol $(SYMBOL) \
+		--horizon $(HORIZON) \
+		--spread-bps $(SPREAD_BPS) \
+		$(if $(filter 1,$(REMOVE_LEAKY)),--remove-leaky,)
+
+# Run signal test across all symbols and both feature sets (full report)
+signal_test_all:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          PHASE 1: FULL SIGNAL SWEEP (all symbols + configs)      ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "=== BTC — all features ===" && \
+	$(PYTHON) scripts/phase1_signal_test.py --symbol BTC --horizon $(HORIZON) --spread-bps $(SPREAD_BPS) && \
+	echo "" && \
+	echo "=== BTC — leaky removed ===" && \
+	$(PYTHON) scripts/phase1_signal_test.py --symbol BTC --horizon $(HORIZON) --spread-bps $(SPREAD_BPS) --remove-leaky && \
+	echo "" && \
+	echo "=== ETH — all features ===" && \
+	$(PYTHON) scripts/phase1_signal_test.py --symbol ETH --horizon $(HORIZON) --spread-bps $(SPREAD_BPS) && \
+	echo "" && \
+	echo "=== SOL — all features ===" && \
+	$(PYTHON) scripts/phase1_signal_test.py --symbol SOL --horizon $(HORIZON) --spread-bps $(SPREAD_BPS)
+
+# =============================================================================
+# EXPERIMENTS
+# =============================================================================
+
+# Start ingestor in tmux (background data collection)
+exp_start: release
+	@$(PYTHON) scripts/run_experiment.py start
+
+# Stop ingestor gracefully
+exp_stop:
+	@$(PYTHON) scripts/run_experiment.py stop
+
+# Check ingestor health + data stats
+exp_status:
+	@$(PYTHON) scripts/run_experiment.py status
+
+# Daily validation check (last 24h by default)
+exp_check:
+	@$(PYTHON) scripts/run_experiment.py check --hours $(HOURS)
+
+# Mid-week: full validation + schema scan
+exp_midweek:
+	@$(PYTHON) scripts/run_experiment.py midweek
+
+# End-of-experiment: stop, validate, profile, quality gates
+exp_analyze:
+	@$(PYTHON) scripts/run_experiment.py analyze
+
+# =============================================================================
 # HELP
 # =============================================================================
 
@@ -845,6 +932,14 @@ help:
 	@echo "  test_dashboard      Run dashboard tests"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " PHASE 1: SIGNAL TESTING"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  signal_test         Test if features predict returns out-of-sample"
+	@echo "                      (SYMBOL=BTC HORIZON=3000 SPREAD_BPS=1.0 REMOVE_LEAKY=0)"
+	@echo "  signal_test_all     Run signal test across BTC/ETH/SOL with and without"
+	@echo "                      leaky features (full comparison report)"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " API VALIDATION (Live Hyperliquid)"
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo "  validate          Run all API validations"
@@ -885,4 +980,14 @@ help:
 	@echo "  lint              Run clippy linter"
 	@echo "  check             Check code without building"
 	@echo "  help              Show this help"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " EXPERIMENTS"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  exp_start         Start ingestor in tmux (background collection)"
+	@echo "  exp_stop          Stop ingestor gracefully"
+	@echo "  exp_status        Check ingestor health + data stats"
+	@echo "  exp_check         Daily validation (last 24h)"
+	@echo "  exp_midweek       Full validation + schema scan"
+	@echo "  exp_analyze       Stop, validate, profile, quality gates"
 	@echo ""
