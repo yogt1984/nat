@@ -22,6 +22,8 @@ from cluster_pipeline.characterize import (
     characterize_states,
     TransitionSignature,
     compute_signatures,
+    ReturnProfile,
+    return_profile,
 )
 from cluster_pipeline.hierarchy import HierarchicalLabels, StructureTest
 from cluster_pipeline.transitions import empirical_transitions, TransitionModel
@@ -934,3 +936,287 @@ class TestSignatureColumns:
         assert list(sig.entry_trajectory.columns) == list(derivatives.columns)
         assert list(sig.exit_trajectory.columns) == list(derivatives.columns)
         assert list(sig.entry_std.columns) == list(derivatives.columns)
+
+
+# ===========================================================================
+# Task 5.3: Forward Return Profiling (Multi-Horizon)
+# ===========================================================================
+
+
+class TestReturnComputation:
+    """Forward log returns computed correctly."""
+
+    def test_log_return_single_horizon(self):
+        """log(price[t+h] / price[t]) computed correctly."""
+        prices = np.array([100.0, 110.0, 121.0, 133.1, 146.41])
+        labels = np.array([0, 0, 0, 0, 0])
+        rp = return_profile(labels, prices, state_id=0, horizons=[1])
+        # All bars are state 0, horizon=1
+        # returns: log(110/100), log(121/110), log(133.1/121), log(146.41/133.1)
+        expected = np.log(np.array([110, 121, 133.1, 146.41]) /
+                          np.array([100, 110, 121, 133.1]))
+        assert rp.horizons[1]["mean"] == pytest.approx(np.mean(expected), abs=1e-10)
+        assert rp.horizons[1]["n"] == 4
+
+    def test_horizon_2(self):
+        """Horizon 2: log(price[t+2]/price[t])."""
+        prices = np.array([100.0, 200.0, 400.0, 800.0, 1600.0])
+        labels = np.array([0, 0, 0, 0, 0])
+        rp = return_profile(labels, prices, state_id=0, horizons=[2])
+        # returns: log(400/100), log(800/200), log(1600/400)
+        expected = np.log(np.array([400, 800, 1600]) /
+                          np.array([100, 200, 400]))
+        assert rp.horizons[2]["mean"] == pytest.approx(np.mean(expected), abs=1e-10)
+        assert rp.horizons[2]["n"] == 3
+
+    def test_only_state_bars_used(self):
+        """Only bars where labels==state_id contribute returns."""
+        prices = np.array([100.0, 110.0, 105.0, 115.0, 120.0])
+        labels = np.array([0, 1, 0, 1, 0])
+        rp = return_profile(labels, prices, state_id=0, horizons=[1])
+        # State 0 at t=0,2,4. Horizon 1: t=0→1, t=2→3 (t=4 has no t+1)
+        expected = np.array([np.log(110/100), np.log(115/105)])
+        assert rp.horizons[1]["mean"] == pytest.approx(np.mean(expected), abs=1e-10)
+        assert rp.horizons[1]["n"] == 2
+
+    def test_positive_return(self):
+        """Uptrend → positive mean return."""
+        prices = np.exp(np.linspace(0, 1, 100))  # exponential growth
+        labels = np.zeros(100, dtype=int)
+        rp = return_profile(labels, prices, state_id=0, horizons=[5])
+        assert rp.horizons[5]["mean"] > 0
+
+    def test_negative_return(self):
+        """Downtrend → negative mean return."""
+        prices = np.exp(np.linspace(0, -1, 100))  # exponential decline
+        labels = np.zeros(100, dtype=int)
+        rp = return_profile(labels, prices, state_id=0, horizons=[5])
+        assert rp.horizons[5]["mean"] < 0
+
+
+class TestMultipleHorizons:
+    """Result contains entries for all requested horizons."""
+
+    def test_default_horizons(self):
+        """Default horizons [1, 5, 10, 20] all present."""
+        prices = np.exp(np.random.RandomState(42).normal(0, 0.01, 100).cumsum() + 5)
+        labels = np.zeros(100, dtype=int)
+        rp = return_profile(labels, prices, state_id=0)
+        assert set(rp.horizons.keys()) == {1, 5, 10, 20}
+
+    def test_custom_horizons(self):
+        """Custom horizons [3, 7, 15] all present."""
+        prices = np.exp(np.random.RandomState(42).normal(0, 0.01, 100).cumsum() + 5)
+        labels = np.zeros(100, dtype=int)
+        rp = return_profile(labels, prices, state_id=0, horizons=[3, 7, 15])
+        assert set(rp.horizons.keys()) == {3, 7, 15}
+
+    def test_single_horizon(self):
+        prices = np.ones(50) * 100
+        labels = np.zeros(50, dtype=int)
+        rp = return_profile(labels, prices, state_id=0, horizons=[1])
+        assert set(rp.horizons.keys()) == {1}
+
+    def test_all_stats_present(self):
+        """Each horizon has all required stat keys."""
+        prices = np.exp(np.random.RandomState(42).normal(0, 0.01, 100).cumsum() + 5)
+        labels = np.zeros(100, dtype=int)
+        rp = return_profile(labels, prices, state_id=0, horizons=[1, 5])
+        expected_keys = {"mean", "median", "std", "skew", "kurtosis", "p5", "p95", "sharpe", "n"}
+        for h in [1, 5]:
+            assert set(rp.horizons[h].keys()) == expected_keys
+
+
+class TestMeanDurationAdded:
+    """mean_duration auto-added to horizons."""
+
+    def test_adds_mean_duration(self):
+        """mean_duration=8, horizons=[1,5] → result has 1,5,8."""
+        prices = np.exp(np.random.RandomState(42).normal(0, 0.01, 50).cumsum() + 5)
+        labels = np.zeros(50, dtype=int)
+        rp = return_profile(labels, prices, state_id=0,
+                            horizons=[1, 5], mean_duration=8)
+        assert 8 in rp.horizons
+        assert set(rp.horizons.keys()) == {1, 5, 8}
+
+    def test_mean_duration_already_in_horizons(self):
+        """mean_duration already in horizons → no duplicate."""
+        prices = np.exp(np.random.RandomState(42).normal(0, 0.01, 50).cumsum() + 5)
+        labels = np.zeros(50, dtype=int)
+        rp = return_profile(labels, prices, state_id=0,
+                            horizons=[1, 5, 10], mean_duration=5)
+        assert set(rp.horizons.keys()) == {1, 5, 10}
+
+    def test_mean_duration_none(self):
+        """mean_duration=None → no extra horizon."""
+        prices = np.exp(np.random.RandomState(42).normal(0, 0.01, 50).cumsum() + 5)
+        labels = np.zeros(50, dtype=int)
+        rp = return_profile(labels, prices, state_id=0,
+                            horizons=[1, 5], mean_duration=None)
+        assert set(rp.horizons.keys()) == {1, 5}
+
+    def test_mean_duration_zero_ignored(self):
+        """mean_duration=0 → not added."""
+        prices = np.exp(np.random.RandomState(42).normal(0, 0.01, 50).cumsum() + 5)
+        labels = np.zeros(50, dtype=int)
+        rp = return_profile(labels, prices, state_id=0,
+                            horizons=[1, 5], mean_duration=0)
+        assert set(rp.horizons.keys()) == {1, 5}
+
+
+class TestReturnStatistics:
+    """Statistics are mathematically correct."""
+
+    def test_std_positive(self):
+        """Non-constant prices → positive std."""
+        rng = np.random.RandomState(42)
+        prices = np.exp(rng.normal(0, 0.02, 200).cumsum() + 5)
+        labels = np.zeros(200, dtype=int)
+        rp = return_profile(labels, prices, state_id=0, horizons=[1])
+        assert rp.horizons[1]["std"] > 0
+
+    def test_constant_prices_zero_return(self):
+        """Constant prices → mean return = 0, std = 0."""
+        prices = np.ones(50) * 100
+        labels = np.zeros(50, dtype=int)
+        rp = return_profile(labels, prices, state_id=0, horizons=[1])
+        assert rp.horizons[1]["mean"] == pytest.approx(0.0, abs=1e-15)
+        assert rp.horizons[1]["std"] == pytest.approx(0.0, abs=1e-15)
+
+    def test_sharpe_sign_matches_mean(self):
+        """Sharpe has same sign as mean return."""
+        rng = np.random.RandomState(42)
+        # Uptrend with noise so std > 0
+        prices = np.exp(np.linspace(0, 0.5, 100) + rng.normal(0, 0.01, 100))
+        labels = np.zeros(100, dtype=int)
+        rp = return_profile(labels, prices, state_id=0, horizons=[1])
+        assert rp.horizons[1]["sharpe"] > 0
+
+    def test_p5_less_than_p95(self):
+        """p5 < p95 for non-degenerate returns."""
+        rng = np.random.RandomState(42)
+        prices = np.exp(rng.normal(0, 0.02, 200).cumsum() + 5)
+        labels = np.zeros(200, dtype=int)
+        rp = return_profile(labels, prices, state_id=0, horizons=[1])
+        assert rp.horizons[1]["p5"] < rp.horizons[1]["p95"]
+
+    def test_median_between_p5_and_p95(self):
+        """Median is between p5 and p95."""
+        rng = np.random.RandomState(42)
+        prices = np.exp(rng.normal(0, 0.02, 200).cumsum() + 5)
+        labels = np.zeros(200, dtype=int)
+        rp = return_profile(labels, prices, state_id=0, horizons=[1])
+        stats = rp.horizons[1]
+        assert stats["p5"] <= stats["median"] <= stats["p95"]
+
+    def test_n_correct(self):
+        """n counts how many valid returns were computed."""
+        prices = np.ones(10) * 100
+        labels = np.array([0, 0, 0, 1, 1, 0, 0, 0, 1, 1])
+        rp = return_profile(labels, prices, state_id=0, horizons=[1])
+        # State 0 at t=0,1,2,5,6,7. Horizon 1: need t+1<10
+        # Valid: t=0,1,2,5,6,7 → all have t+1<10 except... all valid
+        # But t+1 must exist: t=7→8 ok. All 6 valid.
+        assert rp.horizons[1]["n"] == 6
+
+
+class TestReturnValidation:
+    """Invalid inputs raise errors."""
+
+    def test_length_mismatch(self):
+        with pytest.raises(ValueError, match="labels length"):
+            return_profile(np.array([0, 1]), np.array([100.0]), state_id=0)
+
+    def test_negative_price(self):
+        with pytest.raises(ValueError, match="strictly positive"):
+            return_profile(np.array([0, 0]), np.array([100.0, -50.0]), state_id=0)
+
+    def test_zero_price(self):
+        with pytest.raises(ValueError, match="strictly positive"):
+            return_profile(np.array([0, 0]), np.array([100.0, 0.0]), state_id=0)
+
+    def test_2d_labels(self):
+        with pytest.raises(ValueError, match="1-D"):
+            return_profile(np.array([[0, 1]]), np.array([100.0, 110.0]), state_id=0)
+
+    def test_2d_prices(self):
+        with pytest.raises(ValueError, match="1-D"):
+            return_profile(np.array([0, 0]), np.array([[100.0, 110.0]]), state_id=0)
+
+
+class TestReturnEdgeCases:
+    """Edge cases."""
+
+    def test_state_not_in_labels(self):
+        """State never appears → n=0, stats are NaN."""
+        prices = np.array([100.0, 110.0, 120.0])
+        labels = np.array([0, 0, 0])
+        rp = return_profile(labels, prices, state_id=99, horizons=[1])
+        assert rp.horizons[1]["n"] == 0
+        assert np.isnan(rp.horizons[1]["mean"])
+
+    def test_horizon_larger_than_data(self):
+        """Horizon > data length → n=0."""
+        prices = np.array([100.0, 110.0, 120.0])
+        labels = np.array([0, 0, 0])
+        rp = return_profile(labels, prices, state_id=0, horizons=[100])
+        assert rp.horizons[100]["n"] == 0
+
+    def test_state_only_at_end(self):
+        """State only at last bar → no forward return possible."""
+        prices = np.array([100.0, 110.0, 120.0])
+        labels = np.array([1, 1, 0])
+        rp = return_profile(labels, prices, state_id=0, horizons=[1])
+        assert rp.horizons[1]["n"] == 0
+
+    def test_single_bar_in_state(self):
+        """Single bar with forward data → n=1."""
+        prices = np.array([100.0, 110.0, 120.0])
+        labels = np.array([0, 1, 1])
+        rp = return_profile(labels, prices, state_id=0, horizons=[1])
+        assert rp.horizons[1]["n"] == 1
+        assert rp.horizons[1]["mean"] == pytest.approx(np.log(110/100))
+
+    def test_very_large_horizon(self):
+        """Large horizon with enough data."""
+        prices = np.exp(np.linspace(0, 1, 1000))
+        labels = np.zeros(1000, dtype=int)
+        rp = return_profile(labels, prices, state_id=0, horizons=[500])
+        assert rp.horizons[500]["n"] == 500
+        # log(exp(0.5+...)/exp(0+...)) ≈ 0.5
+        assert rp.horizons[500]["mean"] == pytest.approx(0.5005, abs=0.01)
+
+
+class TestReturnReturnType:
+    """Return type checks."""
+
+    def test_returns_return_profile(self):
+        prices = np.ones(20) * 100
+        labels = np.zeros(20, dtype=int)
+        rp = return_profile(labels, prices, state_id=0, horizons=[1])
+        assert isinstance(rp, ReturnProfile)
+
+    def test_state_id_stored(self):
+        prices = np.ones(20) * 100
+        labels = np.zeros(20, dtype=int)
+        rp = return_profile(labels, prices, state_id=7, horizons=[1])
+        assert rp.state_id == 7
+
+    def test_horizons_is_dict(self):
+        prices = np.ones(20) * 100
+        labels = np.zeros(20, dtype=int)
+        rp = return_profile(labels, prices, state_id=0, horizons=[1])
+        assert isinstance(rp.horizons, dict)
+
+
+class TestReturnDeterminism:
+    """Same inputs → same results."""
+
+    def test_deterministic(self):
+        rng = np.random.RandomState(42)
+        prices = np.exp(rng.normal(0, 0.01, 100).cumsum() + 5)
+        labels = np.array([0]*50 + [1]*50)
+        r1 = return_profile(labels, prices, state_id=0, horizons=[1, 5, 10])
+        r2 = return_profile(labels, prices, state_id=0, horizons=[1, 5, 10])
+        for h in [1, 5, 10]:
+            assert r1.horizons[h] == r2.horizons[h]

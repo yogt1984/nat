@@ -318,3 +318,137 @@ def compute_signatures(
         entry_std=entry_std_df,
         exit_std=exit_std_df,
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 5.3: Forward Return Profiling (Multi-Horizon)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ReturnProfile:
+    """Forward return distribution at multiple horizons for a state."""
+
+    state_id: int
+    horizons: Dict[int, Dict]  # horizon_bars → {mean, median, std, skew, kurtosis, p5, p95, sharpe, n}
+
+
+def return_profile(
+    labels: np.ndarray,
+    prices: np.ndarray,
+    state_id: int,
+    horizons: Optional[List[int]] = None,
+    mean_duration: Optional[int] = None,
+) -> ReturnProfile:
+    """
+    Compute forward log-return distribution at multiple horizons for a state.
+
+    For each bar t where labels[t] == state_id, computes:
+        return_h = log(prices[t+h] / prices[t])
+
+    Then aggregates statistics across all such bars.
+
+    Args:
+        labels: 1-D array of state labels.
+        prices: 1-D array of prices (same length as labels).
+        state_id: Which state to profile.
+        horizons: List of forward horizons in bars. Default [1, 5, 10, 20].
+        mean_duration: If provided, automatically added to horizons
+            (ensures evaluation at the state's natural timescale).
+
+    Returns:
+        ReturnProfile with per-horizon statistics.
+
+    Raises:
+        ValueError: if labels and prices have different lengths,
+            or if prices contain non-positive values.
+    """
+    labels = np.asarray(labels)
+    prices = np.asarray(prices, dtype=float)
+
+    if labels.ndim != 1:
+        raise ValueError(f"labels must be 1-D, got shape {labels.shape}")
+
+    if prices.ndim != 1:
+        raise ValueError(f"prices must be 1-D, got shape {prices.shape}")
+
+    if len(labels) != len(prices):
+        raise ValueError(
+            f"labels length ({len(labels)}) != prices length ({len(prices)})"
+        )
+
+    if np.any(prices <= 0):
+        raise ValueError("prices must be strictly positive for log returns")
+
+    if horizons is None:
+        horizons = [1, 5, 10, 20]
+
+    # Auto-add mean_duration to horizons
+    if mean_duration is not None and mean_duration > 0:
+        if mean_duration not in horizons:
+            horizons = sorted(set(horizons) | {mean_duration})
+
+    n = len(labels)
+    state_mask = labels == state_id
+    state_indices = np.where(state_mask)[0]
+
+    log_prices = np.log(prices)
+
+    horizon_stats: Dict[int, Dict] = {}
+
+    for h in horizons:
+        # Collect forward returns for bars in this state with enough forward data
+        valid_indices = state_indices[state_indices + h < n]
+        if len(valid_indices) == 0:
+            horizon_stats[h] = {
+                "mean": np.nan,
+                "median": np.nan,
+                "std": np.nan,
+                "skew": np.nan,
+                "kurtosis": np.nan,
+                "p5": np.nan,
+                "p95": np.nan,
+                "sharpe": np.nan,
+                "n": 0,
+            }
+            continue
+
+        returns = log_prices[valid_indices + h] - log_prices[valid_indices]
+
+        n_obs = len(returns)
+        mean = float(np.mean(returns))
+        median = float(np.median(returns))
+        std = float(np.std(returns, ddof=1)) if n_obs > 1 else 0.0
+        p5 = float(np.percentile(returns, 5))
+        p95 = float(np.percentile(returns, 95))
+
+        # Skewness
+        if n_obs > 2 and std > 1e-15:
+            skew = float(
+                np.mean(((returns - mean) / std) ** 3) * n_obs / ((n_obs - 1) * (n_obs - 2) / n_obs)
+            )
+        else:
+            skew = 0.0
+
+        # Excess kurtosis
+        if n_obs > 3 and std > 1e-15:
+            kurt = float(np.mean(((returns - mean) / std) ** 4) - 3.0)
+        else:
+            kurt = 0.0
+
+        # Sharpe (annualized is not meaningful here — use per-bar Sharpe)
+        sharpe = mean / std if std > 1e-15 else 0.0
+
+        horizon_stats[h] = {
+            "mean": mean,
+            "median": median,
+            "std": std,
+            "skew": skew,
+            "kurtosis": kurt,
+            "p5": p5,
+            "p95": p95,
+            "sharpe": sharpe,
+            "n": n_obs,
+        }
+
+    return ReturnProfile(state_id=state_id, horizons=horizon_stats)
