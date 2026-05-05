@@ -278,6 +278,98 @@ def _rolling_slope(series: pd.Series, window: int) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# Spectral derivative generation
+# ---------------------------------------------------------------------------
+
+
+def spectral_derivatives(
+    bars: pd.DataFrame,
+    columns: List[str],
+    window: int = 30,
+) -> pd.DataFrame:
+    """
+    Generate spectral (frequency-domain) derivatives for selected columns.
+
+    For each column, computes over a rolling window:
+      - Low-frequency power (first 1/5 of spectrum)
+      - High-frequency power (last 1/5 of spectrum)
+      - Spectral ratio (low/high) — high = trending, low = oscillating
+      - Dominant period — bars per cycle of strongest frequency
+
+    Args:
+        bars: aggregated bar DataFrame.
+        columns: feature columns to derive.
+        window: FFT window size (must be >= 10).
+
+    Returns:
+        DataFrame with spectral columns. First (window-1) rows are NaN.
+
+    Raises:
+        ValueError: if columns is empty or window < 10.
+    """
+    if not columns:
+        raise ValueError("columns must be non-empty")
+    if window < 10:
+        raise ValueError(f"spectral window must be >= 10, got {window}")
+
+    n = len(bars)
+    result = {}
+
+    for col in columns:
+        if col not in bars.columns:
+            continue
+
+        series = bars[col].values.astype(np.float64)
+
+        spec_low = np.full(n, np.nan)
+        spec_high = np.full(n, np.nan)
+        spec_ratio = np.full(n, np.nan)
+        spec_period = np.full(n, np.nan)
+
+        low_cutoff = max(1, window // 5)
+        high_start = max(1, 4 * window // 5)
+        n_freq = window // 2 + 1
+
+        for t in range(window - 1, n):
+            seg = series[t - window + 1: t + 1]
+            if np.any(np.isnan(seg)):
+                continue
+
+            # Detrend (remove mean) before FFT
+            seg = seg - seg.mean()
+
+            # One-sided power spectrum
+            X = np.fft.rfft(seg)
+            power = np.abs(X) ** 2
+
+            # Low-frequency power (excluding DC at index 0)
+            p_low = power[1:low_cutoff].sum() if low_cutoff > 1 else 0.0
+            # High-frequency power
+            p_high = power[high_start:].sum() if high_start < n_freq else 0.0
+
+            spec_low[t] = p_low
+            spec_high[t] = p_high
+            spec_ratio[t] = p_low / (p_high + 1e-10)
+
+            # Dominant period: only if there's a clear peak
+            if len(power) > 1:
+                power_no_dc = power[1:]
+                if power_no_dc.max() > 2.0 * power_no_dc.mean():
+                    peak_idx = int(np.argmax(power_no_dc)) + 1  # +1 for DC offset
+                    spec_period[t] = window / peak_idx
+                # else: no dominant frequency → NaN
+
+        result[f"{col}_spec_low_{window}"] = spec_low
+        result[f"{col}_spec_high_{window}"] = spec_high
+        result[f"{col}_spec_ratio_{window}"] = spec_ratio
+        result[f"{col}_spec_period_{window}"] = spec_period
+
+    out = pd.DataFrame(result, index=bars.index)
+    out.replace([np.inf, -np.inf], 0.0, inplace=True)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Cross-feature derivative generation
 # ---------------------------------------------------------------------------
 
@@ -458,6 +550,8 @@ def generate_derivatives(
     temporal_windows: List[int] = [5, 15, 30],
     cross_pairs: Optional[List[Dict]] = None,
     cross_windows: Optional[List[int]] = None,
+    include_spectral: bool = True,
+    spectral_window: int = 30,
 ) -> DerivativeResult:
     """
     Single entry point for the full derivative generation pipeline.
@@ -466,7 +560,8 @@ def generate_derivatives(
       1. select_top_features() — pick the most informative base features
       2. temporal_derivatives() — velocity, acceleration, z-score, slope, rvol
       3. cross_feature_derivatives() — ratios, correlations, divergences
-      4. Concatenate into a single DataFrame
+      4. spectral_derivatives() — frequency-domain features (if include_spectral)
+      5. Concatenate into a single DataFrame
 
     Args:
         bars: aggregated bar DataFrame (from aggregate_bars)
@@ -476,6 +571,8 @@ def generate_derivatives(
         temporal_windows: window sizes for temporal derivatives
         cross_pairs: cross-feature pair definitions (default: DEFAULT_CROSS_PAIRS)
         cross_windows: window sizes for cross derivatives (default: temporal_windows)
+        include_spectral: if True, include spectral (FFT) derivatives
+        spectral_window: window size for spectral computation
 
     Returns:
         DerivativeResult with combined derivative DataFrame and metadata.
@@ -514,14 +611,26 @@ def generate_derivatives(
             bars, pairs=cross_pairs, windows=cross_windows,
         )
 
-    # Step 4: Concatenate
+    # Step 4: Spectral derivatives (optional)
+    n_spectral = 0
+    if include_spectral and len(bars) >= spectral_window:
+        sd = spectral_derivatives(bars, columns=base_features, window=spectral_window)
+        n_spectral = sd.shape[1]
+    else:
+        sd = pd.DataFrame(index=bars.index)
+
+    # Step 5: Concatenate
     parts = [td]
     if cd.shape[1] > 0:
         parts.append(cd)
+    if sd.shape[1] > 0:
+        parts.append(sd)
     combined = pd.concat(parts, axis=1)
 
     # Compute warmup: largest temporal window determines when all derivatives are valid
     warmup = max(temporal_windows) if temporal_windows else 0
+    if include_spectral:
+        warmup = max(warmup, spectral_window)
 
     return DerivativeResult(
         derivatives=combined,
@@ -538,5 +647,7 @@ def generate_derivatives(
             "cross_windows": cross_windows,
             "n_cross_pairs_attempted": len(cross_pairs),
             "n_cross_pairs_resolved": cd.shape[1] > 0,
+            "include_spectral": include_spectral,
+            "n_spectral": n_spectral,
         },
     )

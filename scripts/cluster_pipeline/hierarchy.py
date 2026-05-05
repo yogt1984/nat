@@ -1004,6 +1004,7 @@ class ProfilingResult:
     derivative_columns: List[str]
     breaks_detected: List[int]
     structure_test: StructureTest
+    training_stats: Dict = field(default_factory=dict)  # log_likelihood_p10, log_likelihood_p50
 
 
 def _detect_breaks_safe(
@@ -1032,12 +1033,20 @@ def _detect_breaks_safe(
 
     data = bars[usable].fillna(0).values
 
+    # PCA-reduce to concentrate variance (improves PELT statistical power)
+    from sklearn.decomposition import PCA as _PCA
+    n_comp = min(5, data.shape[1], data.shape[0])
     try:
-        algo = rpt.Pelt(model="rbf", min_size=min_segment_length).fit(data)
-        # PELT returns breakpoints including the last index (len(data))
-        bkpts = algo.predict(pen=np.log(len(data)) * data.shape[1])
+        data_reduced = _PCA(n_components=n_comp).fit_transform(data)
+    except Exception:
+        data_reduced = data  # fallback to raw if PCA fails
+
+    try:
+        algo = rpt.Pelt(model="rbf", min_size=min_segment_length).fit(data_reduced)
+        # Penalty scales with reduced dimensionality, not original
+        bkpts = algo.predict(pen=np.log(len(data_reduced)) * data_reduced.shape[1])
         # Remove the terminal breakpoint (always == len(data))
-        breaks = [b for b in bkpts if b < len(data)]
+        breaks = [b for b in bkpts if b < len(data_reduced)]
         return breaks
     except Exception as e:
         logger.warning(f"Break detection failed: {e}")
@@ -1211,6 +1220,23 @@ def profile(
     # ----- Step 6: Assemble hierarchy -----
     hierarchy = assemble_hierarchy(macro, micros)
 
+    # ----- Step 7: Training stats for drift detection -----
+    training_stats: Dict = {}
+    if not macro.early_exit and macro.pca_result is not None:
+        X_reduced = macro.pca_result.X_reduced
+        # Re-fit GMM to get score_samples (fast — data already reduced)
+        _gmm = GaussianMixture(
+            n_components=macro.k, covariance_type="full",
+            n_init=1, random_state=random_state,
+        )
+        _gmm.fit(X_reduced)
+        train_ll = _gmm.score_samples(X_reduced)
+        training_stats = {
+            "log_likelihood_p10": float(np.percentile(train_ll, 10)),
+            "log_likelihood_p50": float(np.percentile(train_ll, 50)),
+            "log_likelihood_mean": float(np.mean(train_ll)),
+        }
+
     return ProfilingResult(
         hierarchy=hierarchy,
         macro=macro,
@@ -1221,4 +1247,5 @@ def profile(
         derivative_columns=derivative_columns,
         breaks_detected=breaks_detected,
         structure_test=macro.structure_test,
+        training_stats=training_stats,
     )

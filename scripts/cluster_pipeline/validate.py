@@ -41,9 +41,7 @@ Q2_DEFAULTS = {
 
 Q3_DEFAULTS = {
     "macro_str": 0.8,
-    "micro_str": 0.5,
     "min_duration": 3,
-    "entry_lead": 1,
 }
 
 
