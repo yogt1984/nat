@@ -330,3 +330,106 @@ def _per_state_verdicts(
         verdicts[state_id] = "GO" if has_signal else "COLLECT"
 
     return verdicts
+
+
+# ---------------------------------------------------------------------------
+# Task 6.2: Cross-Symbol Consistency Check
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CrossSymbolResult:
+    """Result of cross-symbol regime agreement analysis."""
+
+    agreement_matrix: np.ndarray  # (n_symbols, n_symbols) pairwise ARI
+    mean_agreement: float  # mean of off-diagonal ARI values
+    above_random: bool  # whether mean_agreement > random baseline
+    consensus_labels: np.ndarray  # majority-vote labels at each bar
+    disagreement_rate: float  # fraction of bars with no majority
+    per_symbol_labels: Dict[str, np.ndarray]  # symbol → label array
+    symbol_names: List[str]
+
+
+def cross_symbol_consistency(
+    per_symbol_labels: Dict[str, np.ndarray],
+    random_threshold: float = 0.05,
+) -> CrossSymbolResult:
+    """
+    Measure regime agreement across symbols using pairwise ARI.
+
+    For each pair of symbols, compute Adjusted Rand Index between their
+    label sequences. Then compute majority-vote consensus at each bar.
+
+    Args:
+        per_symbol_labels: Dict mapping symbol name → 1-D label array.
+            All arrays must have the same length.
+        random_threshold: ARI above this is considered "above random".
+
+    Returns:
+        CrossSymbolResult with agreement matrix and consensus labels.
+
+    Raises:
+        ValueError: if fewer than 2 symbols, or arrays have different lengths.
+    """
+    symbols = sorted(per_symbol_labels.keys())
+    n_symbols = len(symbols)
+
+    if n_symbols < 2:
+        raise ValueError(f"Need at least 2 symbols, got {n_symbols}")
+
+    # Validate lengths
+    lengths = {s: len(per_symbol_labels[s]) for s in symbols}
+    unique_lengths = set(lengths.values())
+    if len(unique_lengths) > 1:
+        raise ValueError(f"Label arrays have different lengths: {lengths}")
+
+    n_bars = list(lengths.values())[0]
+    if n_bars == 0:
+        raise ValueError("Label arrays are empty")
+
+    # Stack labels: (n_symbols, n_bars)
+    label_matrix = np.array([np.asarray(per_symbol_labels[s]) for s in symbols])
+
+    # Pairwise ARI
+    from sklearn.metrics import adjusted_rand_score
+
+    agreement_matrix = np.ones((n_symbols, n_symbols))
+    for i in range(n_symbols):
+        for j in range(i + 1, n_symbols):
+            ari = adjusted_rand_score(label_matrix[i], label_matrix[j])
+            agreement_matrix[i, j] = ari
+            agreement_matrix[j, i] = ari
+
+    # Mean off-diagonal
+    mask = ~np.eye(n_symbols, dtype=bool)
+    mean_agreement = float(np.mean(agreement_matrix[mask]))
+    above_random = mean_agreement > random_threshold
+
+    # Majority-vote consensus
+    consensus_labels = np.full(n_bars, -1, dtype=int)
+    disagreement_count = 0
+
+    for t in range(n_bars):
+        bar_labels = label_matrix[:, t]
+        unique_vals, counts = np.unique(bar_labels, return_counts=True)
+        max_count = counts.max()
+
+        if max_count > n_symbols / 2:
+            # Strict majority exists
+            consensus_labels[t] = unique_vals[counts.argmax()]
+        else:
+            # No majority — mark as uncertain (-1)
+            consensus_labels[t] = -1
+            disagreement_count += 1
+
+    disagreement_rate = disagreement_count / n_bars
+
+    return CrossSymbolResult(
+        agreement_matrix=agreement_matrix,
+        mean_agreement=mean_agreement,
+        above_random=above_random,
+        consensus_labels=consensus_labels,
+        disagreement_rate=disagreement_rate,
+        per_symbol_labels={s: np.asarray(per_symbol_labels[s]) for s in symbols},
+        symbol_names=symbols,
+    )
