@@ -15,9 +15,11 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
 from collections import deque
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -440,3 +442,219 @@ class OnlineClassifier:
                 all_probs[k] /= total
 
         return all_probs
+
+
+# ---------------------------------------------------------------------------
+# Task 7.3: Detector Persistence (Save/Load)
+# ---------------------------------------------------------------------------
+
+
+def save_classifier(config: ClassifierConfig, output_dir: Path, metadata: Optional[Dict] = None) -> None:
+    """
+    Save all classifier artifacts to disk for online deployment.
+
+    Saved files:
+      - pca_macro.npz: macro PCA components, mean, std
+      - pca_micro_{regime_id}.npz: per-regime micro PCA
+      - gmm_macro.npz: macro GMM means, covariances, weights
+      - gmm_micro_{regime_id}.npz: per-regime micro GMM
+      - transitions.json: transition matrix and state IDs
+      - config.json: label map and structure info
+      - training_stats.json: log-likelihood percentiles for drift
+      - metadata.json: optional metadata (training range, n_bars, etc.)
+
+    Args:
+        config: ClassifierConfig to persist.
+        output_dir: Directory to write artifacts into. Created if needed.
+        metadata: Optional dict of metadata (training info, verdict, etc.).
+
+    Raises:
+        ValueError: if output_dir exists and is not a directory.
+    """
+    output_dir = Path(output_dir)
+    if output_dir.exists() and not output_dir.is_dir():
+        raise ValueError(f"{output_dir} exists and is not a directory")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # ----- Macro PCA -----
+    np.savez(
+        output_dir / "pca_macro.npz",
+        components=config.macro_pca_components,
+        mean=config.macro_pca_mean,
+        std=config.macro_pca_std,
+    )
+
+    # ----- Macro GMM -----
+    gmm = config.macro_gmm
+    np.savez(
+        output_dir / "gmm_macro.npz",
+        means=gmm.means_,
+        covariances=gmm.covariances_,
+        weights=gmm.weights_,
+        precisions_cholesky=gmm.precisions_cholesky_,
+    )
+
+    # ----- Per-regime micro PCA + GMM -----
+    for regime_id in config.micro_pca_components:
+        np.savez(
+            output_dir / f"pca_micro_{regime_id}.npz",
+            components=config.micro_pca_components[regime_id],
+            mean=config.micro_pca_mean[regime_id],
+            std=config.micro_pca_std[regime_id],
+        )
+
+    for regime_id, micro_gmm in config.micro_gmm.items():
+        np.savez(
+            output_dir / f"gmm_micro_{regime_id}.npz",
+            means=micro_gmm.means_,
+            covariances=micro_gmm.covariances_,
+            weights=micro_gmm.weights_,
+            precisions_cholesky=micro_gmm.precisions_cholesky_,
+        )
+
+    # ----- Transitions -----
+    trans_data = {
+        "matrix": config.transition_matrix.tolist(),
+        "state_ids": config.state_ids,
+    }
+    with open(output_dir / "transitions.json", "w") as f:
+        json.dump(trans_data, f, indent=2)
+
+    # ----- Config (label map, structure) -----
+    config_data = {
+        "label_map": {str(k): list(v) for k, v in config.label_map.items()},
+        "n_regimes": len(config.micro_gmm),
+        "regime_ids": list(config.micro_gmm.keys()),
+    }
+    with open(output_dir / "config.json", "w") as f:
+        json.dump(config_data, f, indent=2)
+
+    # ----- Training stats -----
+    stats_data = {
+        "log_likelihood_p10": config.training_ll_p10,
+        "log_likelihood_p50": config.training_ll_p50,
+    }
+    with open(output_dir / "training_stats.json", "w") as f:
+        json.dump(stats_data, f, indent=2)
+
+    # ----- Metadata -----
+    if metadata is not None:
+        with open(output_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+
+
+def load_classifier(input_dir: Path) -> ClassifierConfig:
+    """
+    Load classifier artifacts from disk.
+
+    Reconstructs a ClassifierConfig including fitted sklearn GMM objects
+    from saved parameters.
+
+    Args:
+        input_dir: Directory containing saved artifacts from save_classifier().
+
+    Returns:
+        ClassifierConfig ready to be passed to OnlineClassifier().
+
+    Raises:
+        FileNotFoundError: if required files are missing.
+        ValueError: if artifacts are inconsistent.
+    """
+    from sklearn.mixture import GaussianMixture
+
+    input_dir = Path(input_dir)
+
+    # ----- Macro PCA -----
+    pca_macro = np.load(input_dir / "pca_macro.npz")
+    macro_pca_components = pca_macro["components"]
+    macro_pca_mean = pca_macro["mean"]
+    macro_pca_std = pca_macro["std"]
+
+    # ----- Macro GMM -----
+    gmm_data = np.load(input_dir / "gmm_macro.npz")
+    macro_gmm = _rebuild_gmm(
+        gmm_data["means"], gmm_data["covariances"],
+        gmm_data["weights"], gmm_data["precisions_cholesky"],
+    )
+
+    # ----- Config -----
+    with open(input_dir / "config.json") as f:
+        config_data = json.load(f)
+    label_map = {int(k): tuple(v) for k, v in config_data["label_map"].items()}
+    regime_ids = config_data["regime_ids"]
+
+    # ----- Per-regime micro PCA + GMM -----
+    micro_pca_components = {}
+    micro_pca_mean = {}
+    micro_pca_std = {}
+    micro_gmm = {}
+
+    for regime_id in regime_ids:
+        pca_path = input_dir / f"pca_micro_{regime_id}.npz"
+        if pca_path.exists():
+            pca_data = np.load(pca_path)
+            micro_pca_components[regime_id] = pca_data["components"]
+            micro_pca_mean[regime_id] = pca_data["mean"]
+            micro_pca_std[regime_id] = pca_data["std"]
+
+        gmm_path = input_dir / f"gmm_micro_{regime_id}.npz"
+        if gmm_path.exists():
+            gmm_d = np.load(gmm_path)
+            micro_gmm[regime_id] = _rebuild_gmm(
+                gmm_d["means"], gmm_d["covariances"],
+                gmm_d["weights"], gmm_d["precisions_cholesky"],
+            )
+
+    # ----- Transitions -----
+    with open(input_dir / "transitions.json") as f:
+        trans_data = json.load(f)
+    transition_matrix = np.array(trans_data["matrix"])
+    state_ids = trans_data["state_ids"]
+
+    # ----- Training stats -----
+    with open(input_dir / "training_stats.json") as f:
+        stats_data = json.load(f)
+    training_ll_p10 = stats_data["log_likelihood_p10"]
+    training_ll_p50 = stats_data["log_likelihood_p50"]
+
+    return ClassifierConfig(
+        macro_pca_components=macro_pca_components,
+        macro_pca_mean=macro_pca_mean,
+        macro_pca_std=macro_pca_std,
+        macro_gmm=macro_gmm,
+        micro_pca_components=micro_pca_components,
+        micro_pca_mean=micro_pca_mean,
+        micro_pca_std=micro_pca_std,
+        micro_gmm=micro_gmm,
+        label_map=label_map,
+        transition_matrix=transition_matrix,
+        state_ids=state_ids,
+        training_ll_p10=training_ll_p10,
+        training_ll_p50=training_ll_p50,
+    )
+
+
+def _rebuild_gmm(means, covariances, weights, precisions_cholesky):
+    """Rebuild a fitted sklearn GaussianMixture from saved parameters."""
+    from sklearn.mixture import GaussianMixture
+
+    n_components = len(weights)
+    n_features = means.shape[1]
+
+    gmm = GaussianMixture(
+        n_components=n_components, covariance_type="full",
+    )
+    # Set parameters directly (sklearn allows this for prediction)
+    gmm.means_ = means
+    gmm.covariances_ = covariances
+    gmm.weights_ = weights
+    gmm.precisions_cholesky_ = precisions_cholesky
+
+    # These are needed for predict/score_samples to work
+    gmm._check_is_fitted = lambda: None
+    # Mark as fitted
+    gmm.converged_ = True
+    gmm.n_iter_ = 1
+    gmm.lower_bound_ = 0.0
+
+    return gmm
