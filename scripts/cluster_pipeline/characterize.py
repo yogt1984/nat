@@ -168,3 +168,153 @@ def characterize_states(
         )
 
     return profiles
+
+
+# ---------------------------------------------------------------------------
+# Task 5.2: Entry and Exit Signatures
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TransitionSignature:
+    """Average derivative trajectory around state entry/exit."""
+
+    state_id: int
+    entry_trajectory: pd.DataFrame  # shape (lookback, n_columns) — mean trajectory
+    exit_trajectory: pd.DataFrame  # shape (lookback, n_columns) — mean trajectory
+    entry_count: int  # number of entry events used
+    exit_count: int  # number of exit events used
+    entry_std: pd.DataFrame  # shape (lookback, n_columns) — std across events
+    exit_std: pd.DataFrame  # shape (lookback, n_columns) — std across events
+
+
+def compute_signatures(
+    derivatives: pd.DataFrame,
+    labels: np.ndarray,
+    state_id: int,
+    lookback: int = 5,
+    min_events: int = 5,
+) -> Optional[TransitionSignature]:
+    """
+    Compute average derivative trajectory before state entry and after exit.
+
+    Entry signature: for each time t where label[t]==state_id and
+    label[t-1]!=state_id, collect derivatives[t-lookback:t] (the approach).
+
+    Exit signature: for each time t where label[t]==state_id and
+    label[t+1]!=state_id, collect derivatives[t+1:t+1+lookback] (the departure).
+
+    Args:
+        derivatives: DataFrame of derivative columns.
+        labels: 1-D array of state labels (same length as derivatives).
+        state_id: Which state to compute signatures for.
+        lookback: Number of bars before entry / after exit to capture.
+        min_events: Minimum number of entry/exit events required.
+            Returns None if both entry_count and exit_count < min_events.
+
+    Returns:
+        TransitionSignature if sufficient events, None otherwise.
+
+    Raises:
+        ValueError: if derivatives and labels have different lengths,
+            or if lookback < 1.
+    """
+    labels = np.asarray(labels)
+
+    if len(derivatives) != len(labels):
+        raise ValueError(
+            f"derivatives rows ({len(derivatives)}) != "
+            f"labels length ({len(labels)})"
+        )
+
+    if lookback < 1:
+        raise ValueError(f"lookback must be >= 1, got {lookback}")
+
+    n = len(labels)
+    columns = derivatives.columns.tolist()
+
+    # ----- Find entry points -----
+    # Entry at t: labels[t] == state_id AND (t==0 OR labels[t-1] != state_id)
+    entry_indices = []
+    for t in range(n):
+        if labels[t] == state_id:
+            if t == 0 or labels[t - 1] != state_id:
+                entry_indices.append(t)
+
+    # ----- Find exit points -----
+    # Exit at t: labels[t] == state_id AND (t==n-1 OR labels[t+1] != state_id)
+    exit_indices = []
+    for t in range(n):
+        if labels[t] == state_id:
+            if t == n - 1 or labels[t + 1] != state_id:
+                exit_indices.append(t)
+
+    # ----- Collect entry trajectories (lookback bars BEFORE entry) -----
+    entry_windows = []
+    for t in entry_indices:
+        start = t - lookback
+        if start >= 0:
+            window = derivatives.iloc[start:t].values
+            if window.shape[0] == lookback:
+                entry_windows.append(window)
+
+    # ----- Collect exit trajectories (lookback bars AFTER exit) -----
+    exit_windows = []
+    for t in exit_indices:
+        end = t + 1 + lookback
+        if end <= n:
+            window = derivatives.iloc[t + 1:end].values
+            if window.shape[0] == lookback:
+                exit_windows.append(window)
+
+    entry_count = len(entry_windows)
+    exit_count = len(exit_windows)
+
+    # Check minimum events
+    if entry_count < min_events and exit_count < min_events:
+        return None
+
+    # ----- Compute mean and std trajectories -----
+    if entry_count > 0:
+        entry_stack = np.stack(entry_windows, axis=0)  # (n_events, lookback, n_cols)
+        entry_mean = np.mean(entry_stack, axis=0)
+        entry_std = np.std(entry_stack, axis=0)
+    else:
+        entry_mean = np.full((lookback, len(columns)), np.nan)
+        entry_std = np.full((lookback, len(columns)), np.nan)
+
+    if exit_count > 0:
+        exit_stack = np.stack(exit_windows, axis=0)
+        exit_mean = np.mean(exit_stack, axis=0)
+        exit_std = np.std(exit_stack, axis=0)
+    else:
+        exit_mean = np.full((lookback, len(columns)), np.nan)
+        exit_std = np.full((lookback, len(columns)), np.nan)
+
+    # Build DataFrames with relative time index
+    entry_trajectory = pd.DataFrame(
+        entry_mean, columns=columns,
+        index=range(-lookback, 0),
+    )
+    exit_trajectory = pd.DataFrame(
+        exit_mean, columns=columns,
+        index=range(1, lookback + 1),
+    )
+    entry_std_df = pd.DataFrame(
+        entry_std, columns=columns,
+        index=range(-lookback, 0),
+    )
+    exit_std_df = pd.DataFrame(
+        exit_std, columns=columns,
+        index=range(1, lookback + 1),
+    )
+
+    return TransitionSignature(
+        state_id=state_id,
+        entry_trajectory=entry_trajectory,
+        exit_trajectory=exit_trajectory,
+        entry_count=entry_count,
+        exit_count=exit_count,
+        entry_std=entry_std_df,
+        exit_std=exit_std_df,
+    )

@@ -20,6 +20,8 @@ import pytest
 from cluster_pipeline.characterize import (
     StateProfile,
     characterize_states,
+    TransitionSignature,
+    compute_signatures,
 )
 from cluster_pipeline.hierarchy import HierarchicalLabels, StructureTest
 from cluster_pipeline.transitions import empirical_transitions, TransitionModel
@@ -573,3 +575,362 @@ class TestZScoreLogic:
         if profiles[2].top_elevated:
             _, z = profiles[2].top_elevated[0]
             assert abs(z) < abs(profiles[0].top_elevated[0][1])
+
+
+# ===========================================================================
+# Task 5.2: Entry and Exit Signatures
+# ===========================================================================
+
+
+def _make_signature_data(n=100, seed=42):
+    """Create data with known entry/exit patterns for state 0."""
+    rng = np.random.RandomState(seed)
+    # Pattern: [1]*10 + [0]*10 + [1]*10 + [0]*10 + ... (repeating)
+    # This gives predictable entry/exit counts
+    labels = np.array(([1]*10 + [0]*10) * (n // 20))
+    data = rng.normal(0, 1, (len(labels), 3))
+    # Add a ramp before entry to state 0 (derivative increases before switching)
+    for t in range(len(labels)):
+        if labels[t] == 0 and (t == 0 or labels[t-1] != 0):
+            # Entry at t — make preceding bars ramp up
+            for offset in range(1, 6):
+                if t - offset >= 0:
+                    data[t - offset, 0] += offset * 0.5  # ramp on col 0
+    derivatives = pd.DataFrame(data, columns=["a", "b", "c"])
+    return derivatives, labels
+
+
+class TestEntryCount:
+    """Entry count must match hand-counted transitions INTO the state."""
+
+    def test_known_entry_count(self):
+        """[1,0,0,1,0,0,1,0] → state 0 entered at index 1 and 4 → 2 entries."""
+        labels = np.array([1, 0, 0, 1, 0, 0, 1, 0])
+        derivatives = pd.DataFrame(np.random.randn(8, 2), columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=1, min_events=1)
+        assert sig is not None
+        # Entries at indices 1, 4, 7 (where labels[t]==0 and labels[t-1]!=0)
+        # t=1: labels[1]=0, labels[0]=1 ✓
+        # t=4: labels[4]=0, labels[3]=1 ✓
+        # t=7: labels[7]=0, labels[6]=1 ✓
+        # But entry_count only counts those with enough lookback
+        # With lookback=1: t=1 needs t=0 (ok), t=4 needs t=3 (ok), t=7 needs t=6 (ok)
+        assert sig.entry_count == 3
+
+    def test_first_bar_is_entry(self):
+        """If label[0] == state_id, it counts as an entry but no lookback available."""
+        labels = np.array([0, 0, 1, 0, 0])
+        derivatives = pd.DataFrame(np.random.randn(5, 2), columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=2, min_events=1)
+        # Entry at t=0 (no lookback), t=3 (lookback=2 → needs t=1,2)
+        # t=0: start=0-2=-2 < 0 → skip
+        # t=3: start=3-2=1 → window=[1,2] → ok
+        assert sig is not None
+        assert sig.entry_count == 1
+
+    def test_entry_count_long_lookback(self):
+        """Longer lookback → fewer valid entries (need more history)."""
+        labels = np.array([1]*5 + [0]*5 + [1]*5 + [0]*5)
+        derivatives = pd.DataFrame(np.random.randn(20, 2), columns=["a", "b"])
+        sig_short = compute_signatures(derivatives, labels, state_id=0,
+                                       lookback=3, min_events=1)
+        sig_long = compute_signatures(derivatives, labels, state_id=0,
+                                      lookback=10, min_events=1)
+        # Short lookback: entry at t=5 (start=2 ok), t=15 (start=12 ok) → 2
+        assert sig_short is not None
+        assert sig_short.entry_count == 2
+        # Long lookback: entry at t=5 (start=-5 < 0 skip), t=15 (start=5 ok) → 1
+        assert sig_long is not None
+        assert sig_long.entry_count == 1
+
+
+class TestExitCount:
+    """Exit count must match hand-counted transitions OUT OF the state."""
+
+    def test_known_exit_count(self):
+        """[0,0,0,1,1,0,0,1] → state 0 exits at index 2, 6."""
+        labels = np.array([0, 0, 0, 1, 1, 0, 0, 1])
+        derivatives = pd.DataFrame(np.random.randn(8, 2), columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=1, min_events=1)
+        # Exit at t where labels[t]==0 and labels[t+1]!=0
+        # t=2: labels[2]=0, labels[3]=1 ✓ → exit window = [t+1:t+2] = [3:4] ok
+        # t=6: labels[6]=0, labels[7]=1 ✓ → exit window = [t+1:t+2] = [7:8] ok
+        assert sig is not None
+        assert sig.exit_count == 2
+
+    def test_last_bar_is_exit_no_window(self):
+        """If state ends at last bar, it's an exit but no forward window."""
+        labels = np.array([1, 1, 0, 0, 0])
+        derivatives = pd.DataFrame(np.random.randn(5, 2), columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=2, min_events=1)
+        # Exit at t=4 (last bar) → need t+1:t+3 = [5:7] → out of bounds → skip
+        # Exit at t=2? No, labels[3]=0, so t=2 is not exit
+        # Actually exit at t=4: labels[4]=0 and t==n-1 → it IS exit
+        # But window t+1:t+1+2 = [5:7] > len=5 → skip
+        # So exit_count = 0
+        # Entry at t=2: start=2-2=0, window=[0:2] ok → entry_count=1
+        assert sig is not None
+        assert sig.exit_count == 0
+        assert sig.entry_count == 1
+
+
+class TestInsufficientEventsReturnsNone:
+    """Returns None when both entry and exit counts < min_events."""
+
+    def test_too_few_events(self):
+        """State with only 2 entries, min_events=5 → None."""
+        labels = np.array([1]*10 + [0]*5 + [1]*10 + [0]*5)
+        derivatives = pd.DataFrame(np.random.randn(30, 2), columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=3, min_events=5)
+        assert sig is None
+
+    def test_exactly_min_events_entry(self):
+        """Exactly min_events entries → returns result."""
+        # Create 5 entry events with lookback=1
+        labels = np.array(([1, 0]) * 6)  # 12 bars, 6 entries to state 0
+        derivatives = pd.DataFrame(np.random.randn(12, 2), columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=1, min_events=5)
+        assert sig is not None
+        assert sig.entry_count >= 5
+
+    def test_entry_sufficient_exit_not(self):
+        """Entry ≥ min_events but exit < min_events → still returns (entry ok)."""
+        # 10 entries with lookback but exits need forward window
+        labels = np.array(([1]*3 + [0]*3) * 10)  # 60 bars
+        derivatives = pd.DataFrame(np.random.randn(60, 2), columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=2, min_events=5)
+        assert sig is not None
+
+
+class TestTrajectoryShape:
+    """Trajectory DataFrames have correct shape."""
+
+    def test_entry_trajectory_shape(self):
+        derivatives, labels = _make_signature_data()
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=5, min_events=1)
+        assert sig is not None
+        assert sig.entry_trajectory.shape == (5, 3)
+
+    def test_exit_trajectory_shape(self):
+        derivatives, labels = _make_signature_data()
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=5, min_events=1)
+        assert sig is not None
+        assert sig.exit_trajectory.shape == (5, 3)
+
+    def test_entry_std_shape(self):
+        derivatives, labels = _make_signature_data()
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=5, min_events=1)
+        assert sig is not None
+        assert sig.entry_std.shape == (5, 3)
+
+    def test_exit_std_shape(self):
+        derivatives, labels = _make_signature_data()
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=5, min_events=1)
+        assert sig is not None
+        assert sig.exit_std.shape == (5, 3)
+
+    def test_custom_lookback(self):
+        derivatives, labels = _make_signature_data()
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=3, min_events=1)
+        assert sig is not None
+        assert sig.entry_trajectory.shape == (3, 3)
+        assert sig.exit_trajectory.shape == (3, 3)
+
+
+class TestTrajectoryIndex:
+    """Trajectory index uses relative time."""
+
+    def test_entry_index_negative(self):
+        """Entry trajectory index: [-lookback, ..., -1]."""
+        derivatives, labels = _make_signature_data()
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=5, min_events=1)
+        assert sig is not None
+        assert list(sig.entry_trajectory.index) == [-5, -4, -3, -2, -1]
+
+    def test_exit_index_positive(self):
+        """Exit trajectory index: [1, 2, ..., lookback]."""
+        derivatives, labels = _make_signature_data()
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=5, min_events=1)
+        assert sig is not None
+        assert list(sig.exit_trajectory.index) == [1, 2, 3, 4, 5]
+
+
+class TestTrajectoryContent:
+    """Trajectory values are correct averages."""
+
+    def test_entry_is_mean_of_windows(self):
+        """Entry trajectory == mean of all lookback windows before entry."""
+        # Simple case: constant values before entry
+        labels = np.array([1, 1, 1, 0, 0, 1, 1, 1, 0, 0])
+        data = np.arange(20).reshape(10, 2).astype(float)
+        derivatives = pd.DataFrame(data, columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=2, min_events=1)
+        assert sig is not None
+        # Entry at t=3: window = derivatives[1:3] = [[2,3],[4,5]]
+        # Entry at t=8: window = derivatives[6:8] = [[12,13],[14,15]]
+        # Mean: [[(2+12)/2, (3+13)/2], [(4+14)/2, (5+15)/2]] = [[7,8],[9,10]]
+        expected = np.array([[7.0, 8.0], [9.0, 10.0]])
+        np.testing.assert_allclose(sig.entry_trajectory.values, expected)
+
+    def test_exit_is_mean_of_windows(self):
+        """Exit trajectory == mean of all lookback windows after exit."""
+        labels = np.array([0, 0, 1, 1, 0, 0, 1, 1, 1, 1])
+        data = np.arange(20).reshape(10, 2).astype(float)
+        derivatives = pd.DataFrame(data, columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=2, min_events=1)
+        # Exit at t where labels[t]==0 and labels[t+1]!=0
+        # t=1: labels[1]=0, labels[2]=1 ✓ → window = [2:4] = [[4,5],[6,7]]
+        # t=5: labels[5]=0, labels[6]=1 ✓ → window = [6:8] = [[12,13],[14,15]]
+        # Mean: [[(4+12)/2, (5+13)/2], [(6+14)/2, (7+15)/2]] = [[8,9],[10,11]]
+        assert sig is not None
+        expected = np.array([[8.0, 9.0], [10.0, 11.0]])
+        np.testing.assert_allclose(sig.exit_trajectory.values, expected)
+
+    def test_single_event_no_std(self):
+        """Single event → std = 0."""
+        labels = np.array([1, 1, 1, 0, 0, 0, 0, 0])
+        data = np.ones((8, 2))
+        derivatives = pd.DataFrame(data, columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=2, min_events=1)
+        assert sig is not None
+        # Single entry event → std across events = 0
+        assert np.all(sig.entry_std.values == 0)
+
+
+class TestSignatureValidation:
+    """Invalid inputs raise errors."""
+
+    def test_length_mismatch(self):
+        derivatives = pd.DataFrame({"a": [1, 2, 3]})
+        labels = np.array([0, 1])
+        with pytest.raises(ValueError, match="derivatives rows"):
+            compute_signatures(derivatives, labels, state_id=0)
+
+    def test_lookback_zero(self):
+        derivatives = pd.DataFrame({"a": [1, 2, 3]})
+        labels = np.array([0, 1, 0])
+        with pytest.raises(ValueError, match="lookback must be >= 1"):
+            compute_signatures(derivatives, labels, state_id=0, lookback=0)
+
+    def test_negative_lookback(self):
+        derivatives = pd.DataFrame({"a": [1, 2, 3]})
+        labels = np.array([0, 1, 0])
+        with pytest.raises(ValueError, match="lookback must be >= 1"):
+            compute_signatures(derivatives, labels, state_id=0, lookback=-1)
+
+
+class TestSignatureReturnType:
+    """Return type checks."""
+
+    def test_returns_transition_signature(self):
+        derivatives, labels = _make_signature_data()
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=3, min_events=1)
+        assert isinstance(sig, TransitionSignature)
+
+    def test_trajectories_are_dataframes(self):
+        derivatives, labels = _make_signature_data()
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=3, min_events=1)
+        assert isinstance(sig.entry_trajectory, pd.DataFrame)
+        assert isinstance(sig.exit_trajectory, pd.DataFrame)
+        assert isinstance(sig.entry_std, pd.DataFrame)
+        assert isinstance(sig.exit_std, pd.DataFrame)
+
+    def test_state_id_stored(self):
+        derivatives, labels = _make_signature_data()
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=3, min_events=1)
+        assert sig.state_id == 0
+
+
+class TestSignatureEdgeCases:
+    """Edge cases."""
+
+    def test_state_never_appears(self):
+        """State not in labels → None (0 events)."""
+        labels = np.array([0, 0, 0, 0])
+        derivatives = pd.DataFrame(np.random.randn(4, 2), columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=99,
+                                 lookback=1, min_events=1)
+        assert sig is None
+
+    def test_state_all_bars(self):
+        """State occupies all bars → 1 entry at t=0, but no lookback."""
+        labels = np.array([0, 0, 0, 0, 0])
+        derivatives = pd.DataFrame(np.random.randn(5, 2), columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=2, min_events=1)
+        # Entry at t=0 → need t-2:t → negative → skip
+        # No exits (state runs to end without switching)
+        # exit_count = 0, entry_count = 0 → None
+        assert sig is None
+
+    def test_lookback_one(self):
+        """Minimal lookback=1 works."""
+        labels = np.array([1, 0, 1, 0, 1, 0])
+        derivatives = pd.DataFrame(np.random.randn(6, 2), columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=1, min_events=1)
+        assert sig is not None
+        assert sig.entry_trajectory.shape == (1, 2)
+
+    def test_many_columns(self):
+        """50 derivative columns work correctly."""
+        rng = np.random.RandomState(42)
+        labels = np.array(([1]*5 + [0]*5) * 10)
+        data = rng.normal(0, 1, (100, 50))
+        derivatives = pd.DataFrame(data, columns=[f"f_{i}" for i in range(50)])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=3, min_events=1)
+        assert sig is not None
+        assert sig.entry_trajectory.shape[1] == 50
+
+    def test_min_events_zero(self):
+        """min_events=0 → always returns (as long as state exists)."""
+        labels = np.array([1, 0, 1])
+        derivatives = pd.DataFrame(np.random.randn(3, 2), columns=["a", "b"])
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=1, min_events=0)
+        # entry at t=1, lookback=1 → window=[0:1] ok → entry_count=1
+        assert sig is not None
+
+
+class TestSignatureDeterminism:
+    """Same inputs → same results."""
+
+    def test_deterministic(self):
+        derivatives, labels = _make_signature_data()
+        s1 = compute_signatures(derivatives, labels, state_id=0, lookback=3, min_events=1)
+        s2 = compute_signatures(derivatives, labels, state_id=0, lookback=3, min_events=1)
+        pd.testing.assert_frame_equal(s1.entry_trajectory, s2.entry_trajectory)
+        pd.testing.assert_frame_equal(s1.exit_trajectory, s2.exit_trajectory)
+
+
+class TestSignatureColumns:
+    """Trajectory columns match derivatives columns."""
+
+    def test_columns_match(self):
+        derivatives, labels = _make_signature_data()
+        sig = compute_signatures(derivatives, labels, state_id=0,
+                                 lookback=3, min_events=1)
+        assert list(sig.entry_trajectory.columns) == list(derivatives.columns)
+        assert list(sig.exit_trajectory.columns) == list(derivatives.columns)
+        assert list(sig.entry_std.columns) == list(derivatives.columns)
