@@ -14,7 +14,7 @@ use tracing::{debug, info, warn, error};
 use crate::config::WebSocketConfig;
 use super::messages::{parse_ws_message, SubscriptionRequest, WsMessage};
 
-/// Hyperliquid WebSocket client
+/// Hyperliquid WebSocket client with keepalive and stale detection
 pub struct HyperliquidClient {
     config: WebSocketConfig,
     symbol: String,
@@ -23,6 +23,9 @@ pub struct HyperliquidClient {
     first_message_logged: bool,
     connected_at: Option<std::time::Instant>,
     message_count: u64,
+    last_message_at: Option<std::time::Instant>,
+    last_ping_sent: Option<std::time::Instant>,
+    pong_received: bool,
 }
 
 impl HyperliquidClient {
@@ -36,6 +39,9 @@ impl HyperliquidClient {
             first_message_logged: false,
             connected_at: None,
             message_count: 0,
+            last_message_at: None,
+            last_ping_sent: None,
+            pong_received: true,
         }
     }
 
@@ -52,6 +58,9 @@ impl HyperliquidClient {
         self.stream = Some(stream);
         self.reconnect_attempts = 0;
         self.connected_at = Some(std::time::Instant::now());
+        self.last_message_at = Some(std::time::Instant::now());
+        self.last_ping_sent = None;
+        self.pong_received = true;
         self.first_message_logged = false;
         self.message_count = 0;
 
@@ -101,6 +110,7 @@ impl HyperliquidClient {
 
         match stream.next().await {
             Some(Ok(Message::Text(text))) => {
+                self.last_message_at = Some(std::time::Instant::now());
                 match parse_ws_message(&text) {
                     Some(msg) => {
                         self.message_count += 1;
@@ -124,24 +134,33 @@ impl HyperliquidClient {
                 }
             }
             Some(Ok(Message::Ping(data))) => {
+                self.last_message_at = Some(std::time::Instant::now());
                 stream.send(Message::Pong(data)).await?;
                 Ok(None)
             }
-            Some(Ok(Message::Pong(_))) => Ok(None),
+            Some(Ok(Message::Pong(_))) => {
+                self.last_message_at = Some(std::time::Instant::now());
+                self.pong_received = true;
+                debug!(symbol = %self.symbol, "Pong received");
+                Ok(None)
+            }
             Some(Ok(Message::Close(frame))) => {
-                warn!(?frame, "WebSocket closed by server");
+                warn!(symbol = %self.symbol, ?frame, "WebSocket closed by server");
                 self.stream = None;
                 Ok(None)
             }
-            Some(Ok(Message::Binary(_))) => Ok(None),
+            Some(Ok(Message::Binary(_))) => {
+                self.last_message_at = Some(std::time::Instant::now());
+                Ok(None)
+            }
             Some(Ok(Message::Frame(_))) => Ok(None),
             Some(Err(e)) => {
-                error!(?e, "WebSocket error");
+                error!(symbol = %self.symbol, ?e, "WebSocket error");
                 self.stream = None;
                 Err(e.into())
             }
             None => {
-                warn!("WebSocket stream ended");
+                warn!(symbol = %self.symbol, "WebSocket stream ended");
                 self.stream = None;
                 Ok(None)
             }
@@ -171,6 +190,58 @@ impl HyperliquidClient {
         self.connect().await
     }
 
+    /// Send a ping frame to keep the connection alive.
+    /// Returns true if ping was sent, false if not connected.
+    pub async fn send_ping(&mut self) -> Result<bool> {
+        if let Some(ref mut stream) = self.stream {
+            let payload = b"keepalive".to_vec();
+            match stream.send(Message::Ping(payload)).await {
+                Ok(()) => {
+                    self.last_ping_sent = Some(std::time::Instant::now());
+                    self.pong_received = false;
+                    debug!(symbol = %self.symbol, "Ping sent");
+                    Ok(true)
+                }
+                Err(e) => {
+                    warn!(symbol = %self.symbol, ?e, "Failed to send ping");
+                    self.stream = None;
+                    Ok(false)
+                }
+            }
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Check if the connection is stale (no messages received recently).
+    /// A connection is stale if no data has arrived for 2x the ping interval.
+    pub fn is_stale(&self) -> bool {
+        if self.stream.is_none() {
+            return true;
+        }
+        let stale_threshold = std::time::Duration::from_millis(self.config.ping_interval_ms * 3);
+        match self.last_message_at {
+            Some(t) => t.elapsed() > stale_threshold,
+            None => {
+                // Never received a message — stale if connected for > threshold
+                self.connected_at
+                    .map(|t| t.elapsed() > stale_threshold)
+                    .unwrap_or(true)
+            }
+        }
+    }
+
+    /// Check if a sent ping timed out (no pong received within ping_interval).
+    pub fn ping_timed_out(&self) -> bool {
+        if self.pong_received {
+            return false;
+        }
+        match self.last_ping_sent {
+            Some(t) => t.elapsed() > std::time::Duration::from_millis(self.config.ping_interval_ms),
+            None => false,
+        }
+    }
+
     /// Check if connected
     pub fn is_connected(&self) -> bool {
         self.stream.is_some()
@@ -186,5 +257,12 @@ impl HyperliquidClient {
         self.connected_at
             .map(|t| t.elapsed().as_secs_f64())
             .unwrap_or(0.0)
+    }
+
+    /// Seconds since last message (any frame type)
+    pub fn seconds_since_last_message(&self) -> f64 {
+        self.last_message_at
+            .map(|t| t.elapsed().as_secs_f64())
+            .unwrap_or(self.elapsed_since_connect())
     }
 }

@@ -202,6 +202,11 @@ async fn run_symbol_ingestor(
     let mut health_ticker = tokio::time::interval(tokio::time::Duration::from_secs(60));
     health_ticker.tick().await; // skip immediate first tick
 
+    // Ping/keepalive ticker
+    let ping_interval = tokio::time::Duration::from_millis(config.websocket.ping_interval_ms);
+    let mut ping_ticker = tokio::time::interval(ping_interval);
+    ping_ticker.tick().await; // skip immediate first tick
+
     let connect_time = std::time::Instant::now();
     let mut first_feature_logged = false;
     let mut no_data_warned = false;
@@ -332,6 +337,36 @@ async fn run_symbol_ingestor(
                     let elapsed = start.elapsed();
                     metrics.record_feature_latency(&symbol, elapsed);
                     metrics.record_feature_emitted(&symbol);
+                }
+            }
+
+            // Ping/keepalive — detect stale connections and reconnect
+            _ = ping_ticker.tick() => {
+                if client.is_connected() {
+                    // Check if connection is stale or ping timed out
+                    if client.is_stale() || client.ping_timed_out() {
+                        let silence = client.seconds_since_last_message();
+                        warn!(
+                            %symbol,
+                            silence_s = format!("{:.1}", silence),
+                            stale = client.is_stale(),
+                            ping_timeout = client.ping_timed_out(),
+                            "Connection stale — forcing reconnect"
+                        );
+                        dashboard_state.update_symbol(&symbol, |s| {
+                            s.connected = false;
+                        });
+                        client.reconnect().await?;
+                        dashboard_state.update_symbol(&symbol, |s| {
+                            s.connected = true;
+                        });
+                    } else {
+                        // Send keepalive ping
+                        if let Err(e) = client.send_ping().await {
+                            warn!(%symbol, ?e, "Ping send failed, reconnecting");
+                            client.reconnect().await?;
+                        }
+                    }
                 }
             }
 
