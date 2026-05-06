@@ -13,6 +13,76 @@
 
 NAT is a quantitative research platform for extracting alpha signals from Hyperliquid perpetual futures. Rust handles real-time ingestion and feature computation; Python handles regime profiling, backtesting, and ML training.
 
+## Why This System Exists
+
+Market making on decentralized perpetual exchanges is a spread-setting problem under uncertainty. The market maker must continuously choose a half-spread $\delta$ that balances two competing objectives:
+
+1. **Revenue from the spread**: wider $\delta$ captures more per round-trip
+2. **Adverse selection**: wider $\delta$ reduces fill probability; narrow $\delta$ invites informed flow that moves through the quote
+
+The classical result of Glosten & Milgrom (1985) proves that a competitive market maker must set:
+
+$$\delta \geq \mu \cdot (V^+ - V^-) / (V^+ + V^-)$$
+
+where $\mu$ is the probability of facing an informed trader, and $V^+, V^-$ are expected asset values conditional on a buy/sell. This is the **zero-profit condition** — any spread below this bound guarantees negative expected PnL due to adverse selection.
+
+Avellaneda & Stoikov (2008) extend this to continuous-time with inventory:
+
+$$\delta^*(q, \sigma, T) = \gamma \sigma^2 (T - t) + \frac{2}{\gamma} \ln\left(1 + \frac{\gamma}{k}\right)$$
+
+where $\gamma$ is risk aversion, $\sigma$ is volatility, $q$ is inventory, and $k$ is fill intensity. The key insight: **optimal spread is a function of market state**, not a constant.
+
+### The Entropy-Adaptive Hypothesis
+
+NAT's core thesis is that **Shannon entropy of tick direction** is a sufficient statistic for the informed-trader intensity $\mu$ and therefore for optimal spread:
+
+$$H(t) = -\sum_{d \in \{+,-,0\}} p_d(t) \ln p_d(t), \quad H \in [0, \ln 3]$$
+
+**Theoretical justification**:
+
+- When $H \to 0$ (trending): tick direction is predictable, implying informed flow dominates. Glosten-Milgrom says widen spread (high $\mu$).
+- When $H \to \ln 3$ (random walk): no directional information in order flow, implying noise traders dominate. Narrow spread captures volume safely (low $\mu$).
+- When $H$ is intermediate: regime is transitioning, spread should interpolate.
+
+This maps to a testable statistical hypothesis:
+
+> **H₀**: Optimal spread is independent of entropy regime  
+> **H₁**: $E[\delta^* | H \in R_i] \neq E[\delta^* | H \in R_j]$ for at least one pair $(R_i, R_j)$
+
+Tested via Kruskal-Wallis with effect size $\eta^2 > 0.01$ and $p < 0.01$.
+
+### Why FPGA Without Co-location
+
+Hyperliquid is a decentralized exchange — there is no co-location facility. All participants face the same network latency (~50-200ms to validators). The advantage of FPGA is not raw speed but **deterministic execution**: once a spread decision is made, the quote update executes in constant time regardless of system load, eliminating the tail-latency jitter that software market makers suffer during volatility spikes (exactly when correct spread-setting matters most).
+
+The decision tree structure of LightGBM maps directly to FPGA lookup tables: each split is a comparator, each leaf is a fixed-point spread value. The full model evaluates in $O(\text{depth})$ clock cycles with no branch misprediction.
+
+## Theoretical Foundations
+
+| Concept | Reference | Application in NAT |
+|---------|-----------|-------------------|
+| Adverse selection & spread | Glosten & Milgrom (1985) | Zero-profit condition, spread lower bound |
+| Inventory-optimal spread | Avellaneda & Stoikov (2008) | Inventory penalty $\gamma q^2 \sigma^2$, skew |
+| Kyle's lambda (price impact) | Kyle (1985) | Feature: illiquidity measure |
+| VPIN (informed flow) | Easley, Lopez de Prado & O'Hara (2012) | Feature: toxicity detection |
+| Permutation entropy | Bandt & Pompe (2002) | Feature: nonlinear serial dependence |
+| Tick entropy as regime indicator | Zunino et al. (2009) | Core thesis: entropy → optimal spread |
+| Order flow imbalance | Cont, Kukanov & Stoikov (2014) | Feature: short-horizon prediction |
+| Hurst exponent | Mandelbrot (1971) | Feature: persistence vs mean-reversion |
+| Parkinson volatility | Parkinson (1980) | Feature: range-based vol estimator |
+| GMM regime detection | Hamilton (1989), McLachlan & Peel (2000) | Phase 2: unsupervised regime discovery |
+| Walk-forward validation | White (2000), Bailey et al. (2014) | No lookahead in all evaluations |
+
+## Key Results
+
+| Metric | Value | Interpretation |
+|--------|-------|----------------|
+| Walk-forward edge (Phase 1) | +4.18% over base rate | Statistically significant signal in 123 features |
+| Net PnL after costs (Phase 1) | -0.45 bps/trade | Signal alone insufficient; regime conditioning needed |
+| Test coverage | 125 EAMM + 196 pipeline + 386 Rust | Comprehensive validation at every layer |
+| Feature count | 191 (123 active) | Dense microstructure representation |
+| Ingestion rate | 30 rows/sec × 3 symbols | 100ms resolution, sufficient for 5-min decisions |
+
 ## Architecture
 
 ```
@@ -344,3 +414,41 @@ make docker_down        # Stop
 ## Multi-Machine Setup
 
 The ingestor runs on a separate machine (`su-35`). `make run` kills stale processes before starting. Data is written to `data/features/` at project root.
+
+## References
+
+1. Glosten, L. R., & Milgrom, P. R. (1985). Bid, ask and transaction prices in a specialist market with heterogeneously informed traders. *Journal of Financial Economics*, 14(1), 71-100.
+
+2. Avellaneda, M., & Stoikov, S. (2008). High-frequency trading in a limit order book. *Quantitative Finance*, 8(3), 217-224.
+
+3. Kyle, A. S. (1985). Continuous auctions and insider trading. *Econometrica*, 53(6), 1315-1335.
+
+4. Easley, D., Lopez de Prado, M. M., & O'Hara, M. (2012). Flow toxicity and liquidity in a high-frequency world. *The Review of Financial Studies*, 25(5), 1457-1493.
+
+5. Cont, R., Kukanov, A., & Stoikov, S. (2014). The price impact of order book events. *Journal of Financial Econometrics*, 12(1), 47-88.
+
+6. Bandt, C., & Pompe, B. (2002). Permutation entropy: A natural complexity measure for time series. *Physical Review Letters*, 88(17), 174102.
+
+7. Zunino, L., Zanin, M., Tabak, B. M., Perez, D. G., & Rosso, O. A. (2009). Forbidden patterns, permutation entropy and stock market inefficiency. *Physica A*, 388(14), 2854-2864.
+
+8. Shannon, C. E. (1948). A mathematical theory of communication. *The Bell System Technical Journal*, 27(3), 379-423.
+
+9. Parkinson, M. (1980). The extreme value method for estimating the variance of the rate of return. *The Journal of Business*, 53(1), 61-65.
+
+10. Mandelbrot, B. B. (1971). When can price be arbitraged efficiently? A limit to the validity of the random walk and martingale models. *The Review of Economics and Statistics*, 53(3), 225-236.
+
+11. Hamilton, J. D. (1989). A new approach to the economic analysis of nonstationary time series and the business cycle. *Econometrica*, 57(2), 357-384.
+
+12. White, H. (2000). A reality check for data snooping. *Econometrica*, 68(5), 1097-1126.
+
+13. Bailey, D. H., Borwein, J. M., Lopez de Prado, M., & Zhu, Q. J. (2014). Pseudo-mathematics and financial charlatanism: The effects of backtest overfitting on out-of-sample performance. *Notices of the AMS*, 61(5), 458-471.
+
+14. Amihud, Y. (2002). Illiquidity and stock returns: Cross-section and time-series effects. *Journal of Financial Markets*, 5(1), 31-56.
+
+15. Hasbrouck, J. (2009). Trading costs and returns for US equities: Estimating effective costs from daily data. *The Journal of Finance*, 64(3), 1445-1477.
+
+16. Jegadeesh, N., & Titman, S. (1993). Returns to buying winners and selling losers: Implications for stock market efficiency. *The Journal of Finance*, 48(1), 65-91.
+
+17. Cont, R., Stoikov, S., & Talreja, R. (2010). A stochastic model for order book dynamics. *Operations Research*, 58(3), 549-563.
+
+18. Gatheral, J., & Oomen, R. (2010). Zero-intelligence realized variance estimation. *Finance and Stochastics*, 14(2), 249-283.
