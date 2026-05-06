@@ -322,19 +322,56 @@ make pipeline_resume    # Resume after interrupt
 
 ## Profiling Pipeline
 
-Hierarchical regime discovery in `scripts/cluster_pipeline/`:
+Hierarchical regime discovery via unsupervised clustering. The pipeline answers: **do natural market regimes exist in the data, and can they predict returns?**
 
-```bash
-# Run full profiling on collected data
-python scripts/analyze_clusters.py
-
-# Individual steps
-pytest scripts/tests/                    # 196 tests across 29 files
-make scan_schema                         # Schema + vector coverage
-make validate_data                       # 7-point data quality check
+```
+Ticks → Bars → Derivatives → PCA → GMM → Regimes → Validation → Verdict
 ```
 
-Modules: `loader` (Parquet I/O), `preprocess` (bar aggregation), `derivatives` (temporal + spectral), `reduction` (PCA), `cluster` (GMM/HDBSCAN), `hierarchy` (macro/micro discovery), `characterize` (centroid profiling), `transitions` (Markov analysis), `validate` (Q1-Q3 quality gates), `online` (drift-detecting classifier), `report` (automated markdown reports).
+### Mathematical Summary
+
+**Stage 1 — Preprocessing.** Aggregate 100ms ticks into 15-min bars. Per-column: mean/std/last (default), OHLC (prices), sum (volumes), mean/std/slope (entropy). Z-score normalize: `X' = (X - μ) / σ`. Clip outliers at ±5σ.
+
+**Stage 2 — Derivatives.** For top-15 features by variance, compute temporal derivatives over windows w ∈ {5, 15, 30}:
+
+| Derivative | Formula |
+|-----------|---------|
+| Velocity | `v(t) = f(t) - f(t-1)` |
+| Acceleration | `a(t) = v(t) - v(t-1)` |
+| Rolling z-score | `z_w(t) = (f(t) - μ_w) / σ_w` |
+| Rolling slope | `β_w(t) = (w·Σxᵢyᵢ - Σxᵢ·Σyᵢ) / (w·Σxᵢ² - (Σxᵢ)²)` |
+| Rolling volatility | `σ_w(t) = std(f over window w)` |
+
+Plus spectral features (FFT power ratio, dominant period) and cross-feature derivatives (ratios, correlations, divergences). Output: ~260 features.
+
+**Stage 3 — Reduction.** Drop low-variance columns (<10th percentile). Greedy dedup: for pairs with |ρ| > 0.95, drop lower-variance column. PCA with Ledoit-Wolf shrinkage covariance. Retain k components at ≥95% cumulative variance. Typical output: 10-15 dimensions.
+
+**Stage 4 — Clustering.** Test structure existence: Hopkins statistic H = Σu/(Σu+Σw) > 0.7 and Hartigan dip test p < 0.05. Select "slow" features (autocorrelation at lag-5 > 0.7). GMM k-sweep (k=2..5), select k* = argmin(BIC). Within each macro regime, discover micro-states via second-level GMM.
+
+**Stage 5 — Validation.** Three quality gates:
+
+| Gate | Test | Threshold | Meaning |
+|------|------|-----------|---------|
+| Q1 Structural | Silhouette + bootstrap ARI | sil ≥ 0.25, ARI ≥ 0.6 | Clusters are real and stable |
+| Q2 Predictive | Kruskal-Wallis on forward returns | p < 0.05, η² ≥ 0.01 | States predict different returns |
+| Q3 Operational | Self-transition rate + duration | STR ≥ 0.8, dur ≥ 3 bars | Regimes persist long enough to trade |
+
+**Decision:** Q1 fail → DROP, Q2 fail → COLLECT, Q3 fail → PIVOT, all pass → GO.
+
+**Stage 6 — Transitions.** Row-stochastic transition matrix P[i,j] = count(i→j) / Σⱼcount(i→j). Shannon row entropy H(i) = -Σⱼ P[i,j]·ln(P[i,j]). Duration distributions per state.
+
+See [`docs/specs/new/PROFILING_MATHEMATICS.md`](docs/specs/new/PROFILING_MATHEMATICS.md) for the full mathematical reference (1000+ lines with all derivations).
+
+### Running
+
+```bash
+make exp_analyze                         # Full pipeline: stop ingestor → validate → profile → verdict
+make scan_schema                         # Schema + vector coverage
+make validate_data                       # 7-point data quality check
+pytest scripts/tests/                    # 196 tests across 29 files
+```
+
+Modules: `loader`, `preprocess`, `derivatives`, `reduction`, `cluster`, `hierarchy`, `characterize`, `transitions`, `validate`, `online`, `report`.
 
 ## ML Infrastructure
 
