@@ -298,6 +298,47 @@ def cmd_dashboard():
     _print("→", B, f"Open: http://{ip}:8050")
 
 
+def cmd_macro():
+    """Show macro signals for all symbols."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from data.macro import fetch_candles, add_indicators
+
+    symbols = ["BTC", "ETH", "SOL"]
+    print(f"\n  {BOLD}Macro Signals (Daily){W}\n")
+
+    for sym in symbols:
+        try:
+            df = fetch_candles(sym, interval="1d", days=365)
+            df = add_indicators(df)
+            r = df.iloc[-1]
+
+            # Determine trend
+            cross_7_21 = "UP" if r.get("cross_7_21", 0) > 0 else "DN"
+            cross_50_200 = "UP" if r.get("cross_50_200", 0) > 0 else "DN"
+            rsi = r.get("rsi_14", 0)
+            macd = "BUY" if r.get("macd_cross", 0) > 0 else "SELL"
+            price = r.get("close", 0)
+
+            # Color the trend
+            c7 = G if cross_7_21 == "UP" else R
+            c50 = G if cross_50_200 == "UP" else R
+
+            print(f"  {BOLD}{sym}{W}  ${price:,.2f}")
+            print(f"    SMA 7/21:  {c7}{cross_7_21}{W}   SMA 50/200: {c50}{cross_50_200}{W}   MACD: {macd}   RSI: {rsi:.0f}")
+            print(f"    SMA7: {r.sma_7:,.2f}  SMA21: {r.sma_21:,.2f}  SMA50: {r.sma_50:,.2f}  SMA200: {r.sma_200:,.2f}")
+
+            # Support/Resistance
+            if "support_20" in df.columns:
+                print(f"    Support: ${r.support_20:,.2f}  Resist: ${r.resist_20:,.2f}")
+
+            print()
+        except Exception as e:
+            _print("✗", R, f"{sym}: {e}")
+
+    print(f"  {BOLD}Legend{W}: 7/21 = short-term trend, 50/200 = macro trend (golden/death cross)")
+    print()
+
+
 def cmd_build():
     """Build the ingestor binary."""
     _print("…", B, "Building release binary...")
@@ -371,6 +412,7 @@ COMMANDS = {
     "report": cmd_report,
     "dashboard": cmd_dashboard,
     "build": cmd_build,
+    "macro": cmd_macro,
 }
 
 
@@ -389,6 +431,9 @@ def cmd_help():
     nat profile      Run regime profiling on current data
     nat backtest     Backtest all strategies
     nat report       Generate full experiment report
+
+  {BOLD}Macro{W}
+    nat macro        Show daily MA crossover signals for all symbols
 
   {BOLD}Infrastructure{W}
     nat dashboard    Start dashboard and print URL
