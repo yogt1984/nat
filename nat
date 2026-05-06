@@ -92,6 +92,9 @@ def cmd_start():
         _print("✗", R, f"Failed to start. Check: cat {logfile}")
         return
 
+    # Start dashboard
+    cmd_dashboard()
+
     # Install cron watchdog
     _install_watchdog()
     print()
