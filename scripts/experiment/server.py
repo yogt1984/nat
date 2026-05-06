@@ -61,6 +61,58 @@ async def get_events(n: int = 50):
     return JSONResponse(events)
 
 
+@app.get("/api/heartbeat")
+async def heartbeat():
+    """Live heartbeat: check ingestor process + tail recent log lines."""
+    import subprocess
+    import os
+    from datetime import datetime, timezone
+
+    # Check ingestor process
+    result = subprocess.run(["pgrep", "-x", "ing"], capture_output=True, text=True)
+    pid = int(result.stdout.strip().split("\n")[0]) if result.returncode == 0 and result.stdout.strip() else None
+
+    # Find most recent log file
+    log_dir = Path(__file__).resolve().parent.parent.parent / "logs"
+    log_lines = []
+    if log_dir.exists():
+        logs = sorted(log_dir.glob("ingestor_*.log"), key=os.path.getmtime, reverse=True)
+        if logs:
+            # Read last 10 lines, strip ANSI codes
+            import re
+            ansi_re = re.compile(r'\x1b\[[0-9;]*m')
+            try:
+                with open(logs[0], 'rb') as f:
+                    # Seek to end, read last ~4KB
+                    f.seek(0, 2)
+                    size = f.tell()
+                    f.seek(max(0, size - 4096))
+                    tail = f.read().decode('utf-8', errors='replace')
+                    lines = tail.strip().split('\n')
+                    log_lines = [ansi_re.sub('', l) for l in lines[-8:]]
+            except Exception:
+                pass
+
+    # Check data freshness
+    data_dir = Path(__file__).resolve().parent.parent.parent / "data" / "features"
+    latest_mtime = 0
+    if data_dir.exists():
+        for p in data_dir.rglob("*.parquet"):
+            mt = p.stat().st_mtime
+            if mt > latest_mtime:
+                latest_mtime = mt
+
+    data_age_s = (datetime.now(timezone.utc).timestamp() - latest_mtime) if latest_mtime > 0 else -1
+
+    return JSONResponse({
+        "alive": pid is not None,
+        "pid": pid,
+        "data_age_s": round(data_age_s, 1),
+        "log_lines": log_lines,
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    })
+
+
 def main():
     parser = argparse.ArgumentParser(description="NAT Dashboard Server")
     parser.add_argument("--port", type=int, default=8050)

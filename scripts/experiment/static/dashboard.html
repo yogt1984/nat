@@ -297,8 +297,19 @@ footer {
     </ul>
 </section>
 
+<!-- LIVE HEARTBEAT -->
+<section>
+    <h2>Ingestor Live <span id="heartbeat-dot" style="color:#484f58;">&#x25CF;</span></h2>
+    <div style="display:flex; gap:20px; margin-bottom:8px;">
+        <span class="metric-label">PID: <span id="hb-pid" class="metric-value">—</span></span>
+        <span class="metric-label">Data age: <span id="hb-age" class="metric-value">—</span></span>
+        <span class="metric-label">Status: <span id="hb-status" class="metric-value">—</span></span>
+    </div>
+    <pre id="hb-log" style="background:#0d1117; border:1px solid #30363d; border-radius:4px; padding:10px; font-size:11px; color:#8b949e; overflow-x:auto; max-height:180px; white-space:pre-wrap;">waiting for heartbeat...</pre>
+</section>
+
 <footer>
-    Last updated: <span id="last-updated">never</span> · Refreshes every 60s
+    Last updated: <span id="last-updated">never</span> · Refreshes every 10s
 </footer>
 
 </div>
@@ -498,22 +509,78 @@ function renderEvents(state) {
     }).join('');
 }
 
+async function fetchHeartbeat() {
+    try {
+        const resp = await fetch(`${API_BASE}/api/heartbeat`);
+        if (!resp.ok) return null;
+        return await resp.json();
+    } catch (e) {
+        return null;
+    }
+}
+
+function renderHeartbeat(hb) {
+    const dot = document.getElementById('heartbeat-dot');
+    const pidEl = document.getElementById('hb-pid');
+    const ageEl = document.getElementById('hb-age');
+    const statusEl = document.getElementById('hb-status');
+    const logEl = document.getElementById('hb-log');
+
+    if (!hb) {
+        dot.style.color = '#f85149';
+        statusEl.textContent = 'NO RESPONSE';
+        return;
+    }
+
+    if (hb.alive) {
+        dot.style.color = '#3fb950';
+        statusEl.textContent = 'RUNNING';
+        statusEl.style.color = '#3fb950';
+    } else {
+        dot.style.color = '#f85149';
+        statusEl.textContent = 'DEAD';
+        statusEl.style.color = '#f85149';
+    }
+
+    pidEl.textContent = hb.pid || '—';
+
+    if (hb.data_age_s >= 0) {
+        const age = Math.round(hb.data_age_s);
+        ageEl.textContent = age < 60 ? age + 's' : Math.round(age/60) + 'min';
+        ageEl.style.color = age < 600 ? '#3fb950' : age < 3600 ? '#d29922' : '#f85149';
+    } else {
+        ageEl.textContent = 'no data';
+    }
+
+    if (hb.log_lines && hb.log_lines.length > 0) {
+        logEl.textContent = hb.log_lines.join('\n');
+    }
+}
+
 async function update() {
     const state = await fetchState();
-    if (!state) return;
-
-    renderData(state);
-    renderHealth(state);
-    renderProfiling(state);
-    renderGates(state);
-    renderEvents(state);
-
+    if (state) {
+        renderData(state);
+        renderHealth(state);
+        renderProfiling(state);
+        renderGates(state);
+        renderEvents(state);
+    }
     document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
 }
 
-// Initial load + refresh every 60s
+async function heartbeatLoop() {
+    const hb = await fetchHeartbeat();
+    renderHeartbeat(hb);
+}
+
+// Initial load
 update();
+heartbeatLoop();
+
+// State refreshes every 60s, heartbeat every 10s
 setInterval(update, 60000);
+setInterval(heartbeatLoop, 10000);
 </script>
 </body>
 </html>
