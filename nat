@@ -1,0 +1,403 @@
+#!/usr/bin/env python3
+"""
+nat — NAT research terminal tool.
+
+Usage:
+    nat start          Start data collection (ingestor + watchdog)
+    nat stop           Stop everything
+    nat status         One-line health check
+    nat log            Tail ingestor log (live)
+    nat data           Show data stats
+    nat profile        Run regime profiling on current data
+    nat backtest       Backtest all strategies
+    nat report         Generate full experiment report
+    nat dashboard      Start dashboard and print URL
+    nat build          Build ingestor binary
+    nat help           Show this message
+"""
+
+from __future__ import annotations
+
+import os
+import signal
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+# Resolve project root (where this script lives)
+ROOT = Path(__file__).resolve().parent
+DATA_DIR = ROOT / "data" / "features"
+LOG_DIR = ROOT / "logs"
+BINARY = ROOT / "rust" / "target" / "release" / "ing"
+CONFIG = ROOT / "config" / "ing.toml"
+PYTHON = sys.executable
+
+# Colors
+G = "\033[32m"  # green
+R = "\033[31m"  # red
+Y = "\033[33m"  # yellow
+B = "\033[34m"  # blue
+W = "\033[0m"   # reset
+BOLD = "\033[1m"
+
+
+def _run(cmd, **kw):
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True, **kw)
+
+
+def _pid():
+    r = _run("pgrep -x ing")
+    if r.returncode == 0 and r.stdout.strip():
+        return int(r.stdout.strip().split("\n")[0])
+    return None
+
+
+def _print(icon, color, msg):
+    print(f"  {color}{icon}{W}  {msg}")
+
+
+# ─── Commands ───────────────────────────────────────────────────────────
+
+
+def cmd_start():
+    """Start ingestor with auto-restart watchdog."""
+    pid = _pid()
+    if pid:
+        _print("●", G, f"Already running (PID {pid})")
+        return
+
+    # Build if needed
+    if not BINARY.exists():
+        _print("…", Y, "Binary not found, building...")
+        cmd_build()
+
+    # Start ingestor
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    logfile = LOG_DIR / f"ingestor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+    subprocess.run(
+        f"tmux new-session -d -s ingestor "
+        f"'cd {ROOT / 'rust'} && ./target/release/ing ../config/ing.toml 2>&1 | tee {logfile}'",
+        shell=True,
+    )
+
+    time.sleep(3)
+    pid = _pid()
+    if pid:
+        _print("●", G, f"Ingestor started (PID {pid})")
+        _print(" ", W, f"Log: {logfile}")
+    else:
+        _print("✗", R, f"Failed to start. Check: cat {logfile}")
+        return
+
+    # Install cron watchdog
+    _install_watchdog()
+    print()
+    _print("→", B, "Data collection running. Come back in 7 days.")
+    _print(" ", W, "Check anytime with: nat status")
+
+
+def cmd_stop():
+    """Stop ingestor and remove watchdog."""
+    pid = _pid()
+    if pid:
+        os.kill(pid, signal.SIGTERM)
+        time.sleep(2)
+        if _pid():
+            os.kill(pid, signal.SIGKILL)
+            time.sleep(1)
+        _print("■", Y, "Ingestor stopped")
+    else:
+        _print("■", W, "Ingestor was not running")
+
+    # Kill tmux sessions
+    for s in ["ingestor", "nat-monitor", "nat-dashboard"]:
+        subprocess.run(f"tmux kill-session -t {s} 2>/dev/null", shell=True)
+
+    # Remove watchdog
+    _remove_watchdog()
+    _print("■", W, "All cleaned up")
+
+
+def cmd_status():
+    """One-line health check."""
+    pid = _pid()
+
+    # Ingestor
+    if pid:
+        _print("●", G, f"Ingestor: RUNNING (PID {pid})")
+    else:
+        _print("●", R, "Ingestor: STOPPED")
+
+    # Data
+    if DATA_DIR.exists():
+        parquets = list(DATA_DIR.rglob("*.parquet"))
+        total_size = sum(f.stat().st_size for f in parquets if f.stat().st_size > 0)
+        days = sorted(set(p.parent.name for p in parquets))
+        n_valid = sum(1 for f in parquets if f.stat().st_size > 0)
+
+        _print("◆", B, f"Data: {n_valid} files, {total_size / 1e6:.0f} MB, {len(days)} days")
+
+        if days:
+            _print(" ", W, f"Range: {days[0]} to {days[-1]}")
+
+        # Latest file age
+        if parquets:
+            newest = max(f.stat().st_mtime for f in parquets)
+            age = time.time() - newest
+            if age < 300:
+                _print("◆", G, f"Last write: {age:.0f}s ago")
+            elif age < 3600:
+                _print("◆", Y, f"Last write: {age / 60:.0f} min ago")
+            else:
+                _print("◆", R, f"Last write: {age / 3600:.1f} hours ago")
+    else:
+        _print("◆", R, "Data: no data directory")
+
+    # Watchdog
+    r = _run("crontab -l 2>/dev/null")
+    if "pgrep -x ing" in (r.stdout or ""):
+        _print("⟳", G, "Watchdog: active")
+    else:
+        _print("⟳", Y, "Watchdog: not installed (run: nat start)")
+
+    # Dashboard
+    r = _run("tmux has-session -t nat-dashboard 2>/dev/null")
+    if r.returncode == 0:
+        _print("◎", G, "Dashboard: running")
+    else:
+        _print("◎", W, "Dashboard: not running (run: nat dashboard)")
+
+
+def cmd_log():
+    """Tail the latest ingestor log."""
+    if not LOG_DIR.exists():
+        _print("✗", R, "No logs directory")
+        return
+
+    logs = sorted(LOG_DIR.glob("ingestor_*.log"), key=os.path.getmtime, reverse=True)
+    if not logs:
+        _print("✗", R, "No ingestor logs found")
+        return
+
+    latest = logs[0]
+    _print("→", B, f"Tailing {latest.name} (Ctrl+C to stop)")
+    print()
+    try:
+        os.execvp("tail", ["tail", "-f", "-n", "30", str(latest)])
+    except KeyboardInterrupt:
+        pass
+
+
+def cmd_data():
+    """Show detailed data statistics."""
+    if not DATA_DIR.exists():
+        _print("✗", R, "No data directory")
+        return
+
+    parquets = sorted(DATA_DIR.rglob("*.parquet"))
+    valid = [f for f in parquets if f.stat().st_size > 0]
+
+    print(f"\n  {BOLD}Data Summary{W}\n")
+
+    total_size = sum(f.stat().st_size for f in valid)
+    print(f"  Files:     {len(valid)} ({len(parquets) - len(valid)} corrupted/empty)")
+    print(f"  Disk:      {total_size / 1e6:.1f} MB")
+
+    days = sorted(set(p.parent.name for p in valid))
+    print(f"  Days:      {len(days)}")
+    if days:
+        print(f"  Range:     {days[0]} to {days[-1]}")
+
+    # Per-day breakdown
+    print(f"\n  {BOLD}Per Day{W}\n")
+    for day in days:
+        day_files = [f for f in valid if f.parent.name == day]
+        day_size = sum(f.stat().st_size for f in day_files)
+        print(f"  {day}: {len(day_files)} files, {day_size / 1e6:.1f} MB")
+
+    # Row count estimate
+    print(f"\n  ~{total_size // 300:.0f} rows (estimated)")
+    print(f"  ~{total_size // 300 // (30 * 60 * 15):.0f} fifteen-minute bars (estimated)")
+    print()
+
+
+def cmd_profile():
+    """Run regime profiling on current data."""
+    _print("…", B, "Running profiling pipeline...")
+    print()
+    r = subprocess.run(
+        [PYTHON, "-m", "scripts.experiment.profiler"],
+        cwd=str(ROOT),
+    )
+    if r.returncode != 0:
+        # Fallback: run inline
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from experiment.profiler import quick_profile
+        from dataclasses import asdict
+        import json
+
+        result = quick_profile()
+        print(json.dumps(asdict(result), indent=2))
+
+
+def cmd_backtest():
+    """Run all strategy backtests."""
+    _print("…", B, "Running backtests...")
+    print()
+    subprocess.run(
+        [PYTHON, str(ROOT / "scripts" / "backtest_funding_reversion.py")],
+        cwd=str(ROOT / "scripts"),
+    )
+
+
+def cmd_report():
+    """Generate full experiment report."""
+    _print("…", B, "Generating report (this takes a few minutes)...")
+    print()
+    subprocess.run(
+        [PYTHON, str(ROOT / "scripts" / "generate_report.py")],
+        cwd=str(ROOT),
+    )
+
+
+def cmd_dashboard():
+    """Start or show dashboard."""
+    r = _run("tmux has-session -t nat-dashboard 2>/dev/null")
+    if r.returncode == 0:
+        _print("◎", G, "Dashboard already running")
+    else:
+        subprocess.run(
+            f"tmux new-session -d -s nat-dashboard "
+            f"'{PYTHON} -m scripts.experiment.server --port 8050'",
+            shell=True,
+            cwd=str(ROOT),
+        )
+        time.sleep(2)
+        _print("◎", G, "Dashboard started")
+
+    # Get IP
+    r = _run("hostname -I")
+    ip = r.stdout.strip().split()[0] if r.stdout.strip() else "localhost"
+    _print("→", B, f"Open: http://{ip}:8050")
+
+
+def cmd_build():
+    """Build the ingestor binary."""
+    _print("…", B, "Building release binary...")
+    r = subprocess.run(
+        "cargo build --release --bin ing",
+        shell=True,
+        cwd=str(ROOT / "rust"),
+    )
+    if r.returncode == 0:
+        _print("✓", G, "Build complete")
+    else:
+        _print("✗", R, "Build failed")
+        sys.exit(1)
+
+
+# ─── Watchdog ───────────────────────────────────────────────────────────
+
+
+def _install_watchdog():
+    """Add cron watchdog if not present."""
+    r = _run("crontab -l 2>/dev/null")
+    existing = r.stdout or ""
+
+    if "pgrep -x ing" in existing:
+        _print("⟳", G, "Watchdog already installed")
+        return
+
+    cron_line = (
+        f"*/5 * * * * pgrep -x ing || "
+        f"(cd {ROOT} && cd rust && ./target/release/ing ../config/ing.toml "
+        f">> {LOG_DIR}/cron_restart.log 2>&1 &)"
+    )
+
+    new_cron = existing.rstrip() + "\n" + cron_line + "\n"
+    proc = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
+    proc.communicate(input=new_cron)
+
+    if proc.returncode == 0:
+        _print("⟳", G, "Watchdog installed (checks every 5 min)")
+    else:
+        _print("⟳", Y, "Could not install watchdog cron")
+
+
+def _remove_watchdog():
+    """Remove cron watchdog."""
+    r = _run("crontab -l 2>/dev/null")
+    existing = r.stdout or ""
+
+    if "pgrep -x ing" not in existing:
+        return
+
+    lines = [l for l in existing.split("\n") if "pgrep -x ing" not in l]
+    new_cron = "\n".join(lines).strip() + "\n"
+
+    proc = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
+    proc.communicate(input=new_cron)
+    _print("⟳", W, "Watchdog removed")
+
+
+# ─── Main ───────────────────────────────────────────────────────────────
+
+
+COMMANDS = {
+    "start": cmd_start,
+    "stop": cmd_stop,
+    "status": cmd_status,
+    "log": cmd_log,
+    "data": cmd_data,
+    "profile": cmd_profile,
+    "backtest": cmd_backtest,
+    "report": cmd_report,
+    "dashboard": cmd_dashboard,
+    "build": cmd_build,
+}
+
+
+def cmd_help():
+    print(f"""
+  {BOLD}nat{W} — NAT research terminal tool
+
+  {BOLD}Data Collection{W}
+    nat start        Start ingestor + auto-restart watchdog
+    nat stop         Stop everything
+    nat status       One-line health check
+    nat log          Tail ingestor log (live)
+    nat data         Show data statistics
+
+  {BOLD}Analysis{W}
+    nat profile      Run regime profiling on current data
+    nat backtest     Backtest all strategies
+    nat report       Generate full experiment report
+
+  {BOLD}Infrastructure{W}
+    nat dashboard    Start dashboard and print URL
+    nat build        Build ingestor binary
+    nat help         This message
+""")
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ("help", "--help", "-h"):
+        cmd_help()
+        return
+
+    cmd = sys.argv[1]
+    if cmd not in COMMANDS:
+        print(f"\n  Unknown command: {cmd}")
+        cmd_help()
+        sys.exit(1)
+
+    print()
+    COMMANDS[cmd]()
+    print()
+
+
+if __name__ == "__main__":
+    main()
