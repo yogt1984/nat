@@ -339,7 +339,171 @@ make test_pipeline_cov      # Tests with coverage report
 
 ---
 
-## 8. Typical Session
+## 8. Phase 1 — Signal Existence Test
+
+Before building strategies, you need to answer one question: **do the features predict returns out-of-sample?** If not, nothing else matters.
+
+### What It Does
+
+Trains a LightGBM classifier to predict the direction (up/down) of the next N-second return using your 191 features. Runs three tests:
+
+| Test | What It Measures | What to Look For |
+|------|-----------------|------------------|
+| **In-sample accuracy** | Can the model fit training data? | >55% = model can learn patterns |
+| **Walk-forward validation** | Does it work on unseen future data? | Accuracy > base rate = real signal |
+| **Confidence-filtered PnL** | Is signal profitable after costs? | Net(maker) > 0 at any threshold = tradeable |
+
+### Run It
+
+```bash
+# Default: BTC, 5-minute horizon, all features
+make signal_test
+
+# Remove leaky features (midprice, OI, volume_24h) — the honest test
+make signal_test REMOVE_LEAKY=1
+
+# Test different symbols
+make signal_test SYMBOL=ETH
+make signal_test SYMBOL=SOL
+
+# Test different horizons
+make signal_test HORIZON=18000                # 30 minutes
+make signal_test HORIZON=36000                # 1 hour
+
+# Full sweep: all symbols, with and without leaky features
+make signal_test_all
+```
+
+### Reading the Output
+
+**Test 2 (Walk-Forward)** is the most important. Look at:
+- `edge` = accuracy minus base rate. Positive = model learned something real.
+- Consistency across splits — all positive edges is better than one huge and four negative.
+
+**Test 3 (Confidence-Filtered)** answers "can I trade this?":
+- `Net(taker)` > 0 at any threshold → profitable with market orders
+- `Net(maker)` > 0 at any threshold → profitable with limit orders only
+- Neither positive → signal exists but doesn't survive costs yet. Need more data or longer horizon.
+
+### What We Know So Far (5.5 days of data, April 2026)
+
+| Config | Walk-Forward Edge | Best Confidence Acc | Net(maker) at 0.80 |
+|--------|-------------------|--------------------|--------------------|
+| All features | +4.18% | 54.2% | -0.45 bps |
+| Leaky removed | +4.61% | 50.5% | -0.76 bps |
+
+**Interpretation:** Real signal exists in the microstructure features (+4.6% edge survives removing leaky features). Not yet profitable after costs — needs more data for confidence calibration to work.
+
+---
+
+## 9. One-Week Execution Plan
+
+This is the concrete sequence to go from "data exists" to "signal validated." No ambiguity, just commands.
+
+### Prerequisites
+
+- Machine: su-35 (or wherever the ingestor runs)
+- The ingestor binary builds and connects (`make run` works)
+- You have screen/tmux for persistent sessions
+
+### Day 0 (Now) — Start Collection
+
+```bash
+# Step 1: Open a persistent session so ingestor survives SSH disconnect
+tmux new-session -d -s nat 'cd /home/onat/nat && make run'
+
+# Step 2: Verify it's running (should see the ing process)
+pgrep -f "target/release/ing" && echo "RUNNING" || echo "NOT RUNNING"
+
+# Step 3: Verify data is being written (wait 6 minutes for first flush)
+sleep 360 && ls -lh data/features/$(date +%Y-%m-%d)/
+
+# Step 4: Attach to watch logs (Ctrl+B, D to detach)
+tmux attach -t nat
+```
+
+**Leave it running. Do not touch it for 3 days.**
+
+### Day 3 — Health Check
+
+```bash
+# Check ingestor is still alive
+pgrep -f "target/release/ing" && echo "RUNNING" || echo "DEAD — restart with: tmux new-session -d -s nat 'cd /home/onat/nat && make run'"
+
+# Check data volume (should be ~1.5 GB after 3 days)
+du -sh data/features/
+ls data/features/
+
+# Validate recent data
+make validate_data_recent HOURS=24
+
+# Quick signal test (optional — just to see progress)
+make signal_test HORIZON=3000
+```
+
+If the ingestor died, restart it immediately:
+```bash
+tmux new-session -d -s nat 'cd /home/onat/nat && make run'
+```
+
+### Day 5 — Mid-Week Check
+
+```bash
+# Same health check
+pgrep -f "target/release/ing" && echo "RUNNING" || echo "DEAD"
+du -sh data/features/
+
+# Validate all collected data
+make validate_data
+
+# Check schema coverage
+make scan_schema
+```
+
+### Day 7 — Full Analysis
+
+```bash
+# Step 1: Validate the full dataset
+make validate_data
+make scan_schema
+
+# Step 2: Signal test — the main event
+#   Run all three: default, leaky-removed, and full sweep
+make signal_test HORIZON=3000
+make signal_test HORIZON=3000 REMOVE_LEAKY=1
+make signal_test HORIZON=18000
+make signal_test HORIZON=18000 REMOVE_LEAKY=1
+
+# Step 3: Test all symbols
+make signal_test_all
+
+# Step 4: Cluster analysis
+make analyze_clusters SYMBOL=BTC HOURS=168
+make analyze_clusters SYMBOL=ETH HOURS=168
+make analyze_clusters SYMBOL=SOL HOURS=168
+
+# Step 5: Full pipeline analysis (automated)
+make pipeline_analyze
+```
+
+### Decision After Day 7
+
+Read the signal test output and decide:
+
+| Result | Meaning | Action |
+|--------|---------|--------|
+| Walk-forward edge > 3%, Net(maker) > 0 at any threshold | **Signal is tradeable** | Build strategy, paper trade |
+| Walk-forward edge > 3%, Net(maker) < 0 | **Signal exists, not yet profitable** | Extend to 30 days, try longer horizons |
+| Walk-forward edge < 1% | **No signal at this horizon** | Try 30min/1h horizons, add lagged features |
+| Edge negative or inconsistent across splits | **No signal** | Need fundamentally different features or more data |
+
+### DO NOT stop the ingestor after Day 7.
+
+More data always helps. Keep collecting while you analyze. The goal is 30+ days covering multiple market regimes (trend, chop, crash, squeeze). Every day of data makes the next signal test more reliable.
+
+---
+
+## 10. Previous Typical Session
 
 ```bash
 # 1. Start collecting data (let run 24+ hours)
@@ -365,7 +529,7 @@ jupyter notebook notebooks/explore_features.ipynb
 
 ---
 
-## 9. Troubleshooting
+## 11. Troubleshooting
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
@@ -375,3 +539,7 @@ jupyter notebook notebooks/explore_features.ipynb
 | Low data rate | Network issues or API throttling | Check `RUST_LOG=debug make run` |
 | `ModuleNotFoundError` | Wrong Python | Makefile uses conda python automatically |
 | Notebook can't import cluster_pipeline | Path issue | Ensure you run from `notebooks/` directory |
+| `signal_test` takes >10 min | Large dataset + 200 trees × 7 fits | Normal for 400k+ rows; be patient |
+| Target distribution very skewed (e.g. 27/73) | Short horizon during a trend | Increase `HORIZON` to 3000+ to balance |
+| Walk-forward edge is negative | Model is wrong about direction | Try longer horizon, remove leaky features |
+| `ModuleNotFoundError: lightgbm` | Not installed in conda env | `conda install -c conda-forge lightgbm` |
