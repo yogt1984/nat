@@ -825,6 +825,15 @@ exp_midweek:
 exp_analyze:
 	@$(PYTHON) scripts/run_experiment.py analyze
 
+# Show dashboard URL
+exp_dashboard:
+	@$(PYTHON) scripts/run_experiment.py dashboard
+
+# Expose dashboard via cloudflare tunnel
+exp_tunnel:
+	@echo "Exposing dashboard at localhost:8050 via Cloudflare tunnel..."
+	cloudflared tunnel --url http://localhost:8050
+
 # =============================================================================
 # HELP
 # =============================================================================

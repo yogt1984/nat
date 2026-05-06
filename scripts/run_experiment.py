@@ -27,6 +27,9 @@ LOG_DIR = PROJECT_ROOT / "logs"
 BINARY = PROJECT_ROOT / "rust" / "target" / "release" / "ing"
 CONFIG = PROJECT_ROOT / "config" / "ing.toml"
 TMUX_SESSION = "ingestor"
+MONITOR_TMUX = "nat-monitor"
+SERVER_TMUX = "nat-dashboard"
+DASHBOARD_PORT = 8050
 
 
 def _run(cmd: str, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
@@ -100,35 +103,47 @@ def cmd_start(args):
     if pid:
         print(f"[OK] Ingestor started (PID {pid})")
         print(f"     Log: {logfile}")
-        print(f"     Tmux: tmux attach -t {TMUX_SESSION}")
-        print(f"     Detach: Ctrl+B then D")
     else:
         print("[FAIL] Ingestor did not start. Check the log:")
         print(f"       cat {logfile}")
+        return
+
+    # Start monitor
+    _run(f"tmux kill-session -t {MONITOR_TMUX} 2>/dev/null", check=False)
+    monitor_cmd = f"cd {PROJECT_ROOT} && python3 -m scripts.experiment.monitor"
+    _run(f"tmux new-session -d -s {MONITOR_TMUX} '{monitor_cmd}'")
+    print(f"[OK] Monitor started (tmux: {MONITOR_TMUX})")
+
+    # Start dashboard server
+    _run(f"tmux kill-session -t {SERVER_TMUX} 2>/dev/null", check=False)
+    server_cmd = f"cd {PROJECT_ROOT} && python3 -m scripts.experiment.server --port {DASHBOARD_PORT}"
+    _run(f"tmux new-session -d -s {SERVER_TMUX} '{server_cmd}'")
+    print(f"[OK] Dashboard started at http://localhost:{DASHBOARD_PORT}")
+    print()
+    print(f"     Tmux sessions: {TMUX_SESSION}, {MONITOR_TMUX}, {SERVER_TMUX}")
+    print(f"     Detach any: Ctrl+B then D")
 
 
 def cmd_stop(args):
-    """Stop the ingestor gracefully."""
+    """Stop the ingestor, monitor, and dashboard."""
+    # Stop ingestor
     pid = _ingestor_pid()
-    if not pid:
-        print("[!] Ingestor is not running.")
-        if _tmux_exists():
-            _run(f"tmux kill-session -t {TMUX_SESSION}", check=False)
-        return
+    if pid:
+        print(f"[..] Stopping ingestor (PID {pid})...")
+        os.kill(pid, signal.SIGTERM)
+        time.sleep(2)
+        if _ingestor_pid():
+            os.kill(pid, signal.SIGKILL)
+            time.sleep(1)
+        print("[OK] Ingestor stopped.")
+    else:
+        print("[!] Ingestor was not running.")
 
-    print(f"[..] Stopping ingestor (PID {pid})...")
-    os.kill(pid, signal.SIGTERM)
-    time.sleep(2)
+    # Stop monitor and dashboard
+    for session in [TMUX_SESSION, MONITOR_TMUX, SERVER_TMUX]:
+        _run(f"tmux kill-session -t {session} 2>/dev/null", check=False)
 
-    if _ingestor_pid():
-        print("[..] Still alive, sending SIGKILL...")
-        os.kill(pid, signal.SIGKILL)
-        time.sleep(1)
-
-    if _tmux_exists():
-        _run(f"tmux kill-session -t {TMUX_SESSION}", check=False)
-
-    print("[OK] Ingestor stopped.")
+    print("[OK] All sessions cleaned up.")
 
 
 def cmd_status(args):
@@ -229,7 +244,7 @@ def cmd_analyze(args):
         df = load_parquet(str(DATA_DIR))
         print(f"       Loaded {len(df):,} rows")
 
-        bars = aggregate_bars(df, bar_minutes=15)
+        bars = aggregate_bars(df, timeframe="15min")
         print(f"       Aggregated to {len(bars)} bars")
 
         deriv = generate_derivatives(bars, vector="entropy", include_spectral=True)
@@ -274,6 +289,16 @@ def cmd_analyze(args):
         traceback.print_exc()
 
 
+def cmd_dashboard(args):
+    """Show dashboard URL or open it."""
+    # Check if server is running
+    r = _run(f"tmux has-session -t {SERVER_TMUX} 2>/dev/null", check=False)
+    if r.returncode == 0:
+        print(f"[OK] Dashboard running at http://localhost:{DASHBOARD_PORT}")
+    else:
+        print(f"[!] Dashboard not running. Start with: make exp_start")
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -285,18 +310,19 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Commands:
-  start     Start ingestor in tmux background
-  stop      Stop ingestor gracefully
+  start     Start ingestor + monitor + dashboard
+  stop      Stop everything gracefully
   status    Show ingestor health + data stats
   check     Daily validation (last 24h by default)
   midweek   Full validation + schema scan
   analyze   Stop, validate, profile, evaluate quality gates
+  dashboard Show dashboard URL
 """,
     )
     sub = parser.add_subparsers(dest="command")
 
-    sub.add_parser("start", help="Start ingestor in tmux")
-    sub.add_parser("stop", help="Stop ingestor")
+    sub.add_parser("start", help="Start ingestor + monitor + dashboard")
+    sub.add_parser("stop", help="Stop everything")
     sub.add_parser("status", help="Check health + data stats")
 
     p_check = sub.add_parser("check", help="Daily validation")
@@ -304,6 +330,7 @@ Commands:
 
     sub.add_parser("midweek", help="Full validation + schema scan")
     sub.add_parser("analyze", help="End-of-experiment analysis")
+    sub.add_parser("dashboard", help="Show dashboard URL")
 
     args = parser.parse_args()
 
@@ -318,6 +345,7 @@ Commands:
         "check": cmd_check,
         "midweek": cmd_midweek,
         "analyze": cmd_analyze,
+        "dashboard": cmd_dashboard,
     }
     commands[args.command](args)
 
