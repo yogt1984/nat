@@ -97,8 +97,19 @@ def cmd_start():
 
     # Install cron watchdog
     _install_watchdog()
+
+    # Print final summary with URL
+    r = _run("hostname -I")
+    ip = r.stdout.strip().split()[0] if r.stdout.strip() else "localhost"
     print()
-    _print("→", B, "Data collection running. Come back in 7 days.")
+    print(f"  {BOLD}════════════════════════════════════════{W}")
+    _print("●", G, "Ingestor collecting data")
+    _print("◎", G, "Dashboard serving")
+    _print("⟳", G, "Watchdog auto-restarts on crash")
+    print()
+    _print("→", B, f"Dashboard: {BOLD}http://{ip}:8050{W}")
+    print(f"  {BOLD}════════════════════════════════════════{W}")
+    print()
     _print(" ", W, "Check anytime with: nat status")
 
 
