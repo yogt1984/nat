@@ -1,476 +1,1327 @@
 #!/usr/bin/env python3
-"""
-nat — NAT research terminal tool.
+"""nat — unified NAT research terminal.
 
-Usage:
-    nat start          Start data collection (ingestor + watchdog)
-    nat stop           Stop everything
-    nat status         One-line health check
-    nat log            Tail ingestor log (live)
-    nat data           Show data stats
-    nat profile        Run regime profiling on current data
-    nat backtest       Backtest all strategies
-    nat report         Generate full experiment report
-    nat dashboard      Start dashboard and print URL
-    nat build          Build ingestor binary
-    nat help           Show this message
+Single CLI replacing both the Makefile and previous nat script.
+Run 'nat help' for full command reference.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
-import signal
+import signal as sig
 import subprocess
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 
-# Resolve project root (where this script lives)
+# ── Constants ────────────────────────────────────────────────────────────────
+
 ROOT = Path(__file__).resolve().parent
-DATA_DIR = ROOT / "data" / "features"
+RUST = ROOT / "rust"
+DATA_DEFAULT = ROOT / "data" / "features"
 LOG_DIR = ROOT / "logs"
-BINARY = ROOT / "rust" / "target" / "release" / "ing"
-CONFIG = ROOT / "config" / "ing.toml"
-PYTHON = sys.executable
+BIN_ING = RUST / "target" / "release" / "ing"
+ING_CFG = ROOT / "config" / "ing.toml"
+PIPE_CFG = ROOT / "config" / "pipeline.toml"
+PY = sys.executable
 
-# Colors
-G = "\033[32m"  # green
-R = "\033[31m"  # red
-Y = "\033[33m"  # yellow
-B = "\033[34m"  # blue
-W = "\033[0m"   # reset
-BOLD = "\033[1m"
+G, R, Y, B, W, BOLD = "\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[0m", "\033[1m"
 
 
-def _run(cmd, **kw):
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _sh(cmd, **kw):
+    """Run shell command, capture output."""
     return subprocess.run(cmd, shell=True, capture_output=True, text=True, **kw)
 
 
+def _exec(cmd, cwd=None, env=None):
+    """Run shell command in foreground, inheriting stdio."""
+    e = {**os.environ, **(env or {})}
+    return subprocess.run(cmd, shell=True, cwd=str(cwd) if cwd else None, env=e)
+
+
+def _cargo(args_str):
+    return _exec(f"cargo {args_str}", cwd=RUST)
+
+
+def _py(script_args, cwd=None):
+    return _exec(f"{PY} {script_args}", cwd=cwd or ROOT)
+
+
 def _pid():
-    r = _run("pgrep -x ing")
-    if r.returncode == 0 and r.stdout.strip():
-        return int(r.stdout.strip().split("\n")[0])
-    return None
+    r = _sh("pgrep -x ing")
+    return int(r.stdout.strip().split("\n")[0]) if r.returncode == 0 and r.stdout.strip() else None
 
 
-def _print(icon, color, msg):
+def _p(icon, color, msg):
     print(f"  {color}{icon}{W}  {msg}")
 
 
-# ─── Commands ───────────────────────────────────────────────────────────
+def _banner(title):
+    w = max(len(title) + 4, 50)
+    print(f"  {'=' * w}")
+    print(f"  {BOLD}{title}{W}")
+    print(f"  {'=' * w}")
+    print()
 
 
-def cmd_start():
-    """Start ingestor with auto-restart watchdog."""
+def _data(args):
+    return getattr(args, 'data', None) or str(DATA_DEFAULT)
+
+
+def _sym(args):
+    return getattr(args, 'symbol', None) or 'BTC'
+
+
+def _ensure_release():
+    """Build release binaries if not present."""
+    if not BIN_ING.exists():
+        _p("...", Y, "Release binaries not found, building...")
+        r = _cargo(
+            "build --release --bin ing --bin validate_api --bin validate_positions "
+            "--bin validate_whales --bin validate_entropy --bin show_features --bin test_hypotheses"
+        )
+        if r.returncode != 0:
+            _p("x", R, "Build failed")
+            sys.exit(1)
+
+
+# ── Top-level commands ───────────────────────────────────────────────────────
+
+def cmd_start(args):
+    """Start ingestor with auto-restart watchdog + dashboard."""
     pid = _pid()
     if pid:
-        _print("●", G, f"Already running (PID {pid})")
+        _p("*", G, f"Already running (PID {pid})")
         return
 
-    # Build if needed
-    if not BINARY.exists():
-        _print("…", Y, "Binary not found, building...")
-        cmd_build()
+    if not BIN_ING.exists():
+        _p("...", Y, "Binary not found, building...")
+        cmd_build(args)
 
-    # Start ingestor
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     logfile = LOG_DIR / f"ingestor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
     subprocess.run(
         f"tmux new-session -d -s ingestor "
-        f"'cd {ROOT / 'rust'} && ./target/release/ing ../config/ing.toml 2>&1 | tee {logfile}'",
+        f"'cd {RUST} && ./target/release/ing ../config/ing.toml 2>&1 | tee {logfile}'",
         shell=True,
     )
-
     time.sleep(3)
     pid = _pid()
     if pid:
-        _print("●", G, f"Ingestor started (PID {pid})")
-        _print(" ", W, f"Log: {logfile}")
+        _p("*", G, f"Ingestor started (PID {pid})")
+        _p(" ", W, f"Log: {logfile}")
     else:
-        _print("✗", R, f"Failed to start. Check: cat {logfile}")
+        _p("x", R, f"Failed to start. Check: cat {logfile}")
         return
 
-    # Start dashboard
-    cmd_dashboard()
-
-    # Install cron watchdog
+    cmd_dashboard(args)
     _install_watchdog()
 
-    # Print final summary with URL
-    r = _run("hostname -I")
+    r = _sh("hostname -I")
     ip = r.stdout.strip().split()[0] if r.stdout.strip() else "localhost"
     print()
-    print(f"  {BOLD}════════════════════════════════════════{W}")
-    _print("●", G, "Ingestor collecting data")
-    _print("◎", G, "Dashboard serving")
-    _print("⟳", G, "Watchdog auto-restarts on crash")
+    print(f"  {BOLD}{'=' * 40}{W}")
+    _p("*", G, "Ingestor collecting data")
+    _p("o", G, "Dashboard serving")
+    _p("~", G, "Watchdog auto-restarts on crash")
     print()
-    _print("→", B, f"Dashboard: {BOLD}http://{ip}:8050{W}")
-    print(f"  {BOLD}════════════════════════════════════════{W}")
+    _p(">", B, f"Dashboard: {BOLD}http://{ip}:8050{W}")
+    print(f"  {BOLD}{'=' * 40}{W}")
     print()
-    _print(" ", W, "Check anytime with: nat status")
+    _p(" ", W, "Check anytime with: nat status")
 
 
-def cmd_stop():
+def cmd_stop(args):
     """Stop ingestor and remove watchdog."""
     pid = _pid()
     if pid:
-        os.kill(pid, signal.SIGTERM)
+        os.kill(pid, sig.SIGTERM)
         time.sleep(2)
         if _pid():
-            os.kill(pid, signal.SIGKILL)
+            os.kill(pid, sig.SIGKILL)
             time.sleep(1)
-        _print("■", Y, "Ingestor stopped")
+        _p("-", Y, "Ingestor stopped")
     else:
-        _print("■", W, "Ingestor was not running")
+        _p("-", W, "Ingestor was not running")
 
-    # Kill tmux sessions
     for s in ["ingestor", "nat-monitor", "nat-dashboard"]:
         subprocess.run(f"tmux kill-session -t {s} 2>/dev/null", shell=True)
 
-    # Remove watchdog
     _remove_watchdog()
-    _print("■", W, "All cleaned up")
+    _p("-", W, "All cleaned up")
 
 
-def cmd_status():
+def cmd_status(args):
     """One-line health check."""
     pid = _pid()
-
-    # Ingestor
     if pid:
-        _print("●", G, f"Ingestor: RUNNING (PID {pid})")
+        _p("*", G, f"Ingestor: RUNNING (PID {pid})")
     else:
-        _print("●", R, "Ingestor: STOPPED")
+        _p("*", R, "Ingestor: STOPPED")
 
-    # Data
-    if DATA_DIR.exists():
-        parquets = list(DATA_DIR.rglob("*.parquet"))
+    if DATA_DEFAULT.exists():
+        parquets = list(DATA_DEFAULT.rglob("*.parquet"))
         total_size = sum(f.stat().st_size for f in parquets if f.stat().st_size > 0)
         days = sorted(set(p.parent.name for p in parquets))
         n_valid = sum(1 for f in parquets if f.stat().st_size > 0)
 
-        _print("◆", B, f"Data: {n_valid} files, {total_size / 1e6:.0f} MB, {len(days)} days")
-
+        _p("+", B, f"Data: {n_valid} files, {total_size / 1e6:.0f} MB, {len(days)} days")
         if days:
-            _print(" ", W, f"Range: {days[0]} to {days[-1]}")
-
-        # Latest file age
+            _p(" ", W, f"Range: {days[0]} to {days[-1]}")
         if parquets:
             newest = max(f.stat().st_mtime for f in parquets)
             age = time.time() - newest
             if age < 300:
-                _print("◆", G, f"Last write: {age:.0f}s ago")
+                _p("+", G, f"Last write: {age:.0f}s ago")
             elif age < 3600:
-                _print("◆", Y, f"Last write: {age / 60:.0f} min ago")
+                _p("+", Y, f"Last write: {age / 60:.0f} min ago")
             else:
-                _print("◆", R, f"Last write: {age / 3600:.1f} hours ago")
+                _p("+", R, f"Last write: {age / 3600:.1f} hours ago")
     else:
-        _print("◆", R, "Data: no data directory")
+        _p("+", R, "Data: no data directory")
 
-    # Watchdog
-    r = _run("crontab -l 2>/dev/null")
+    r = _sh("crontab -l 2>/dev/null")
     if "pgrep -x ing" in (r.stdout or ""):
-        _print("⟳", G, "Watchdog: active")
+        _p("~", G, "Watchdog: active")
     else:
-        _print("⟳", Y, "Watchdog: not installed (run: nat start)")
+        _p("~", Y, "Watchdog: not installed (run: nat start)")
 
-    # Dashboard
-    r = _run("tmux has-session -t nat-dashboard 2>/dev/null")
+    r = _sh("tmux has-session -t nat-dashboard 2>/dev/null")
     if r.returncode == 0:
-        _print("◎", G, "Dashboard: running")
+        _p("o", G, "Dashboard: running")
     else:
-        _print("◎", W, "Dashboard: not running (run: nat dashboard)")
+        _p("o", W, "Dashboard: not running (run: nat dashboard)")
 
 
-def cmd_log():
+def cmd_log(args):
     """Tail the latest ingestor log."""
     if not LOG_DIR.exists():
-        _print("✗", R, "No logs directory")
+        _p("x", R, "No logs directory")
         return
-
     logs = sorted(LOG_DIR.glob("ingestor_*.log"), key=os.path.getmtime, reverse=True)
     if not logs:
-        _print("✗", R, "No ingestor logs found")
+        _p("x", R, "No ingestor logs found")
         return
-
-    latest = logs[0]
-    _print("→", B, f"Tailing {latest.name} (Ctrl+C to stop)")
+    _p(">", B, f"Tailing {logs[0].name} (Ctrl+C to stop)")
     print()
     try:
-        os.execvp("tail", ["tail", "-f", "-n", "30", str(latest)])
+        os.execvp("tail", ["tail", "-f", "-n", "30", str(logs[0])])
     except KeyboardInterrupt:
         pass
 
 
-def cmd_data():
-    """Show detailed data statistics."""
-    if not DATA_DIR.exists():
-        _print("✗", R, "No data directory")
-        return
-
-    parquets = sorted(DATA_DIR.rglob("*.parquet"))
-    valid = [f for f in parquets if f.stat().st_size > 0]
-
-    print(f"\n  {BOLD}Data Summary{W}\n")
-
-    total_size = sum(f.stat().st_size for f in valid)
-    print(f"  Files:     {len(valid)} ({len(parquets) - len(valid)} corrupted/empty)")
-    print(f"  Disk:      {total_size / 1e6:.1f} MB")
-
-    days = sorted(set(p.parent.name for p in valid))
-    print(f"  Days:      {len(days)}")
-    if days:
-        print(f"  Range:     {days[0]} to {days[-1]}")
-
-    # Per-day breakdown
-    print(f"\n  {BOLD}Per Day{W}\n")
-    for day in days:
-        day_files = [f for f in valid if f.parent.name == day]
-        day_size = sum(f.stat().st_size for f in day_files)
-        print(f"  {day}: {len(day_files)} files, {day_size / 1e6:.1f} MB")
-
-    # Row count estimate
-    print(f"\n  ~{total_size // 300:.0f} rows (estimated)")
-    print(f"  ~{total_size // 300 // (30 * 60 * 15):.0f} fifteen-minute bars (estimated)")
-    print()
-
-
-def cmd_profile():
+def cmd_profile(args):
     """Run regime profiling on current data."""
-    _print("…", B, "Running profiling pipeline...")
+    _p("...", B, "Running profiling pipeline...")
     print()
-    r = subprocess.run(
-        [PYTHON, "-m", "scripts.experiment.profiler"],
-        cwd=str(ROOT),
-    )
+    r = _py("-m scripts.experiment.profiler")
     if r.returncode != 0:
-        # Fallback: run inline
         sys.path.insert(0, str(ROOT / "scripts"))
         from experiment.profiler import quick_profile
         from dataclasses import asdict
         import json
-
-        result = quick_profile()
-        print(json.dumps(asdict(result), indent=2))
+        print(json.dumps(asdict(quick_profile()), indent=2))
 
 
-def cmd_backtest():
-    """Run all strategy backtests."""
-    _print("…", B, "Running backtests...")
-    print()
-    subprocess.run(
-        [PYTHON, str(ROOT / "scripts" / "backtest_funding_reversion.py")],
-        cwd=str(ROOT / "scripts"),
-    )
-
-
-def cmd_report():
+def cmd_report(args):
     """Generate full experiment report."""
-    _print("…", B, "Generating report (this takes a few minutes)...")
-    print()
-    subprocess.run(
-        [PYTHON, str(ROOT / "scripts" / "generate_report.py")],
-        cwd=str(ROOT),
-    )
+    _p("...", B, "Generating report...")
+    _py(f"{ROOT / 'scripts' / 'generate_report.py'}")
 
 
-def cmd_dashboard():
+def cmd_dashboard(args):
     """Start or show dashboard."""
-    r = _run("tmux has-session -t nat-dashboard 2>/dev/null")
+    r = _sh("tmux has-session -t nat-dashboard 2>/dev/null")
     if r.returncode == 0:
-        _print("◎", G, "Dashboard already running")
+        _p("o", G, "Dashboard already running")
     else:
         subprocess.run(
             f"tmux new-session -d -s nat-dashboard "
-            f"'{PYTHON} -m scripts.experiment.server --port 8050'",
-            shell=True,
-            cwd=str(ROOT),
+            f"'{PY} -m scripts.experiment.server --port 8050'",
+            shell=True, cwd=str(ROOT),
         )
         time.sleep(2)
-        _print("◎", G, "Dashboard started")
+        _p("o", G, "Dashboard started")
 
-    # Get IP
-    r = _run("hostname -I")
+    r = _sh("hostname -I")
     ip = r.stdout.strip().split()[0] if r.stdout.strip() else "localhost"
-    _print("→", B, f"Open: http://{ip}:8050")
+    _p(">", B, f"Open: http://{ip}:8050")
 
 
-def cmd_macro():
+def cmd_macro(args):
     """Show macro signals for all symbols."""
     sys.path.insert(0, str(ROOT / "scripts"))
     from data.macro import fetch_candles, add_indicators
 
     symbols = ["BTC", "ETH", "SOL"]
     print(f"\n  {BOLD}Macro Signals (Daily){W}\n")
-
     for sym in symbols:
         try:
             df = fetch_candles(sym, interval="1d", days=365)
             df = add_indicators(df)
-            r = df.iloc[-1]
-
-            # Determine trend
-            cross_7_21 = "UP" if r.get("cross_7_21", 0) > 0 else "DN"
-            cross_50_200 = "UP" if r.get("cross_50_200", 0) > 0 else "DN"
-            rsi = r.get("rsi_14", 0)
-            macd = "BUY" if r.get("macd_cross", 0) > 0 else "SELL"
-            price = r.get("close", 0)
-
-            # Color the trend
+            row = df.iloc[-1]
+            cross_7_21 = "UP" if row.get("cross_7_21", 0) > 0 else "DN"
+            cross_50_200 = "UP" if row.get("cross_50_200", 0) > 0 else "DN"
+            rsi = row.get("rsi_14", 0)
+            macd = "BUY" if row.get("macd_cross", 0) > 0 else "SELL"
+            price = row.get("close", 0)
             c7 = G if cross_7_21 == "UP" else R
             c50 = G if cross_50_200 == "UP" else R
-
             print(f"  {BOLD}{sym}{W}  ${price:,.2f}")
             print(f"    SMA 7/21:  {c7}{cross_7_21}{W}   SMA 50/200: {c50}{cross_50_200}{W}   MACD: {macd}   RSI: {rsi:.0f}")
-            print(f"    SMA7: {r.sma_7:,.2f}  SMA21: {r.sma_21:,.2f}  SMA50: {r.sma_50:,.2f}  SMA200: {r.sma_200:,.2f}")
-
-            # Support/Resistance
+            print(f"    SMA7: {row.sma_7:,.2f}  SMA21: {row.sma_21:,.2f}  SMA50: {row.sma_50:,.2f}  SMA200: {row.sma_200:,.2f}")
             if "support_20" in df.columns:
-                print(f"    Support: ${r.support_20:,.2f}  Resist: ${r.resist_20:,.2f}")
-
+                print(f"    Support: ${row.support_20:,.2f}  Resist: ${row.resist_20:,.2f}")
             print()
         except Exception as e:
-            _print("✗", R, f"{sym}: {e}")
-
-    print(f"  {BOLD}Legend{W}: 7/21 = short-term trend, 50/200 = macro trend (golden/death cross)")
-    print()
+            _p("x", R, f"{sym}: {e}")
+    print(f"  {BOLD}Legend{W}: 7/21 = short-term trend, 50/200 = macro trend (golden/death cross)\n")
 
 
-def cmd_screen():
+def cmd_screen(args):
     """Run alpha screening on collected data."""
-    _print("…", B, "Running alpha screener...")
+    _p("...", B, "Running alpha screener...")
     print()
+    extra = getattr(args, 'screen_args', None) or []
+    subprocess.run([PY, "-m", "scripts.alpha.screener"] + extra, cwd=str(ROOT))
 
-    # Forward CLI args after 'screen' to the screener
-    extra_args = sys.argv[2:]
-    subprocess.run(
-        [PYTHON, "-m", "scripts.alpha.screener"] + extra_args,
-        cwd=str(ROOT),
+
+# ── Build commands ───────────────────────────────────────────────────────────
+
+def cmd_build(args):
+    """Build all release binaries."""
+    _banner("Building release binaries")
+    _cargo(
+        "build --release --bin ing --bin validate_api --bin validate_positions "
+        "--bin validate_whales --bin validate_entropy --bin show_features --bin test_hypotheses"
     )
 
 
-def cmd_build():
-    """Build the ingestor binary."""
-    _print("…", B, "Building release binary...")
-    r = subprocess.run(
-        "cargo build --release --bin ing",
-        shell=True,
-        cwd=str(ROOT / "rust"),
+def cmd_build_debug(args):
+    _banner("Building debug binary")
+    _cargo("build --bin ing")
+
+
+def cmd_build_api(args):
+    _banner("Building API server")
+    _cargo("build --release --bin nat-api")
+
+
+def cmd_build_clean(args):
+    _p("...", Y, "Cleaning build artifacts...")
+    _cargo("clean")
+
+
+def cmd_build_fmt(args):
+    _cargo("fmt")
+
+
+def cmd_build_lint(args):
+    _cargo("clippy -- -D warnings")
+
+
+def cmd_build_check(args):
+    _cargo("check")
+
+
+# ── Run commands (foreground, for development) ───────────────────────────────
+
+def cmd_run(args):
+    """Run ingestor in foreground."""
+    _ensure_release()
+    _banner("Running ingestor (foreground)")
+    _sh("pkill -f 'target/.*ing.*config/ing.toml' 2>/dev/null")
+    time.sleep(1)
+    _exec("./target/release/ing ../config/ing.toml", cwd=RUST)
+
+
+def cmd_run_serve(args):
+    """Run ingestor + dashboard in foreground."""
+    _ensure_release()
+    _banner("Running ingestor + dashboard")
+    print(f"  Dashboard: http://localhost:8080\n")
+    _exec("./target/release/ing ../config/ing.toml", cwd=RUST,
+          env={"ING_DASHBOARD_ENABLED": "true"})
+
+
+def cmd_run_show(args):
+    """Show real-time features in terminal."""
+    _ensure_release()
+    symbol = _sym(args)
+    freq = getattr(args, 'freq', 1) or 1
+    print(f"  Real-time features: {symbol} @ {freq} Hz  (Ctrl+C to stop)\n")
+    _exec(f"./target/release/show_features {symbol} {freq}", cwd=RUST)
+
+
+def cmd_run_tunnel(args):
+    _p(">", B, "Starting Cloudflare tunnel to localhost:8080...")
+    _exec("cloudflared tunnel --url http://localhost:8080")
+
+
+# ── Data commands ────────────────────────────────────────────────────────────
+
+def cmd_data(args):
+    """Show data statistics."""
+    dd = Path(_data(args))
+    if not dd.exists():
+        _p("x", R, "No data directory")
+        return
+    parquets = sorted(dd.rglob("*.parquet"))
+    valid = [f for f in parquets if f.stat().st_size > 0]
+    total_size = sum(f.stat().st_size for f in valid)
+    days = sorted(set(p.parent.name for p in valid))
+
+    print(f"\n  {BOLD}Data Summary{W}\n")
+    print(f"  Files:     {len(valid)} ({len(parquets) - len(valid)} empty)")
+    print(f"  Disk:      {total_size / 1e6:.1f} MB")
+    print(f"  Days:      {len(days)}")
+    if days:
+        print(f"  Range:     {days[0]} to {days[-1]}")
+    print(f"\n  {BOLD}Per Day{W}\n")
+    for day in days:
+        day_files = [f for f in valid if f.parent.name == day]
+        day_size = sum(f.stat().st_size for f in day_files)
+        print(f"  {day}: {len(day_files)} files, {day_size / 1e6:.1f} MB")
+    print(f"\n  ~{total_size // 300:.0f} rows (estimated)\n")
+
+
+def cmd_data_validate(args):
+    _banner("Validating collected data")
+    hours = getattr(args, 'hours', None)
+    cmd = f"scripts/validate_data.py {_data(args)} --verbose"
+    if hours:
+        cmd += f" --hours {hours}"
+    _py(cmd)
+
+
+def cmd_data_explore(args):
+    _exec("jupyter notebook notebooks/explore_features.ipynb")
+
+
+def cmd_data_schema(args):
+    _banner("Scanning parquet schema & vector coverage")
+    _exec(
+        f'{PY} -c "from cluster_pipeline.loader import print_schema_summary; '
+        f"print_schema_summary('../{_data(args)}')\"",
+        cwd=ROOT / "scripts",
     )
-    if r.returncode == 0:
-        _print("✓", G, "Build complete")
+
+
+# ── Test commands ────────────────────────────────────────────────────────────
+
+def cmd_test(args):
+    _banner("Running all Rust unit tests")
+    _cargo("test --package ing")
+
+
+def cmd_test_verbose(args):
+    _cargo("test --package ing -- --nocapture")
+
+
+def cmd_test_hypotheses(args):
+    _ensure_release()
+    _banner("Running hypothesis tests")
+    _exec(f"./target/release/test_hypotheses ../{_data(args)}", cwd=RUST)
+
+
+def cmd_test_validate(args):
+    _ensure_release()
+    target = getattr(args, 'target', None)
+    if target:
+        _banner(f"Validating: {target}")
+        _exec(f"./target/release/validate_{target}", cwd=RUST)
     else:
-        _print("✗", R, "Build failed")
-        sys.exit(1)
+        _banner("Running all API validations")
+        for i, name in enumerate(["api", "positions", "whales", "entropy"], 1):
+            print(f"  [{i}/4] {name}...")
+            _exec(f"./target/release/validate_{name}", cwd=RUST)
+            print()
 
 
-# ─── Watchdog ───────────────────────────────────────────────────────────
+def cmd_test_api(args):
+    _exec("bash scripts/test_api.sh", cwd=ROOT)
 
+
+def cmd_test_redis(args):
+    _exec("redis-cli ping && echo 'Redis is running' || echo 'Redis not running'")
+    _exec("redis-cli KEYS 'nat:latest:*'")
+
+
+def cmd_test_integration(args):
+    _exec("bash scripts/test_integration.sh", cwd=ROOT)
+
+
+def cmd_test_backtest(args):
+    cov = getattr(args, 'coverage', False)
+    cmd = "backtest/tests/ -v"
+    if cov:
+        cmd += " --cov=backtest --cov-report=term-missing"
+    _exec(f"{PY} -m pytest {cmd}", cwd=ROOT / "scripts")
+
+
+def cmd_test_cluster(args):
+    cov = getattr(args, 'coverage', False)
+    cmd = "scripts/cluster_quality/tests/ -v"
+    if cov:
+        cmd += " --cov=cluster_quality --cov-report=term-missing"
+    _py(f"-m pytest {cmd}")
+
+
+def cmd_test_pipeline(args):
+    cov = getattr(args, 'coverage', False)
+    tests = (
+        "tests/test_cluster_loader.py tests/test_cluster_preprocess.py "
+        "tests/test_cluster_engine.py tests/test_cluster_reduce.py tests/test_cluster_viz.py"
+    )
+    cmd = f"{tests} -v"
+    if cov:
+        cmd += " --cov=cluster_pipeline --cov-report=term-missing"
+    _exec(f"{PY} -m pytest {cmd}", cwd=ROOT / "scripts")
+
+
+def cmd_test_pipeline_runner(args):
+    _exec(f"{PY} -m pytest tests/test_pipeline_runner.py -v", cwd=ROOT / "scripts")
+
+
+def cmd_test_dashboard(args):
+    _exec(f"{PY} -m pytest tests/test_dashboard.py -v", cwd=ROOT / "scripts")
+
+
+def cmd_test_serving(args):
+    _py("-m pytest scripts/tests/test_model_serving.py -v")
+
+
+def cmd_test_eamm(args):
+    integration = getattr(args, 'integration', False)
+    if integration:
+        _exec(f"{PY} -m pytest eamm/tests/test_integration.py -v", cwd=ROOT / "scripts")
+    else:
+        _exec(f"{PY} -m pytest eamm/tests/ -v", cwd=ROOT / "scripts")
+
+
+# ── Backtest commands ────────────────────────────────────────────────────────
+
+def cmd_backtest(args):
+    strategy = getattr(args, 'strategy', 'whale_flow_simple')
+    _banner(f"Backtest: {strategy}")
+    _py(f"scripts/run_backtest.py --data-dir {_data(args)} --symbol {_sym(args)} --strategy {strategy}")
+
+
+def cmd_backtest_validate(args):
+    strategy = getattr(args, 'strategy', 'whale_flow_simple')
+    _banner(f"Walk-forward validation: {strategy}")
+    _py(
+        f"scripts/run_backtest.py --data-dir {_data(args)} --symbol {_sym(args)} "
+        f"--strategy {strategy} --walk-forward"
+    )
+
+
+def _ml_args(args):
+    pred = getattr(args, 'predictions', './predictions.parquet')
+    entry = getattr(args, 'entry', 0.001)
+    exit_ = getattr(args, 'exit', 0.0)
+    return pred, entry, exit_
+
+
+def cmd_backtest_ml(args):
+    pred, entry, exit_ = _ml_args(args)
+    _banner("ML model backtest")
+    _py(
+        f"scripts/run_backtest.py --data-dir {_data(args)} --symbol {_sym(args)} "
+        f"--ml-predictions {pred} --ml-entry-threshold {entry} --ml-exit-threshold {exit_}"
+    )
+
+
+def cmd_backtest_ml_validate(args):
+    pred, entry, exit_ = _ml_args(args)
+    _banner("ML walk-forward validation")
+    _py(
+        f"scripts/run_backtest.py --data-dir {_data(args)} --symbol {_sym(args)} "
+        f"--ml-predictions {pred} --ml-entry-threshold {entry} --ml-exit-threshold {exit_} "
+        f"--walk-forward"
+    )
+
+
+def cmd_backtest_ml_quantile(args):
+    pred = getattr(args, 'predictions', './predictions.parquet')
+    entry_q = getattr(args, 'entry_q', 0.75)
+    exit_q = getattr(args, 'exit_q', 0.50)
+    _banner("ML backtest (quantile)")
+    _py(
+        f"scripts/run_backtest.py --data-dir {_data(args)} --symbol {_sym(args)} "
+        f"--ml-predictions {pred} --ml-quantile "
+        f"--ml-entry-threshold {entry_q} --ml-exit-threshold {exit_q} --walk-forward"
+    )
+
+
+def cmd_backtest_ml_tracked(args):
+    pred, entry, exit_ = _ml_args(args)
+    direction = getattr(args, 'direction', 'long')
+    output = getattr(args, 'output', './backtest_results.json')
+    _banner("ML backtest with tracking")
+    _py(
+        f"scripts/run_backtest_tracked.py "
+        f"--ml-predictions {pred} --ml-entry-threshold {entry} --ml-exit-threshold {exit_} "
+        f"--ml-direction {direction} --walk-forward --output {output}"
+    )
+
+
+def cmd_backtest_list(args):
+    _py("scripts/run_backtest.py --list-strategies")
+
+
+# ── Model commands ───────────────────────────────────────────────────────────
+
+def cmd_model_train(args):
+    snapshot = getattr(args, 'snapshot', 'baseline_30d')
+    model_type = getattr(args, 'type', 'elasticnet')
+    output_dir = getattr(args, 'output_dir', './models')
+    _banner(f"Training baseline model: {model_type}")
+    os.makedirs(output_dir, exist_ok=True)
+    _py(f"scripts/train_baseline.py --snapshot {snapshot} --model {model_type} --output-dir {output_dir}")
+
+
+def cmd_model_train_gmm(args):
+    auto = getattr(args, 'auto', False)
+    _banner("Training GMM regime classifier")
+    os.makedirs("models", exist_ok=True)
+    cmd = f"scripts/train_regime_gmm.py --data-dir {_data(args)} --output-dir models"
+    if auto:
+        cmd += " --auto-select"
+    _py(cmd)
+
+
+def cmd_model_list(args):
+    model_dir = getattr(args, 'model_dir', './models')
+    _py(f"scripts/list_models.py --model-dir {model_dir}")
+
+
+def cmd_model_score(args):
+    model = getattr(args, 'model', 'models/latest.pkl')
+    save = getattr(args, 'save', False)
+    output = getattr(args, 'output', './predictions.parquet')
+    cmd = f"scripts/score_data.py --model {model} --data {_data(args)} --evaluate"
+    if save:
+        cmd += f" --output {output}"
+    _py(cmd)
+
+
+def cmd_model_serve(args):
+    port = getattr(args, 'port', 8000)
+    host = getattr(args, 'host', '0.0.0.0')
+    cache = getattr(args, 'cache_size', 5)
+    dev = getattr(args, 'dev', False)
+    best = getattr(args, 'best', False)
+    metric = getattr(args, 'metric', 'sharpe_ratio')
+
+    if dev:
+        _banner("Model serving API (dev mode)")
+        _exec(f"uvicorn scripts.model_serving:app --reload --host {host} --port {port}")
+    elif best:
+        _banner(f"Serving best model by {metric}")
+        _py(f"scripts/model_serving.py --host {host} --port {port} --serve-best "
+            f"--metric {metric} --cache-size {cache}")
+    else:
+        _banner("Model serving API")
+        _py(f"scripts/model_serving.py --host {host} --port {port} --cache-size {cache}")
+
+
+# ── Cluster commands ─────────────────────────────────────────────────────────
+
+def cmd_cluster_analyze(args):
+    hours = getattr(args, 'hours', 24)
+    _banner(f"Analyzing cluster quality: {_sym(args)}")
+    _py(f"scripts/analyze_clusters.py --data-dir {_data(args)} --symbol {_sym(args)} --hours {hours}")
+
+
+def cmd_cluster_gmm(args):
+    _banner(f"Analyzing with GMM model: {_sym(args)}")
+    _py(
+        f"scripts/analyze_clusters.py --data-dir {_data(args)} --symbol {_sym(args)} "
+        f"--model models/regime_gmm.json"
+    )
+
+
+def cmd_cluster_all(args):
+    _banner("Analyzing all symbols")
+    for sym in ["BTC", "ETH", "SOL"]:
+        print(f"\n  {BOLD}{sym}{W}\n")
+        _py(f"scripts/analyze_clusters.py --data-dir {_data(args)} --symbol {sym} "
+            f"--output reports/cluster_{sym}.txt")
+
+
+# ── Experiment tracking commands ─────────────────────────────────────────────
+
+def cmd_experiment_list(args):
+    stage = getattr(args, 'stage', None)
+    cmd = "scripts/experiment_tracking.py list"
+    if stage:
+        cmd += f" --stage {stage}"
+    _py(cmd)
+
+
+def cmd_experiment_get(args):
+    _py(f"scripts/experiment_tracking.py get {args.id}")
+
+
+def cmd_experiment_compare(args):
+    _py(f"scripts/experiment_tracking.py compare {args.ids}")
+
+
+def cmd_experiment_best(args):
+    metric = getattr(args, 'metric', 'sharpe_ratio')
+    _py(f"scripts/experiment_tracking.py best --metric {metric}")
+
+
+def cmd_experiment_workflow(args):
+    snapshot = getattr(args, 'snapshot', 'baseline_30d')
+    model_type = getattr(args, 'type', 'elasticnet')
+    entry = getattr(args, 'entry', 0.001)
+    exit_ = getattr(args, 'exit', 0.0)
+    predictions = getattr(args, 'predictions', './predictions.parquet')
+    output = getattr(args, 'output', './backtest_results.json')
+
+    _banner("Complete ML workflow with tracking")
+    print("  Step 1: Training model...")
+    os.makedirs("models", exist_ok=True)
+    _py(f"scripts/train_baseline.py --snapshot {snapshot} --model {model_type} --output-dir models")
+    print("\n  Step 2: Scoring...")
+    _py(f"scripts/score_data.py --model models/{model_type}_*.* --data {_data(args)} "
+        f"--output {predictions} --evaluate")
+    print("\n  Step 3: Backtest with tracking...")
+    _py(f"scripts/run_backtest_tracked.py --ml-predictions {predictions} "
+        f"--ml-entry-threshold {entry} --ml-exit-threshold {exit_} --walk-forward --output {output}")
+
+
+# ── Pipeline commands ────────────────────────────────────────────────────────
+
+def _pipe_cfg(args):
+    return getattr(args, 'config', None) or str(PIPE_CFG)
+
+
+def cmd_pipeline_start(args):
+    _banner("Starting automated pipeline")
+    _py(f"scripts/pipeline_runner.py --config {_pipe_cfg(args)} start")
+
+
+def cmd_pipeline_resume(args):
+    _py(f"scripts/pipeline_runner.py --config {_pipe_cfg(args)} resume")
+
+
+def cmd_pipeline_analyze(args):
+    _banner("Analyzing existing data")
+    _py(f"scripts/pipeline_runner.py --config {_pipe_cfg(args)} analyze")
+
+
+def cmd_pipeline_stop(args):
+    _py(f"scripts/pipeline_runner.py --config {_pipe_cfg(args)} stop")
+
+
+def cmd_pipeline_status(args):
+    _py(f"scripts/pipeline_runner.py --config {_pipe_cfg(args)} status")
+
+
+def cmd_pipeline_dashboard(args):
+    port = getattr(args, 'port', 8050)
+    _banner("Pipeline dashboard")
+    _py(f"scripts/dashboard.py --config {_pipe_cfg(args)} --port {port}")
+
+
+# ── Signal commands ──────────────────────────────────────────────────────────
+
+def cmd_signal_test(args):
+    symbol = _sym(args)
+    horizon = getattr(args, 'horizon', 3000)
+    spread = getattr(args, 'spread_bps', 1.0)
+    remove_leaky = getattr(args, 'remove_leaky', False)
+    _banner(f"Signal existence test: {symbol}")
+    cmd = f"scripts/phase1_signal_test.py --symbol {symbol} --horizon {horizon} --spread-bps {spread}"
+    if remove_leaky:
+        cmd += " --remove-leaky"
+    _py(cmd)
+
+
+def cmd_signal_test_all(args):
+    horizon = getattr(args, 'horizon', 3000)
+    spread = getattr(args, 'spread_bps', 1.0)
+    _banner("Full signal sweep: all symbols + feature sets")
+    for sym in ["BTC", "ETH", "SOL"]:
+        for leaky in ([False, True] if sym == "BTC" else [False]):
+            tag = f"{sym} -- {'leaky removed' if leaky else 'all features'}"
+            print(f"\n  === {tag} ===\n")
+            cmd = (f"scripts/phase1_signal_test.py --symbol {sym} "
+                   f"--horizon {horizon} --spread-bps {spread}")
+            if leaky:
+                cmd += " --remove-leaky"
+            _py(cmd)
+
+
+# ── EAMM commands ────────────────────────────────────────────────────────────
+
+def cmd_eamm_run(args):
+    symbol = _sym(args)
+    horizon = getattr(args, 'horizon', 3000)
+    mode = getattr(args, 'mode', 'regression')
+    _exec(f"{PY} -m eamm.cli run --symbol {symbol} --horizon {horizon} --mode {mode}",
+          cwd=ROOT / "scripts")
+
+
+def cmd_eamm_regime(args):
+    _exec(f"{PY} -m eamm.cli regime --symbol {_sym(args)} "
+          f"--horizon {getattr(args, 'horizon', 3000)}",
+          cwd=ROOT / "scripts")
+
+
+def cmd_eamm_backtest(args):
+    gamma = getattr(args, 'gamma', 0.1)
+    q_max = getattr(args, 'q_max', 1.0)
+    _exec(
+        f"{PY} -m eamm.cli backtest --symbol {_sym(args)} "
+        f"--horizon {getattr(args, 'horizon', 3000)} --gamma {gamma} --q-max {q_max}",
+        cwd=ROOT / "scripts",
+    )
+
+
+# ── API commands ─────────────────────────────────────────────────────────────
+
+def cmd_api_start(args):
+    _ensure_release()
+    _cargo("build --release --bin nat-api")
+    _banner("NAT API server")
+    print("  REST: http://localhost:3000")
+    print("  WebSocket: ws://localhost:3000/ws/stream/:symbol\n")
+    _exec("./target/release/nat-api", cwd=RUST)
+
+
+def cmd_api_alerts(args):
+    _cargo("build --release --bin nat-api")
+    _banner("Telegram alert service")
+    _exec("./target/release/alert-service", cwd=RUST)
+
+
+def cmd_api_serve_all(args):
+    _ensure_release()
+    _cargo("build --release --bin nat-api")
+    _banner("Starting full NAT stack in tmux")
+    _exec("tmux kill-session -t nat 2>/dev/null || true")
+    _exec(f"tmux new-session -d -s nat -n ingestor "
+          f"'cd {RUST} && ./target/release/ing ../config/ing.toml; read'")
+    _exec(f"tmux new-window -t nat -n api 'cd {RUST} && ./target/release/nat-api; read'")
+    _exec(f"tmux new-window -t nat -n alerts 'cd {RUST} && ./target/release/alert-service; read'")
+    _exec("tmux attach -t nat")
+
+
+# ── Exp commands (week-long experiment runner) ───────────────────────────────
+
+def cmd_exp_start(args):
+    _ensure_release()
+    _py("scripts/run_experiment.py start")
+
+
+def cmd_exp_stop(args):
+    _py("scripts/run_experiment.py stop")
+
+
+def cmd_exp_status(args):
+    _py("scripts/run_experiment.py status")
+
+
+def cmd_exp_check(args):
+    hours = getattr(args, 'hours', 24)
+    _py(f"scripts/run_experiment.py check --hours {hours}")
+
+
+def cmd_exp_midweek(args):
+    _py("scripts/run_experiment.py midweek")
+
+
+def cmd_exp_analyze(args):
+    _py("scripts/run_experiment.py analyze")
+
+
+def cmd_exp_dashboard(args):
+    _py("scripts/run_experiment.py dashboard")
+
+
+def cmd_exp_tunnel(args):
+    _exec("cloudflared tunnel --url http://localhost:8050")
+
+
+# ── Docker commands ──────────────────────────────────────────────────────────
+
+def cmd_docker_build(args):
+    _exec("docker-compose build")
+
+
+def cmd_docker_up(args):
+    _exec("docker-compose up -d")
+    print("\n  API: http://localhost:3000")
+    print("  Redis: localhost:6379\n")
+
+
+def cmd_docker_down(args):
+    _exec("docker-compose down")
+
+
+def cmd_docker_logs(args):
+    _exec("docker-compose logs -f")
+
+
+# ── Watchdog ─────────────────────────────────────────────────────────────────
 
 def _install_watchdog():
-    """Add cron watchdog if not present."""
-    r = _run("crontab -l 2>/dev/null")
+    r = _sh("crontab -l 2>/dev/null")
     existing = r.stdout or ""
-
     if "pgrep -x ing" in existing:
-        _print("⟳", G, "Watchdog already installed")
+        _p("~", G, "Watchdog already installed")
         return
-
     cron_line = (
         f"*/5 * * * * pgrep -x ing || "
         f"(cd {ROOT} && cd rust && ./target/release/ing ../config/ing.toml "
         f">> {LOG_DIR}/cron_restart.log 2>&1 &)"
     )
-
     new_cron = existing.rstrip() + "\n" + cron_line + "\n"
     proc = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
     proc.communicate(input=new_cron)
-
     if proc.returncode == 0:
-        _print("⟳", G, "Watchdog installed (checks every 5 min)")
+        _p("~", G, "Watchdog installed (checks every 5 min)")
     else:
-        _print("⟳", Y, "Could not install watchdog cron")
+        _p("~", Y, "Could not install watchdog cron")
 
 
 def _remove_watchdog():
-    """Remove cron watchdog."""
-    r = _run("crontab -l 2>/dev/null")
+    r = _sh("crontab -l 2>/dev/null")
     existing = r.stdout or ""
-
     if "pgrep -x ing" not in existing:
         return
-
     lines = [l for l in existing.split("\n") if "pgrep -x ing" not in l]
     new_cron = "\n".join(lines).strip() + "\n"
-
     proc = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
     proc.communicate(input=new_cron)
-    _print("⟳", W, "Watchdog removed")
+    _p("~", W, "Watchdog removed")
 
 
-# ─── Main ───────────────────────────────────────────────────────────────
+# ── Help ─────────────────────────────────────────────────────────────────────
 
-
-COMMANDS = {
-    "start": cmd_start,
-    "stop": cmd_stop,
-    "status": cmd_status,
-    "log": cmd_log,
-    "data": cmd_data,
-    "profile": cmd_profile,
-    "backtest": cmd_backtest,
-    "report": cmd_report,
-    "dashboard": cmd_dashboard,
-    "build": cmd_build,
-    "macro": cmd_macro,
-    "screen": cmd_screen,
-}
-
-
-def cmd_help():
+def cmd_help(args=None):
     print(f"""
-  {BOLD}nat{W} — NAT research terminal tool
+  {BOLD}nat{W} -- unified NAT research terminal
 
   {BOLD}Data Collection{W}
-    nat start        Start ingestor + auto-restart watchdog
-    nat stop         Stop everything
-    nat status       One-line health check
-    nat log          Tail ingestor log (live)
-    nat data         Show data statistics
+    nat start                  Start ingestor + watchdog + dashboard
+    nat stop                   Stop everything
+    nat status                 One-line health check
+    nat log                    Tail ingestor log (live)
 
   {BOLD}Analysis{W}
-    nat profile      Run regime profiling on current data
-    nat backtest     Backtest all strategies
-    nat report       Generate full experiment report
+    nat profile                Run regime profiling
+    nat report                 Generate full experiment report
+    nat macro                  Daily MA crossover signals
+    nat screen [args]          Alpha screening
 
-  {BOLD}Alpha Research{W}
-    nat screen       Screen all features for predictive power (Step 1)
-    nat macro        Show daily MA crossover signals for all symbols
+  {BOLD}Data{W}
+    nat data                   Show data statistics
+    nat data validate          Validate parquet data (--hours N for recent)
+    nat data explore           Launch Jupyter notebook
+    nat data schema            Scan parquet schema & vector coverage
 
-  {BOLD}Infrastructure{W}
-    nat dashboard    Start dashboard and print URL
-    nat build        Build ingestor binary
-    nat help         This message
+  {BOLD}Build & Dev{W}
+    nat build                  Build release binaries (default)
+    nat build debug            Build debug binary
+    nat build api              Build API server
+    nat build clean            Remove build artifacts
+    nat build fmt              Format Rust code
+    nat build lint             Run clippy
+    nat build check            Check without building
+
+  {BOLD}Run (foreground){W}
+    nat run                    Run ingestor in foreground
+    nat run serve              Ingestor + live dashboard
+    nat run show               Real-time features (--symbol, --freq)
+    nat run tunnel             Cloudflare tunnel to dashboard
+
+  {BOLD}Test{W}
+    nat test                   All Rust unit tests
+    nat test verbose           With --nocapture
+    nat test hypotheses        H1-H5 hypothesis tests
+    nat test validate [target] Live API validations (api|positions|whales|entropy)
+    nat test api               Test API endpoints
+    nat test redis             Test Redis connection
+    nat test integration       Full integration suite
+    nat test backtest          Backtest unit tests (--coverage)
+    nat test cluster           Cluster quality tests (--coverage)
+    nat test pipeline          Cluster pipeline tests (--coverage)
+    nat test pipeline-runner   Pipeline runner tests
+    nat test dashboard         Dashboard tests
+    nat test serving           Model serving tests
+    nat test eamm              EAMM tests (--integration)
+
+  {BOLD}Backtest{W}
+    nat backtest               Run strategy backtest (--strategy, --symbol, --data)
+    nat backtest validate      Walk-forward validation
+    nat backtest ml            ML predictions backtest (--predictions, --entry, --exit)
+    nat backtest ml-validate   ML walk-forward validation
+    nat backtest ml-quantile   ML quantile thresholds (--entry-q, --exit-q)
+    nat backtest ml-tracked    ML with experiment tracking
+    nat backtest list          List available strategies
+
+  {BOLD}Model{W}
+    nat model train            Train baseline model (--snapshot, --type)
+    nat model train-gmm       Train GMM classifier (--auto)
+    nat model list             List saved models
+    nat model score            Score data (--model, --save, --output)
+    nat model serve            Model serving API (--port, --dev, --best, --metric)
+
+  {BOLD}Cluster{W}
+    nat cluster analyze        Cluster quality (--symbol, --hours)
+    nat cluster gmm            Analyze with trained GMM
+    nat cluster all            Analyze BTC, ETH, SOL
+
+  {BOLD}Experiment Tracking{W}
+    nat experiment list        List experiments (--stage)
+    nat experiment get         Get details (--id)
+    nat experiment compare     Compare (--ids)
+    nat experiment best        Best by metric (--metric)
+    nat experiment workflow    Full train -> score -> backtest
+
+  {BOLD}Pipeline (State Machine){W}
+    nat pipeline start         IDLE -> BUILD -> INGEST -> ANALYZE -> DONE
+    nat pipeline resume        Resume from saved state
+    nat pipeline analyze       Analyze existing data
+    nat pipeline stop          Stop (preserves data)
+    nat pipeline status        Show current state
+    nat pipeline dashboard     Pipeline dashboard (--port)
+
+  {BOLD}Signal Testing{W}
+    nat signal test            Test signal existence (--symbol, --horizon, --spread-bps, --remove-leaky)
+    nat signal test-all        Full sweep across all symbols
+
+  {BOLD}EAMM{W}
+    nat eamm run               Full EAMM pipeline (--symbol, --horizon, --mode)
+    nat eamm regime            Regime analysis
+    nat eamm backtest          Stateful backtest (--gamma, --q-max)
+
+  {BOLD}API & Services{W}
+    nat api start              REST/WebSocket API server
+    nat api alerts             Telegram alert service
+    nat api serve-all          Full stack in tmux
+
+  {BOLD}Experiment Runner{W}
+    nat exp start              Start ingestor in tmux
+    nat exp stop               Stop ingestor
+    nat exp status             Health + data stats
+    nat exp check              Daily validation (--hours)
+    nat exp midweek            Full validation + schema scan
+    nat exp analyze            End-of-experiment analysis
+    nat exp dashboard          Show dashboard URL
+    nat exp tunnel             Cloudflare tunnel
+
+  {BOLD}Docker{W}
+    nat docker build           Build images
+    nat docker up              Start services
+    nat docker down            Stop services
+    nat docker logs            View logs
+
+  Options like --data, --symbol go BEFORE the subcommand:
+    nat backtest --symbol ETH --data ./data/features validate
 """)
 
 
+# ── Argument Parser ──────────────────────────────────────────────────────────
+
+def build_parser():
+    p = argparse.ArgumentParser(prog='nat', description='NAT research terminal', add_help=False)
+    sub = p.add_subparsers(dest='command')
+
+    # ── Top-level commands ──
+    sub.add_parser('start', help='Start ingestor + watchdog + dashboard').set_defaults(func=cmd_start)
+    sub.add_parser('stop', help='Stop everything').set_defaults(func=cmd_stop)
+    sub.add_parser('status', help='Health check').set_defaults(func=cmd_status)
+    sub.add_parser('log', help='Tail ingestor log').set_defaults(func=cmd_log)
+    sub.add_parser('profile', help='Run regime profiling').set_defaults(func=cmd_profile)
+    sub.add_parser('report', help='Generate experiment report').set_defaults(func=cmd_report)
+    sub.add_parser('dashboard', help='Start dashboard').set_defaults(func=cmd_dashboard)
+    sub.add_parser('macro', help='Daily macro signals').set_defaults(func=cmd_macro)
+    sub.add_parser('help', help='Show full help').set_defaults(func=cmd_help)
+
+    screen_p = sub.add_parser('screen', help='Alpha screening')
+    screen_p.add_argument('screen_args', nargs=argparse.REMAINDER)
+    screen_p.set_defaults(func=cmd_screen)
+
+    # ── build ──
+    build_p = sub.add_parser('build', help='Build & dev tools (default: release)')
+    build_p.set_defaults(func=cmd_build)
+    bsub = build_p.add_subparsers(dest='subcmd')
+    bsub.add_parser('debug', help='Debug binary').set_defaults(func=cmd_build_debug)
+    bsub.add_parser('api', help='API server').set_defaults(func=cmd_build_api)
+    bsub.add_parser('clean', help='Remove artifacts').set_defaults(func=cmd_build_clean)
+    bsub.add_parser('fmt', help='Format code').set_defaults(func=cmd_build_fmt)
+    bsub.add_parser('lint', help='Run clippy').set_defaults(func=cmd_build_lint)
+    bsub.add_parser('check', help='Check code').set_defaults(func=cmd_build_check)
+
+    # ── run ──
+    run_p = sub.add_parser('run', help='Run in foreground (default: ingestor)')
+    run_p.set_defaults(func=cmd_run)
+    rsub = run_p.add_subparsers(dest='subcmd')
+    rsub.add_parser('serve', help='Ingestor + dashboard').set_defaults(func=cmd_run_serve)
+    show_p = rsub.add_parser('show', help='Real-time features')
+    show_p.add_argument('--symbol', default='BTC')
+    show_p.add_argument('--freq', type=int, default=1, help='Frequency in Hz')
+    show_p.set_defaults(func=cmd_run_show)
+    rsub.add_parser('tunnel', help='Cloudflare tunnel').set_defaults(func=cmd_run_tunnel)
+
+    # ── data ──
+    data_p = sub.add_parser('data', help='Data stats & validation')
+    data_p.add_argument('--data', default=str(DATA_DEFAULT))
+    data_p.set_defaults(func=cmd_data)
+    dsub = data_p.add_subparsers(dest='subcmd')
+    dv = dsub.add_parser('validate', help='Validate parquet data')
+    dv.add_argument('--hours', type=int, help='Validate only last N hours')
+    dv.set_defaults(func=cmd_data_validate)
+    dsub.add_parser('explore', help='Launch Jupyter').set_defaults(func=cmd_data_explore)
+    dsub.add_parser('schema', help='Scan parquet schema').set_defaults(func=cmd_data_schema)
+
+    # ── test ──
+    test_p = sub.add_parser('test', help='Testing (default: all Rust unit tests)')
+    test_p.set_defaults(func=cmd_test)
+    tsub = test_p.add_subparsers(dest='subcmd')
+    tsub.add_parser('unit', help='Rust unit tests').set_defaults(func=cmd_test)
+    tsub.add_parser('verbose', help='Tests with --nocapture').set_defaults(func=cmd_test_verbose)
+    tsub.add_parser('hypotheses', help='Hypothesis tests').set_defaults(func=cmd_test_hypotheses)
+    tv = tsub.add_parser('validate', help='Live API validations')
+    tv.add_argument('target', nargs='?', choices=['api', 'positions', 'whales', 'entropy'],
+                    help='Specific validation (omit for all)')
+    tv.set_defaults(func=cmd_test_validate)
+    tsub.add_parser('api', help='Test API endpoints').set_defaults(func=cmd_test_api)
+    tsub.add_parser('redis', help='Test Redis').set_defaults(func=cmd_test_redis)
+    tsub.add_parser('integration', help='Integration tests').set_defaults(func=cmd_test_integration)
+    tb = tsub.add_parser('backtest', help='Backtest tests')
+    tb.add_argument('--coverage', action='store_true')
+    tb.set_defaults(func=cmd_test_backtest)
+    tc = tsub.add_parser('cluster', help='Cluster quality tests')
+    tc.add_argument('--coverage', action='store_true')
+    tc.set_defaults(func=cmd_test_cluster)
+    tp = tsub.add_parser('pipeline', help='Pipeline tests')
+    tp.add_argument('--coverage', action='store_true')
+    tp.set_defaults(func=cmd_test_pipeline)
+    tsub.add_parser('pipeline-runner', help='Pipeline runner tests').set_defaults(func=cmd_test_pipeline_runner)
+    tsub.add_parser('dashboard', help='Dashboard tests').set_defaults(func=cmd_test_dashboard)
+    tsub.add_parser('serving', help='Model serving tests').set_defaults(func=cmd_test_serving)
+    te = tsub.add_parser('eamm', help='EAMM tests')
+    te.add_argument('--integration', action='store_true')
+    te.set_defaults(func=cmd_test_eamm)
+
+    # ── backtest ──
+    bt_p = sub.add_parser('backtest', help='Backtesting')
+    bt_p.add_argument('--strategy', default='whale_flow_simple')
+    bt_p.add_argument('--data', default=str(DATA_DEFAULT))
+    bt_p.add_argument('--symbol', default='BTC')
+    bt_p.set_defaults(func=cmd_backtest)
+    btsub = bt_p.add_subparsers(dest='subcmd')
+    btsub.add_parser('validate', help='Walk-forward validation').set_defaults(func=cmd_backtest_validate)
+    bml = btsub.add_parser('ml', help='ML predictions backtest')
+    bml.add_argument('--predictions', default='./predictions.parquet')
+    bml.add_argument('--entry', type=float, default=0.001)
+    bml.add_argument('--exit', type=float, default=0.0)
+    bml.set_defaults(func=cmd_backtest_ml)
+    bmlv = btsub.add_parser('ml-validate', help='ML walk-forward')
+    bmlv.add_argument('--predictions', default='./predictions.parquet')
+    bmlv.add_argument('--entry', type=float, default=0.001)
+    bmlv.add_argument('--exit', type=float, default=0.0)
+    bmlv.set_defaults(func=cmd_backtest_ml_validate)
+    bmlq = btsub.add_parser('ml-quantile', help='ML quantile thresholds')
+    bmlq.add_argument('--predictions', default='./predictions.parquet')
+    bmlq.add_argument('--entry-q', type=float, default=0.75)
+    bmlq.add_argument('--exit-q', type=float, default=0.50)
+    bmlq.set_defaults(func=cmd_backtest_ml_quantile)
+    bmlt = btsub.add_parser('ml-tracked', help='ML with tracking')
+    bmlt.add_argument('--predictions', default='./predictions.parquet')
+    bmlt.add_argument('--entry', type=float, default=0.001)
+    bmlt.add_argument('--exit', type=float, default=0.0)
+    bmlt.add_argument('--direction', default='long')
+    bmlt.add_argument('--output', default='./backtest_results.json')
+    bmlt.set_defaults(func=cmd_backtest_ml_tracked)
+    btsub.add_parser('list', help='List strategies').set_defaults(func=cmd_backtest_list)
+
+    # ── model ──
+    model_p = sub.add_parser('model', help='Model training & serving')
+    model_p.set_defaults(func=lambda a: model_p.print_help())
+    msub = model_p.add_subparsers(dest='subcmd')
+    mt = msub.add_parser('train', help='Train baseline model')
+    mt.add_argument('--snapshot', default='baseline_30d')
+    mt.add_argument('--type', default='elasticnet')
+    mt.add_argument('--output-dir', default='./models')
+    mt.set_defaults(func=cmd_model_train)
+    mg = msub.add_parser('train-gmm', help='Train GMM classifier')
+    mg.add_argument('--auto', action='store_true', help='Auto BIC selection')
+    mg.add_argument('--data', default=str(DATA_DEFAULT))
+    mg.set_defaults(func=cmd_model_train_gmm)
+    ml = msub.add_parser('list', help='List models')
+    ml.add_argument('--model-dir', default='./models')
+    ml.set_defaults(func=cmd_model_list)
+    ms = msub.add_parser('score', help='Score data')
+    ms.add_argument('--model', default='models/latest.pkl')
+    ms.add_argument('--data', default=str(DATA_DEFAULT))
+    ms.add_argument('--save', action='store_true')
+    ms.add_argument('--output', default='./predictions.parquet')
+    ms.set_defaults(func=cmd_model_score)
+    mv = msub.add_parser('serve', help='Model serving API')
+    mv.add_argument('--port', type=int, default=8000)
+    mv.add_argument('--host', default='0.0.0.0')
+    mv.add_argument('--cache-size', type=int, default=5)
+    mv.add_argument('--dev', action='store_true', help='Hot-reload mode')
+    mv.add_argument('--best', action='store_true', help='Serve best model')
+    mv.add_argument('--metric', default='sharpe_ratio')
+    mv.set_defaults(func=cmd_model_serve)
+
+    # ── cluster ──
+    cl_p = sub.add_parser('cluster', help='Cluster analysis')
+    cl_p.set_defaults(func=lambda a: cl_p.print_help())
+    csub = cl_p.add_subparsers(dest='subcmd')
+    ca = csub.add_parser('analyze', help='Analyze cluster quality')
+    ca.add_argument('--symbol', default='BTC')
+    ca.add_argument('--data', default=str(DATA_DEFAULT))
+    ca.add_argument('--hours', type=int, default=24)
+    ca.set_defaults(func=cmd_cluster_analyze)
+    cg = csub.add_parser('gmm', help='Analyze with GMM')
+    cg.add_argument('--symbol', default='BTC')
+    cg.add_argument('--data', default=str(DATA_DEFAULT))
+    cg.set_defaults(func=cmd_cluster_gmm)
+    call = csub.add_parser('all', help='Analyze all symbols')
+    call.add_argument('--data', default=str(DATA_DEFAULT))
+    call.set_defaults(func=cmd_cluster_all)
+
+    # ── experiment ──
+    exp_p = sub.add_parser('experiment', help='Experiment tracking')
+    exp_p.set_defaults(func=lambda a: exp_p.print_help())
+    esub = exp_p.add_subparsers(dest='subcmd')
+    el = esub.add_parser('list', help='List experiments')
+    el.add_argument('--stage', help='Filter by stage')
+    el.set_defaults(func=cmd_experiment_list)
+    eg = esub.add_parser('get', help='Get experiment details')
+    eg.add_argument('--id', required=True)
+    eg.set_defaults(func=cmd_experiment_get)
+    ec = esub.add_parser('compare', help='Compare experiments')
+    ec.add_argument('--ids', required=True)
+    ec.set_defaults(func=cmd_experiment_compare)
+    eb = esub.add_parser('best', help='Find best')
+    eb.add_argument('--metric', default='sharpe_ratio')
+    eb.set_defaults(func=cmd_experiment_best)
+    ew = esub.add_parser('workflow', help='Full ML workflow')
+    ew.add_argument('--snapshot', default='baseline_30d')
+    ew.add_argument('--type', default='elasticnet')
+    ew.add_argument('--data', default=str(DATA_DEFAULT))
+    ew.add_argument('--entry', type=float, default=0.001)
+    ew.add_argument('--exit', type=float, default=0.0)
+    ew.add_argument('--predictions', default='./predictions.parquet')
+    ew.add_argument('--output', default='./backtest_results.json')
+    ew.set_defaults(func=cmd_experiment_workflow)
+
+    # ── pipeline ──
+    pipe_p = sub.add_parser('pipeline', help='Automated pipeline')
+    pipe_p.add_argument('--config', default=str(PIPE_CFG))
+    pipe_p.set_defaults(func=lambda a: pipe_p.print_help())
+    psub = pipe_p.add_subparsers(dest='subcmd')
+    psub.add_parser('start', help='Start pipeline').set_defaults(func=cmd_pipeline_start)
+    psub.add_parser('resume', help='Resume from saved state').set_defaults(func=cmd_pipeline_resume)
+    psub.add_parser('analyze', help='Analyze existing data').set_defaults(func=cmd_pipeline_analyze)
+    psub.add_parser('stop', help='Stop pipeline').set_defaults(func=cmd_pipeline_stop)
+    psub.add_parser('status', help='Show state').set_defaults(func=cmd_pipeline_status)
+    pd = psub.add_parser('dashboard', help='Pipeline dashboard')
+    pd.add_argument('--port', type=int, default=8050)
+    pd.set_defaults(func=cmd_pipeline_dashboard)
+
+    # ── signal ──
+    sig_p = sub.add_parser('signal', help='Signal testing')
+    sig_p.set_defaults(func=lambda a: sig_p.print_help())
+    ssub = sig_p.add_subparsers(dest='subcmd')
+    st = ssub.add_parser('test', help='Signal existence test')
+    st.add_argument('--symbol', default='BTC')
+    st.add_argument('--horizon', type=int, default=3000)
+    st.add_argument('--spread-bps', type=float, default=1.0)
+    st.add_argument('--remove-leaky', action='store_true')
+    st.set_defaults(func=cmd_signal_test)
+    sta = ssub.add_parser('test-all', help='Full symbol sweep')
+    sta.add_argument('--horizon', type=int, default=3000)
+    sta.add_argument('--spread-bps', type=float, default=1.0)
+    sta.set_defaults(func=cmd_signal_test_all)
+
+    # ── eamm ──
+    eamm_p = sub.add_parser('eamm', help='EAMM market making')
+    eamm_p.set_defaults(func=lambda a: eamm_p.print_help())
+    easub = eamm_p.add_subparsers(dest='subcmd')
+    er = easub.add_parser('run', help='Full EAMM pipeline')
+    er.add_argument('--symbol', default='BTC')
+    er.add_argument('--horizon', type=int, default=3000)
+    er.add_argument('--mode', default='regression')
+    er.set_defaults(func=cmd_eamm_run)
+    erg = easub.add_parser('regime', help='Regime analysis')
+    erg.add_argument('--symbol', default='BTC')
+    erg.add_argument('--horizon', type=int, default=3000)
+    erg.set_defaults(func=cmd_eamm_regime)
+    ebt = easub.add_parser('backtest', help='Stateful backtest')
+    ebt.add_argument('--symbol', default='BTC')
+    ebt.add_argument('--horizon', type=int, default=3000)
+    ebt.add_argument('--gamma', type=float, default=0.1)
+    ebt.add_argument('--q-max', type=float, default=1.0)
+    ebt.set_defaults(func=cmd_eamm_backtest)
+
+    # ── api ──
+    api_p = sub.add_parser('api', help='API & alert services')
+    api_p.set_defaults(func=lambda a: api_p.print_help())
+    asub = api_p.add_subparsers(dest='subcmd')
+    asub.add_parser('start', help='Start API server').set_defaults(func=cmd_api_start)
+    asub.add_parser('alerts', help='Telegram alerts').set_defaults(func=cmd_api_alerts)
+    asub.add_parser('serve-all', help='Full stack in tmux').set_defaults(func=cmd_api_serve_all)
+
+    # ── exp ──
+    xp_p = sub.add_parser('exp', help='Experiment runner')
+    xp_p.set_defaults(func=lambda a: xp_p.print_help())
+    xsub = xp_p.add_subparsers(dest='subcmd')
+    xsub.add_parser('start', help='Start ingestor in tmux').set_defaults(func=cmd_exp_start)
+    xsub.add_parser('stop', help='Stop ingestor').set_defaults(func=cmd_exp_stop)
+    xsub.add_parser('status', help='Health + data stats').set_defaults(func=cmd_exp_status)
+    xc = xsub.add_parser('check', help='Daily validation')
+    xc.add_argument('--hours', type=int, default=24)
+    xc.set_defaults(func=cmd_exp_check)
+    xsub.add_parser('midweek', help='Full validation').set_defaults(func=cmd_exp_midweek)
+    xsub.add_parser('analyze', help='End-of-experiment').set_defaults(func=cmd_exp_analyze)
+    xsub.add_parser('dashboard', help='Show dashboard URL').set_defaults(func=cmd_exp_dashboard)
+    xsub.add_parser('tunnel', help='Cloudflare tunnel').set_defaults(func=cmd_exp_tunnel)
+
+    # ── docker ──
+    dk_p = sub.add_parser('docker', help='Docker operations')
+    dk_p.set_defaults(func=lambda a: dk_p.print_help())
+    dksub = dk_p.add_subparsers(dest='subcmd')
+    dksub.add_parser('build', help='Build images').set_defaults(func=cmd_docker_build)
+    dksub.add_parser('up', help='Start services').set_defaults(func=cmd_docker_up)
+    dksub.add_parser('down', help='Stop services').set_defaults(func=cmd_docker_down)
+    dksub.add_parser('logs', help='View logs').set_defaults(func=cmd_docker_logs)
+
+    return p
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] in ("help", "--help", "-h"):
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.command is None or args.command == 'help':
         cmd_help()
         return
 
-    cmd = sys.argv[1]
-    if cmd not in COMMANDS:
-        print(f"\n  Unknown command: {cmd}")
-        cmd_help()
-        sys.exit(1)
-
-    print()
-    COMMANDS[cmd]()
-    print()
+    if hasattr(args, 'func'):
+        print()
+        args.func(args)
+        print()
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
