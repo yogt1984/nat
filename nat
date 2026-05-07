@@ -339,6 +339,19 @@ def cmd_macro():
     print()
 
 
+def cmd_screen():
+    """Run alpha screening on collected data."""
+    _print("…", B, "Running alpha screener...")
+    print()
+
+    # Forward CLI args after 'screen' to the screener
+    extra_args = sys.argv[2:]
+    subprocess.run(
+        [PYTHON, "-m", "scripts.alpha.screener"] + extra_args,
+        cwd=str(ROOT),
+    )
+
+
 def cmd_build():
     """Build the ingestor binary."""
     _print("…", B, "Building release binary...")
@@ -413,6 +426,7 @@ COMMANDS = {
     "dashboard": cmd_dashboard,
     "build": cmd_build,
     "macro": cmd_macro,
+    "screen": cmd_screen,
 }
 
 
@@ -432,7 +446,8 @@ def cmd_help():
     nat backtest     Backtest all strategies
     nat report       Generate full experiment report
 
-  {BOLD}Macro{W}
+  {BOLD}Alpha Research{W}
+    nat screen       Screen all features for predictive power (Step 1)
     nat macro        Show daily MA crossover signals for all symbols
 
   {BOLD}Infrastructure{W}
