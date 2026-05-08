@@ -364,6 +364,61 @@ def cmd_alpha_validate(args):
     _py(cmd)
 
 
+def cmd_alpha_regime(args):
+    """Run regime conditioning (Step 5)."""
+    _banner(f"Regime Conditioning: {_sym(args)}")
+    _py(f"scripts/alpha/regime_filter.py "
+        f"--data {_data(args)} --symbol {_sym(args)} "
+        f"--screen {getattr(args, 'screen', 'reports/alpha_screen.json')} "
+        f"--timeframe {getattr(args, 'timeframe', '15min')} "
+        f"--top-n {getattr(args, 'top_n', 10)} "
+        f"--output {getattr(args, 'output', 'reports/alpha_regime.json')}"
+        + (f" --model {args.model}" if getattr(args, 'model', None) else ""))
+
+
+def cmd_alpha_multi_freq(args):
+    """Run multi-frequency integration (Step 6)."""
+    _banner(f"Multi-Frequency Integration: {_sym(args)}")
+    _py(f"scripts/alpha/multi_freq.py "
+        f"--data {_data(args)} --symbol {_sym(args)} "
+        f"--timeframe {getattr(args, 'timeframe', '15min')} "
+        f"--output {getattr(args, 'output', 'reports/alpha_multi_freq.json')}"
+        + (f" --signal {args.signal}" if getattr(args, 'signal', None) else ""))
+
+
+def cmd_alpha_portfolio(args):
+    """Run portfolio assembly (Step 7)."""
+    _banner("Portfolio Assembly")
+    symbols = getattr(args, 'symbols', ['BTC', 'ETH', 'SOL'])
+    sym_args = " ".join(f"--symbols {s}" for s in symbols) if symbols else ""
+    _py(f"scripts/alpha/portfolio.py "
+        f"--data {_data(args)} {sym_args} "
+        f"--timeframe {getattr(args, 'timeframe', '15min')} "
+        f"--output {getattr(args, 'output', 'reports/alpha_portfolio.json')}")
+
+
+def cmd_alpha_paper(args):
+    """Run paper trading simulation (Step 8)."""
+    _banner(f"Paper Trading: {_sym(args)}")
+    _py(f"scripts/alpha/paper_trader.py "
+        f"--data {_data(args)} --symbol {_sym(args)} "
+        f"--timeframe {getattr(args, 'timeframe', '15min')} "
+        f"--backtest-sharpe {getattr(args, 'backtest_sharpe', 1.0)} "
+        f"--backtest-ic {getattr(args, 'backtest_ic', 0.03)} "
+        f"--output {getattr(args, 'output', 'reports/alpha_paper.json')}")
+
+
+def cmd_alpha_deploy(args):
+    """Run deployment readiness check or show status (Step 9)."""
+    _banner("Deployment Status")
+    extra = ""
+    if getattr(args, 'check', False):
+        extra += " --check"
+    extra += f" --paper-report {getattr(args, 'paper_report', 'reports/alpha_paper.json')}"
+    extra += f" --account-value {getattr(args, 'account_value', 10000.0)}"
+    _py(f"scripts/alpha/deployer.py{extra}")
+
+
 def cmd_test_scan(args):
     """Run scalp edge scanner tests."""
     cov = getattr(args, 'coverage', False)
@@ -1212,6 +1267,11 @@ def cmd_help(args=None):
     nat alpha combine          Feature combination (--symbol, --top, --method, --screen)
     nat alpha size             Cost-aware position sizing (--signal, --ic, --vol)
     nat alpha validate         Walk-forward validation (--signal, --direction, --n-trials)
+    nat alpha regime           Regime conditioning (--screen, --model, --symbol)
+    nat alpha multi-freq       Multi-frequency integration (--symbol, --signal)
+    nat alpha portfolio        Portfolio assembly (--symbols BTC ETH SOL)
+    nat alpha paper            Paper trading simulation (--backtest-sharpe, --backtest-ic)
+    nat alpha deploy           Deployment status & readiness (--check)
 
   {BOLD}Visualization{W}
     nat visualize              All visualizations (scanner + data + profiler)
@@ -1373,7 +1433,7 @@ def build_parser():
     scan_p.set_defaults(func=cmd_scan)
 
     # ── alpha ──
-    alpha_p = sub.add_parser('alpha', help='Alpha research pipeline (Steps 2-4)')
+    alpha_p = sub.add_parser('alpha', help='Alpha research pipeline (Steps 2-9)')
     alpha_p.set_defaults(func=lambda a: alpha_p.print_help())
     asub = alpha_p.add_subparsers(dest='subcmd')
     ac = asub.add_parser('combine', help='Feature combination (Step 2)')
@@ -1409,6 +1469,41 @@ def build_parser():
     av.add_argument('--direction', nargs='+', default=['long', 'short'], choices=['long', 'short'])
     av.add_argument('--output', default='reports/alpha_validation.json')
     av.set_defaults(func=cmd_alpha_validate)
+    ar = asub.add_parser('regime', help='Regime conditioning (Step 5)')
+    ar.add_argument('--symbol', default='BTC')
+    ar.add_argument('--data', default=str(DATA_DEFAULT))
+    ar.add_argument('--screen', default='reports/alpha_screen.json')
+    ar.add_argument('--model', default=None, help='Regime GMM model JSON')
+    ar.add_argument('--timeframe', default='15min')
+    ar.add_argument('--top-n', type=int, default=10)
+    ar.add_argument('--output', default='reports/alpha_regime.json')
+    ar.set_defaults(func=cmd_alpha_regime)
+    amf = asub.add_parser('multi-freq', help='Multi-frequency integration (Step 6)')
+    amf.add_argument('--symbol', default='BTC')
+    amf.add_argument('--data', default=str(DATA_DEFAULT))
+    amf.add_argument('--signal', default=None, help='Pre-computed signal JSON')
+    amf.add_argument('--timeframe', default='15min')
+    amf.add_argument('--output', default='reports/alpha_multi_freq.json')
+    amf.set_defaults(func=cmd_alpha_multi_freq)
+    ap = asub.add_parser('portfolio', help='Portfolio assembly (Step 7)')
+    ap.add_argument('--data', default=str(DATA_DEFAULT))
+    ap.add_argument('--symbols', nargs='+', default=['BTC', 'ETH', 'SOL'])
+    ap.add_argument('--timeframe', default='15min')
+    ap.add_argument('--output', default='reports/alpha_portfolio.json')
+    ap.set_defaults(func=cmd_alpha_portfolio)
+    apt = asub.add_parser('paper', help='Paper trading simulation (Step 8)')
+    apt.add_argument('--symbol', default='BTC')
+    apt.add_argument('--data', default=str(DATA_DEFAULT))
+    apt.add_argument('--timeframe', default='15min')
+    apt.add_argument('--backtest-sharpe', type=float, default=1.0)
+    apt.add_argument('--backtest-ic', type=float, default=0.03)
+    apt.add_argument('--output', default='reports/alpha_paper.json')
+    apt.set_defaults(func=cmd_alpha_paper)
+    adp = asub.add_parser('deploy', help='Deployment status & readiness (Step 9)')
+    adp.add_argument('--check', action='store_true', help='Run readiness check')
+    adp.add_argument('--paper-report', default='reports/alpha_paper.json')
+    adp.add_argument('--account-value', type=float, default=10000.0)
+    adp.set_defaults(func=cmd_alpha_deploy)
 
     # ── visualize ──
     viz_p = sub.add_parser('visualize', help='Visualization suite')
