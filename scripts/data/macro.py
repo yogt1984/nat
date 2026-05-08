@@ -12,7 +12,9 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 import time
+import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -103,7 +105,8 @@ def _fetch_hyperliquid(symbol: str, interval: str, days: int) -> Optional[pd.Dat
         df = pd.DataFrame(rows).sort_values("timestamp").reset_index(drop=True)
         return df
 
-    except Exception:
+    except (urllib.error.URLError, json.JSONDecodeError, KeyError, ValueError, OSError) as e:
+        logging.getLogger(__name__).debug("Hyperliquid candle fetch failed: %s", e)
         return None
 
 
@@ -141,7 +144,8 @@ def _fetch_binance(symbol: str, interval: str, days: int) -> Optional[pd.DataFra
 
         return pd.DataFrame(rows).sort_values("timestamp").reset_index(drop=True)
 
-    except Exception:
+    except (urllib.error.URLError, json.JSONDecodeError, KeyError, ValueError, OSError) as e:
+        logging.getLogger(__name__).debug("Binance candle fetch failed: %s", e)
         return None
 
 
