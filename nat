@@ -316,6 +316,54 @@ def cmd_scan(args):
     subprocess.run(cmd_parts, cwd=str(ROOT))
 
 
+# ── Alpha pipeline commands ──────────────────────────────────────────────────
+
+def cmd_alpha_combine(args):
+    """Run feature combination (Step 2)."""
+    _banner(f"Feature Combination: {_sym(args)}")
+    cmd = (f"scripts/alpha/combiner.py --data-dir {_data(args)} --symbol {_sym(args)} "
+           f"--screen {getattr(args, 'screen', 'reports/alpha_screen.json')} "
+           f"--top {getattr(args, 'top', 20)} "
+           f"--max-corr {getattr(args, 'max_corr', 0.8)} "
+           f"--timeframe {getattr(args, 'timeframe', '15min')} "
+           f"--method {getattr(args, 'method', 'equal')} "
+           f"--output {getattr(args, 'output', 'reports/alpha_combine.json')}")
+    horizon = getattr(args, 'horizon', None)
+    if horizon:
+        cmd += f" --horizon {horizon}"
+    _py(cmd)
+
+
+def cmd_alpha_size(args):
+    """Run cost-aware position sizing (Step 3)."""
+    _banner("Cost-Aware Position Sizing")
+    cmd = (f"scripts/alpha/position.py "
+           f"--signal {args.signal} --ic {args.ic} --vol {args.vol} "
+           f"--horizon-bars {getattr(args, 'horizon_bars', 16)} "
+           f"--cost-multiplier {getattr(args, 'cost_multiplier', 1.5)} "
+           f"--scale {getattr(args, 'scale', 1.0)} "
+           f"--bar-minutes {getattr(args, 'bar_minutes', 15.0)} "
+           f"--output {getattr(args, 'output', 'reports/alpha_position.json')}")
+    _py(cmd)
+
+
+def cmd_alpha_validate(args):
+    """Run walk-forward validation (Step 4)."""
+    _banner(f"Walk-Forward Validation: {_sym(args)}")
+    cmd = (f"scripts/alpha/adapter.py "
+           f"--signal {args.signal} --data-dir {_data(args)} --symbol {_sym(args)} "
+           f"--timeframe {getattr(args, 'timeframe', '15min')} "
+           f"--n-trials {getattr(args, 'n_trials', 1998)} "
+           f"--entry-threshold {getattr(args, 'entry_threshold', 0.3)} "
+           f"--n-splits {getattr(args, 'n_splits', 5)} "
+           f"--embargo-bars {getattr(args, 'embargo_bars', 600)} "
+           f"--output {getattr(args, 'output', 'reports/alpha_validation.json')}")
+    directions = getattr(args, 'direction', ['long', 'short'])
+    for d in directions:
+        cmd += f" --direction {d}"
+    _py(cmd)
+
+
 def cmd_test_scan(args):
     """Run scalp edge scanner tests."""
     cov = getattr(args, 'coverage', False)
@@ -1061,6 +1109,11 @@ def cmd_help(args=None):
     nat screen [args]          Alpha screening
     nat scan                   Scalp edge scanner (--symbol, --data, --tail)
 
+  {BOLD}Alpha Pipeline{W}
+    nat alpha combine          Feature combination (--symbol, --top, --method, --screen)
+    nat alpha size             Cost-aware position sizing (--signal, --ic, --vol)
+    nat alpha validate         Walk-forward validation (--signal, --direction, --n-trials)
+
   {BOLD}Visualization{W}
     nat visualize              All visualizations (scanner + data + profiler)
     nat visualize scan         Scanner plots (--report, --symbol, --data)
@@ -1217,6 +1270,44 @@ def build_parser():
     scan_p.add_argument('--data', default=str(DATA_DEFAULT))
     scan_p.add_argument('--tail', type=int, default=None, help='Tail percentile threshold')
     scan_p.set_defaults(func=cmd_scan)
+
+    # ── alpha ──
+    alpha_p = sub.add_parser('alpha', help='Alpha research pipeline (Steps 2-4)')
+    alpha_p.set_defaults(func=lambda a: alpha_p.print_help())
+    asub = alpha_p.add_subparsers(dest='subcmd')
+    ac = asub.add_parser('combine', help='Feature combination (Step 2)')
+    ac.add_argument('--symbol', default='BTC')
+    ac.add_argument('--data', default=str(DATA_DEFAULT))
+    ac.add_argument('--screen', default='reports/alpha_screen.json', help='Screen results JSON')
+    ac.add_argument('--horizon', default=None, help='Filter to specific horizon')
+    ac.add_argument('--top', type=int, default=20, help='Top N features')
+    ac.add_argument('--max-corr', type=float, default=0.8, help='Correlation dedup threshold')
+    ac.add_argument('--timeframe', default='15min')
+    ac.add_argument('--method', default='equal', choices=['equal', 'ic_weighted'])
+    ac.add_argument('--output', default='reports/alpha_combine.json')
+    ac.set_defaults(func=cmd_alpha_combine)
+    az = asub.add_parser('size', help='Cost-aware position sizing (Step 3)')
+    az.add_argument('--signal', required=True, help='Signal .npy file')
+    az.add_argument('--ic', type=float, required=True, help='Estimated IC')
+    az.add_argument('--vol', type=float, required=True, help='Return volatility')
+    az.add_argument('--horizon-bars', type=int, default=16)
+    az.add_argument('--cost-multiplier', type=float, default=1.5)
+    az.add_argument('--scale', type=float, default=1.0)
+    az.add_argument('--bar-minutes', type=float, default=15.0)
+    az.add_argument('--output', default='reports/alpha_position.json')
+    az.set_defaults(func=cmd_alpha_size)
+    av = asub.add_parser('validate', help='Walk-forward validation (Step 4)')
+    av.add_argument('--signal', required=True, help='Signal .npy file')
+    av.add_argument('--symbol', default='BTC')
+    av.add_argument('--data', default=str(DATA_DEFAULT))
+    av.add_argument('--timeframe', default='15min')
+    av.add_argument('--n-trials', type=int, default=1998)
+    av.add_argument('--entry-threshold', type=float, default=0.3)
+    av.add_argument('--n-splits', type=int, default=5)
+    av.add_argument('--embargo-bars', type=int, default=600)
+    av.add_argument('--direction', nargs='+', default=['long', 'short'], choices=['long', 'short'])
+    av.add_argument('--output', default='reports/alpha_validation.json')
+    av.set_defaults(func=cmd_alpha_validate)
 
     # ── visualize ──
     viz_p = sub.add_parser('visualize', help='Visualization suite')
