@@ -228,6 +228,18 @@ def cmd_profile(args):
         print(json.dumps(asdict(quick_profile()), indent=2))
 
 
+def cmd_profile_scalp(args):
+    """Run scalping feature profiler."""
+    _banner(f"Scalping profiler: {_sym(args)}")
+    cmd = f"scripts/scalping_profiler.py profile --symbol {_sym(args)} --data-dir {_data(args)}"
+    top = getattr(args, 'top', None)
+    if top:
+        cmd += f" --top {top}"
+    if getattr(args, 'forward_test', False):
+        cmd += " --forward-test"
+    _py(cmd)
+
+
 def cmd_report(args):
     """Generate full experiment report."""
     _p("...", B, "Generating report...")
@@ -311,6 +323,73 @@ def cmd_test_scan(args):
     if cov:
         cmd += " --cov=scripts.scalp_edge_scanner --cov-report=term-missing"
     _py(f"-m pytest {cmd}")
+
+
+def cmd_test_viz(args):
+    """Run scanner visualization tests."""
+    cov = getattr(args, 'coverage', False)
+    cmd = "scripts/tests/test_visualize_scanner.py -v"
+    if cov:
+        cmd += " --cov=scripts.visualize_scanner --cov-report=term-missing"
+    _py(f"-m pytest {cmd}")
+
+
+# ── Visualize commands ──────────────────────────────────────────────────
+
+def cmd_visualize_scan(args):
+    """Generate scanner visualization plots."""
+    _banner("Scanner Visualizations")
+    symbol = getattr(args, 'symbol', 'BTC')
+    data_dir = getattr(args, 'data', str(DATA_DEFAULT))
+    report_path = getattr(args, 'report', None)
+    output = getattr(args, 'output', str(ROOT / 'reports' / 'figures' / 'scanner'))
+    dpi = getattr(args, 'dpi', 150)
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from visualize_scanner import run_all
+    paths = run_all(data_dir=data_dir, symbol=symbol, output_dir=output,
+                    report_path=report_path, dpi=dpi, plots="scanner")
+    _p("+", G, f"Saved {len(paths)} figures to {output}/")
+
+
+def cmd_visualize_data(args):
+    """Generate data quality plots."""
+    _banner("Data Quality Visualizations")
+    symbol = getattr(args, 'symbol', 'BTC')
+    data_dir = getattr(args, 'data', str(DATA_DEFAULT))
+    output = getattr(args, 'output', str(ROOT / 'reports' / 'figures' / 'scanner'))
+    dpi = getattr(args, 'dpi', 150)
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from visualize_scanner import run_all
+    paths = run_all(data_dir=data_dir, symbol=symbol, output_dir=output,
+                    dpi=dpi, plots="data")
+    _p("+", G, f"Saved {len(paths)} figures to {output}/")
+
+
+def cmd_visualize_profile(args):
+    """Run existing cluster profiling visualizations."""
+    _banner("Cluster Profiling Visualizations")
+    _py(f"{ROOT / 'scripts' / 'visualize_profiling.py'}")
+
+
+def cmd_visualize_all(args):
+    """Generate all visualizations."""
+    _banner("All Visualizations")
+    symbol = getattr(args, 'symbol', 'BTC')
+    data_dir = getattr(args, 'data', str(DATA_DEFAULT))
+    report_path = getattr(args, 'report', None)
+    output = getattr(args, 'output', str(ROOT / 'reports' / 'figures' / 'scanner'))
+    dpi = getattr(args, 'dpi', 150)
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from visualize_scanner import run_all
+    paths = run_all(data_dir=data_dir, symbol=symbol, output_dir=output,
+                    report_path=report_path, dpi=dpi, plots="all")
+    _p("+", G, f"Saved {len(paths)} scanner/data figures to {output}/")
+    print()
+    _p("...", B, "Running cluster profiling visualizations...")
+    _py(f"{ROOT / 'scripts' / 'visualize_profiling.py'}")
 
 
 # ── Build commands ───────────────────────────────────────────────────────────
@@ -677,6 +756,30 @@ def cmd_cluster_all(args):
             f"--output reports/cluster_{sym}.txt")
 
 
+def cmd_cluster_quality(args):
+    _banner("Q3 predictive quality test")
+    _py("scripts/q3_predictive_quality.py")
+
+
+def cmd_cluster_explore(args):
+    _banner(f"Exploring clusters: {_sym(args)}")
+    cmd = f"scripts/explore_clusters.py --data-dir {_data(args)} --symbol {_sym(args)}"
+    subset = getattr(args, 'subset', None)
+    if subset:
+        cmd += f" --subset {subset}"
+    method = getattr(args, 'method', 'gmm')
+    cmd += f" --cluster-method {method}"
+    _py(cmd)
+
+
+# ── Validation commands ─────────────────────────────────────────────────────
+
+def cmd_validate_skeptical(args):
+    _banner("Running skeptical validation suite")
+    output = getattr(args, 'output', 'reports/skeptical_validation')
+    _py(f"scripts/skeptical_validation.py --data {_data(args)} --output {output}")
+
+
 # ── Experiment tracking commands ─────────────────────────────────────────────
 
 def cmd_experiment_list(args):
@@ -718,6 +821,16 @@ def cmd_experiment_workflow(args):
     print("\n  Step 3: Backtest with tracking...")
     _py(f"scripts/run_backtest_tracked.py --ml-predictions {predictions} "
         f"--ml-entry-threshold {entry} --ml-exit-threshold {exit_} --walk-forward --output {output}")
+
+
+def cmd_experiment_snapshot(args):
+    name = args.name
+    cmd = f"scripts/experiment_governance.py snapshot --data-dir {_data(args)} --name {name}"
+    desc = getattr(args, 'description', None)
+    if desc:
+        cmd += f" --description \"{desc}\""
+    _banner(f"Creating snapshot: {name}")
+    _py(cmd)
 
 
 # ── Pipeline commands ────────────────────────────────────────────────────────
@@ -942,10 +1055,17 @@ def cmd_help(args=None):
 
   {BOLD}Analysis{W}
     nat profile                Run regime profiling
+    nat profile scalp          Scalping feature profiler (--symbol, --top, --forward-test)
     nat report                 Generate full experiment report
     nat macro                  Daily MA crossover signals
     nat screen [args]          Alpha screening
     nat scan                   Scalp edge scanner (--symbol, --data, --tail)
+
+  {BOLD}Visualization{W}
+    nat visualize              All visualizations (scanner + data + profiler)
+    nat visualize scan         Scanner plots (--report, --symbol, --data)
+    nat visualize data         Data quality plots (--data)
+    nat visualize profile      Cluster profiling plots
 
   {BOLD}Data{W}
     nat data                   Show data statistics
@@ -984,6 +1104,7 @@ def cmd_help(args=None):
     nat test serving           Model serving tests
     nat test eamm              EAMM tests (--integration)
     nat test scan              Scalp edge scanner tests (--coverage)
+    nat test viz               Scanner visualization tests (--coverage)
 
   {BOLD}Backtest{W}
     nat backtest               Run strategy backtest (--strategy, --symbol, --data)
@@ -1005,6 +1126,11 @@ def cmd_help(args=None):
     nat cluster analyze        Cluster quality (--symbol, --hours)
     nat cluster gmm            Analyze with trained GMM
     nat cluster all            Analyze BTC, ETH, SOL
+    nat cluster quality        Q3 predictive quality test
+    nat cluster explore        Exploratory clustering (--symbol, --subset, --method)
+
+  {BOLD}Validation{W}
+    nat validate skeptical     20+ statistical tests before investment (--data, --output)
 
   {BOLD}Experiment Tracking{W}
     nat experiment list        List experiments (--stage)
@@ -1012,6 +1138,7 @@ def cmd_help(args=None):
     nat experiment compare     Compare (--ids)
     nat experiment best        Best by metric (--metric)
     nat experiment workflow    Full train -> score -> backtest
+    nat experiment snapshot    Create dataset snapshot (--name, --description)
 
   {BOLD}Pipeline (State Machine){W}
     nat pipeline start         IDLE -> BUILD -> INGEST -> ANALYZE -> DONE
@@ -1067,7 +1194,15 @@ def build_parser():
     sub.add_parser('stop', help='Stop everything').set_defaults(func=cmd_stop)
     sub.add_parser('status', help='Health check').set_defaults(func=cmd_status)
     sub.add_parser('log', help='Tail ingestor log').set_defaults(func=cmd_log)
-    sub.add_parser('profile', help='Run regime profiling').set_defaults(func=cmd_profile)
+    prof_p = sub.add_parser('profile', help='Profiling')
+    prof_p.set_defaults(func=cmd_profile)
+    prof_sub = prof_p.add_subparsers(dest='subcmd')
+    ps = prof_sub.add_parser('scalp', help='Scalping feature profiler (--symbol, --top, --forward-test)')
+    ps.add_argument('--symbol', default='BTC')
+    ps.add_argument('--data', default=str(DATA_DEFAULT))
+    ps.add_argument('--top', type=int, default=None, help='Show top N features')
+    ps.add_argument('--forward-test', action='store_true', help='Run forward test')
+    ps.set_defaults(func=cmd_profile_scalp)
     sub.add_parser('report', help='Generate experiment report').set_defaults(func=cmd_report)
     sub.add_parser('dashboard', help='Start dashboard').set_defaults(func=cmd_dashboard)
     sub.add_parser('macro', help='Daily macro signals').set_defaults(func=cmd_macro)
@@ -1082,6 +1217,20 @@ def build_parser():
     scan_p.add_argument('--data', default=str(DATA_DEFAULT))
     scan_p.add_argument('--tail', type=int, default=None, help='Tail percentile threshold')
     scan_p.set_defaults(func=cmd_scan)
+
+    # ── visualize ──
+    viz_p = sub.add_parser('visualize', help='Visualization suite')
+    viz_p.add_argument('--symbol', default='BTC')
+    viz_p.add_argument('--data', default=str(DATA_DEFAULT))
+    viz_p.add_argument('--report', default=None, help='Scanner JSON report path')
+    viz_p.add_argument('--output', default=str(ROOT / 'reports' / 'figures' / 'scanner'))
+    viz_p.add_argument('--dpi', type=int, default=150)
+    viz_p.set_defaults(func=cmd_visualize_all)
+    vsub = viz_p.add_subparsers(dest='subcmd')
+    vsub.add_parser('scan', help='Scanner plots (1-7)').set_defaults(func=cmd_visualize_scan)
+    vsub.add_parser('data', help='Data quality plots (8-10)').set_defaults(func=cmd_visualize_data)
+    vsub.add_parser('profile', help='Cluster profiling plots').set_defaults(func=cmd_visualize_profile)
+    vsub.add_parser('all', help='All visualizations').set_defaults(func=cmd_visualize_all)
 
     # ── build ──
     build_p = sub.add_parser('build', help='Build & dev tools (default: release)')
@@ -1148,6 +1297,9 @@ def build_parser():
     tsc = tsub.add_parser('scan', help='Scalp edge scanner tests')
     tsc.add_argument('--coverage', action='store_true')
     tsc.set_defaults(func=cmd_test_scan)
+    tvz = tsub.add_parser('viz', help='Scanner visualization tests')
+    tvz.add_argument('--coverage', action='store_true')
+    tvz.set_defaults(func=cmd_test_viz)
 
     # ── backtest ──
     bt_p = sub.add_parser('backtest', help='Backtesting')
@@ -1228,6 +1380,22 @@ def build_parser():
     call = csub.add_parser('all', help='Analyze all symbols')
     call.add_argument('--data', default=str(DATA_DEFAULT))
     call.set_defaults(func=cmd_cluster_all)
+    csub.add_parser('quality', help='Q3 predictive quality test').set_defaults(func=cmd_cluster_quality)
+    ce = csub.add_parser('explore', help='Exploratory clustering (PCA/UMAP/t-SNE)')
+    ce.add_argument('--symbol', default='BTC')
+    ce.add_argument('--data', default=str(DATA_DEFAULT))
+    ce.add_argument('--subset', default=None, help='Feature subset')
+    ce.add_argument('--method', default='gmm', choices=['gmm', 'kmeans', 'hdbscan', 'dbscan'])
+    ce.set_defaults(func=cmd_cluster_explore)
+
+    # ── validate ──
+    val_p = sub.add_parser('validate', help='Validation suites')
+    val_p.set_defaults(func=lambda a: val_p.print_help())
+    vsub = val_p.add_subparsers(dest='subcmd')
+    vs = vsub.add_parser('skeptical', help='20+ statistical tests before investment')
+    vs.add_argument('--data', default=str(DATA_DEFAULT))
+    vs.add_argument('--output', default='reports/skeptical_validation')
+    vs.set_defaults(func=cmd_validate_skeptical)
 
     # ── experiment ──
     exp_p = sub.add_parser('experiment', help='Experiment tracking')
@@ -1254,6 +1422,11 @@ def build_parser():
     ew.add_argument('--predictions', default='./predictions.parquet')
     ew.add_argument('--output', default='./backtest_results.json')
     ew.set_defaults(func=cmd_experiment_workflow)
+    esn = esub.add_parser('snapshot', help='Create dataset snapshot')
+    esn.add_argument('--name', required=True, help='Snapshot name')
+    esn.add_argument('--description', help='Snapshot description')
+    esn.add_argument('--data', default=str(DATA_DEFAULT))
+    esn.set_defaults(func=cmd_experiment_snapshot)
 
     # ── pipeline ──
     pipe_p = sub.add_parser('pipeline', help='Automated pipeline')
