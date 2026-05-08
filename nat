@@ -487,6 +487,30 @@ def cmd_visualize_hierarchy(args):
     _py(f"{ROOT / 'scripts' / 'visualize_hierarchy.py'} --data {data_dir} --output {output} --vector {vector} --timeframe {timeframe}")
 
 
+def cmd_visualize_cluster(args):
+    """Generate cluster exploration plots (PCA, UMAP, t-SNE scatter with clustering)."""
+    _banner("Cluster Exploration Visualizations")
+    data_dir = getattr(args, 'data', str(DATA_DEFAULT))
+    output = getattr(args, 'output', str(ROOT / 'reports' / 'figures' / 'clusters'))
+    symbol = getattr(args, 'symbol', 'BTC')
+    subset = getattr(args, 'subset', None)
+    method = getattr(args, 'cluster_method', 'gmm')
+    cmd = f"{ROOT / 'scripts' / 'explore_clusters.py'} --data-dir {data_dir} --output-dir {output} --cluster-method {method}"
+    if symbol:
+        cmd += f" --symbol {symbol}"
+    if subset:
+        cmd += f" --subset {subset}"
+    _py(cmd)
+
+
+def cmd_visualize_skeptical(args):
+    """Generate skeptical validation diagnostic plots (20 tests, 16+ PNGs)."""
+    _banner("Skeptical Validation Visualizations")
+    data_dir = getattr(args, 'data', str(DATA_DEFAULT))
+    output = getattr(args, 'output', str(ROOT / 'reports' / 'skeptical_validation'))
+    _py(f"{ROOT / 'scripts' / 'skeptical_validation.py'} --data {data_dir} --output {output}")
+
+
 def cmd_visualize_all(args):
     """Generate all visualizations."""
     _banner("All Visualizations")
@@ -1293,6 +1317,8 @@ def cmd_help(args=None):
     nat visualize data         Data quality plots (--data)
     nat visualize profile      Cluster profiling plots
     nat visualize hierarchy    Hierarchical profiling plots (Phase 8)
+    nat visualize cluster      Cluster exploration plots (--subset, --cluster-method)
+    nat visualize skeptical    Skeptical validation diagnostic plots (16+ PNGs)
 
   {BOLD}Data{W}
     nat data                   Show data statistics
@@ -1539,6 +1565,11 @@ def build_parser():
     hier_p.add_argument('--vector', default='entropy', help='Feature vector (entropy, orderflow, etc.)')
     hier_p.add_argument('--timeframe', default='15min', help='Bar aggregation timeframe')
     hier_p.set_defaults(func=cmd_visualize_hierarchy)
+    cluster_p = vsub.add_parser('cluster', help='Cluster exploration plots (PCA/UMAP/t-SNE)')
+    cluster_p.add_argument('--subset', default=None, help='Feature subset (entropy, orderflow, etc.)')
+    cluster_p.add_argument('--cluster-method', default='gmm', choices=['gmm', 'kmeans', 'hdbscan', 'dbscan'])
+    cluster_p.set_defaults(func=cmd_visualize_cluster)
+    vsub.add_parser('skeptical', help='Skeptical validation diagnostic plots').set_defaults(func=cmd_visualize_skeptical)
     vsub.add_parser('all', help='All visualizations').set_defaults(func=cmd_visualize_all)
 
     # ── build ──
