@@ -18,6 +18,14 @@ mkdir -p "$LINK_DIR"
 # Create symlink
 ln -sf "$NAT_BIN" "$LINK_DIR/nat"
 
+# Ensure Python visualization dependencies are available
+PYTHON="${PYTHON:-python3}"
+if ! $PYTHON -c "import matplotlib" 2>/dev/null; then
+    echo "  Installing Python visualization dependencies..."
+    $PYTHON -m pip install --quiet matplotlib seaborn 2>/dev/null || \
+        echo "  Warning: Could not install matplotlib/seaborn. Run: pip install matplotlib seaborn"
+fi
+
 # Check if LINK_DIR is in PATH
 if echo "$PATH" | tr ':' '\n' | grep -q "$LINK_DIR"; then
     echo "  ✓  nat installed to $LINK_DIR/nat"

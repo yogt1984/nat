@@ -51,6 +51,12 @@ Thumbs.db
 *.log
 logs/
 
+# Reports (generated output)
+reports/
+
+# Claude Code
+.claude/
+
 # Secrets
 .env
 *.pem
