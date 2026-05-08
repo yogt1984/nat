@@ -826,6 +826,13 @@ def cmd_model_score(args):
 
 
 def cmd_model_serve(args):
+    try:
+        import fastapi, uvicorn, pydantic  # noqa: F401
+    except ImportError:
+        _p("x", R, "Missing serving dependencies. Install with:")
+        _p(" ", W, "pip install -r scripts/requirements-serving.txt")
+        sys.exit(1)
+
     port = getattr(args, 'port', 8000)
     host = getattr(args, 'host', '0.0.0.0')
     cache = getattr(args, 'cache_size', 5)
@@ -1062,6 +1069,13 @@ def cmd_pipeline_status(args):
 
 
 def cmd_pipeline_dashboard(args):
+    try:
+        import dash  # noqa: F401
+    except ImportError:
+        _p("x", R, "Missing dash dependency. Install with:")
+        _p(" ", W, "pip install dash>=2.14.0")
+        sys.exit(1)
+
     port = getattr(args, 'port', 8050)
     _banner("Pipeline dashboard")
     _py(f"scripts/dashboard.py --config {_pipe_cfg(args)} --port {port}")
