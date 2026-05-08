@@ -3,7 +3,7 @@
 
 [ingestion]
 # Duration of data collection
-duration_days = 7
+duration_days = 1
 # Rust ingestor config path (relative to project root)
 ingestor_config = "config/ing.toml"
 # Data directory (parquet output)
@@ -17,7 +17,7 @@ max_gap_seconds = 600
 # Primary timeframe for cluster analysis
 timeframe = "15min"
 # Feature vectors to analyze
-vectors = ["entropy", "trend", "volatility", "toxicity", "regime", "micro"]
+vectors = ["entropy", "trend", "volatility", "toxicity", "orderflow", "illiquidity", "flow", "context", "derived"]
 # Scaler for preprocessing
 scaler = "zscore"
 # k-sweep range
@@ -47,6 +47,54 @@ save_figures = true
 figure_format = "png"
 # Figure DPI
 figure_dpi = 150
+
+[profiler]
+# Scalping signal profiler configuration
+# Bar timeframe for profiling (5min = scalping horizon)
+timeframe = "5min"
+# Forward return horizons in bars (1 bar = 5min at default timeframe)
+horizons = [1, 2, 5, 10]
+# One-way taker fee in bps (Hyperliquid: 3.5 bps)
+cost_bps = 3.5
+# Minimum IC to consider a feature signal
+min_ic = 0.02
+# Minimum directional hit rate
+min_hit_rate = 0.51
+# Forward test temporal split (in-sample fraction)
+forward_test_split = 0.70
+# Top N features to report / forward test
+top_n = 30
+# Rolling window for IC stability (IC IR)
+rolling_ic_window = 50
+# Minimum observations to profile a feature
+min_observations = 100
+# Symbols to profile
+symbols = ["BTC"]
+
+[scanner]
+# Scalp edge scanner configuration
+# Bar timeframe for scanning
+timeframe = "5min"
+# One-way taker fee in bps (Hyperliquid: 3.5 bps)
+cost_bps = 3.5
+# Percentile thresholds for tail analysis
+tail_percentiles = [1, 5, 10, 90, 95, 99]
+# Tail threshold percentile (lower/upper cutoff)
+tail_threshold = 5
+# Top N features to profile (by variance)
+top_features = 40
+# Top N significant features for conjunction scan
+conjunction_features = 15
+# Minimum observations per bar
+min_observations = 100
+# Minimum observations in a tail region
+min_tail_obs = 10
+# FDR significance level
+significance_alpha = 0.05
+# Forward return horizon in bars
+forward_horizon_bars = 1
+# Symbols to scan
+symbols = ["BTC"]
 
 [state]
 # State file tracks pipeline progress (JSON)

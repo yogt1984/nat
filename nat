@@ -291,6 +291,28 @@ def cmd_screen(args):
     subprocess.run([PY, "-m", "scripts.alpha.screener"] + extra, cwd=str(ROOT))
 
 
+def cmd_scan(args):
+    """Run scalp edge scanner on collected data."""
+    _banner("Scalp Edge Scanner")
+    symbol = getattr(args, 'symbol', 'BTC')
+    data_dir = getattr(args, 'data', str(DATA_DEFAULT))
+    tail = getattr(args, 'tail', None)
+    cmd_parts = [PY, str(ROOT / "scripts" / "scalp_edge_scanner.py"),
+                 "--symbol", symbol, "--data-dir", data_dir]
+    if tail is not None:
+        cmd_parts += ["--tail", str(tail)]
+    subprocess.run(cmd_parts, cwd=str(ROOT))
+
+
+def cmd_test_scan(args):
+    """Run scalp edge scanner tests."""
+    cov = getattr(args, 'coverage', False)
+    cmd = "scripts/tests/test_scalp_scanner.py -v"
+    if cov:
+        cmd += " --cov=scripts.scalp_edge_scanner --cov-report=term-missing"
+    _py(f"-m pytest {cmd}")
+
+
 # ── Build commands ───────────────────────────────────────────────────────────
 
 def cmd_build(args):
@@ -923,6 +945,7 @@ def cmd_help(args=None):
     nat report                 Generate full experiment report
     nat macro                  Daily MA crossover signals
     nat screen [args]          Alpha screening
+    nat scan                   Scalp edge scanner (--symbol, --data, --tail)
 
   {BOLD}Data{W}
     nat data                   Show data statistics
@@ -960,6 +983,7 @@ def cmd_help(args=None):
     nat test dashboard         Dashboard tests
     nat test serving           Model serving tests
     nat test eamm              EAMM tests (--integration)
+    nat test scan              Scalp edge scanner tests (--coverage)
 
   {BOLD}Backtest{W}
     nat backtest               Run strategy backtest (--strategy, --symbol, --data)
@@ -1053,6 +1077,12 @@ def build_parser():
     screen_p.add_argument('screen_args', nargs=argparse.REMAINDER)
     screen_p.set_defaults(func=cmd_screen)
 
+    scan_p = sub.add_parser('scan', help='Scalp edge scanner')
+    scan_p.add_argument('--symbol', default='BTC')
+    scan_p.add_argument('--data', default=str(DATA_DEFAULT))
+    scan_p.add_argument('--tail', type=int, default=None, help='Tail percentile threshold')
+    scan_p.set_defaults(func=cmd_scan)
+
     # ── build ──
     build_p = sub.add_parser('build', help='Build & dev tools (default: release)')
     build_p.set_defaults(func=cmd_build)
@@ -1115,6 +1145,9 @@ def build_parser():
     te = tsub.add_parser('eamm', help='EAMM tests')
     te.add_argument('--integration', action='store_true')
     te.set_defaults(func=cmd_test_eamm)
+    tsc = tsub.add_parser('scan', help='Scalp edge scanner tests')
+    tsc.add_argument('--coverage', action='store_true')
+    tsc.set_defaults(func=cmd_test_scan)
 
     # ── backtest ──
     bt_p = sub.add_parser('backtest', help='Backtesting')
