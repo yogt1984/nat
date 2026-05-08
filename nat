@@ -421,6 +421,18 @@ def cmd_visualize_profile(args):
     _py(f"{ROOT / 'scripts' / 'visualize_profiling.py'}")
 
 
+def cmd_visualize_hierarchy(args):
+    """Generate hierarchical profiling visualizations (Phase 8)."""
+    _banner("Hierarchical Profiling Visualizations")
+    data_dir = getattr(args, 'data', str(DATA_DEFAULT))
+    output = getattr(args, 'output', str(ROOT / 'reports' / 'figures'))
+    vector = getattr(args, 'vector', 'entropy')
+    timeframe = getattr(args, 'timeframe', '15min')
+    sys.path.insert(0, str(ROOT / "scripts"))
+    _py(f"{ROOT / 'scripts' / 'visualize_hierarchy.py'}",
+        f"--data {data_dir} --output {output} --vector {vector} --timeframe {timeframe}")
+
+
 def cmd_visualize_all(args):
     """Generate all visualizations."""
     _banner("All Visualizations")
@@ -1206,6 +1218,7 @@ def cmd_help(args=None):
     nat visualize scan         Scanner plots (--report, --symbol, --data)
     nat visualize data         Data quality plots (--data)
     nat visualize profile      Cluster profiling plots
+    nat visualize hierarchy    Hierarchical profiling plots (Phase 8)
 
   {BOLD}Data{W}
     nat data                   Show data statistics
@@ -1409,6 +1422,10 @@ def build_parser():
     vsub.add_parser('scan', help='Scanner plots (1-7)').set_defaults(func=cmd_visualize_scan)
     vsub.add_parser('data', help='Data quality plots (8-10)').set_defaults(func=cmd_visualize_data)
     vsub.add_parser('profile', help='Cluster profiling plots').set_defaults(func=cmd_visualize_profile)
+    hier_p = vsub.add_parser('hierarchy', help='Hierarchical profiling plots (Phase 8)')
+    hier_p.add_argument('--vector', default='entropy', help='Feature vector (entropy, orderflow, etc.)')
+    hier_p.add_argument('--timeframe', default='15min', help='Bar aggregation timeframe')
+    hier_p.set_defaults(func=cmd_visualize_hierarchy)
     vsub.add_parser('all', help='All visualizations').set_defaults(func=cmd_visualize_all)
 
     # ── build ──
