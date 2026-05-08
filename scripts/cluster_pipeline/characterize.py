@@ -452,3 +452,188 @@ def return_profile(
         }
 
     return ReturnProfile(state_id=state_id, horizons=horizon_stats)
+
+
+# ---------------------------------------------------------------------------
+# Cross-Asset Lead/Lag Analysis (FR-4.5.4)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StateLeadLag:
+    """Lead/lag statistics for a single state across symbols."""
+
+    state_id: int
+    symbol_fractions: Dict[str, float]
+    entry_order: List[Tuple[str, float]]  # [(symbol, mean_offset)] sorted
+    leader: Optional[str]
+    mean_lead_bars: float
+    return_correlations: Optional[pd.DataFrame]
+    n_episodes: int
+
+
+@dataclass
+class LeadLagResult:
+    """Cross-asset lead/lag analysis across all states (FR-4.5.4)."""
+
+    per_state: Dict[int, StateLeadLag]
+    symbols: List[str]
+    n_bars: int
+
+
+def cross_asset_lead_lag(
+    per_symbol_labels: Dict[str, np.ndarray],
+    per_symbol_prices: Optional[Dict[str, np.ndarray]] = None,
+    min_episodes: int = 3,
+    max_entry_gap: int = 10,
+) -> LeadLagResult:
+    """
+    Compute cross-asset lead/lag for each state.
+
+    For each state, identifies which symbol enters first on average
+    ("the leader") and by how many bars.
+
+    Args:
+        per_symbol_labels: {symbol: 1-D label array}. All same length.
+        per_symbol_prices: Optional {symbol: 1-D price array} for return correlations.
+        min_episodes: Minimum synchronized episodes to declare a leader.
+        max_entry_gap: Maximum bars between first and last symbol entry
+                       to consider them the same episode.
+
+    Returns:
+        LeadLagResult with per-state lead/lag statistics.
+
+    Raises:
+        ValueError: If fewer than 2 symbols or arrays differ in length.
+    """
+    symbols = sorted(per_symbol_labels.keys())
+    if len(symbols) < 2:
+        raise ValueError(f"Need >= 2 symbols, got {len(symbols)}")
+
+    n_bars = len(per_symbol_labels[symbols[0]])
+    for sym in symbols:
+        if len(per_symbol_labels[sym]) != n_bars:
+            raise ValueError(
+                f"Label length mismatch: {symbols[0]}={n_bars}, {sym}={len(per_symbol_labels[sym])}"
+            )
+    if per_symbol_prices is not None:
+        for sym in symbols:
+            if sym not in per_symbol_prices:
+                raise ValueError(f"Missing prices for symbol {sym}")
+            if len(per_symbol_prices[sym]) != n_bars:
+                raise ValueError(f"Price length mismatch for {sym}")
+
+    # Collect all unique states
+    all_states = set()
+    for labels in per_symbol_labels.values():
+        all_states.update(np.unique(labels).tolist())
+
+    # Detect entry events: bars where label changes from previous bar
+    def _find_entries(labels: np.ndarray) -> Dict[int, List[int]]:
+        entries: Dict[int, List[int]] = {}
+        entries.setdefault(int(labels[0]), []).append(0)
+        for t in range(1, len(labels)):
+            if labels[t] != labels[t - 1]:
+                entries.setdefault(int(labels[t]), []).append(t)
+        return entries
+
+    per_sym_entries = {sym: _find_entries(per_symbol_labels[sym]) for sym in symbols}
+
+    per_state: Dict[int, StateLeadLag] = {}
+
+    for state_id in sorted(all_states):
+        # Symbol fractions
+        sym_fracs = {}
+        for sym in symbols:
+            sym_fracs[sym] = float(np.mean(per_symbol_labels[sym] == state_id))
+
+        # Gather all entry events for this state across symbols
+        events: List[Tuple[int, str]] = []  # (time, symbol)
+        for sym in symbols:
+            for t in per_sym_entries[sym].get(state_id, []):
+                events.append((t, sym))
+        events.sort(key=lambda x: x[0])
+
+        # Group into episodes: consecutive entries within max_entry_gap
+        episodes: List[Dict[str, int]] = []  # [{symbol: entry_time}]
+        i = 0
+        while i < len(events):
+            episode: Dict[str, int] = {events[i][1]: events[i][0]}
+            anchor = events[i][0]
+            j = i + 1
+            while j < len(events) and events[j][0] - anchor <= max_entry_gap:
+                sym = events[j][1]
+                if sym not in episode:  # first entry per symbol in episode
+                    episode[sym] = events[j][0]
+                j += 1
+            # Only keep episodes with >= 2 symbols
+            if len(episode) >= 2:
+                episodes.append(episode)
+            i = j if j > i + 1 else i + 1
+
+        # Compute entry order from episodes
+        if len(episodes) >= min_episodes:
+            # For each episode, compute offset relative to earliest entry
+            offsets: Dict[str, List[float]] = {sym: [] for sym in symbols}
+            for episode in episodes:
+                earliest = min(episode.values())
+                for sym, t in episode.items():
+                    offsets[sym].append(float(t - earliest))
+
+            mean_offsets = {}
+            for sym in symbols:
+                if offsets[sym]:
+                    mean_offsets[sym] = float(np.mean(offsets[sym]))
+
+            entry_order = sorted(mean_offsets.items(), key=lambda x: x[1])
+
+            # Leader: symbol with lowest mean offset
+            # Only declare if gap to next is >= 0.5 bars
+            if len(entry_order) >= 2 and entry_order[1][1] - entry_order[0][1] >= 0.5:
+                leader = entry_order[0][0]
+                mean_lead = float(entry_order[-1][1] - entry_order[0][1])
+            else:
+                leader = None
+                mean_lead = 0.0
+        else:
+            entry_order = []
+            leader = None
+            mean_lead = 0.0
+
+        # Return correlations within simultaneous state occupancy
+        ret_corr = None
+        if per_symbol_prices is not None:
+            # Find bars where ALL symbols are in this state
+            mask = np.ones(n_bars, dtype=bool)
+            for sym in symbols:
+                mask &= per_symbol_labels[sym] == state_id
+            simultaneous = np.where(mask)[0]
+
+            if len(simultaneous) > 10:
+                # Compute log-returns at these bars
+                returns = {}
+                for sym in symbols:
+                    prices = per_symbol_prices[sym]
+                    # Use returns between consecutive simultaneous bars
+                    valid = simultaneous[simultaneous > 0]
+                    if len(valid) > 1:
+                        r = np.log(prices[valid] / prices[valid - 1])
+                        returns[sym] = r
+
+                if len(returns) >= 2 and all(len(r) > 1 for r in returns.values()):
+                    min_len = min(len(r) for r in returns.values())
+                    mat = np.column_stack([returns[sym][:min_len] for sym in symbols])
+                    corr = np.corrcoef(mat.T)
+                    ret_corr = pd.DataFrame(corr, index=symbols, columns=symbols)
+
+        per_state[state_id] = StateLeadLag(
+            state_id=state_id,
+            symbol_fractions=sym_fracs,
+            entry_order=entry_order,
+            leader=leader,
+            mean_lead_bars=mean_lead,
+            return_correlations=ret_corr,
+            n_episodes=len(episodes),
+        )
+
+    return LeadLagResult(per_state=per_state, symbols=symbols, n_bars=n_bars)

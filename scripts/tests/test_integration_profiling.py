@@ -2,6 +2,8 @@
 Integration tests for the full profiling pipeline (Phase 9, Task 9.1 + 9.2).
 
 Tests the end-to-end flow: synthetic data → profile() → validate → online classify.
+Expanded: characterization, cross-asset lead/lag, report generation, visualization,
+edge cases, and extended performance benchmarks.
 """
 
 import time
@@ -18,7 +20,15 @@ from cluster_pipeline.online import (
     save_classifier,
     load_classifier,
 )
-from cluster_pipeline.validate import validate
+from cluster_pipeline.validate import validate, cross_symbol_consistency
+from cluster_pipeline.characterize import (
+    characterize_states,
+    compute_signatures,
+    return_profile,
+    cross_asset_lead_lag,
+)
+from cluster_pipeline.transitions import empirical_transitions
+from cluster_pipeline.report import generate_report
 
 
 # ---------------------------------------------------------------------------
@@ -631,3 +641,397 @@ class TestIntegrationRealData:
             macro_k_range=range(2, 4), micro_k_range=range(2, 4),
         )
         assert isinstance(result, ProfilingResult)
+
+
+# ---------------------------------------------------------------------------
+# Helper — Multi-Symbol Synthetic Data
+# ---------------------------------------------------------------------------
+
+
+def _generate_multi_symbol_regimes(
+    n_bars=300, n_regimes=2, n_symbols=3, lead_offset=3, seed=42,
+):
+    """
+    Generate per-symbol label arrays with controllable lead/lag.
+
+    Symbol 0 (BTC) enters each regime first; subsequent symbols are delayed
+    by ``lead_offset * i`` bars.
+
+    Returns (per_symbol_labels, per_symbol_prices).
+    """
+    rng = np.random.default_rng(seed)
+    block = n_bars // (n_regimes * 3)
+    total = n_bars + lead_offset * (n_symbols - 1)
+    base = np.array([i // block % n_regimes for i in range(total)])
+
+    names = ["BTC", "ETH", "SOL"][:n_symbols]
+    labels = {}
+    prices = {}
+    for idx, sym in enumerate(names):
+        # More offset → transitions appear earlier → leader
+        shift = lead_offset * (n_symbols - 1 - idx)
+        labels[sym] = base[shift:shift + n_bars].copy()
+        # Correlated geometric random walk
+        log_returns = rng.normal(0, 0.005, n_bars)
+        prices[sym] = np.exp(np.cumsum(log_returns) + 10.0)
+
+    return labels, prices
+
+
+# ---------------------------------------------------------------------------
+# TestIntegrationCharacterization
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationCharacterization:
+    """Test characterization functions on pipeline output."""
+
+    @pytest.fixture(autouse=True)
+    def _profile(self):
+        from cluster_pipeline.derivatives import generate_derivatives
+        df, _, _ = _generate_synthetic_regimes(n_bars=500, seed=77)
+        self.result = profile(
+            df, vector="entropy", skip_aggregation=True,
+            macro_k_range=range(2, 4), micro_k_range=range(2, 4),
+        )
+        self.prices = np.exp(
+            np.random.default_rng(77).normal(0, 0.005, len(self.result.bars)).cumsum() + 10
+        )
+        # Regenerate derivatives aligned to post-warmup bars
+        deriv_result = generate_derivatives(df, vector="entropy")
+        derivs = deriv_result.derivatives
+        if deriv_result.warmup_rows > 0:
+            derivs = derivs.iloc[deriv_result.warmup_rows:].reset_index(drop=True)
+        self.derivatives = derivs.iloc[:len(self.result.hierarchy.micro_labels)].reset_index(drop=True)
+
+    def test_characterize_states_from_profile(self):
+        tm = empirical_transitions(self.result.hierarchy.micro_labels)
+        profiles = characterize_states(
+            self.derivatives,
+            self.result.hierarchy,
+            tm,
+        )
+        assert isinstance(profiles, dict)
+        assert len(profiles) == self.result.hierarchy.n_micro_total
+        for state_id, sp in profiles.items():
+            assert len(sp.centroid) == len(self.derivatives.columns)
+
+    def test_compute_signatures_from_profile(self):
+        labels = self.result.hierarchy.micro_labels
+        sig = compute_signatures(self.derivatives, labels, state_id=0, lookback=5)
+        if sig is not None:
+            assert sig.entry_trajectory.shape[1] == self.derivatives.shape[1]
+            assert sig.entry_trajectory.shape[0] == 5
+
+    def test_return_profile_from_profile(self):
+        labels = self.result.hierarchy.micro_labels
+        rp = return_profile(labels, self.prices, state_id=0, horizons=[1, 5, 10])
+        assert isinstance(rp.horizons, dict)
+        for h in [1, 5, 10]:
+            assert h in rp.horizons
+            assert rp.horizons[h]["n"] > 0
+
+
+# ---------------------------------------------------------------------------
+# TestIntegrationCrossAssetLeadLag
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationCrossAssetLeadLag:
+    """Test cross-asset lead/lag with multi-symbol synthetic data."""
+
+    def test_leader_detected_with_offset(self):
+        labels, prices = _generate_multi_symbol_regimes(
+            n_bars=600, lead_offset=5, seed=42,
+        )
+        result = cross_asset_lead_lag(labels, per_symbol_prices=prices)
+        leaders = [s.leader for s in result.per_state.values() if s.leader is not None]
+        assert "BTC" in leaders
+
+    def test_no_leader_when_simultaneous(self):
+        labels, prices = _generate_multi_symbol_regimes(
+            n_bars=300, lead_offset=0, seed=42,
+        )
+        result = cross_asset_lead_lag(labels)
+        for sll in result.per_state.values():
+            assert sll.leader is None
+
+    def test_return_correlations_computed(self):
+        labels, prices = _generate_multi_symbol_regimes(
+            n_bars=300, lead_offset=0, seed=42,
+        )
+        result = cross_asset_lead_lag(labels, per_symbol_prices=prices)
+        has_corr = any(s.return_correlations is not None for s in result.per_state.values())
+        assert has_corr
+
+    def test_insufficient_episodes_graceful(self):
+        # BTC always state 0, ETH always state 1 → no shared episodes
+        labels = {"BTC": np.zeros(200, dtype=int), "ETH": np.ones(200, dtype=int)}
+        result = cross_asset_lead_lag(labels)
+        for sll in result.per_state.values():
+            assert sll.leader is None
+            assert sll.n_episodes == 0
+
+
+# ---------------------------------------------------------------------------
+# TestIntegrationReportGeneration
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationReportGeneration:
+    """Test report generation end-to-end."""
+
+    def test_report_from_pipeline_output(self):
+        df, _, _ = _generate_synthetic_regimes(n_bars=400, seed=55)
+        result = profile(
+            df, vector="entropy", skip_aggregation=True,
+            macro_k_range=range(2, 4), micro_k_range=range(2, 4),
+        )
+        prices = np.exp(
+            np.random.default_rng(55).normal(0, 0.005, len(result.bars)).cumsum() + 10
+        )
+        report = generate_report(result, prices, vector="entropy", timeframe="15min")
+        assert isinstance(report, str)
+        assert len(report) > 100
+        assert "## Data Summary" in report
+
+    def test_report_with_early_exit(self):
+        df = _generate_random_data(n_bars=200, seed=99)
+        result = profile(
+            df, vector="entropy", skip_aggregation=True,
+            macro_k_range=range(2, 4), micro_k_range=range(2, 4),
+        )
+        prices = np.ones(len(result.bars)) * 100
+        report = generate_report(result, prices, vector="entropy", timeframe="15min")
+        assert isinstance(report, str)
+
+    def test_report_with_cross_symbol(self):
+        df, _, _ = _generate_synthetic_regimes(n_bars=400, seed=66)
+        result = profile(
+            df, vector="entropy", skip_aggregation=True,
+            macro_k_range=range(2, 4), micro_k_range=range(2, 4),
+        )
+        # Simulate cross-symbol: use same labels for two "symbols"
+        cs = cross_symbol_consistency({
+            "BTC": result.hierarchy.micro_labels,
+            "ETH": result.hierarchy.micro_labels,
+        })
+        prices = np.ones(len(result.bars)) * 100
+        report = generate_report(
+            result, prices, vector="entropy", timeframe="15min",
+            cross_symbol_result=cs,
+        )
+        assert "## Cross-Symbol Consistency" in report
+
+
+# ---------------------------------------------------------------------------
+# TestIntegrationVisualization
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationVisualization:
+    """Test that visualization functions don't crash on pipeline output."""
+
+    @pytest.fixture(autouse=True)
+    def _profile(self, tmp_path):
+        df, _, _ = _generate_synthetic_regimes(n_bars=300, seed=88)
+        self.result = profile(
+            df, vector="entropy", skip_aggregation=True,
+            macro_k_range=range(2, 4), micro_k_range=range(2, 4),
+        )
+        self.output_dir = tmp_path
+
+    def test_hierarchy_overview_no_crash(self):
+        try:
+            from visualize_hierarchy import plot_hierarchy_overview
+        except ImportError:
+            import sys, os
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+            from visualize_hierarchy import plot_hierarchy_overview
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        path = plot_hierarchy_overview(self.result, self.output_dir)
+        assert path.exists()
+        plt.close("all")
+
+    def test_derivative_pca_no_crash(self):
+        try:
+            from visualize_hierarchy import plot_derivative_pca
+        except ImportError:
+            import sys, os
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+            from visualize_hierarchy import plot_derivative_pca
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        path = plot_derivative_pca(self.result, self.output_dir)
+        assert path.exists()
+        plt.close("all")
+
+    def test_transition_graph_no_crash(self):
+        try:
+            from visualize_hierarchy import plot_transition_graph
+        except ImportError:
+            import sys, os
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+            from visualize_hierarchy import plot_transition_graph
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        path = plot_transition_graph(self.result, self.output_dir)
+        assert path.exists()
+        plt.close("all")
+
+    def test_drift_dashboard_no_crash(self):
+        try:
+            from visualize_hierarchy import plot_drift_dashboard
+        except ImportError:
+            import sys, os
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+            from visualize_hierarchy import plot_drift_dashboard
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        n = len(self.result.hierarchy.micro_labels)
+        ll_scores = np.random.default_rng(88).normal(-3.0, 1.0, n)
+        path = plot_drift_dashboard(
+            ll_scores, training_p10=-5.0, training_p50=-3.0,
+            output_dir=self.output_dir,
+        )
+        assert path.exists()
+        plt.close("all")
+
+
+# ---------------------------------------------------------------------------
+# TestIntegrationEdgeCases
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationEdgeCases:
+    """Edge cases for the profiling pipeline."""
+
+    def test_single_regime(self):
+        """Data with weak structure → pipeline completes without crash."""
+        rng = np.random.default_rng(42)
+        data = {f"{col}_mean": rng.standard_normal(200) * 0.1 for col in _ENT_BASE_COLS}
+        df = pd.DataFrame(data)
+        result = profile(
+            df, vector="entropy", skip_aggregation=True,
+            macro_k_range=range(2, 4), micro_k_range=range(2, 3),
+        )
+        assert isinstance(result, ProfilingResult)
+
+    def test_very_short_data(self):
+        """50 bars — just above derivative warmup minimum."""
+        df, _, _ = _generate_synthetic_regimes(n_bars=100, seed=42)
+        result = profile(
+            df, vector="entropy", skip_aggregation=True,
+            macro_k_range=range(2, 3), micro_k_range=range(2, 3),
+        )
+        assert isinstance(result, ProfilingResult)
+        assert len(result.hierarchy.micro_labels) <= 100
+
+    def test_all_nan_single_feature(self):
+        """One feature column is all NaN — pipeline should still complete."""
+        df, _, _ = _generate_synthetic_regimes(n_bars=300, seed=42)
+        nan_col = df.columns[0]
+        df[nan_col] = np.nan
+        result = profile(
+            df, vector="entropy", skip_aggregation=True,
+            macro_k_range=range(2, 4), micro_k_range=range(2, 3),
+        )
+        assert isinstance(result, ProfilingResult)
+
+    def test_many_features_few_bars(self):
+        """More features than usual — pipeline handles gracefully with top-N selection."""
+        rng = np.random.default_rng(42)
+        # Use standard ent_ column naming + extras to get more features
+        extra_ent = [f"ent_extra_{i}" for i in range(12)]
+        all_base = list(_ENT_BASE_COLS) + extra_ent  # 20 total base features
+        cols = [f"{c}_mean" for c in all_base]
+        data = {col: rng.standard_normal(120) for col in cols}
+        # Add block structure
+        for i, col in enumerate(cols[:8]):
+            shift = np.zeros(120)
+            shift[60:] = 2.0 * (i % 3)
+            data[col] = data[col] + shift
+        df = pd.DataFrame(data)
+        result = profile(
+            df, vector="entropy", skip_aggregation=True,
+            macro_k_range=range(2, 3), micro_k_range=range(2, 3),
+        )
+        assert isinstance(result, ProfilingResult)
+
+
+# ---------------------------------------------------------------------------
+# TestPerformanceBenchmarksExtended
+# ---------------------------------------------------------------------------
+
+
+class TestPerformanceBenchmarksExtended:
+    """Extended performance benchmarks for characterization and lead/lag."""
+
+    def test_characterization_time(self):
+        """characterize_states + signatures < 5s on 500 bars."""
+        from cluster_pipeline.derivatives import generate_derivatives
+        df, _, _ = _generate_synthetic_regimes(n_bars=500, seed=77)
+        result = profile(
+            df, vector="entropy", skip_aggregation=True,
+            macro_k_range=range(2, 4), micro_k_range=range(2, 4),
+        )
+        tm = empirical_transitions(result.hierarchy.micro_labels)
+        deriv_result = generate_derivatives(df, vector="entropy")
+        derivs_df = deriv_result.derivatives
+        if deriv_result.warmup_rows > 0:
+            derivs_df = derivs_df.iloc[deriv_result.warmup_rows:].reset_index(drop=True)
+        derivs_df = derivs_df.iloc[:len(result.hierarchy.micro_labels)].reset_index(drop=True)
+
+        start = time.time()
+        characterize_states(derivs_df, result.hierarchy, tm)
+        for state_id in range(result.hierarchy.n_micro_total):
+            compute_signatures(derivs_df, result.hierarchy.micro_labels, state_id=state_id)
+        elapsed = time.time() - start
+
+        assert elapsed < 5.0, f"Characterization took {elapsed:.1f}s (limit 5s)"
+
+    def test_cross_asset_lead_lag_time(self):
+        """cross_asset_lead_lag < 3s on 3 symbols x 1000 bars."""
+        labels, prices = _generate_multi_symbol_regimes(n_bars=1000, seed=42)
+
+        start = time.time()
+        cross_asset_lead_lag(labels, per_symbol_prices=prices)
+        elapsed = time.time() - start
+
+        assert elapsed < 3.0, f"Lead/lag took {elapsed:.1f}s (limit 3s)"
+
+    def test_full_pipeline_with_characterization_time(self):
+        """Full profile + characterize + return_profile < 90s on 500 bars."""
+        from cluster_pipeline.derivatives import generate_derivatives
+        df, _, _ = _generate_synthetic_regimes(n_bars=500, seed=42)
+        prices = np.exp(
+            np.random.default_rng(42).normal(0, 0.005, 500).cumsum() + 10
+        )
+
+        start = time.time()
+        result = profile(
+            df, vector="entropy", skip_aggregation=True,
+            macro_k_range=range(2, 4), micro_k_range=range(2, 4),
+        )
+        tm = empirical_transitions(result.hierarchy.micro_labels)
+        deriv_result = generate_derivatives(df, vector="entropy")
+        derivs_df = deriv_result.derivatives
+        if deriv_result.warmup_rows > 0:
+            derivs_df = derivs_df.iloc[deriv_result.warmup_rows:].reset_index(drop=True)
+        derivs_df = derivs_df.iloc[:len(result.hierarchy.micro_labels)].reset_index(drop=True)
+        characterize_states(derivs_df, result.hierarchy, tm)
+        p = prices[:len(result.hierarchy.micro_labels)]
+        for s in range(result.hierarchy.n_micro_total):
+            return_profile(result.hierarchy.micro_labels, p, state_id=s)
+        elapsed = time.time() - start
+
+        assert elapsed < 90.0, f"Full pipeline took {elapsed:.1f}s (limit 90s)"

@@ -24,6 +24,9 @@ from cluster_pipeline.characterize import (
     compute_signatures,
     ReturnProfile,
     return_profile,
+    StateLeadLag,
+    LeadLagResult,
+    cross_asset_lead_lag,
 )
 from cluster_pipeline.hierarchy import HierarchicalLabels, StructureTest
 from cluster_pipeline.transitions import empirical_transitions, TransitionModel
@@ -1220,3 +1223,88 @@ class TestReturnDeterminism:
         r2 = return_profile(labels, prices, state_id=0, horizons=[1, 5, 10])
         for h in [1, 5, 10]:
             assert r1.horizons[h] == r2.horizons[h]
+
+
+# ===========================================================================
+# Cross-Asset Lead/Lag (FR-4.5.4)
+# ===========================================================================
+
+
+class TestCrossAssetLeadLag:
+    """Tests for cross_asset_lead_lag()."""
+
+    def _make_shifted_labels(self, n_bars=300, block=30, offset=3, n_states=3, seed=42):
+        """BTC leads ETH by `offset` bars, SOL by `2*offset`."""
+        base = np.array([i // block % n_states for i in range(n_bars + 2 * offset)])
+        # More offset → transitions appear earlier in the output array → leader
+        return {
+            "BTC": base[2 * offset:2 * offset + n_bars].copy(),
+            "ETH": base[offset:offset + n_bars].copy(),
+            "SOL": base[:n_bars].copy(),
+        }
+
+    def test_leader_detected(self):
+        labels = self._make_shifted_labels(n_bars=300, block=30, offset=3)
+        result = cross_asset_lead_lag(labels)
+        assert isinstance(result, LeadLagResult)
+        assert result.symbols == ["BTC", "ETH", "SOL"]
+        # BTC should lead in at least some states
+        leaders = [s.leader for s in result.per_state.values() if s.leader is not None]
+        assert "BTC" in leaders
+
+    def test_no_leader_when_simultaneous(self):
+        n = 300
+        base = np.array([i // 30 % 2 for i in range(n)])
+        labels = {"BTC": base.copy(), "ETH": base.copy(), "SOL": base.copy()}
+        result = cross_asset_lead_lag(labels)
+        # All enter simultaneously → no leader
+        for sll in result.per_state.values():
+            assert sll.leader is None
+
+    def test_return_correlations(self):
+        labels = self._make_shifted_labels(n_bars=200, block=50, offset=0)
+        rng = np.random.RandomState(42)
+        prices = {
+            sym: np.exp(rng.normal(0, 0.01, 200).cumsum() + 10)
+            for sym in ["BTC", "ETH", "SOL"]
+        }
+        result = cross_asset_lead_lag(labels, per_symbol_prices=prices)
+        # At least one state should have return correlations
+        has_corr = any(s.return_correlations is not None for s in result.per_state.values())
+        assert has_corr
+        for sll in result.per_state.values():
+            if sll.return_correlations is not None:
+                assert sll.return_correlations.shape == (3, 3)
+                np.testing.assert_allclose(
+                    np.diag(sll.return_correlations.values), 1.0, atol=1e-10
+                )
+
+    def test_symbol_fractions_sum_to_one_per_symbol(self):
+        labels = self._make_shifted_labels()
+        result = cross_asset_lead_lag(labels)
+        for sym in result.symbols:
+            total = sum(sll.symbol_fractions[sym] for sll in result.per_state.values())
+            assert abs(total - 1.0) < 1e-10
+
+    def test_raises_on_single_symbol(self):
+        with pytest.raises(ValueError, match="Need >= 2"):
+            cross_asset_lead_lag({"BTC": np.zeros(100, dtype=int)})
+
+    def test_raises_on_length_mismatch(self):
+        with pytest.raises(ValueError, match="length mismatch"):
+            cross_asset_lead_lag({
+                "BTC": np.zeros(100, dtype=int),
+                "ETH": np.zeros(99, dtype=int),
+            })
+
+    def test_insufficient_episodes(self):
+        # Labels that barely overlap: BTC always state 0, ETH always state 1
+        labels = {
+            "BTC": np.zeros(100, dtype=int),
+            "ETH": np.ones(100, dtype=int),
+        }
+        result = cross_asset_lead_lag(labels)
+        # State 0 only occupied by BTC, state 1 only by ETH → no shared episodes
+        for sll in result.per_state.values():
+            assert sll.leader is None
+            assert sll.n_episodes == 0

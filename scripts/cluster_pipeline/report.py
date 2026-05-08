@@ -117,8 +117,8 @@ def _section_structure_test(pr: ProfilingResult) -> str:
     lines = ["## Structure Test\n"]
     st = pr.macro.structure_test
     lines.append(f"- **Has structure:** {st.has_structure}")
-    lines.append(f"- **Hopkins statistic:** {st.hopkins:.4f}")
-    lines.append(f"- **Dip test p-value:** {st.dip_p:.4f}")
+    lines.append(f"- **Hopkins statistic:** {st.hopkins_statistic:.4f}")
+    lines.append(f"- **Dip test p-value:** {st.dip_test_p:.4f}")
     if hasattr(st, 'recommendation'):
         lines.append(f"- **Recommendation:** {st.recommendation}")
     lines.append("")
