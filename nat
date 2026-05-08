@@ -483,9 +483,7 @@ def cmd_visualize_hierarchy(args):
     output = getattr(args, 'output', str(ROOT / 'reports' / 'figures'))
     vector = getattr(args, 'vector', 'entropy')
     timeframe = getattr(args, 'timeframe', '15min')
-    sys.path.insert(0, str(ROOT / "scripts"))
-    _py(f"{ROOT / 'scripts' / 'visualize_hierarchy.py'}",
-        f"--data {data_dir} --output {output} --vector {vector} --timeframe {timeframe}")
+    _py(f"{ROOT / 'scripts' / 'visualize_hierarchy.py'} --data {data_dir} --output {output} --vector {vector} --timeframe {timeframe}")
 
 
 def cmd_visualize_all(args):
@@ -901,7 +899,7 @@ def cmd_cluster_hmm(args):
     from cluster_pipeline.transitions import fit_hmm, compare_hmm_gmm, empirical_transitions
     from sklearn.decomposition import PCA
     from sklearn.mixture import GaussianMixture
-    import json, polars as pl
+    import json, numpy as np, polars as pl
 
     print(f"  Loading data from {_data(args)}...")
     df = load_parquet(str(_data(args)))

@@ -71,7 +71,7 @@ FASTAPI_AVAILABLE = False
 try:
     from fastapi import FastAPI, HTTPException, Request
     from fastapi.responses import JSONResponse
-    from pydantic import BaseModel, Field, validator
+    from pydantic import BaseModel, Field, field_validator
     import uvicorn
     FASTAPI_AVAILABLE = True
 except ImportError:
@@ -80,7 +80,7 @@ except ImportError:
     class BaseModel:
         pass
     Field = lambda *args, **kwargs: None
-    validator = lambda *args, **kwargs: lambda f: f
+    field_validator = lambda *args, **kwargs: lambda f: f
     FastAPI = HTTPException = Request = None
     JSONResponse = None
     uvicorn = None
@@ -95,7 +95,8 @@ class PredictRequest(BaseModel):
     features: List[float] = Field(..., description="Feature vector for prediction")
     model_id: Optional[str] = Field(None, description="Optional: specific model ID to use")
 
-    @validator('features')
+    @field_validator('features')
+    @classmethod
     def validate_features(cls, v):
         if not v:
             raise ValueError("Features cannot be empty")
@@ -109,7 +110,8 @@ class BatchPredictRequest(BaseModel):
     features: List[List[float]] = Field(..., description="List of feature vectors")
     model_id: Optional[str] = Field(None, description="Optional: specific model ID to use")
 
-    @validator('features')
+    @field_validator('features')
+    @classmethod
     def validate_features(cls, v):
         if not v:
             raise ValueError("Features cannot be empty")
