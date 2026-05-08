@@ -308,6 +308,18 @@ Check deployment readiness:
 .nf
 nat alpha deploy --check
 .fi
+.SH DASHBOARDS
+Two separate dashboard systems exist:
+.TP
+.B Port 8080 \(em Rust real-time feature dashboard
+Embedded in the ingestor binary. Enable with \fBING_DASHBOARD_ENABLED=true\fR
+or \fBnat run serve\fR. Shows live feature vectors and system metrics.
+Tunnel via \fBnat run tunnel\fR.
+.TP
+.B Port 8050 \(em Python analysis dashboard
+Standalone Dash/Plotly application. Start with \fBnat pipeline dashboard\fR.
+Shows pipeline status, cluster analysis, and historical data.
+Tunnel via \fBnat exp tunnel\fR.
 .SH AUTHORS
 yogt1984
 .SH SEE ALSO

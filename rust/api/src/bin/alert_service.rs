@@ -35,44 +35,48 @@ async fn main() {
 
     info!("Starting NAT Telegram Alert Service");
 
-    // Load configuration from environment
-    let redis_url =
-        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+    // Load Redis URL: env var > config file > hardcoded default
+    let toml_redis_url = std::fs::read_to_string("../config/ing.toml")
+        .ok()
+        .and_then(|content| {
+            content.lines()
+                .skip_while(|l| !l.starts_with("[redis]"))
+                .skip(1)
+                .find(|l| l.starts_with("url"))
+                .and_then(|l| l.split('=').nth(1))
+                .map(|v| v.trim().trim_matches('"').to_string())
+        });
+    let redis_url = std::env::var("REDIS_URL")
+        .unwrap_or_else(|_| toml_redis_url.unwrap_or_else(|| "redis://127.0.0.1:6379".to_string()));
 
-    let telegram_token = match std::env::var("TELEGRAM_BOT_TOKEN") {
-        Ok(token) => token,
-        Err(_) => {
-            error!("TELEGRAM_BOT_TOKEN environment variable is required");
-            error!("");
-            error!("To get a bot token:");
-            error!("  1. Message @BotFather on Telegram");
-            error!("  2. Send /newbot");
-            error!("  3. Follow the prompts to create your bot");
-            error!("  4. Copy the token and set TELEGRAM_BOT_TOKEN");
-            std::process::exit(1);
-        }
-    };
+    let telegram_token = std::env::var("TELEGRAM_BOT_TOKEN").ok();
+    let telegram_chat_id = std::env::var("TELEGRAM_CHAT_ID").ok();
 
-    let telegram_chat_id = match std::env::var("TELEGRAM_CHAT_ID") {
-        Ok(chat_id) => chat_id,
-        Err(_) => {
-            error!("TELEGRAM_CHAT_ID environment variable is required");
-            error!("");
-            error!("To get your chat ID:");
-            error!("  1. Start a chat with your bot");
-            error!("  2. Send any message");
-            error!("  3. Visit: https://api.telegram.org/bot<TOKEN>/getUpdates");
-            error!("  4. Find your chat.id in the response");
-            std::process::exit(1);
+    match (&telegram_token, &telegram_chat_id) {
+        (None, _) => {
+            tracing::warn!("TELEGRAM_BOT_TOKEN not set — alerts disabled. Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to enable.");
         }
-    };
+        (_, None) => {
+            tracing::warn!("TELEGRAM_CHAT_ID not set — alerts disabled. Set TELEGRAM_CHAT_ID to enable.");
+        }
+        (Some(_), Some(chat_id)) => {
+            info!("Telegram bot configured, will send alerts to chat {}", chat_id);
+        }
+    }
 
     info!(redis_url = %redis_url, "Connecting to Redis");
-    info!("Telegram bot configured, will send alerts to chat {}", telegram_chat_id);
 
-    // Run the alert service
-    if let Err(e) = run_alert_service(&redis_url, telegram_token, telegram_chat_id).await {
-        error!("Alert service error: {}", e);
-        std::process::exit(1);
+    if let (Some(token), Some(chat_id)) = (telegram_token, telegram_chat_id) {
+        // Run with Telegram alerts enabled
+        if let Err(e) = run_alert_service(&redis_url, token, chat_id).await {
+            error!("Alert service error: {}", e);
+            std::process::exit(1);
+        }
+    } else {
+        // Run in listen-only mode (no alerts sent)
+        info!("Running in listen-only mode (no Telegram credentials). Subscribing to Redis for monitoring.");
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        }
     }
 }

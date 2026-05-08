@@ -16,6 +16,8 @@ pub struct Config {
     pub metrics: MetricsConfig,
     #[serde(default)]
     pub dashboard: DashboardConfig,
+    #[serde(default)]
+    pub redis: RedisTomlConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -93,6 +95,26 @@ impl Default for DashboardConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct RedisTomlConfig {
+    #[serde(default = "default_redis_url")]
+    pub url: String,
+    #[serde(default = "default_redis_prefix")]
+    pub channel_prefix: Option<String>,
+    #[serde(default)]
+    pub cache_ttl_seconds: Option<u64>,
+}
+
+impl Default for RedisTomlConfig {
+    fn default() -> Self {
+        Self {
+            url: default_redis_url(),
+            channel_prefix: None,
+            cache_ttl_seconds: None,
+        }
+    }
+}
+
 // Default values
 fn default_log_level() -> String { "info".to_string() }
 fn default_ws_url() -> String { "wss://api.hyperliquid.xyz/ws".to_string() }
@@ -108,6 +130,8 @@ fn default_row_group_size() -> usize { 10000 }
 fn default_compression() -> String { "zstd".to_string() }
 fn default_rotate_interval() -> String { "1h".to_string() }
 fn default_dashboard_addr() -> String { "0.0.0.0:8080".to_string() }
+fn default_redis_url() -> String { "redis://127.0.0.1:6379".to_string() }
+fn default_redis_prefix() -> Option<String> { None }
 
 impl Config {
     /// Load configuration from a TOML file
@@ -183,6 +207,7 @@ impl Default for Config {
             },
             metrics: MetricsConfig::default(),
             dashboard: DashboardConfig::default(),
+            redis: RedisTomlConfig::default(),
         }
     }
 }

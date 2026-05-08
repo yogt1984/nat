@@ -146,9 +146,15 @@ impl Default for RedisConfig {
 impl RedisConfig {
     /// Load from environment variables
     pub fn from_env() -> Self {
+        Self::from_env_with_toml_url(None)
+    }
+
+    /// Load from environment variables, falling back to toml config URL
+    pub fn from_env_with_toml_url(toml_url: Option<&str>) -> Self {
+        let default_url = toml_url.unwrap_or("redis://127.0.0.1:6379");
         Self {
             url: std::env::var("REDIS_URL")
-                .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string()),
+                .unwrap_or_else(|_| default_url.to_string()),
             channel_prefix: std::env::var("REDIS_PREFIX")
                 .unwrap_or_else(|_| "nat".to_string()),
             cache_ttl_seconds: std::env::var("REDIS_CACHE_TTL")

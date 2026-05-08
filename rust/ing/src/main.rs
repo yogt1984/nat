@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
     }
 
     // Initialize Redis publisher (optional - gracefully degrades if unavailable)
-    let redis_config = RedisConfig::from_env();
+    let redis_config = RedisConfig::from_env_with_toml_url(Some(&config.redis.url));
     let redis_publisher: Option<Arc<Mutex<RedisPublisher>>> =
         match RedisPublisher::try_new(redis_config).await {
             Some(publisher) => {

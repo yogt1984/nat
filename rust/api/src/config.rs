@@ -21,6 +21,10 @@ impl Default for ApiConfig {
 
 impl ApiConfig {
     pub fn from_env() -> Self {
+        Self::from_env_with_defaults(None)
+    }
+
+    pub fn from_env_with_defaults(redis_url_default: Option<&str>) -> Self {
         Self {
             host: std::env::var("NAT_API_HOST")
                 .unwrap_or_else(|_| "0.0.0.0".to_string()),
@@ -29,7 +33,7 @@ impl ApiConfig {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(3000),
             redis_url: std::env::var("REDIS_URL")
-                .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string()),
+                .unwrap_or_else(|_| redis_url_default.unwrap_or("redis://127.0.0.1:6379").to_string()),
         }
     }
 }

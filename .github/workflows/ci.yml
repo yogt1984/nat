@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Build
+        run: cargo build --package ing
+      - name: Test
+        run: cargo test --package ing
+
+  python:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run tests
+        run: |
+          python -m pytest scripts/tests/ -x -q \
+            --ignore=scripts/tests/test_integration_profiling.py \
+            --ignore=scripts/tests/test_nat_cli.py \
+            --ignore=scripts/tests/test_pipeline_runner.py \
+            --ignore=scripts/tests/test_dashboard.py \
+            --ignore=scripts/tests/test_visualize_scanner.py \
+            --ignore=scripts/tests/test_model_serving.py

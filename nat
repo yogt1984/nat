@@ -166,15 +166,16 @@ def cmd_status(args):
 
     if DATA_DEFAULT.exists():
         parquets = list(DATA_DEFAULT.rglob("*.parquet"))
-        total_size = sum(f.stat().st_size for f in parquets if f.stat().st_size > 0)
+        stats = [(f, f.stat()) for f in parquets]
+        valid_stats = [(f, s) for f, s in stats if s.st_size > 0]
+        total_size = sum(s.st_size for _, s in valid_stats)
         days = sorted(set(p.parent.name for p in parquets))
-        n_valid = sum(1 for f in parquets if f.stat().st_size > 0)
 
-        _p("+", B, f"Data: {n_valid} files, {total_size / 1e6:.0f} MB, {len(days)} days")
+        _p("+", B, f"Data: {len(valid_stats)} files, {total_size / 1e6:.0f} MB, {len(days)} days")
         if days:
             _p(" ", W, f"Range: {days[0]} to {days[-1]}")
-        if parquets:
-            newest = max(f.stat().st_mtime for f in parquets)
+        if stats:
+            newest = max(s.st_mtime for _, s in stats)
             age = time.time() - newest
             if age < 300:
                 _p("+", G, f"Last write: {age:.0f}s ago")
@@ -586,9 +587,10 @@ def cmd_data(args):
         _p("x", R, "No data directory")
         return
     parquets = sorted(dd.rglob("*.parquet"))
-    valid = [f for f in parquets if f.stat().st_size > 0]
-    total_size = sum(f.stat().st_size for f in valid)
-    days = sorted(set(p.parent.name for p in valid))
+    stats = [(f, f.stat()) for f in parquets]
+    valid = [(f, s) for f, s in stats if s.st_size > 0]
+    total_size = sum(s.st_size for _, s in valid)
+    days = sorted(set(f.parent.name for f, _ in valid))
 
     print(f"\n  {BOLD}Data Summary{W}\n")
     print(f"  Files:     {len(valid)} ({len(parquets) - len(valid)} empty)")
@@ -598,8 +600,8 @@ def cmd_data(args):
         print(f"  Range:     {days[0]} to {days[-1]}")
     print(f"\n  {BOLD}Per Day{W}\n")
     for day in days:
-        day_files = [f for f in valid if f.parent.name == day]
-        day_size = sum(f.stat().st_size for f in day_files)
+        day_files = [(f, s) for f, s in valid if f.parent.name == day]
+        day_size = sum(s.st_size for _, s in day_files)
         print(f"  {day}: {len(day_files)} files, {day_size / 1e6:.1f} MB")
     print(f"\n  ~{total_size // 300:.0f} rows (estimated)\n")
 
@@ -1403,6 +1405,10 @@ def cmd_help(args=None):
     nat docker up              Start services
     nat docker down            Stop services
     nat docker logs            View logs
+
+  {BOLD}Dashboards{W}
+    Port 8080  Rust real-time feature dashboard (embedded in ingestor, ING_DASHBOARD_ENABLED=true)
+    Port 8050  Python analysis dashboard (Dash/Plotly, nat pipeline dashboard)
 
   Options like --data, --symbol go BEFORE the subcommand:
     nat backtest --symbol ETH --data ./data/features validate
