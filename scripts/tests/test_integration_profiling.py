@@ -112,7 +112,7 @@ class TestIntegrationSynthetic:
 
     def test_profile_completes(self):
         """profile() runs without error on well-structured data."""
-        df, _, _ = _generate_synthetic_regimes(n_bars=300)
+        df, _, _ = _generate_synthetic_regimes(n_bars=500)
         result = profile(
             df, vector="entropy", skip_aggregation=True,
             macro_k_range=range(2, 4), micro_k_range=range(2, 4),
@@ -429,6 +429,38 @@ class TestPerformanceBenchmarks:
         throughput = n_updates / elapsed
         assert throughput > 30, f"Buffer throughput: {throughput:.0f}/sec (need >30)"
 
+    def test_reduction_time(self):
+        """Dimensionality reduction on 2000 bars x 200 cols < 3 seconds."""
+        from cluster_pipeline.reduce import reduce_all
+
+        rng = np.random.default_rng(42)
+        X = rng.standard_normal((2000, 200))
+
+        start = time.time()
+        reduce_all(X, n_components=10, methods=["pca"])
+        elapsed = time.time() - start
+        assert elapsed < 3.0, f"Reduction took {elapsed:.2f}s (limit: 3s)"
+
+    def test_macro_discovery_time(self):
+        """Macro regime discovery on 2000 bars < 30 seconds."""
+        from cluster_pipeline.hierarchy import discover_macro_regimes
+
+        rng = np.random.default_rng(42)
+        n = 2000
+        labels_true = np.repeat([0, 1], n // 2)
+        X = rng.standard_normal((n, 5))
+        X[labels_true == 1] += 3.0
+        # discover_macro_regimes expects a DataFrame
+        df_macro = pd.DataFrame(X, columns=[f"d_{i}" for i in range(5)])
+
+        start = time.time()
+        discover_macro_regimes(
+            df_macro, autocorrelation_threshold=0.0,  # low threshold to include all cols
+            k_range=range(2, 5), random_state=42,
+        )
+        elapsed = time.time() - start
+        assert elapsed < 30.0, f"Macro discovery took {elapsed:.2f}s (limit: 30s)"
+
     def test_full_pipeline_time(self):
         """Full profile() on 300 bars < 60 seconds."""
         df, _, _ = _generate_synthetic_regimes(n_bars=300)
@@ -440,3 +472,162 @@ class TestPerformanceBenchmarks:
         )
         elapsed = time.time() - start
         assert elapsed < 60.0, f"Full pipeline took {elapsed:.2f}s (limit: 60s)"
+
+
+# ---------------------------------------------------------------------------
+# TestIntegrationDriftDetection
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationDriftDetection:
+    """Profile first half, classify second half with shifted distribution."""
+
+    def test_drift_detection_fires_on_shift(self):
+        """Drift detection triggers when distribution shifts between halves."""
+        # Generate 2 halves: first is normal, second is shifted
+        rng = np.random.default_rng(42)
+        n_half = 200
+        data_first = {f"{col}_mean": rng.standard_normal(n_half) for col in _ENT_BASE_COLS}
+        data_second = {f"{col}_mean": rng.standard_normal(n_half) + 5.0 for col in _ENT_BASE_COLS}
+
+        df_first = pd.DataFrame(data_first)
+
+        # Profile first half
+        result = profile(
+            df_first, vector="entropy", skip_aggregation=True,
+            macro_k_range=range(2, 4), micro_k_range=range(2, 4),
+        )
+
+        if result.macro.early_exit:
+            pytest.skip("First half has no structure — cannot test drift")
+
+        # Build classifier from profiling result
+        from sklearn.mixture import GaussianMixture
+        from cluster_pipeline.derivatives import generate_derivatives
+
+        macro_pca = result.macro.pca_result
+        available_cols = [c for c in macro_pca.column_names
+                          if c in result.bars.columns or f"{c}" in result.bars.columns]
+
+        # Fit GMM on first half
+        deriv_first = generate_derivatives(result.bars, vector="entropy")
+        df_deriv = deriv_first.derivatives
+        if deriv_first.warmup_rows > 0:
+            df_deriv = df_deriv.iloc[deriv_first.warmup_rows:].reset_index(drop=True)
+
+        cols_available = [c for c in macro_pca.column_names if c in df_deriv.columns]
+        if not cols_available:
+            pytest.skip("No matching derivative columns")
+
+        X_first = df_deriv[cols_available].values
+        X_std = (X_first - macro_pca.mean) / np.where(macro_pca.std > 1e-12, macro_pca.std, 1.0)
+        X_reduced = X_std @ macro_pca.components.T
+
+        macro_gmm = GaussianMixture(
+            n_components=result.macro.k, covariance_type="full",
+            n_init=5, random_state=42,
+        ).fit(X_reduced)
+
+        # Compute training LL baseline
+        train_ll = macro_gmm.score_samples(X_reduced)
+        ll_p10 = float(np.percentile(train_ll, 10))
+        ll_p50 = float(np.percentile(train_ll, 50))
+
+        # Classify shifted data using raw GMM score
+        df_second = pd.DataFrame(data_second)
+        deriv_second = generate_derivatives(df_second, vector="entropy")
+        df_deriv2 = deriv_second.derivatives
+        if deriv_second.warmup_rows > 0:
+            df_deriv2 = df_deriv2.iloc[deriv_second.warmup_rows:].reset_index(drop=True)
+
+        cols2 = [c for c in cols_available if c in df_deriv2.columns]
+        if not cols2 or len(df_deriv2) == 0:
+            pytest.skip("No data after warmup")
+
+        X_second = df_deriv2[cols2].values
+        X_std2 = (X_second - macro_pca.mean) / np.where(macro_pca.std > 1e-12, macro_pca.std, 1.0)
+        X_reduced2 = X_std2 @ macro_pca.components.T
+
+        # Score shifted data — should have much lower log-likelihood
+        shifted_ll = macro_gmm.score_samples(X_reduced2)
+        mean_shifted_ll = float(np.mean(shifted_ll))
+
+        # Shifted data LL should be well below training p10
+        assert mean_shifted_ll < ll_p10, (
+            f"Shifted data LL ({mean_shifted_ll:.2f}) not below training p10 ({ll_p10:.2f})"
+        )
+
+    def test_no_drift_on_same_distribution(self):
+        """No drift when test data comes from the same generating process."""
+        from sklearn.mixture import GaussianMixture
+
+        # Generate two sets from the SAME regime structure
+        rng = np.random.default_rng(42)
+        n = 500
+        k = 2
+        # 2-regime data in PCA-like space (bypass derivative pipeline)
+        labels = np.repeat(np.arange(k), n // k)
+        X_train = rng.standard_normal((n, 5))
+        X_test = rng.standard_normal((n, 5))
+        for i in range(k):
+            mask = labels == i
+            shift = rng.standard_normal(5) * 3
+            X_train[mask] += shift
+            X_test[mask] += shift
+
+        gmm = GaussianMixture(n_components=k, n_init=5, random_state=42).fit(X_train)
+        train_ll = gmm.score_samples(X_train)
+        ll_p10 = float(np.percentile(train_ll, 10))
+
+        test_ll = float(np.mean(gmm.score_samples(X_test)))
+
+        # Same generating process — test LL should be above training p10
+        assert test_ll > ll_p10 - 2.0, (
+            f"Same-distribution LL ({test_ll:.2f}) below p10 ({ll_p10:.2f})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# TestIntegrationRealData
+# ---------------------------------------------------------------------------
+
+
+class TestIntegrationRealData:
+    """Integration test with actual collected data (skipped if unavailable)."""
+
+    @pytest.fixture(autouse=True)
+    def _check_data(self):
+        import os
+        data_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data", "features")
+        if not os.path.isdir(data_dir) or not os.listdir(data_dir):
+            pytest.skip("No real data available in data/features/")
+        self.data_dir = data_dir
+
+    def test_real_data_completes(self):
+        """profile() completes on real collected data without crashing."""
+        from cluster_pipeline.loader import load_parquet
+        from cluster_pipeline.preprocess import aggregate_bars
+
+        df = load_parquet(self.data_dir)
+        if len(df) == 0:
+            pytest.skip("No data loaded")
+
+        # Use only BTC and limit for speed
+        if "symbol" in df.columns:
+            df = df[df["symbol"] == "BTC"].reset_index(drop=True)
+        if len(df) > 2000:
+            df = df.head(2000)
+        if len(df) < 100:
+            pytest.skip("Not enough raw data")
+
+        bars = aggregate_bars(df, timeframe="15min")
+        if len(bars) < 50:
+            pytest.skip("Not enough bars after aggregation")
+
+        # Convert to pandas if polars DataFrame
+        bars_pd = bars.to_pandas() if hasattr(bars, 'to_pandas') else bars
+        result = profile(
+            bars_pd, vector="entropy", skip_aggregation=True,
+            macro_k_range=range(2, 4), micro_k_range=range(2, 4),
+        )
+        assert isinstance(result, ProfilingResult)
