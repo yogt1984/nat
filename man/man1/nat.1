@@ -1,0 +1,316 @@
+.\" nat(1) man page
+.TH NAT 1 "2026-05-08" "nat" "NAT Research Platform"
+.SH NAME
+nat \- unified CLI for the NAT quantitative research platform
+.SH SYNOPSIS
+.B nat
+.I command
+.RI [ subcommand ]
+.RI [ options ]
+.SH DESCRIPTION
+.B nat
+is the single entry point for the NAT quantitative research platform.
+It manages real-time data ingestion from Hyperliquid perpetual futures,
+feature computation (191 features across 14 categories), cluster analysis,
+alpha research, backtesting, ML training, and live deployment.
+.PP
+Rust handles real-time ingestion and feature computation; Python handles
+analysis, backtesting, and ML training.
+.SH COMMANDS
+.SS Core Operations
+.TP
+.B nat start
+Start the ingestor with auto-restart watchdog and dashboard.
+.TP
+.B nat stop
+Stop all running processes (ingestor, dashboard, API).
+.TP
+.B nat status
+Health check \(em shows process status, data stats, and uptime.
+.TP
+.B nat log
+Tail the ingestor log.
+.TP
+.B nat report
+Generate an experiment report from collected data.
+.TP
+.B nat dashboard
+Start the web dashboard.
+.TP
+.B nat macro
+Show daily macro signals (SMA crossovers, regime).
+.TP
+.B nat help
+Print the full command reference with all subcommands.
+.SS Alpha Screening
+.TP
+.B nat screen \fR[\fB\-\-symbol\fR \fISYM\fR] [\fB\-\-data\fR \fIDIR\fR]
+Run the alpha feature screener (Step 1).
+.TP
+.B nat scan \fR[\fB\-\-symbol\fR \fISYM\fR] [\fB\-\-data\fR \fIDIR\fR]
+Scalp edge scanner for tail-effect strategy discovery.
+.SS Alpha Research Pipeline (Steps 2\-9)
+.TP
+.B nat alpha combine \fR[\fB\-\-data\fR \fIDIR\fR] [\fB\-\-top\fR \fIN\fR]
+Feature combination \(em composite signal from top-N features with correlation dedup (Step 2).
+.TP
+.B nat alpha size \fR[\fB\-\-data\fR \fIDIR\fR] [\fB\-\-cost\-mult\fR \fIX\fR]
+Cost-aware position sizing \(em only trade when E[gain] > 1.5x cost (Step 3).
+.TP
+.B nat alpha validate \fR[\fB\-\-data\fR \fIDIR\fR] [\fB\-\-n\-folds\fR \fIN\fR]
+Walk-forward validation adapter (Step 4).
+.TP
+.B nat alpha regime \fR[\fB\-\-data\fR \fIDIR\fR] [\fB\-\-symbol\fR \fISYM\fR]
+Regime conditioning \(em per-regime feature rescreening (Step 5).
+.TP
+.B nat alpha multi\-freq \fR[\fB\-\-data\fR \fIDIR\fR] [\fB\-\-symbol\fR \fISYM\fR]
+Multi-frequency integration \(em macro SMA gates + micro sizing (Step 6).
+.TP
+.B nat alpha portfolio \fR[\fB\-\-data\fR \fIDIR\fR]
+Portfolio assembly with risk parity weighting (Step 7).
+.TP
+.B nat alpha paper \fR[\fB\-\-data\fR \fIDIR\fR]
+Paper trading simulation with IC decay monitoring (Step 8).
+.TP
+.B nat alpha deploy \fR[\fB\-\-status\fR|\fB\-\-check\fR]
+Deployment readiness check and kill switch status (Step 9).
+.SS Profiling
+.TP
+.B nat profile scalp \fR[\fB\-\-symbol\fR \fISYM\fR] [\fB\-\-top\fR \fIN\fR] [\fB\-\-forward\-test\fR]
+Scalping feature profiler \(em IC, hit rate, quintile spreads, cost-adjusted edge.
+.SS Cluster Analysis
+.TP
+.B nat cluster analyze \fR[\fB\-\-symbol\fR \fISYM\fR]
+Analyze cluster quality (silhouette, BIC).
+.TP
+.B nat cluster gmm \fR[\fB\-\-symbol\fR \fISYM\fR]
+GMM-based clustering analysis.
+.TP
+.B nat cluster all
+Analyze all symbols.
+.TP
+.B nat cluster quality
+Q3 predictive quality test (Kruskal-Wallis, eta-squared, per-cluster Sharpe).
+.TP
+.B nat cluster explore \fR[\fB\-\-subset\fR \fINAME\fR] [\fB\-\-cluster\-method\fR \fIMETHOD\fR]
+Exploratory clustering (PCA/UMAP/t-SNE) without predefined assumptions.
+.TP
+.B nat cluster hmm\-fit \fR[\fB\-\-symbol\fR \fISYM\fR] [\fB\-\-n\-states\fR \fIN\fR]
+Fit Hidden Markov Model on feature data (Baum-Welch).
+.SS Validation
+.TP
+.B nat validate skeptical \fR[\fB\-\-data\fR \fIDIR\fR] [\fB\-\-output\fR \fIDIR\fR]
+20+ statistical tests designed to disprove core hypotheses before investment.
+.SS Visualization
+.TP
+.B nat visualize scan
+Scanner plots (tail effects, edge distribution).
+.TP
+.B nat visualize data
+Data quality plots.
+.TP
+.B nat visualize profile
+Cluster profiling plots.
+.TP
+.B nat visualize hierarchy \fR[\fB\-\-vector\fR \fINAME\fR]
+Hierarchical profiling plots (Phase 8) \(em PCA, signatures, transitions, drift.
+.TP
+.B nat visualize all
+Generate all visualization types.
+.SS Backtesting
+.TP
+.B nat backtest \fR[\fB\-\-strategy\fR \fINAME\fR] [\fB\-\-symbol\fR \fISYM\fR]
+Run strategy backtest.  Available strategies: funding_reversion, scalping, micro.
+.TP
+.B nat backtest ml \fR[\fB\-\-model\fR \fIPATH\fR]
+ML predictions backtest.
+.TP
+.B nat backtest validate
+Walk-forward validation.
+.TP
+.B nat backtest list
+List available strategies.
+.SS Model Training
+.TP
+.B nat model train \fR[\fB\-\-data\fR \fIDIR\fR]
+Train baseline ML model.
+.TP
+.B nat model train\-gmm
+Train GMM classifier.
+.TP
+.B nat model list
+List saved models.
+.TP
+.B nat model score \fR[\fB\-\-data\fR \fIDIR\fR]
+Score data with a trained model.
+.TP
+.B nat model serve
+Start model serving API.
+.SS Experiment Management
+.TP
+.B nat experiment list
+List experiments.
+.TP
+.B nat experiment compare
+Compare experiments.
+.TP
+.B nat experiment snapshot \fR[\fB\-\-data\fR \fIDIR\fR] [\fB\-\-name\fR \fINAME\fR]
+Create dataset snapshot for reproducibility.
+.TP
+.B nat experiment workflow
+Full ML workflow (train, evaluate, track).
+.SS Testing
+.TP
+.B nat test
+Run all Rust unit tests.
+.TP
+.B nat test verbose
+Tests with \-\-nocapture.
+.TP
+.B nat test hypotheses
+Run hypothesis tests (H1\-H5).
+.TP
+.B nat test validate
+Live API validations against Hyperliquid.
+.TP
+.B nat test integration
+Integration tests for profiling pipeline.
+.TP
+.B nat test backtest
+Backtest tests.
+.TP
+.B nat test cluster
+Cluster quality tests.
+.SS Build & Dev
+.TP
+.B nat build
+Build release binaries (LTO enabled).
+.TP
+.B nat build debug
+Debug build (faster iteration).
+.TP
+.B nat build clean
+Remove build artifacts.
+.TP
+.B nat build fmt
+Format Rust code.
+.TP
+.B nat build lint
+Run clippy linter.
+.SS Data Management
+.TP
+.B nat data
+Show data directory stats (size, file count, date range).
+.TP
+.B nat data validate
+Validate parquet data integrity.
+.TP
+.B nat data schema
+Scan and display parquet schema.
+.TP
+.B nat data explore
+Launch Jupyter for interactive exploration.
+.SS Infrastructure
+.TP
+.B nat run
+Run ingestor in foreground.
+.TP
+.B nat run serve
+Ingestor + dashboard.
+.TP
+.B nat run show
+Real-time feature display.
+.TP
+.B nat pipeline start|resume|stop|status
+Automated pipeline state machine (IDLE \(-> BUILDING \(-> INGESTING \(-> ANALYZING \(-> DONE).
+.TP
+.B nat signal test \fR[\fB\-\-symbol\fR \fISYM\fR]
+Signal existence test.
+.TP
+.B nat eamm run|regime|backtest
+EAMM market making strategy.
+.TP
+.B nat api start|alerts|serve\-all
+API server and Telegram alerts.
+.TP
+.B nat exp start|stop|status|check|analyze
+Experiment runner (remote ingestor management).
+.TP
+.B nat docker build|up|down|logs
+Docker operations.
+.SH DATA FLOW
+.nf
+Hyperliquid WebSocket
+  \(-> HyperliquidClient (ws/client.rs)
+  \(-> MarketState (state/mod.rs)
+  \(-> FeatureComputer (features/*.rs) [191 features, 14 categories]
+  \(-> ParquetWriter (output/writer.rs)
+  \(-> data/features/YYYY-MM-DD/*.parquet (rotated hourly)
+.fi
+.PP
+Each symbol (BTC, ETH, SOL) runs in its own tokio task.
+Features are emitted every 100ms per symbol.
+.SH CONFIGURATION
+.TP
+.B config/ing.toml
+Ingestor settings (WebSocket URL, symbols, emission interval).
+.TP
+.B config/pipeline.toml
+Pipeline orchestration (ingestion duration, analysis thresholds).
+.TP
+.B config/hypothesis_testing.toml
+Hypothesis test parameters.
+.SH ENVIRONMENT
+.TP
+.B RUST_LOG
+Log level (e.g., info, debug).
+.TP
+.B REDIS_URL
+Redis connection URL.
+.TP
+.B ING_DASHBOARD_ENABLED
+Enable/disable dashboard.
+.TP
+.B TELEGRAM_BOT_TOKEN\fR, \fBTELEGRAM_CHAT_ID
+Telegram alert credentials.
+.SH FILES
+.TP
+.I data/features/
+Collected parquet data, organized by date.
+.TP
+.I reports/
+Generated analysis reports and plots.
+.TP
+.I models/
+Saved ML models.
+.TP
+.I logs/
+Ingestor and pipeline logs.
+.SH EXAMPLES
+Start collecting data:
+.PP
+.nf
+nat start
+nat status
+.fi
+.PP
+Run full analysis pipeline:
+.PP
+.nf
+nat screen --symbol BTC
+nat alpha combine --data data/features --top 10
+nat alpha validate --data data/features
+nat backtest --strategy scalping --symbol BTC
+.fi
+.PP
+Check deployment readiness:
+.PP
+.nf
+nat alpha deploy --check
+.fi
+.SH AUTHORS
+yogt1984
+.SH SEE ALSO
+.BR nat-help (1)
+.PP
+Full command reference: \fBnat help\fR

@@ -18,6 +18,11 @@ mkdir -p "$LINK_DIR"
 # Create symlink
 ln -sf "$NAT_BIN" "$LINK_DIR/nat"
 
+# Install man page
+MAN_DIR="$HOME/.local/share/man/man1"
+mkdir -p "$MAN_DIR"
+cp "$SCRIPT_DIR/man/man1/nat.1" "$MAN_DIR/nat.1"
+
 # Ensure Python visualization dependencies are available
 PYTHON="${PYTHON:-python3}"
 if ! $PYTHON -c "import matplotlib" 2>/dev/null; then
