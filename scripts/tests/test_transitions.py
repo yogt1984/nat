@@ -19,7 +19,10 @@ import pytest
 
 from cluster_pipeline.transitions import (
     TransitionModel,
+    HMMResult,
     empirical_transitions,
+    fit_hmm,
+    compare_hmm_gmm,
     _compute_duration_distributions,
 )
 
@@ -669,3 +672,250 @@ class TestConsistency:
         assert model.matrix.shape[0] == 4
         assert model.matrix.shape[1] == 4
         assert len(model.state_names) == 4
+
+
+# ===========================================================================
+# HMM Fitting Tests
+# ===========================================================================
+
+
+def _generate_hmm_data(
+    n_states=2, n_features=3, n_samples=2000, seed=42
+):
+    """Generate synthetic data from a known HMM for testing."""
+    from hmmlearn.hmm import GaussianHMM
+
+    rng = np.random.RandomState(seed)
+    model = GaussianHMM(
+        n_components=n_states,
+        covariance_type="full",
+        n_iter=1,
+        random_state=seed,
+    )
+    # Set known parameters
+    model.startprob_ = np.ones(n_states) / n_states
+    # Diagonal-dominant transition matrix (states persist)
+    transmat = np.full((n_states, n_states), 0.05 / max(n_states - 1, 1))
+    np.fill_diagonal(transmat, 0.95)
+    transmat /= transmat.sum(axis=1, keepdims=True)
+    model.transmat_ = transmat
+    # Well-separated means
+    model.means_ = rng.randn(n_states, n_features) * 3
+    # Covariances
+    model.covars_ = np.array([np.eye(n_features) * 0.5 for _ in range(n_states)])
+    X, true_labels = model.sample(n_samples)
+    return X, true_labels, model
+
+
+class TestFitHMM:
+    """Tests for fit_hmm function."""
+
+    def test_returns_hmm_result(self):
+        X, _, _ = _generate_hmm_data(n_states=2, n_samples=500)
+        result = fit_hmm(X, n_states=2)
+        assert isinstance(result, HMMResult)
+
+    def test_smoothed_labels_shape(self):
+        X, _, _ = _generate_hmm_data(n_states=2, n_samples=500)
+        result = fit_hmm(X, n_states=2)
+        assert result.smoothed_labels.shape == (500,)
+
+    def test_transition_matrix_row_stochastic(self):
+        X, _, _ = _generate_hmm_data(n_states=3, n_samples=1000)
+        result = fit_hmm(X, n_states=3)
+        row_sums = result.transition_matrix.sum(axis=1)
+        np.testing.assert_allclose(row_sums, 1.0, atol=1e-6)
+
+    def test_transition_matrix_shape(self):
+        X, _, _ = _generate_hmm_data(n_states=3, n_samples=1000)
+        result = fit_hmm(X, n_states=3)
+        assert result.transition_matrix.shape == (3, 3)
+
+    def test_stationary_distribution_sums_to_one(self):
+        X, _, _ = _generate_hmm_data(n_states=3, n_samples=1000)
+        result = fit_hmm(X, n_states=3)
+        assert result.stationary_distribution.sum() == pytest.approx(1.0, abs=1e-6)
+
+    def test_stationary_distribution_non_negative(self):
+        X, _, _ = _generate_hmm_data(n_states=3, n_samples=1000)
+        result = fit_hmm(X, n_states=3)
+        assert np.all(result.stationary_distribution >= 0)
+
+    def test_bic_is_finite(self):
+        X, _, _ = _generate_hmm_data(n_states=2, n_samples=500)
+        result = fit_hmm(X, n_states=2)
+        assert np.isfinite(result.bic)
+
+    def test_log_likelihood_is_finite(self):
+        X, _, _ = _generate_hmm_data(n_states=2, n_samples=500)
+        result = fit_hmm(X, n_states=2)
+        assert np.isfinite(result.log_likelihood)
+
+    def test_convergence_flag(self):
+        """With enough data and iterations, should converge."""
+        X, _, _ = _generate_hmm_data(n_states=2, n_samples=2000)
+        result = fit_hmm(X, n_states=2, n_iter=200)
+        assert result.convergence is True
+
+    def test_deterministic(self):
+        """Same seed → same result."""
+        X, _, _ = _generate_hmm_data(n_states=2, n_samples=500)
+        r1 = fit_hmm(X, n_states=2, random_state=42)
+        r2 = fit_hmm(X, n_states=2, random_state=42)
+        np.testing.assert_array_equal(r1.smoothed_labels, r2.smoothed_labels)
+        np.testing.assert_allclose(r1.transition_matrix, r2.transition_matrix)
+
+
+class TestFitHMMRecovery:
+    """HMM should recover known generating parameters."""
+
+    def test_recovers_two_states(self):
+        """Recover 2-state structure from synthetic data."""
+        from sklearn.metrics import adjusted_rand_score
+
+        X, true_labels, _ = _generate_hmm_data(n_states=2, n_samples=2000)
+        result = fit_hmm(X, n_states=2)
+        ari = adjusted_rand_score(true_labels, result.smoothed_labels)
+        # ARI > 0.5 means substantial agreement (label permutation invariant)
+        assert ari > 0.5, f"ARI={ari:.3f} too low, expected > 0.5"
+
+    def test_recovers_three_states(self):
+        X, true_labels, _ = _generate_hmm_data(n_states=3, n_samples=3000)
+        result = fit_hmm(X, n_states=3)
+        from sklearn.metrics import adjusted_rand_score
+        ari = adjusted_rand_score(true_labels, result.smoothed_labels)
+        assert ari > 0.4, f"ARI={ari:.3f} too low for 3-state recovery"
+
+    def test_recovers_diagonal_dominant_transmat(self):
+        """Recovered transition matrix should be diagonal-dominant."""
+        X, _, _ = _generate_hmm_data(n_states=2, n_samples=2000)
+        result = fit_hmm(X, n_states=2)
+        for i in range(2):
+            diag = result.transition_matrix[i, i]
+            assert diag > 0.5, f"State {i} diagonal={diag:.3f}, expected > 0.5"
+
+    def test_hmm_smoother_than_raw(self):
+        """HMM labels should have fewer transitions than noisy hard assignments."""
+        X, true_labels, true_model = _generate_hmm_data(n_states=2, n_samples=2000)
+        result = fit_hmm(X, n_states=2)
+
+        # Hard assignment by nearest mean (noisier)
+        from sklearn.cluster import KMeans
+        km = KMeans(n_clusters=2, random_state=42, n_init=10).fit(X)
+        hard_labels = km.labels_
+
+        hmm_transitions = np.sum(np.diff(result.smoothed_labels) != 0)
+        hard_transitions = np.sum(np.diff(hard_labels) != 0)
+        # HMM should have fewer or comparable transitions
+        assert hmm_transitions <= hard_transitions * 1.2
+
+
+class TestFitHMMMinSamples:
+    """Minimum sample gating."""
+
+    def test_returns_none_below_min_samples(self):
+        X = np.random.randn(50, 3)
+        result = fit_hmm(X, n_states=2, min_samples=200)
+        assert result is None
+
+    def test_works_at_min_samples(self):
+        X, _, _ = _generate_hmm_data(n_states=2, n_samples=200)
+        result = fit_hmm(X, n_states=2, min_samples=200)
+        assert result is not None
+
+    def test_custom_min_samples(self):
+        X = np.random.randn(100, 3)
+        result = fit_hmm(X, n_states=2, min_samples=50)
+        assert result is not None
+
+
+class TestFitHMMInitialization:
+    """Tests for custom initialization."""
+
+    def test_init_transmat(self):
+        X, _, _ = _generate_hmm_data(n_states=2, n_samples=500)
+        init_T = np.array([[0.9, 0.1], [0.1, 0.9]])
+        result = fit_hmm(X, n_states=2, init_transmat=init_T)
+        assert result is not None
+        assert result.transition_matrix.shape == (2, 2)
+
+    def test_init_means(self):
+        X, _, _ = _generate_hmm_data(n_states=2, n_features=3, n_samples=500)
+        init_means = np.array([[1, 0, 0], [-1, 0, 0]], dtype=float)
+        result = fit_hmm(X, n_states=2, init_means=init_means)
+        assert result is not None
+
+    def test_init_from_empirical(self):
+        """Initialize HMM with empirical transition matrix from GMM labels."""
+        from sklearn.mixture import GaussianMixture
+
+        X, _, _ = _generate_hmm_data(n_states=2, n_samples=1000)
+        gmm = GaussianMixture(n_components=2, random_state=42).fit(X)
+        gmm_labels = gmm.predict(X)
+
+        emp = empirical_transitions(gmm_labels)
+        result = fit_hmm(X, n_states=2, init_transmat=emp.matrix, init_means=gmm.means_)
+        assert result is not None
+
+
+class TestFitHMMEdgeCases:
+    """Edge cases for HMM fitting."""
+
+    def test_1d_input(self):
+        """1-D feature input should be reshaped automatically."""
+        rng = np.random.RandomState(42)
+        X = np.concatenate([rng.randn(200) - 2, rng.randn(200) + 2])
+        result = fit_hmm(X, n_states=2)
+        assert result is not None
+        assert result.smoothed_labels.shape == (400,)
+
+    def test_covariance_diag(self):
+        X, _, _ = _generate_hmm_data(n_states=2, n_samples=500)
+        result = fit_hmm(X, n_states=2, covariance_type="diag")
+        assert result is not None
+
+    def test_covariance_spherical(self):
+        X, _, _ = _generate_hmm_data(n_states=2, n_samples=500)
+        result = fit_hmm(X, n_states=2, covariance_type="spherical")
+        assert result is not None
+
+    def test_single_state(self):
+        """Single-state HMM should work."""
+        X = np.random.randn(300, 2)
+        result = fit_hmm(X, n_states=1)
+        assert result is not None
+        assert np.all(result.smoothed_labels == 0)
+
+    def test_labels_in_valid_range(self):
+        X, _, _ = _generate_hmm_data(n_states=3, n_samples=500)
+        result = fit_hmm(X, n_states=3)
+        assert result.smoothed_labels.min() >= 0
+        assert result.smoothed_labels.max() < 3
+
+
+class TestCompareHMMGMM:
+    """Tests for compare_hmm_gmm utility."""
+
+    def test_perfect_agreement(self):
+        labels = np.array([0, 0, 0, 1, 1, 1])
+        result = compare_hmm_gmm(labels, labels)
+        assert result["ari"] == pytest.approx(1.0)
+        assert result["agreement_rate"] == pytest.approx(1.0)
+        assert result["smoothness_ratio"] == pytest.approx(1.0)
+
+    def test_returns_expected_keys(self):
+        a = np.array([0, 0, 1, 1, 0])
+        b = np.array([1, 1, 0, 0, 1])
+        result = compare_hmm_gmm(a, b)
+        assert "ari" in result
+        assert "agreement_rate" in result
+        assert "gmm_transitions" in result
+        assert "hmm_transitions" in result
+        assert "smoothness_ratio" in result
+
+    def test_hmm_smoother_labels(self):
+        """HMM labels with fewer transitions should have lower smoothness_ratio."""
+        hmm = np.array([0, 0, 0, 0, 1, 1, 1, 1])  # 1 transition
+        gmm = np.array([0, 1, 0, 0, 1, 0, 1, 1])  # 5 transitions
+        result = compare_hmm_gmm(hmm, gmm)
+        assert result["smoothness_ratio"] < 1.0
