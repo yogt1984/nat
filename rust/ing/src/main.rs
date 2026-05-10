@@ -33,8 +33,24 @@ use ing::FeatureVector;
 const BOOK_STALE_WARN_SECS: u64 = 60;
 const BOOK_STALE_ERROR_SECS: u64 = 300;
 const TRADE_STALE_WARN_SECS: u64 = 120;
-const PRICE_FROZEN_WARN_SECS: u64 = 60;
-const PRICE_FROZEN_ERROR_SECS: u64 = 300;
+
+// Midprice-frozen detection is two-tiered.
+//
+// (a) Compound freeze: book channel is also stale. This is the May-6
+//     signature — both signals raised together, fire fast.
+// (b) Pure freeze: book channel is alive but the L1 inside quote hasn't
+//     moved. Empirically (1h48 watch on 2026-05-10) this happens 70–84s
+//     naturally on BTC/ETH at low-volatility moments and is benign market
+//     microstructure, not corruption. Use a much higher threshold so quiet
+//     periods don't pollute logs but a true multi-minute desync still trips.
+//
+// `BOOK_STALE_GATE_SECS` is the book_age above which we treat the situation
+// as compound rather than pure.
+const PRICE_FROZEN_WITH_BOOK_STALE_WARN_SECS:  u64 = 60;
+const PRICE_FROZEN_WITH_BOOK_STALE_ERROR_SECS: u64 = 300;
+const PRICE_FROZEN_BOOK_ALIVE_WARN_SECS:  u64 = 300;
+const PRICE_FROZEN_BOOK_ALIVE_ERROR_SECS: u64 = 900;
+const BOOK_STALE_GATE_SECS: u64 = 30;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -510,24 +526,44 @@ async fn run_symbol_ingestor(
                         }
                     }
 
-                    // Midprice-frozen — the actual data corruption signal. Even
-                    // if Book messages keep arriving, if midprice doesn't move,
-                    // downstream features are being written with stale state.
+                    // Midprice-frozen — gated on book health. A pure midprice
+                    // freeze with the book channel still updating is a benign
+                    // quiet inside-quote period (typical 70-84s for liquid
+                    // majors); only WARN on multi-minute persistence. A
+                    // compound freeze (book stale AND midprice frozen) is the
+                    // May-6 signature — fire on the original tight thresholds.
                     if let Some(age) = price_age {
-                        if age >= PRICE_FROZEN_WARN_SECS {
+                        let book_stale = book_age
+                            .map_or(false, |b| b >= BOOK_STALE_GATE_SECS);
+                        let (warn_threshold, error_threshold, regime) = if book_stale {
+                            (
+                                PRICE_FROZEN_WITH_BOOK_STALE_WARN_SECS,
+                                PRICE_FROZEN_WITH_BOOK_STALE_ERROR_SECS,
+                                "book_stale",
+                            )
+                        } else {
+                            (
+                                PRICE_FROZEN_BOOK_ALIVE_WARN_SECS,
+                                PRICE_FROZEN_BOOK_ALIVE_ERROR_SECS,
+                                "book_alive",
+                            )
+                        };
+                        if age >= warn_threshold {
                             warn!(
                                 %symbol,
                                 price_frozen_s = age,
                                 last_midprice = ?last_midprice,
                                 book_silence_s = ?book_age,
+                                regime,
                                 "Health: MIDPRICE FROZEN — features are being written with stale prices"
                             );
-                            if age >= PRICE_FROZEN_ERROR_SECS && !price_frozen_error_logged {
+                            if age >= error_threshold && !price_frozen_error_logged {
                                 price_frozen_error_logged = true;
                                 error!(
                                     %symbol,
                                     price_frozen_s = age,
-                                    threshold_s = PRICE_FROZEN_ERROR_SECS,
+                                    threshold_s = error_threshold,
+                                    regime,
                                     "Health: MIDPRICE FROZEN past threshold — \
                                      collected data is unusable; investigate immediately"
                                 );
