@@ -60,8 +60,11 @@ cost_bps = 3.5
 min_ic = 0.02
 # Minimum directional hit rate
 min_hit_rate = 0.51
-# Forward test temporal split (in-sample fraction)
+# Legacy single-split forward-test in-sample fraction (used with --legacy-split)
 forward_test_split = 0.70
+# Walk-forward k-fold validation (default forward-test method)
+n_folds = 5
+min_train_bars = 200
 # Top N features to report / forward test
 top_n = 30
 # Rolling window for IC stability (IC IR)

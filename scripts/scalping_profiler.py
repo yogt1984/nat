@@ -37,7 +37,10 @@ Pipeline stages
      h. Classification        rule-based role assignment
      i. Composite score       weighted sum into [0, 1]
   3. profile_all              →  iterate over all feature columns, rank by score
-  4. forward_test (optional)  →  temporal split, IS profile vs OOS validation
+  4. forward_test (optional)  →  validation:
+       - default:        walk-forward k-fold expanding window
+                         (forward_test_walkforward, see method docstring)
+       - --legacy-split: single 70/30 temporal split (forward_test)
 
 Profiles every feature signal for scalping viability by computing:
   - Information Coefficient (IC) at multiple forward horizons
@@ -55,8 +58,11 @@ Usage:
     # Profile all features for BTC at 5min bars
     python scripts/scalping_profiler.py profile --symbol BTC --timeframe 5min
 
-    # Include forward test validation (70/30 split)
+    # Include forward-test validation (walk-forward k-fold, default 5 folds)
     python scripts/scalping_profiler.py profile --symbol BTC --forward-test
+
+    # Use the legacy 70/30 single split (not recommended at small N)
+    python scripts/scalping_profiler.py profile --symbol BTC --forward-test --legacy-split
 
     # Show top-N features only
     python scripts/scalping_profiler.py profile --symbol BTC --top 20
@@ -150,8 +156,13 @@ _DEFAULT_CONFIG = {
     "min_ic": 0.02,
     # Minimum hit rate (> 0.50 is directionally informative)
     "min_hit_rate": 0.51,
-    # Fraction of data used as in-sample in forward_test
+    # Fraction of data used as in-sample in legacy single-split forward_test
     "forward_test_split": 0.70,
+    # Walk-forward k-fold settings (replaces single-split as default validation)
+    # Number of expanding-window folds
+    "n_folds": 5,
+    # Minimum number of bars in the first fold's training window
+    "min_train_bars": 200,
     "top_n": 30,
     # W: rolling window size (bars) for IC IR computation
     "rolling_ic_window": 50,
@@ -300,6 +311,86 @@ class ForwardTestResult:
     stable_count: int
     # Features with |IS IC| > min_ic and |ic_change_pct| > 50%
     degraded_count: int
+
+
+@dataclass
+class WalkForwardFeature:
+    """Per-feature aggregate from walk-forward k-fold validation.
+
+    Fields
+    ------
+    name : str
+        Feature column name.
+    vector : str
+        Feature vector group (entropy, trend, volatility, ...).
+    horizon : int
+        Forward-return horizon (in bars) at which this feature was evaluated.
+        Selected as argmax_h |E_i[IS_IC(f, h, i)]|, i.e. the horizon whose mean
+        in-sample IC across folds has the largest magnitude.  Selection uses
+        only IS data so it does not leak OOS information.
+    n_folds : int
+        Number of expanding-window folds k.
+    is_ic_per_fold, oos_ic_per_fold : List[float], length k
+        IS_IC[i] = Spearman( x[t in IS_i],  r_h[t in IS_i] )
+        OOS_IC[i] = Spearman( x[t in OOS_i], r_h[t in OOS_i] )
+        IS_i, OOS_i are defined in forward_test_walkforward.
+    is_ic_mean, oos_ic_mean : float
+        Arithmetic means over the k folds.
+    oos_ic_std : float
+        Population standard deviation (ddof=0) of OOS_IC across folds.  Lower
+        is better — measures fold-to-fold OOS instability.
+    sign_consistency : float in [0, 1]
+        Fraction of folds where sign(IS_IC[i]) == sign(OOS_IC[i]), restricted
+        to folds with |IS_IC[i]| > 1e-6 to avoid degenerate sign comparisons.
+        High consistency means the feature's directional read survives OOS.
+    decision : str
+        keep    : sign_consistency >= 0.6  AND  |oos_ic_mean| >= min_ic
+        monitor : sign_consistency >= 0.6  AND  |oos_ic_mean| <  min_ic
+        drop    : sign_consistency <  0.6
+    """
+    name: str
+    vector: str
+    horizon: int
+    n_folds: int
+    is_ic_per_fold: List[float]
+    oos_ic_per_fold: List[float]
+    is_ic_mean: float
+    oos_ic_mean: float
+    oos_ic_std: float
+    sign_consistency: float
+    decision: str
+
+
+@dataclass
+class WalkForwardResult:
+    """Aggregate result of walk-forward k-fold validation across all features.
+
+    Fold layout (expanding window)
+    ------------------------------
+    Let N = total bars, m = min_train_bars, k = n_folds, L = floor((N-m)/k).
+    For i = 0, ..., k-1:
+        IS_i  = bars[0 : m + i*L]
+        OOS_i = bars[m + i*L : m + (i+1)*L]      for i < k-1
+        OOS_{k-1} = bars[m + (k-1)*L : N]        (last fold absorbs remainder)
+
+    Leakage guard
+    -------------
+    For horizon h, IC pairs (x[t], r_h[t]) require r_h[t] = log(p[t+h]/p[t]),
+    which uses bar t+h.  To prevent peeking past a fold boundary at index B:
+        IS pairs:  t in [0, B - h)
+        OOS pairs: t in [B, t_end - h)
+    """
+    symbol: str
+    timeframe: str
+    n_folds: int
+    total_bars: int
+    min_train_bars: int
+    fold_len: int
+    horizons: List[int]
+    features: List[WalkForwardFeature]
+    keep_count: int
+    monitor_count: int
+    drop_count: int
 
 
 # ---------------------------------------------------------------------------
@@ -792,6 +883,224 @@ class ScalpingProfiler:
             ic_correlation=ic_corr,
             stable_count=stable,
             degraded_count=degraded,
+        )
+
+    # ── Walk-forward k-fold validation ────────────────────────────────
+
+    def forward_test_walkforward(
+        self,
+        bars: pd.DataFrame,
+        n_folds: int = 5,
+        min_train_bars: int = 200,
+        min_fold_obs: int = 30,
+    ) -> WalkForwardResult:
+        """Walk-forward k-fold validation with expanding training window.
+
+        Why this replaces the single 70/30 split
+        ----------------------------------------
+        The single-split forward_test produces a single point estimate of OOS
+        IC per feature.  When the OOS chunk happens to be a contiguous trending
+        regime — common at small sample sizes — every feature collapses to a
+        degenerate (hit_rate=1, IC=0) result, which is a methodological
+        artifact rather than evidence of feature instability.  k-fold gives
+        a distribution of OOS ICs across non-overlapping windows, and sign
+        consistency across folds is a much more robust stability signal.
+
+        Procedure
+        ---------
+        1. fold_len = floor((N - min_train_bars) / n_folds)
+        2. For each feature column f and each horizon h in self.horizons:
+             For each fold i in [0, n_folds):
+                 t_split = min_train_bars + i*fold_len
+                 t_end   = t_split + fold_len    (or N for the last fold)
+                 IS_IC[f,h,i]  = Spearman(x[t in [0, t_split-h)],  r_h[same])
+                 OOS_IC[f,h,i] = Spearman(x[t in [t_split, t_end-h)], r_h[same])
+        3. For each feature, pick best horizon h*:
+                 h* = argmax_h |mean_i IS_IC[f,h,i]|
+           Selection uses IS-only data, so no leakage.
+        4. Aggregate at h*:
+                 is_ic_mean, oos_ic_mean, oos_ic_std (across folds)
+                 sign_consistency = mean_i 1{ sign(IS_IC[i]) == sign(OOS_IC[i]) }
+                                    over folds where |IS_IC[i]| > 1e-6
+        5. Decision:
+                 keep    if sign_consistency >= 0.6 AND |oos_ic_mean| >= min_ic
+                 monitor if sign_consistency >= 0.6 AND |oos_ic_mean| <  min_ic
+                 drop    otherwise
+
+        Complexity
+        ----------
+        O(F * H * K * N log N) where F = features, H = |horizons|,
+        K = n_folds, N = bars.  Dominated by Spearman ranking.
+        For the current corpus (F~140, H=4, K=5, N~3000) this is well under
+        a minute.
+
+        Parameters
+        ----------
+        bars : pd.DataFrame
+            Time-ordered bar sequence.
+        n_folds : int, default 5
+            Number of expanding-window folds.
+        min_train_bars : int, default 200
+            Bars in fold 0's training window.  Subsequent folds expand by
+            fold_len each.
+        min_fold_obs : int, default 30
+            Minimum non-NaN paired observations required in a fold to
+            compute an IC; otherwise IC is recorded as 0.0.
+
+        Returns
+        -------
+        WalkForwardResult
+            Per-feature aggregates plus keep/monitor/drop counts.
+
+        Raises
+        ------
+        ValueError
+            If the bar sequence is too short to fit n_folds folds with at
+            least min_fold_obs OOS bars each.
+        """
+        n = len(bars)
+        if n < min_train_bars + n_folds * min_fold_obs:
+            raise ValueError(
+                f"Not enough bars for walk-forward: have {n}, need "
+                f">= {min_train_bars + n_folds * min_fold_obs} "
+                f"(min_train_bars={min_train_bars}, n_folds={n_folds}, "
+                f"min_fold_obs={min_fold_obs})"
+            )
+        fold_len = (n - min_train_bars) // n_folds
+        if fold_len < min_fold_obs:
+            raise ValueError(
+                f"fold_len={fold_len} < min_fold_obs={min_fold_obs}; "
+                f"reduce n_folds or min_train_bars"
+            )
+
+        log.info(
+            "Walk-forward: N=%d, k=%d, min_train=%d, fold_len=%d",
+            n, n_folds, min_train_bars, fold_len,
+        )
+
+        # Forward returns r_h[t] = log(p[t+h]/p[t]) computed once on full sample
+        fwd = self.compute_forward_returns(bars)
+
+        # Identify feature columns (same gate as profile_all)
+        meta = {"bar_start", "bar_end", "symbol", "tick_count"} | META_COLUMNS
+        feature_cols = [
+            c for c in bars.columns
+            if c not in meta and bars[c].dtype in (np.float64, np.float32, float)
+        ]
+        log.info("Walk-forward over %d feature columns", len(feature_cols))
+
+        # Pre-compute fold boundaries to avoid recomputing per feature
+        # Each entry: (t_split, t_end) where IS = [0, t_split), OOS = [t_split, t_end)
+        boundaries = []
+        for i in range(n_folds):
+            t_split = min_train_bars + i * fold_len
+            t_end = n if i == n_folds - 1 else t_split + fold_len
+            boundaries.append((t_split, t_end))
+
+        features: List[WalkForwardFeature] = []
+        for col in feature_cols:
+            x = bars[col].values.astype(np.float64)
+
+            # For each horizon, collect IS and OOS IC across folds
+            per_horizon: Dict[int, Dict[str, List[float]]] = {}
+            for h in self.horizons:
+                r = fwd[h]
+                is_ics: List[float] = []
+                oos_ics: List[float] = []
+                for (t_split, t_end) in boundaries:
+                    # IS pairs: t in [0, t_split - h) so r[t] uses bar t+h <= t_split-1
+                    is_hi = max(t_split - h, 0)
+                    is_x = x[:is_hi]
+                    is_r = r[:is_hi]
+                    is_mask = np.isfinite(is_x) & np.isfinite(is_r)
+                    is_ic = (
+                        _safe_spearman(is_x[is_mask], is_r[is_mask])
+                        if is_mask.sum() >= min_fold_obs else 0.0
+                    )
+                    is_ics.append(is_ic)
+
+                    # OOS pairs: t in [t_split, t_end - h)
+                    oos_hi = max(t_end - h, t_split)
+                    oos_x = x[t_split:oos_hi]
+                    oos_r = r[t_split:oos_hi]
+                    oos_mask = np.isfinite(oos_x) & np.isfinite(oos_r)
+                    oos_ic = (
+                        _safe_spearman(oos_x[oos_mask], oos_r[oos_mask])
+                        if oos_mask.sum() >= min_fold_obs else 0.0
+                    )
+                    oos_ics.append(oos_ic)
+                per_horizon[h] = {"is": is_ics, "oos": oos_ics}
+
+            # Pick horizon with max |mean(IS_IC)| — IS-only selection, no leakage
+            best_h = max(
+                self.horizons,
+                key=lambda h: abs(float(np.mean(per_horizon[h]["is"]))),
+            )
+            is_arr = np.array(per_horizon[best_h]["is"])
+            oos_arr = np.array(per_horizon[best_h]["oos"])
+
+            is_mean = float(np.mean(is_arr))
+            oos_mean = float(np.mean(oos_arr))
+            oos_std = float(np.std(oos_arr, ddof=0))
+
+            # Sign consistency over folds with non-degenerate IS_IC
+            nonzero = np.abs(is_arr) > 1e-6
+            if nonzero.any():
+                sign_match = (np.sign(is_arr[nonzero]) == np.sign(oos_arr[nonzero]))
+                sign_consistency = float(sign_match.mean())
+            else:
+                sign_consistency = 0.0
+
+            # Decision rule
+            if sign_consistency >= 0.6 and abs(oos_mean) >= self.min_ic:
+                decision = "keep"
+            elif sign_consistency >= 0.6:
+                decision = "monitor"
+            else:
+                decision = "drop"
+
+            # Skip features that produced all-zero IS ICs across all horizons
+            # (constant features, all-NaN, etc.) — they pollute output without info
+            all_zero = all(
+                all(abs(v) < 1e-9 for v in per_horizon[h]["is"])
+                for h in self.horizons
+            )
+            if all_zero:
+                continue
+
+            features.append(WalkForwardFeature(
+                name=col,
+                vector=self._detect_vector(col),
+                horizon=int(best_h),
+                n_folds=n_folds,
+                is_ic_per_fold=[float(v) for v in is_arr],
+                oos_ic_per_fold=[float(v) for v in oos_arr],
+                is_ic_mean=is_mean,
+                oos_ic_mean=oos_mean,
+                oos_ic_std=oos_std,
+                sign_consistency=sign_consistency,
+                decision=decision,
+            ))
+
+        # Sort by |oos_ic_mean| descending — most predictive OOS first
+        features.sort(key=lambda f: abs(f.oos_ic_mean), reverse=True)
+
+        keep = sum(1 for f in features if f.decision == "keep")
+        monitor = sum(1 for f in features if f.decision == "monitor")
+        drop = sum(1 for f in features if f.decision == "drop")
+
+        return WalkForwardResult(
+            symbol=self.config.get("symbol", "BTC"),
+            timeframe=self.timeframe,
+            n_folds=n_folds,
+            total_bars=n,
+            min_train_bars=min_train_bars,
+            fold_len=fold_len,
+            horizons=list(self.horizons),
+            features=features,
+            keep_count=keep,
+            monitor_count=monitor,
+            drop_count=drop,
         )
 
     # ── Internal helpers ──────────────────────────────────────────────
@@ -1525,8 +1834,16 @@ class ScalpingProfilerProcess:
         symbol: str = "BTC",
         forward_test: bool = False,
         top_n: Optional[int] = None,
-    ) -> Tuple[ProfileReport, Optional[ForwardTestResult]]:
-        """Execute the full profiling pipeline."""
+        legacy_split: bool = False,
+        n_folds: Optional[int] = None,
+        min_train_bars: Optional[int] = None,
+    ) -> Tuple[ProfileReport, Optional[Any]]:
+        """Execute the full profiling pipeline.
+
+        When forward_test=True:
+            legacy_split=False (default) → walk-forward k-fold validation.
+            legacy_split=True            → legacy single 70/30 split.
+        """
         if top_n:
             self.profiler.top_n = top_n
 
@@ -1571,18 +1888,39 @@ class ScalpingProfilerProcess:
             ft_result = None
             if forward_test:
                 self._transition(ProfilerState.FORWARD_TESTING)
-                split = self.config.get("forward_test_split", 0.7)
-                ft_result = self.profiler.forward_test(bars, split)
-                ft_path = self._save_forward_test(ft_result)
-                self._transition(
-                    ProfilerState.DONE,
-                    elapsed_sec=round(time.time() - t0, 1),
-                    report_path=str(report_path),
-                    forward_test_path=str(ft_path),
-                    ic_correlation=ft_result.ic_correlation,
-                    stable_count=ft_result.stable_count,
-                    degraded_count=ft_result.degraded_count,
-                )
+                if legacy_split:
+                    split = self.config.get("forward_test_split", 0.7)
+                    ft_result = self.profiler.forward_test(bars, split)
+                    ft_path = self._save_forward_test(ft_result)
+                    self._transition(
+                        ProfilerState.DONE,
+                        elapsed_sec=round(time.time() - t0, 1),
+                        report_path=str(report_path),
+                        forward_test_path=str(ft_path),
+                        ic_correlation=ft_result.ic_correlation,
+                        stable_count=ft_result.stable_count,
+                        degraded_count=ft_result.degraded_count,
+                    )
+                else:
+                    nf = n_folds if n_folds is not None else int(
+                        self.config.get("n_folds", 5)
+                    )
+                    mtb = min_train_bars if min_train_bars is not None else int(
+                        self.config.get("min_train_bars", 200)
+                    )
+                    ft_result = self.profiler.forward_test_walkforward(
+                        bars, n_folds=nf, min_train_bars=mtb
+                    )
+                    ft_path = self._save_walk_forward(ft_result)
+                    self._transition(
+                        ProfilerState.DONE,
+                        elapsed_sec=round(time.time() - t0, 1),
+                        report_path=str(report_path),
+                        walk_forward_path=str(ft_path),
+                        keep_count=ft_result.keep_count,
+                        monitor_count=ft_result.monitor_count,
+                        drop_count=ft_result.drop_count,
+                    )
             else:
                 self._transition(
                     ProfilerState.DONE,
@@ -1646,6 +1984,29 @@ class ScalpingProfilerProcess:
         with open(path, "w") as f:
             json.dump(data, f, indent=2, cls=_NumpyEncoder)
         log.info("Forward test saved: %s", path)
+        return path
+
+    def _save_walk_forward(self, result: WalkForwardResult) -> Path:
+        """Save walk-forward results as JSON."""
+        path = self.report_dir / f"walk_forward_{result.symbol}_{result.timeframe}.json"
+
+        data = {
+            "symbol": result.symbol,
+            "timeframe": result.timeframe,
+            "n_folds": result.n_folds,
+            "total_bars": result.total_bars,
+            "min_train_bars": result.min_train_bars,
+            "fold_len": result.fold_len,
+            "horizons": result.horizons,
+            "keep_count": result.keep_count,
+            "monitor_count": result.monitor_count,
+            "drop_count": result.drop_count,
+            "features": [asdict(f) for f in result.features],
+        }
+
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2, cls=_NumpyEncoder)
+        log.info("Walk-forward saved: %s", path)
         return path
 
 
@@ -1732,6 +2093,38 @@ def print_forward_test(result: ForwardTestResult):
               f"{c['is_edge_bps']:+.1f} {c['oos_edge_bps']:+.1f}")
 
 
+def print_walk_forward(result: WalkForwardResult, top_n: int = 30):
+    """Print walk-forward k-fold validation results."""
+    print(f"\n{'='*80}")
+    print(f"  WALK-FORWARD VALIDATION — {result.symbol} @ {result.timeframe}")
+    print(f"{'='*80}")
+    print(f"  N={result.total_bars:,}  k={result.n_folds}  "
+          f"min_train={result.min_train_bars}  fold_len={result.fold_len}")
+    print(f"  Horizons: {result.horizons}")
+    total = result.keep_count + result.monitor_count + result.drop_count
+    pct = lambda x: f"{x / total:.0%}" if total else "0%"
+    print(f"  KEEP:    {result.keep_count:>4}  ({pct(result.keep_count)})  "
+          f"sign_consistency >= 0.6 AND |OOS IC| >= min_ic")
+    print(f"  MONITOR: {result.monitor_count:>4}  ({pct(result.monitor_count)})  "
+          f"consistent direction but weak edge")
+    print(f"  DROP:    {result.drop_count:>4}  ({pct(result.drop_count)})  "
+          f"sign flips across folds")
+
+    keepers = [f for f in result.features if f.decision == "keep"][:top_n]
+    if keepers:
+        print(f"\n  TOP KEEPERS (by |OOS IC|)")
+        print(f"  {'Feature':<40} {'Vector':<12} {'h':>2} "
+              f"{'IS IC':>7} {'OOS IC':>7} {'OOS std':>8} {'Sign':>5}")
+        print(f"  {'-'*40} {'-'*12} {'-'*2} "
+              f"{'-'*7} {'-'*7} {'-'*8} {'-'*5}")
+        for f in keepers:
+            print(f"  {f.name[:40]:<40} {f.vector:<12} {f.horizon:>2} "
+                  f"{f.is_ic_mean:+.3f} {f.oos_ic_mean:+.3f} "
+                  f"{f.oos_ic_std:>8.3f} {f.sign_consistency:>5.0%}")
+    else:
+        print("\n  (no features passed the keep threshold)")
+
+
 # ---------------------------------------------------------------------------
 # Serialization helpers
 # ---------------------------------------------------------------------------
@@ -1808,7 +2201,23 @@ def main():
     p_profile.add_argument("--timeframe", default=None, help="Bar timeframe (default: from config)")
     p_profile.add_argument("--data-dir", default="data/features", help="Parquet data directory")
     p_profile.add_argument("--top", type=int, default=None, help="Show top N features")
-    p_profile.add_argument("--forward-test", action="store_true", help="Run forward test validation")
+    p_profile.add_argument(
+        "--forward-test", action="store_true",
+        help="Run forward-test validation (walk-forward k-fold by default)"
+    )
+    p_profile.add_argument(
+        "--legacy-split", action="store_true",
+        help="Use the legacy single 70/30 split instead of walk-forward k-fold "
+             "(only meaningful with --forward-test)"
+    )
+    p_profile.add_argument(
+        "--n-folds", type=int, default=None,
+        help="Number of walk-forward folds (default: from config, typ. 5)"
+    )
+    p_profile.add_argument(
+        "--min-train-bars", type=int, default=None,
+        help="Bars in fold-0 training window (default: from config, typ. 200)"
+    )
     p_profile.add_argument("--config", default="config/pipeline.toml", help="Config file path")
     p_profile.add_argument("-v", "--verbose", action="store_true")
 
@@ -1853,12 +2262,18 @@ def main():
         symbol=args.symbol,
         forward_test=args.forward_test,
         top_n=args.top,
+        legacy_split=args.legacy_split,
+        n_folds=args.n_folds,
+        min_train_bars=args.min_train_bars,
     )
 
     print_profile_report(report, top_n=config["top_n"])
 
-    if ft_result:
-        print_forward_test(ft_result)
+    if ft_result is not None:
+        if isinstance(ft_result, WalkForwardResult):
+            print_walk_forward(ft_result, top_n=config["top_n"])
+        else:
+            print_forward_test(ft_result)
 
     print(f"\nReport saved to: {process.report_dir}/")
 
