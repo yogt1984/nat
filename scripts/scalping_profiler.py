@@ -501,9 +501,34 @@ class ScalpingProfiler:
         catastrophic cancellation when prices are nearly equal.  The ratio form
         is numerically equivalent but the subtraction form can lose precision
         for large prices with small relative changes.
+
+        Gap-aware NaN-out
+        -----------------
+        Bars are indexed 0..N-1 contiguously even when the underlying tick
+        stream had time gaps (e.g. OS-suspend or WS reconnect windows).  In
+        that case `prices[t+h]` and `prices[t]` may straddle a wall-clock gap
+        much larger than h * timeframe, and the resulting log-return is
+        spurious.  Whenever bar timestamps are available we therefore set
+        r_h[t] = NaN if  bar_start[t+h] - bar_start[t] > 2 * h * timeframe.
+        The factor of 2 tolerates normal jitter (late bars, brief
+        reconnects) without flagging them; only true gaps trip it.  IC
+        computation already masks NaN, so this propagates correctly.
         """
         price_col = self._find_price_col(bars)
         prices = bars[price_col].values.astype(np.float64)
+
+        # Bar-start timestamps for gap detection.  Falls back to "no gap
+        # check" if no timestamp column is present (older test fixtures).
+        ts_arr = None
+        for ts_col in ("bar_start", "bar_end", "timestamp_ns"):
+            if ts_col in bars.columns:
+                ts_arr = pd.to_datetime(bars[ts_col], utc=True, errors="coerce")
+                ts_arr = ts_arr.values.astype("datetime64[ns]")
+                break
+        try:
+            tf_seconds = pd.Timedelta(self.timeframe).total_seconds()
+        except Exception:
+            tf_seconds = None
 
         fwd = {}
         for h in self.horizons:
@@ -511,6 +536,16 @@ class ScalpingProfiler:
             if h < len(prices):
                 # r_h[t] = log(p[t+h] / p[t]),  t in [0, N-h)
                 ret[:-h] = np.log(prices[h:] / prices[:-h])
+
+                # Gap-aware NaN-out: drop pairs whose wall-clock spacing
+                # exceeds 2 * h * timeframe (handles OS-suspend windows and
+                # long WS reconnects).
+                if ts_arr is not None and tf_seconds is not None:
+                    dt_ns = (ts_arr[h:] - ts_arr[:-h]).astype("timedelta64[ns]")
+                    dt_s = dt_ns.astype(np.int64) / 1e9
+                    expected = h * tf_seconds
+                    spans_gap = dt_s > 2.0 * expected
+                    ret[:-h][spans_gap] = np.nan
             fwd[h] = ret
         return fwd
 
