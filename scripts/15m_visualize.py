@@ -528,23 +528,33 @@ def main():
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
 
-    # Resolve data directory
+    # Resolve data source
+    data_file = None
     if args.data_dir is None or args.latest:
         ref_path = DEFAULT_OUTPUT / "latest" / "data_ref.json"
         if ref_path.exists():
             ref = json.loads(ref_path.read_text())
-            args.data_dir = Path(ref["data_dir"])
+            # Prefer 15m__ data file from experiment dir
+            if "data_file" in ref and Path(ref["data_file"]).exists():
+                data_file = Path(ref["data_file"])
+            else:
+                args.data_dir = Path(ref.get("source_dir", ref.get("data_dir", "")))
             if args.output is None:
                 args.output = DEFAULT_OUTPUT / "latest"
-            log.info("Using latest experiment: %s (%d rows)", args.data_dir, ref["rows"])
+            log.info("Using latest experiment: %s (%d rows)",
+                     data_file or args.data_dir, ref["rows"])
         else:
-            parser.error("--data-dir required (no latest experiment found; run 'make 15m' first)")
+            parser.error("--data-dir required (no latest experiment found; run 'nat 15m' first)")
 
     if args.output is None:
         args.output = DEFAULT_OUTPUT
 
-    log.info("Loading data from %s", args.data_dir)
-    df = load_parquet(args.data_dir)
+    if data_file is not None:
+        log.info("Loading 15m data from %s", data_file)
+        df = pd.read_parquet(data_file)
+    else:
+        log.info("Loading data from %s", args.data_dir)
+        df = load_parquet(args.data_dir)
     log.info("Loaded %d rows", len(df))
 
     symbols = get_symbols(df)

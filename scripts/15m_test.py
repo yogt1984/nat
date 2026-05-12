@@ -190,8 +190,21 @@ def _numeric_feature_cols(df: pd.DataFrame) -> list[str]:
 # --------------------------------------------------------------------------- #
 
 
+def _trim_to_window(df: pd.DataFrame, window_minutes: int) -> pd.DataFrame:
+    """Trim dataframe to the last N minutes of data."""
+    ts_max = df["timestamp_ns"].max()
+    ts_min = ts_max - int(window_minutes * 60 * 1e9)
+    trimmed = df[df["timestamp_ns"] >= ts_min].copy()
+    dur = (trimmed["timestamp_ns"].max() - trimmed["timestamp_ns"].min()) / 1e9
+    log.info("Trimmed to last %d min: %d → %d rows (%.1f min actual)",
+             window_minutes, len(df), len(trimmed), dur / 60)
+    return trimmed
+
+
 def phase_collect(cfg: dict, data_dir: Optional[Path], live: bool) -> tuple[pd.DataFrame, Path]:
     """Load or wait for data. Returns (dataframe, data_dir_used)."""
+    window = cfg.get("live_duration_minutes", 15)
+
     if not live:
         if data_dir is None:
             raise ValueError("--data-dir required in offline mode")
@@ -201,12 +214,15 @@ def phase_collect(cfg: dict, data_dir: Optional[Path], live: bool) -> tuple[pd.D
         if duration < 300:
             log.warning("Only %.0fs of data (< 5 min)", duration)
         log.info("Loaded %d rows, %.1f min", len(df), duration / 60)
+        # Auto-trim to last 15 minutes if data exceeds the window
+        if duration > window * 60 * 1.5:
+            df = _trim_to_window(df, window)
         return df, data_dir
 
     # Live mode: poll for data
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     data_dir = DEFAULT_DATA / today
-    duration_s = cfg["live_duration_minutes"] * 60
+    duration_s = window * 60
     target_rows = int(
         cfg["expected_rate_per_sec"]
         * len(cfg["expected_symbols"])
@@ -214,7 +230,7 @@ def phase_collect(cfg: dict, data_dir: Optional[Path], live: bool) -> tuple[pd.D
         * 0.8
     )
 
-    log.info("Live mode: waiting for %d rows in %s (%.0f min)", target_rows, data_dir, cfg["live_duration_minutes"])
+    log.info("Live mode: waiting for %d rows in %s (%.0f min)", target_rows, data_dir, window)
     start = time.time()
     timeout = duration_s + 300  # 5 min grace
 
@@ -228,6 +244,7 @@ def phase_collect(cfg: dict, data_dir: Optional[Path], live: bool) -> tuple[pd.D
             if rows >= target_rows:
                 log.info("Collected %d rows, loading...", rows)
                 df = load_parquet(str(data_dir))
+                df = _trim_to_window(df, window)
                 return df, data_dir
         time.sleep(10)
 
@@ -780,14 +797,20 @@ def phase_report(report: SmokeTestReport, output_dir: Path) -> PhaseResult:
 
 def _create_experiment_dir(output_dir: Path, used_dir: Path, df: pd.DataFrame,
                            report: SmokeTestReport) -> Path:
-    """Create experiment subdirectory with data reference and latest symlink."""
+    """Create experiment subdirectory with 15m__ data snapshot and latest symlink."""
     exp_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     exp_dir = output_dir / f"exp_{exp_ts}"
     exp_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write data reference so 15m_visualize can find the data
+    # Save trimmed data as 15m__ prefixed parquet
+    data_path = exp_dir / f"15m__data.parquet"
+    df.to_parquet(data_path)
+    log.info("Saved %d rows to %s", len(df), data_path)
+
+    # Write data reference pointing to local 15m__ file
     data_ref = {
-        "data_dir": str(used_dir.resolve()),
+        "data_file": str(data_path.resolve()),
+        "source_dir": str(used_dir.resolve()),
         "rows": len(df),
         "symbols": report.symbols,
         "ts_min": int(df["timestamp_ns"].min()),
@@ -836,8 +859,8 @@ def run_smoke_test(
     # Create experiment directory with data reference
     exp_dir = _create_experiment_dir(output_dir, used_dir, df, report)
 
-    # Phase 2: Validate (gate)
-    p2 = phase_validate(df, used_dir, cfg)
+    # Phase 2: Validate (gate) — check against experiment dir (15m__ data, no corrupt source files)
+    p2 = phase_validate(df, exp_dir, cfg)
     report.phases.append(p2)
     log.info("Phase 2 (Validate): %s [%.1fs]", "PASS" if p2.passed else "FAIL", p2.timing_s)
 
