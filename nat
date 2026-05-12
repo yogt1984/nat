@@ -1227,6 +1227,48 @@ def cmd_exp_tunnel(args):
     _exec("cloudflared tunnel --url http://localhost:8050")
 
 
+# ── 15-Minute Experiment ─────────────────────────────────────────────────────
+
+def cmd_15m(args):
+    """Run 15-minute experiment (validate + profile + cluster + report)."""
+    data = _data(args)
+    _banner("15-MINUTE EXPERIMENT")
+    extra = ""
+    if getattr(args, 'skip_cluster', False):
+        extra += " --skip-cluster"
+    _py(f"scripts/15m_test.py run --data-dir {data} --output reports/smoke_test -v{extra}")
+
+
+def cmd_15m_live(args):
+    """Run 15-minute experiment on live ingestor data."""
+    _banner("15-MINUTE EXPERIMENT (LIVE)")
+    extra = ""
+    if getattr(args, 'skip_cluster', False):
+        extra += " --skip-cluster"
+    _py(f"scripts/15m_test.py run --live --output reports/smoke_test -v{extra}")
+
+
+def cmd_15m_viz(args):
+    """Visualize 15-minute experiment data."""
+    _banner("15-MINUTE VISUALIZATION")
+    sym = _sym(args)
+    extra = ""
+    data = getattr(args, 'data', None)
+    if data:
+        extra += f" --data-dir {data}"
+    else:
+        extra += " --latest"
+    window = getattr(args, 'window', None)
+    if window:
+        extra += f" --window {window}"
+    _py(f"scripts/15m_visualize.py{extra} --symbol {sym} -v")
+
+
+def cmd_15m_test(args):
+    """Run 15m smoke test unit tests."""
+    _exec(f"cd {ROOT / 'scripts'} && {PY} -m pytest tests/test_15m_test.py -v")
+
+
 # ── Docker commands ──────────────────────────────────────────────────────────
 
 def cmd_docker_build(args):
@@ -1431,6 +1473,14 @@ def cmd_help(args=None):
     nat docker up              Start services
     nat docker down            Stop services
     nat docker logs            View logs
+
+  {BOLD}15-Minute Experiment{W}
+    nat 15m                    Run experiment on data (--data DIR, --skip-cluster)
+    nat 15m live               Run experiment on live ingestor data
+    nat 15m viz                Visualize latest experiment (--symbol, --window)
+    nat 15m viz --window 15    Split into 15-min windows
+    nat 15m viz --symbol all   All symbols
+    nat 15m test               Run unit tests
 
   {BOLD}Dashboards{W}
     Port 8080  Rust real-time feature dashboard (embedded in ingestor, ING_DASHBOARD_ENABLED=true)
@@ -1857,6 +1907,22 @@ def build_parser():
     dksub.add_parser('up', help='Start services').set_defaults(func=cmd_docker_up)
     dksub.add_parser('down', help='Stop services').set_defaults(func=cmd_docker_down)
     dksub.add_parser('logs', help='View logs').set_defaults(func=cmd_docker_logs)
+
+    # ── 15m experiment ──
+    sm_p = sub.add_parser('15m', help='15-minute experiment (default: run on data)')
+    sm_p.add_argument('--data', type=str, default=None, help='Data directory')
+    sm_p.add_argument('--skip-cluster', action='store_true', help='Skip clustering phase')
+    sm_p.set_defaults(func=cmd_15m)
+    smsub = sm_p.add_subparsers(dest='subcmd')
+    sml = smsub.add_parser('live', help='Run on live ingestor data')
+    sml.add_argument('--skip-cluster', action='store_true')
+    sml.set_defaults(func=cmd_15m_live)
+    smv = smsub.add_parser('viz', help='Visualize latest experiment')
+    smv.add_argument('--data', type=str, default=None, help='Data directory (default: latest)')
+    smv.add_argument('--symbol', type=str, default='BTC', help='Symbol or "all"')
+    smv.add_argument('--window', type=int, default=None, help='Window size in minutes')
+    smv.set_defaults(func=cmd_15m_viz)
+    smsub.add_parser('test', help='Run unit tests').set_defaults(func=cmd_15m_test)
 
     return p
 
