@@ -1282,6 +1282,9 @@ def cmd_15m(args):
     duration = getattr(args, 'duration', FIFTEEN_MIN)
     _banner("15-MINUTE EXPERIMENT")
 
+    # Capture start date before collection begins (midnight rollover safety)
+    start_date = datetime.now().strftime("%Y-%m-%d")
+
     # Check if ingestor already running
     existing_pid = _pid()
     own_ingestor = False
@@ -1322,9 +1325,9 @@ def cmd_15m(args):
         _p("-", Y, "Ingestor stopped")
         print()
 
-    # Analyze today's data (15m_test auto-trims to last 15 min)
-    today = datetime.now().strftime("%Y-%m-%d")
-    data_dir = str(DATA_DEFAULT / today)
+    # Analyze data — use start_date to avoid midnight rollover.
+    # The ingestor writes to the date dir it started on; auto-trim picks the tail.
+    data_dir = str(DATA_DEFAULT / start_date)
     _p("→", B, f"Analyzing: {data_dir}")
     print()
     extra = ""
