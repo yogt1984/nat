@@ -99,6 +99,22 @@ forward_horizon_bars = 1
 # Symbols to scan
 symbols = ["BTC"]
 
+[smoke_test]
+# 15-minute smoke test configuration
+live_duration_minutes = 15
+expected_symbols = ["BTC", "ETH", "SOL"]
+expected_rate_per_sec = 10
+emission_rate_tolerance = 0.20
+cross_symbol_max_diff = 0.01
+nan_threshold_core = 0.05
+max_gap_seconds = 5.0
+warmup_seconds = 30
+optional_vectors = ["whale", "liquidation", "concentration"]
+cluster_k = 4
+cluster_max_samples = 5000
+silhouette_floor = -0.1
+bar_timeframe = "1min"
+
 [state]
 # State file tracks pipeline progress (JSON)
 state_file = "./data/pipeline_state.json"
