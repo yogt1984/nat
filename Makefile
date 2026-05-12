@@ -906,16 +906,15 @@ WINDOW ?=
 	$(PYTHON) scripts/15m_test.py run --data-dir $(SMOKE_DATA) --output $(SMOKE_OUTPUT) --skip-cluster -v
 
 # Visualize 15-minute data window (microstructure snapshot)
+# Defaults to latest experiment; override with SMOKE_DATA=path
 15m_viz:
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
 	@echo "║          15-MINUTE VISUAL HEALTH CHECK                           ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
 	@echo ""
-	@echo "  Data:   $(SMOKE_DATA)"
-	@echo "  Symbol: $(SYMBOL)"
-	@echo "  Output: $(SMOKE_OUTPUT)"
-	@echo ""
-	$(PYTHON) scripts/15m_visualize.py --data-dir $(SMOKE_DATA) --symbol $(SYMBOL) --output $(SMOKE_OUTPUT) $(if $(WINDOW),--window $(WINDOW)) -v
+	$(PYTHON) scripts/15m_visualize.py \
+		$(if $(filter command line,$(origin SMOKE_DATA)),--data-dir $(SMOKE_DATA),--latest) \
+		--symbol $(SYMBOL) $(if $(WINDOW),--window $(WINDOW)) -v
 
 # Run 15m_test unit tests
 test_15m:

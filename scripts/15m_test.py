@@ -754,15 +754,13 @@ def phase_report(report: SmokeTestReport, output_dir: Path) -> PhaseResult:
     t0 = time.perf_counter()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
     # Markdown
-    md_path = output_dir / f"smoke_test_{ts}.md"
+    md_path = output_dir / "smoke_test.md"
     md_path.write_text(_format_markdown(report))
     log.info("Markdown report: %s", md_path)
 
     # JSON
-    json_path = output_dir / f"smoke_test_{ts}.json"
+    json_path = output_dir / "smoke_test.json"
     json_path.write_text(json.dumps(asdict(report), indent=2, cls=_NumpyEncoder))
     log.info("JSON report: %s", json_path)
 
@@ -778,6 +776,34 @@ def phase_report(report: SmokeTestReport, output_dir: Path) -> PhaseResult:
 # --------------------------------------------------------------------------- #
 #  Orchestrator
 # --------------------------------------------------------------------------- #
+
+
+def _create_experiment_dir(output_dir: Path, used_dir: Path, df: pd.DataFrame,
+                           report: SmokeTestReport) -> Path:
+    """Create experiment subdirectory with data reference and latest symlink."""
+    exp_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    exp_dir = output_dir / f"exp_{exp_ts}"
+    exp_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write data reference so 15m_visualize can find the data
+    data_ref = {
+        "data_dir": str(used_dir.resolve()),
+        "rows": len(df),
+        "symbols": report.symbols,
+        "ts_min": int(df["timestamp_ns"].min()),
+        "ts_max": int(df["timestamp_ns"].max()),
+        "created": report.timestamp,
+    }
+    (exp_dir / "data_ref.json").write_text(json.dumps(data_ref, indent=2))
+
+    # Update latest symlink
+    latest = output_dir / "latest"
+    if latest.is_symlink() or latest.exists():
+        latest.unlink()
+    latest.symlink_to(exp_dir.resolve())
+    log.info("Experiment dir: %s", exp_dir)
+
+    return exp_dir
 
 
 def run_smoke_test(
@@ -807,6 +833,9 @@ def run_smoke_test(
     report.total_rows = len(df)
     report.symbols = sorted(df["symbol"].unique().tolist()) if "symbol" in df.columns else []
 
+    # Create experiment directory with data reference
+    exp_dir = _create_experiment_dir(output_dir, used_dir, df, report)
+
     # Phase 2: Validate (gate)
     p2 = phase_validate(df, used_dir, cfg)
     report.phases.append(p2)
@@ -816,7 +845,7 @@ def run_smoke_test(
         log.error("Gate tripped — skipping Profile and Cluster phases")
         report.overall_passed = False
         report.critical_passed = False
-        report.phases.append(phase_report(report, output_dir))
+        report.phases.append(phase_report(report, exp_dir))
         return 2
 
     # Phase 3: Profile
@@ -835,7 +864,7 @@ def run_smoke_test(
     report.critical_passed = not any(p.gated for p in report.phases)
 
     # Phase 5: Report
-    report.phases.append(phase_report(report, output_dir))
+    report.phases.append(phase_report(report, exp_dir))
 
     if not report.overall_passed:
         return 1

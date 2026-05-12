@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from datetime import datetime, timezone
@@ -507,11 +508,13 @@ def main():
         prog="15m_visualize",
         description="15-Minute Visual Health Check — microstructure snapshot",
     )
-    parser.add_argument("--data-dir", type=Path, required=True,
+    parser.add_argument("--data-dir", type=Path, default=None,
                         help="Path to parquet data directory")
+    parser.add_argument("--latest", action="store_true",
+                        help="Use data from latest 15m experiment (reports/smoke_test/latest)")
     parser.add_argument("--symbol", type=str, default="BTC",
                         help="Symbol to visualize, or 'all' (default: BTC)")
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT,
+    parser.add_argument("--output", type=Path, default=None,
                         help="Output directory for PNG files")
     parser.add_argument("--timeframe", type=str, default="1min",
                         help="Bar aggregation timeframe (default: 1min)")
@@ -524,6 +527,21 @@ def main():
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
+
+    # Resolve data directory
+    if args.data_dir is None or args.latest:
+        ref_path = DEFAULT_OUTPUT / "latest" / "data_ref.json"
+        if ref_path.exists():
+            ref = json.loads(ref_path.read_text())
+            args.data_dir = Path(ref["data_dir"])
+            if args.output is None:
+                args.output = DEFAULT_OUTPUT / "latest"
+            log.info("Using latest experiment: %s (%d rows)", args.data_dir, ref["rows"])
+        else:
+            parser.error("--data-dir required (no latest experiment found; run 'make 15m' first)")
+
+    if args.output is None:
+        args.output = DEFAULT_OUTPUT
 
     log.info("Loading data from %s", args.data_dir)
     df = load_parquet(args.data_dir)
