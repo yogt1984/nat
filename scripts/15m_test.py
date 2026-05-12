@@ -190,6 +190,18 @@ def _numeric_feature_cols(df: pd.DataFrame) -> list[str]:
 # --------------------------------------------------------------------------- #
 
 
+def _fmt_duration(seconds: float) -> str:
+    """Format seconds as compact human string: 14m34s, 1h34m4s, 45s."""
+    s = int(seconds)
+    if s < 60:
+        return f"{s}s"
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h > 0:
+        return f"{h}h{m}m{sec}s" if sec else f"{h}h{m}m"
+    return f"{m}m{sec}s" if sec else f"{m}m"
+
+
 def _trim_to_window(df: pd.DataFrame, window_minutes: int) -> pd.DataFrame:
     """Trim dataframe to the last N minutes of data."""
     ts_max = df["timestamp_ns"].max()
@@ -201,9 +213,10 @@ def _trim_to_window(df: pd.DataFrame, window_minutes: int) -> pd.DataFrame:
     return trimmed
 
 
-def phase_collect(cfg: dict, data_dir: Optional[Path], live: bool) -> tuple[pd.DataFrame, Path]:
+def phase_collect(cfg: dict, data_dir: Optional[Path], live: bool,
+                  duration_s: Optional[int] = None) -> tuple[pd.DataFrame, Path]:
     """Load or wait for data. Returns (dataframe, data_dir_used)."""
-    window = cfg.get("live_duration_minutes", 15)
+    window = (duration_s / 60) if duration_s else cfg.get("live_duration_minutes", 15)
 
     if not live:
         if data_dir is None:
@@ -802,8 +815,12 @@ def _create_experiment_dir(output_dir: Path, used_dir: Path, df: pd.DataFrame,
     exp_dir = output_dir / f"exp_{exp_ts}"
     exp_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save trimmed data as 15m__ prefixed parquet with timestamp
-    data_path = exp_dir / f"15m__{exp_ts}.parquet"
+    # Compute actual data duration for filename prefix
+    actual_dur_s = (df["timestamp_ns"].max() - df["timestamp_ns"].min()) / 1e9
+    dur_label = _fmt_duration(actual_dur_s)
+
+    # Save data with duration prefix: e.g. 14m34s__20260512_192857.parquet
+    data_path = exp_dir / f"{dur_label}__{exp_ts}.parquet"
     df.to_parquet(data_path)
     log.info("Saved %d rows to %s", len(df), data_path)
 
@@ -835,6 +852,7 @@ def run_smoke_test(
     live: bool,
     output_dir: Path,
     skip_cluster: bool,
+    duration_s: Optional[int] = None,
 ) -> int:
     """Run all phases. Returns exit code (0/1/2)."""
     report = SmokeTestReport(
@@ -843,7 +861,7 @@ def run_smoke_test(
 
     # Phase 1: Collect
     try:
-        df, used_dir = phase_collect(cfg, data_dir, live)
+        df, used_dir = phase_collect(cfg, data_dir, live, duration_s)
     except Exception as e:
         log.error("Phase 1 (Collect) failed: %s", e)
         report.data_dir = str(data_dir or "live")
@@ -913,6 +931,8 @@ def main():
                        help="Monitor for 15 min of fresh data from the ingestor")
     run_p.add_argument("--output", type=Path, default=DEFAULT_OUTPUT,
                        help="Report output directory")
+    run_p.add_argument("--duration", type=int, default=None,
+                       help="Trim window in seconds (default: 900 = 15 min)")
     run_p.add_argument("--skip-cluster", action="store_true",
                        help="Skip Phase 4 (clustering) for faster runs")
     run_p.add_argument("--config", type=Path, default=DEFAULT_CONFIG,
@@ -939,6 +959,7 @@ def main():
         live=args.live,
         output_dir=args.output,
         skip_cluster=args.skip_cluster,
+        duration_s=args.duration,
     )
     sys.exit(exit_code)
 
