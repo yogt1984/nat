@@ -873,7 +873,7 @@ exp_tunnel:
 # 15-MINUTE SMOKE TEST
 # =============================================================================
 
-SMOKE_DATA ?= $(DATA)
+SMOKE_DATA ?= ./data/features/$(shell date -u +%Y-%m-%d)
 SMOKE_OUTPUT ?= ./reports/smoke_test
 SYMBOL ?= BTC
 WINDOW ?=

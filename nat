@@ -1229,10 +1229,21 @@ def cmd_exp_tunnel(args):
 
 # ── 15-Minute Experiment ─────────────────────────────────────────────────────
 
+def _today_data(args):
+    """Resolve data dir for 15m: explicit --data, or today's date directory."""
+    d = getattr(args, 'data', None)
+    if d:
+        return d
+    today = datetime.now().strftime("%Y-%m-%d")
+    return str(DATA_DEFAULT / today)
+
+
 def cmd_15m(args):
     """Run 15-minute experiment (validate + profile + cluster + report)."""
-    data = _data(args)
+    data = _today_data(args)
     _banner("15-MINUTE EXPERIMENT")
+    _p("→", B, f"Data: {data}")
+    print()
     extra = ""
     if getattr(args, 'skip_cluster', False):
         extra += " --skip-cluster"
