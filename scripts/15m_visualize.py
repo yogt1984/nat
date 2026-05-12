@@ -335,31 +335,20 @@ def panel_feature_heatmap(ax: plt.Axes, bars: pd.DataFrame, df_raw: pd.DataFrame
 # ---------------------------------------------------------------------------
 
 
-def generate_visualization(
-    df: pd.DataFrame,
+def _render_snapshot(
+    df_sym: pd.DataFrame,
+    bars: pd.DataFrame,
     symbol: str,
+    title_suffix: str,
     output_dir: Path,
-    timeframe: str = "1min",
+    filename: str,
 ) -> Path:
-    """Generate 6-panel microstructure snapshot for one symbol."""
+    """Render the 6-panel figure for a single data slice."""
     apply_style()
-
-    # Filter to symbol
-    df_sym = df[df["symbol"] == symbol].copy()
-    if df_sym.empty:
-        raise ValueError(f"No data for symbol {symbol}")
-
-    df_sym = df_sym.sort_values("timestamp_ns").reset_index(drop=True)
-    df_sym = _ensure_datetime(df_sym)
-
-    # Aggregate bars for panels 3 and 6
-    bars = aggregate_bars(df_sym, timeframe)
-    bars["bar_start"] = pd.to_datetime(bars["bar_start"])
 
     # Downsample tick data for plotting (every 10th row ~ 1/sec)
     ds = df_sym.iloc[::10].copy()
 
-    # Layout: 6 panels, shared x on 0-4, independent heatmap
     fig = plt.figure(figsize=(16, 24))
     gs = gridspec.GridSpec(6, 1, height_ratios=[1, 1, 1, 1, 1, 1.2],
                            hspace=0.25)
@@ -371,11 +360,9 @@ def generate_visualization(
     ax4 = fig.add_subplot(gs[4], sharex=ax0)
     ax5 = fig.add_subplot(gs[5])  # heatmap has different x
 
-    # Hide x labels on shared panels except the last shared one
     for a in [ax0, ax1, ax3]:
         plt.setp(a.get_xticklabels(), visible=False)
 
-    # Draw panels — each wrapped to handle missing data gracefully
     panels = [
         (panel_price_spread, ax0, [ds]),
         (panel_book_depth, ax1, [ds]),
@@ -393,18 +380,83 @@ def generate_visualization(
             ax.text(0.5, 0.5, f"Error: {e}", transform=ax.transAxes,
                     ha="center", va="center", fontsize=10, color=COLORS[2])
 
-    # Format bar panel x-axis
     ax2.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
 
-    ts_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    fig.suptitle(f"{symbol} — 15-Minute Microstructure Snapshot",
+    fig.suptitle(f"{symbol} — {title_suffix}",
                  fontsize=14, color="#c9d1d9", y=0.995)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    out_path = output_dir / f"15m_viz_{symbol}_{ts_str}.png"
+    out_path = output_dir / filename
     fig.savefig(out_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close(fig)
     return out_path
+
+
+def generate_visualization(
+    df: pd.DataFrame,
+    symbol: str,
+    output_dir: Path,
+    timeframe: str = "1min",
+    window_minutes: Optional[int] = None,
+) -> list[Path]:
+    """Generate 6-panel microstructure snapshot(s) for one symbol.
+
+    If window_minutes is set, the data is split into consecutive windows
+    and one PNG is produced per window. Otherwise one PNG for all data.
+    """
+    df_sym = df[df["symbol"] == symbol].copy()
+    if df_sym.empty:
+        raise ValueError(f"No data for symbol {symbol}")
+
+    df_sym = df_sym.sort_values("timestamp_ns").reset_index(drop=True)
+    df_sym = _ensure_datetime(df_sym)
+
+    if window_minutes is None:
+        # Single snapshot of all data
+        bars = aggregate_bars(df_sym, timeframe)
+        bars["bar_start"] = pd.to_datetime(bars["bar_start"])
+        ts_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        out = _render_snapshot(
+            df_sym, bars, symbol,
+            "Microstructure Snapshot",
+            output_dir, f"15m_viz_{symbol}_{ts_str}.png",
+        )
+        return [out]
+
+    # Split into consecutive windows
+    ts_min = df_sym["timestamp_ns"].min()
+    ts_max = df_sym["timestamp_ns"].max()
+    window_ns = int(window_minutes * 60 * 1e9)
+
+    edges = list(range(int(ts_min), int(ts_max) + 1, window_ns))
+    if edges[-1] < ts_max:
+        edges.append(int(ts_max) + 1)
+
+    outputs = []
+    for i in range(len(edges) - 1):
+        t0, t1 = edges[i], edges[i + 1]
+        chunk = df_sym[(df_sym["timestamp_ns"] >= t0) & (df_sym["timestamp_ns"] < t1)]
+        if len(chunk) < 100:
+            log.warning("Window %d: only %d rows, skipping", i + 1, len(chunk))
+            continue
+
+        chunk = chunk.reset_index(drop=True)
+        try:
+            bars = aggregate_bars(chunk, timeframe)
+        except ValueError:
+            log.warning("Window %d: bar aggregation failed, skipping", i + 1)
+            continue
+        bars["bar_start"] = pd.to_datetime(bars["bar_start"])
+
+        win_start = pd.to_datetime(t0, unit="ns").strftime("%H:%M")
+        win_end = pd.to_datetime(t1, unit="ns").strftime("%H:%M")
+        title = f"{window_minutes}min Window {i + 1} ({win_start}–{win_end})"
+        fname = f"15m_viz_{symbol}_w{i + 1:02d}_{win_start.replace(':', '')}_{win_end.replace(':', '')}.png"
+
+        out = _render_snapshot(chunk, bars, symbol, title, output_dir, fname)
+        outputs.append(out)
+
+    return outputs
 
 
 def print_summary(df: pd.DataFrame, symbols: list[str], data_dir: str) -> None:
@@ -463,6 +515,8 @@ def main():
                         help="Output directory for PNG files")
     parser.add_argument("--timeframe", type=str, default="1min",
                         help="Bar aggregation timeframe (default: 1min)")
+    parser.add_argument("--window", type=int, default=None, metavar="MINUTES",
+                        help="Split data into N-minute windows (e.g. --window 15)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -488,8 +542,11 @@ def main():
 
     for sym in targets:
         log.info("Generating visualization for %s ...", sym)
-        out = generate_visualization(df, sym, args.output, args.timeframe)
-        print(f"  Saved: {out}")
+        outputs = generate_visualization(
+            df, sym, args.output, args.timeframe, args.window,
+        )
+        for out in outputs:
+            print(f"  Saved: {out}")
 
     print()
 

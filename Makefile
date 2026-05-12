@@ -876,6 +876,7 @@ exp_tunnel:
 SMOKE_DATA ?= $(DATA)
 SMOKE_OUTPUT ?= ./reports/smoke_test
 SYMBOL ?= BTC
+WINDOW ?=
 
 # Run 15-minute smoke test on existing data (offline)
 15m:
@@ -914,7 +915,7 @@ SYMBOL ?= BTC
 	@echo "  Symbol: $(SYMBOL)"
 	@echo "  Output: $(SMOKE_OUTPUT)"
 	@echo ""
-	$(PYTHON) scripts/15m_visualize.py --data-dir $(SMOKE_DATA) --symbol $(SYMBOL) --output $(SMOKE_OUTPUT) -v
+	$(PYTHON) scripts/15m_visualize.py --data-dir $(SMOKE_DATA) --symbol $(SYMBOL) --output $(SMOKE_OUTPUT) $(if $(WINDOW),--window $(WINDOW)) -v
 
 # Run 15m_test unit tests
 test_15m:
@@ -1086,7 +1087,7 @@ help:
 	@echo "  15m               Run smoke test on data (SMOKE_DATA=./data/features)"
 	@echo "  15m_live          Run smoke test waiting for live ingestor data"
 	@echo "  15m_fast          Run smoke test without clustering (faster)"
-	@echo "  15m_viz           Visualize 15m microstructure (SYMBOL=BTC or all)"
+	@echo "  15m_viz           Visualize microstructure (SYMBOL=BTC WINDOW=15)"
 	@echo "  test_15m          Run 15m smoke test unit tests"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
