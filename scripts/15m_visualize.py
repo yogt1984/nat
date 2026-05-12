@@ -534,7 +534,7 @@ def main():
         ref_path = DEFAULT_OUTPUT / "latest" / "data_ref.json"
         if ref_path.exists():
             ref = json.loads(ref_path.read_text())
-            # Prefer 15m__ data file from experiment dir
+            # Prefer 15m__ data file from experiment dir (check ref or glob)
             if "data_file" in ref and Path(ref["data_file"]).exists():
                 data_file = Path(ref["data_file"])
             else:

@@ -802,8 +802,8 @@ def _create_experiment_dir(output_dir: Path, used_dir: Path, df: pd.DataFrame,
     exp_dir = output_dir / f"exp_{exp_ts}"
     exp_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save trimmed data as 15m__ prefixed parquet
-    data_path = exp_dir / f"15m__data.parquet"
+    # Save trimmed data as 15m__ prefixed parquet with timestamp
+    data_path = exp_dir / f"15m__{exp_ts}.parquet"
     df.to_parquet(data_path)
     log.info("Saved %d rows to %s", len(df), data_path)
 

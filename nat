@@ -1229,8 +1229,11 @@ def cmd_exp_tunnel(args):
 
 # ── 15-Minute Experiment ─────────────────────────────────────────────────────
 
+FIFTEEN_MIN = 15 * 60
+
+
 def _today_data(args):
-    """Resolve data dir for 15m: explicit --data, or today's date directory."""
+    """Resolve data dir: explicit --data, or today's date directory."""
     d = getattr(args, 'data', None)
     if d:
         return d
@@ -1238,10 +1241,102 @@ def _today_data(args):
     return str(DATA_DEFAULT / today)
 
 
+def _start_ingestor_bg():
+    """Start ingestor as background process. Returns (Popen, logfile) or (None, None)."""
+    if not BIN_ING.exists():
+        _p("…", Y, "Binary not found, building release…")
+        subprocess.run("cargo build --release --bin ing", shell=True, cwd=str(RUST))
+        if not BIN_ING.exists():
+            _p("x", R, "Build failed")
+            return None, None
+
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    logfile = LOG_DIR / f"15m_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    lf = open(logfile, "w")
+    proc = subprocess.Popen(
+        [str(BIN_ING), str(ING_CFG)],
+        cwd=str(RUST),
+        stdout=lf, stderr=subprocess.STDOUT,
+    )
+    time.sleep(3)
+    if proc.poll() is not None:
+        _p("x", R, f"Ingestor died. Check: cat {logfile}")
+        lf.close()
+        return None, None
+    return proc, logfile
+
+
+def _stop_ingestor_bg(proc):
+    """Gracefully stop a background ingestor process."""
+    if proc and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+
 def cmd_15m(args):
-    """Run 15-minute experiment (validate + profile + cluster + report)."""
-    data = _today_data(args)
+    """Full 15-minute experiment: ingest → collect → stop → validate → profile → cluster → report."""
+    duration = getattr(args, 'duration', FIFTEEN_MIN)
     _banner("15-MINUTE EXPERIMENT")
+
+    # Check if ingestor already running
+    existing_pid = _pid()
+    own_ingestor = False
+    proc = None
+
+    if existing_pid:
+        _p("*", G, f"Ingestor already running (PID {existing_pid})")
+    else:
+        _p("→", B, "Starting ingestor…")
+        proc, logfile = _start_ingestor_bg()
+        if proc is None:
+            return
+        own_ingestor = True
+        _p("*", G, f"Ingestor started (PID {proc.pid}), log: {logfile}")
+
+    # Countdown
+    _p("⏳", B, f"Collecting for {duration // 60} minutes…")
+    print()
+    t0 = time.time()
+    try:
+        while time.time() - t0 < duration:
+            elapsed = int(time.time() - t0)
+            remaining = duration - elapsed
+            m, s = divmod(remaining, 60)
+            print(f"\r    [{elapsed // 60:02d}:{elapsed % 60:02d} / "
+                  f"{duration // 60:02d}:00]  {m}m {s}s left   ", end="", flush=True)
+            time.sleep(5)
+    except KeyboardInterrupt:
+        print("\n")
+        _p("!", Y, "Interrupted early — analyzing what we have")
+
+    print("\n")
+
+    # Stop ingestor if we started it
+    if own_ingestor:
+        _p("→", B, "Stopping ingestor…")
+        _stop_ingestor_bg(proc)
+        _p("-", Y, "Ingestor stopped")
+        print()
+
+    # Analyze today's data (15m_test auto-trims to last 15 min)
+    today = datetime.now().strftime("%Y-%m-%d")
+    data_dir = str(DATA_DEFAULT / today)
+    _p("→", B, f"Analyzing: {data_dir}")
+    print()
+    extra = ""
+    if getattr(args, 'skip_cluster', False):
+        extra += " --skip-cluster"
+    _py(f"scripts/15m_test.py run --data-dir {data_dir} --output reports/smoke_test -v{extra}")
+
+
+def cmd_15m_offline(args):
+    """Run analysis on existing data (no ingestion)."""
+    data = _today_data(args)
+    _banner("15-MINUTE ANALYSIS (OFFLINE)")
     _p("→", B, f"Data: {data}")
     print()
     extra = ""
@@ -1250,17 +1345,8 @@ def cmd_15m(args):
     _py(f"scripts/15m_test.py run --data-dir {data} --output reports/smoke_test -v{extra}")
 
 
-def cmd_15m_live(args):
-    """Run 15-minute experiment on live ingestor data."""
-    _banner("15-MINUTE EXPERIMENT (LIVE)")
-    extra = ""
-    if getattr(args, 'skip_cluster', False):
-        extra += " --skip-cluster"
-    _py(f"scripts/15m_test.py run --live --output reports/smoke_test -v{extra}")
-
-
 def cmd_15m_viz(args):
-    """Visualize 15-minute experiment data."""
+    """Visualize latest 15-minute experiment."""
     _banner("15-MINUTE VISUALIZATION")
     sym = _sym(args)
     extra = ""
@@ -1276,7 +1362,7 @@ def cmd_15m_viz(args):
 
 
 def cmd_15m_test(args):
-    """Run 15m smoke test unit tests."""
+    """Run 15m unit tests."""
     _exec(f"cd {ROOT / 'scripts'} && {PY} -m pytest tests/test_15m_test.py -v")
 
 
@@ -1486,10 +1572,10 @@ def cmd_help(args=None):
     nat docker logs            View logs
 
   {BOLD}15-Minute Experiment{W}
-    nat 15m                    Run experiment on data (--data DIR, --skip-cluster)
-    nat 15m live               Run experiment on live ingestor data
+    nat 15m                    Ingest 15min → validate → profile → cluster → report
+    nat 15m --duration 300     Short 5-min experiment
+    nat 15m offline            Analyze existing data (--data DIR, no ingestion)
     nat 15m viz                Visualize latest experiment (--symbol, --window)
-    nat 15m viz --window 15    Split into 15-min windows
     nat 15m viz --symbol all   All symbols
     nat 15m test               Run unit tests
 
@@ -1920,14 +2006,15 @@ def build_parser():
     dksub.add_parser('logs', help='View logs').set_defaults(func=cmd_docker_logs)
 
     # ── 15m experiment ──
-    sm_p = sub.add_parser('15m', help='15-minute experiment (default: run on data)')
-    sm_p.add_argument('--data', type=str, default=None, help='Data directory')
+    sm_p = sub.add_parser('15m', help='15-minute experiment (ingest → analyze → report)')
+    sm_p.add_argument('--duration', type=int, default=FIFTEEN_MIN, help='Collection seconds (default: 900)')
     sm_p.add_argument('--skip-cluster', action='store_true', help='Skip clustering phase')
     sm_p.set_defaults(func=cmd_15m)
     smsub = sm_p.add_subparsers(dest='subcmd')
-    sml = smsub.add_parser('live', help='Run on live ingestor data')
-    sml.add_argument('--skip-cluster', action='store_true')
-    sml.set_defaults(func=cmd_15m_live)
+    smo = smsub.add_parser('offline', help='Analyze existing data (no ingestion)')
+    smo.add_argument('--data', type=str, default=None, help='Data directory')
+    smo.add_argument('--skip-cluster', action='store_true')
+    smo.set_defaults(func=cmd_15m_offline)
     smv = smsub.add_parser('viz', help='Visualize latest experiment')
     smv.add_argument('--data', type=str, default=None, help='Data directory (default: latest)')
     smv.add_argument('--symbol', type=str, default='BTC', help='Symbol or "all"')

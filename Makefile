@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner dashboard test_dashboard signal_test signal_test_all exp_start exp_stop exp_status exp_check exp_midweek exp_analyze eamm_run eamm_regime eamm_backtest eamm_test eamm_test_integration 15m 15m_live 15m_fast 15m_viz test_15m
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner dashboard test_dashboard signal_test signal_test_all exp_start exp_stop exp_status exp_check exp_midweek exp_analyze eamm_run eamm_regime eamm_backtest eamm_test eamm_test_integration 15m 15m_offline 15m_viz test_15m
 
 # Python interpreter — prefer 'python' (often conda/venv) over system 'python3'.
 # Override with: make PYTHON=/usr/bin/python3
@@ -878,32 +878,21 @@ SMOKE_OUTPUT ?= ./reports/smoke_test
 SYMBOL ?= BTC
 WINDOW ?=
 
-# Run 15-minute smoke test on existing data (offline)
+# Full 15-minute experiment: ingest → validate → profile → cluster → report
 15m:
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          15-MINUTE SMOKE TEST                                    ║"
+	@echo "║          15-MINUTE EXPERIMENT                                    ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
 	@echo ""
-	@echo "  Data:   $(SMOKE_DATA)"
-	@echo "  Output: $(SMOKE_OUTPUT)"
+	nat 15m
+
+# Analyze existing data (no ingestion)
+15m_offline:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          15-MINUTE ANALYSIS (OFFLINE)                            ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
 	@echo ""
 	$(PYTHON) scripts/15m_test.py run --data-dir $(SMOKE_DATA) --output $(SMOKE_OUTPUT) -v
-
-# Run 15-minute smoke test in live mode (waits for ingestor data)
-15m_live:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          15-MINUTE SMOKE TEST (LIVE)                             ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "  Waiting for 15 minutes of fresh ingestor data..."
-	@echo "  Output: $(SMOKE_OUTPUT)"
-	@echo ""
-	$(PYTHON) scripts/15m_test.py run --live --output $(SMOKE_OUTPUT) -v
-
-# Run smoke test without clustering (faster)
-15m_fast:
-	@echo "Running 15m smoke test (skip clustering)..."
-	$(PYTHON) scripts/15m_test.py run --data-dir $(SMOKE_DATA) --output $(SMOKE_OUTPUT) --skip-cluster -v
 
 # Visualize 15-minute data window (microstructure snapshot)
 # Defaults to latest experiment; override with SMOKE_DATA=path
@@ -1083,10 +1072,9 @@ help:
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " 15-MINUTE SMOKE TEST"
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  15m               Run smoke test on data (SMOKE_DATA=./data/features)"
-	@echo "  15m_live          Run smoke test waiting for live ingestor data"
-	@echo "  15m_fast          Run smoke test without clustering (faster)"
-	@echo "  15m_viz           Visualize microstructure (SYMBOL=BTC WINDOW=15)"
+	@echo "  15m               Full 15-min experiment: ingest → validate → report"
+	@echo "  15m_offline       Analyze existing data (SMOKE_DATA=./data/features/YYYY-MM-DD)"
+	@echo "  15m_viz           Visualize latest experiment (SYMBOL=BTC WINDOW=15)"
 	@echo "  test_15m          Run 15m smoke test unit tests"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
