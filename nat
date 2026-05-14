@@ -1371,6 +1371,21 @@ def cmd_15m_test(args):
     _exec(f"cd {ROOT / 'scripts'} && {PY} -m pytest tests/test_15m_test.py -v")
 
 
+# ── Spannung ──────────────────────────────────────────────────────────────────
+
+def cmd_spannung(args):
+    """Run Spannung offline grid search."""
+    _banner("Spannung Grid Search")
+    data = _data(args)
+    sym = getattr(args, 'symbol', 'all')
+    top = getattr(args, 'top', 20)
+    cmd = f"scripts/spannung_grid.py --data-dir {data} --symbol {sym} --top {top}"
+    output = getattr(args, 'output', None)
+    if output:
+        cmd += f" --output {output}"
+    _py(cmd)
+
+
 # ── Docker commands ──────────────────────────────────────────────────────────
 
 def cmd_docker_build(args):
@@ -1440,6 +1455,7 @@ def cmd_help(args=None):
   {BOLD}Analysis{W}
     nat profile                Run regime profiling
     nat profile scalp          Scalping feature profiler (--symbol, --top, --forward-test)
+    nat spannung               Spannung signal grid search (--data, --symbol, --top)
     nat report                 Generate full experiment report
     nat macro                  Daily MA crossover signals
     nat screen [args]          Alpha screening
@@ -2029,6 +2045,14 @@ def build_parser():
                      help='Page: 0=basic, 1=advanced, all=both')
     smv.set_defaults(func=cmd_15m_viz)
     smsub.add_parser('test', help='Run unit tests').set_defaults(func=cmd_15m_test)
+
+    # ── Spannung ──────────────────────────────────────────────────────────────
+    spn_p = sub.add_parser('spannung', help='Spannung signal grid search')
+    spn_p.add_argument('--data', type=str, default=None, help='Data dir (auto-detects latest)')
+    spn_p.add_argument('--symbol', type=str, default='all', help='Symbol or "all" (default: all)')
+    spn_p.add_argument('--top', type=int, default=20, help='Top N results to display')
+    spn_p.add_argument('--output', type=str, default=None, help='Output directory')
+    spn_p.set_defaults(func=cmd_spannung)
 
     return p
 
