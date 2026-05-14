@@ -233,16 +233,50 @@ Both the exponential smoothing and the illiquidity normalization *hurt* the sign
    toxicity, volatility regime) that determines when high imbalance is informative
    vs. noise.
 
+## Phase A.3: Out-of-Sample Validation (2026-05-14)
+
+**Method**: Run raw imbalance_l1 IC (the true signal) on 3 out-of-sample dates plus
+the original in-sample date. Tests whether the signal generalizes across days and
+market conditions.
+
+**Note**: 2026-05-07 and 2026-05-08 data turned out to be frozen (constant features,
+old ingestor bug). Valid OOS dates: 2026-05-11, 2026-05-10, 2026-04-25.
+
+### Cross-Day Results (raw imbalance_l1, BTC h=5s, ETH h=5s, SOL h=1s)
+
+| Date | Tag | Hours | BTC IC | ETH IC | SOL IC |
+|------|-----|-------|--------|--------|--------|
+| 2026-05-12 | In-sample | 10.0h | 0.479 | 0.484 | 0.441 |
+| 2026-05-11 | OOS | 24.0h | 0.466 | 0.471 | 0.423 |
+| 2026-05-10 | OOS | 6.6h | 0.446 | 0.423 | 0.405 |
+| 2026-04-25 | OOS | 7.6h | 0.359 | 0.353 | 0.270 |
+
+### Interpretation
+
+1. **Recent OOS (May 10-11) is nearly identical to in-sample** — IC drops only
+   0.01-0.04. No overfit. The signal is stable across consecutive days.
+
+2. **24-hour stability confirmed** — 2026-05-11 has 196 non-overlapping 5-min windows
+   and still shows IC=0.47 for BTC. The signal doesn't degrade over a full day.
+
+3. **Older data (April 25) is weaker but still strong** — IC 0.27-0.36. Possible causes:
+   - Different market regime (3 weeks earlier, different volatility/liquidity conditions)
+   - Earlier ingestor version computing features slightly differently
+   - Still well above the 0.05 go/no-go threshold
+
+4. **The signal passes OOS validation decisively** — raw L1 book imbalance is a genuine,
+   persistent microstructure signal that generalizes across days.
+
 ### Remaining Caveats
 
-- **Out-of-sample validation**: All results are from 2026-05-12. Run on 2026-05-08
-  or 2026-05-10 to confirm cross-day stability.
 - **Transaction cost reality**: IC=0.48 at 5s horizon is extraordinary on paper, but
   actual execution at 100ms timescales faces latency, slippage, queue position,
   and adverse selection costs that paper IC doesn't capture.
 - **Is this tradeable?** At 10 rows/sec, acting on L1 imbalance means competing with
   HFT firms on collocated infrastructure. The signal is real but the edge may not
   survive execution friction for a non-collocated setup.
+- **Longer-term OOS**: Need weeks/months of data to confirm stability across major
+  market regime changes (bull/bear transitions, volatility spikes, liquidity crises).
 
 ### Implementation: `nat spannung`
 
@@ -260,6 +294,8 @@ Output: `reports/spannung/spannung_{SYM}.json` + `spannung_summary.json`
 - Should Spannung be computed per-symbol or cross-symbol (e.g., BTC flow / ETH illiquidity)?
 - Is there an asymmetry to exploit — does buy-side Spannung predict differently than sell-side?
 - How does Spannung interact with the existing `derived_informed_trend_score` (kyle x monotonicity)?
-- Can the exponential decay be replaced with a learned kernel (more general but harder to optimize)?
-- How much of the IC comes from the numerator vs the denominator? (Test raw imbalance IC alone)
-- Does the signal survive a 1-tick lag? (Look-ahead bias check)
+- Can a gating function (entropy/toxicity regime) improve the raw imbalance signal?
+- At what timescale does the illiquidity denominator start adding value? (minutes? hours?)
+- ~~How much IC comes from numerator vs denominator?~~ **Answered**: all from numerator (raw imbalance)
+- ~~Does the signal survive a 1-tick lag?~~ **Answered**: yes, smooth decay, no look-ahead bias
+- ~~Does the signal generalize across days?~~ **Answered**: yes, IC 0.27-0.48 across 4 dates
