@@ -381,18 +381,59 @@ def compute_coherence_phase(
 
 
 def compute_acf(signal: np.ndarray) -> Tuple[np.ndarray, ACFResult]:
-    """FFT-based autocorrelation with OU process fit."""
+    """FFT-based autocorrelation with OU process fit.
+
+    Wiener-Khinchin (FFT) ACF
+    -------------------------
+    For zero-mean signal x[n] of length N, the biased ACF at lag k is:
+
+        R[k] = (1/N) sum_{n=0}^{N-1-k} x[n] x[n+k]
+
+    Via Wiener-Khinchin, this equals the inverse DFT of the power spectrum:
+
+        R[k] = IDFT{ |X(f)|^2 }
+
+    Computed efficiently using:
+        1. Zero-pad to nfft = 2^ceil(log2(2N))  (avoids circular aliasing)
+        2. fft_x = rfft(x, nfft)
+        3. acf_raw = irfft(|fft_x|^2)[:max_lag+1]
+        4. Normalise: rho[k] = acf_raw[k] / acf_raw[0]   (so rho[0] = 1)
+
+    Complexity: O(N log N).
+
+    Ornstein-Uhlenbeck ACF fit
+    --------------------------
+    The continuous-time OU process  dX_t = -theta*X_t dt + sigma*dW_t
+    has autocorrelation function:
+
+        rho(tau) = exp(-theta * tau),   tau >= 0
+
+    In discrete time (tau in ticks):
+
+        rho[k] = exp(-theta * k)
+
+    Parameters:
+        theta  -- mean-reversion rate (ticks^{-1}), fitted via nonlinear LS
+                  Fallback: theta = -log(rho[1]) (moment estimator at lag 1)
+
+    Derived quantities:
+        half-life (ticks) = log(2) / theta
+        half-life (s)     = log(2) / theta * 0.1   (tick duration = 100 ms)
+
+    Ref: Uhlenbeck & Ornstein (1930), Phys Rev 36(5).
+    """
     x = signal - np.nanmean(signal)
     x = np.nan_to_num(x, nan=0.0)
     n = len(x)
 
-    # FFT-based autocorrelation
+    # Zero-pad to nfft = 2^ceil(log2(2N)) to prevent circular wrap-around
     nfft = 2 ** int(np.ceil(np.log2(2 * n)))
     fft_x = np.fft.rfft(x, n=nfft)
+    # rho[k] = IDFT{|X(f)|^2}[k] / IDFT{|X(f)|^2}[0]
     acf_raw = np.fft.irfft(np.abs(fft_x) ** 2, n=nfft)[:ACF_MAX_LAG + 1]
 
     if acf_raw[0] > 0:
-        acf = acf_raw / acf_raw[0]
+        acf = acf_raw / acf_raw[0]  # normalise so rho[0] = 1
     else:
         acf = np.zeros(ACF_MAX_LAG + 1)
 
@@ -403,7 +444,7 @@ def compute_acf(signal: np.ndarray) -> Tuple[np.ndarray, ACFResult]:
             zero_cross = k
             break
 
-    # OU fit: acf(k) = exp(-theta * k)
+    # OU fit: rho[k] = exp(-theta * k) via nonlinear LS on positive lags
     fit_end = min(zero_cross, 200)
     lags = np.arange(1, fit_end)
     acf_fit = acf[1:fit_end]
@@ -418,10 +459,12 @@ def compute_acf(signal: np.ndarray) -> Tuple[np.ndarray, ACFResult]:
                                 p0=[0.01], bounds=(1e-6, 1.0))
             theta = float(popt[0])
         else:
+            # Moment estimator: theta = -log(rho[1])
             theta = -np.log(max(acf[1], 0.01))
     except Exception:
         theta = -np.log(max(acf[1], 0.01))
 
+    # half-life = log(2) / theta  [ticks];  * 0.1 converts ticks -> seconds
     halflife_ticks = np.log(2) / max(theta, 1e-8)
     halflife_s = halflife_ticks * 0.1  # ticks to seconds
 
@@ -438,12 +481,40 @@ def compute_acf(signal: np.ndarray) -> Tuple[np.ndarray, ACFResult]:
 
 
 def bandpass_filter(signal: np.ndarray, low_hz: float, high_hz: float) -> Optional[np.ndarray]:
-    """Butterworth bandpass, zero-phase. Returns None if band is invalid."""
+    """Butterworth bandpass, zero-phase. Returns None if band is invalid.
+
+    Butterworth transfer function (order N=4, bandpass)
+    ---------------------------------------------------
+    The Nth-order Butterworth low-pass prototype has magnitude response:
+
+        |H_lp(jw)|^2 = 1 / (1 + (w/w_c)^{2N})
+
+    The bandpass version is obtained via the standard LP->BP bilinear
+    transform with corner frequencies [low_hz, high_hz].  The resulting
+    filter has maximally flat passband (no ripple) and -3 dB points at
+    exactly low_hz and high_hz.  Order N=4 gives 80 dB/decade roll-off
+    outside the passband.
+
+    Zero-phase filtering (sosfiltfilt)
+    -----------------------------------
+    scipy.signal.sosfiltfilt applies the SOS filter forward then backward,
+    achieving:
+        - Zero phase distortion (group delay = 0 across all frequencies)
+        - Effective order 2N = 8 (doubled attenuation outside passband)
+
+    Implementation uses second-order sections (SOS) for improved numerical
+    stability over direct-form transfer-function coefficients at low
+    normalised frequencies.
+
+    Edge guard: low clipped to >= 0.005 Hz, high clipped to <= Nyquist-0.2 Hz
+    to keep the normalised frequencies strictly in (0, 1) for scipy.butter.
+    """
     low = max(low_hz, 0.005)
     high = min(high_hz, NYQUIST - 0.2)
     if low >= high or len(signal) < 500:
         return None
     try:
+        # 4th-order Butterworth bandpass in SOS form; sosfiltfilt => zero-phase, order 8
         sos = sig.butter(4, [low, high], btype="bandpass", fs=FS, output="sos")
         return sig.sosfiltfilt(sos, signal)
     except Exception:
@@ -502,15 +573,43 @@ def compute_band_ic(signal: np.ndarray, prices: np.ndarray) -> List[BandICResult
 
 
 def compute_spectral_entropy(freqs: np.ndarray, pxx_db: np.ndarray) -> float:
-    """Normalized Shannon entropy of PSD (0=concentrated, 1=uniform)."""
-    # Work in linear power, skip DC
+    """Normalized Shannon entropy of PSD (0=concentrated, 1=uniform).
+
+    Spectral entropy
+    ----------------
+    Treat the normalised PSD as a discrete probability distribution over
+    frequency bins k = 1, ..., M  (DC bin k=0 excluded):
+
+        p_k = P_xx(f_k) / sum_{i=1}^{M} P_xx(f_i),   sum p_k = 1
+
+    Shannon entropy (bits):
+
+        H = -sum_{k=1}^{M} p_k * log2(p_k)
+
+    Normalised spectral entropy (range [0, 1]):
+
+        H_norm = H / H_max,   where H_max = log2(M)
+
+    H_max is achieved when all p_k are equal (flat/white PSD).
+
+    Interpretation:
+        H_norm -> 0  : power concentrated in a few frequencies (periodic/tonal)
+        H_norm -> 1  : power spread uniformly (broadband/noise-like)
+
+    Note: linear power P_xx = 10^(P_dB/10) is used (not dB) so that the
+    normalisation sum_{p_k} = 1 is meaningful.
+
+    Ref: Powell & Percival (1979), "A spectral entropy method for distinguishing
+    regular and irregular motion of Hamiltonian systems."
+    """
+    # Convert dB back to linear power; skip DC (index 0)
     pxx_lin = 10 ** (pxx_db[1:] / 10)
     total = np.sum(pxx_lin)
     if total <= 0:
         return 1.0
-    p = pxx_lin / total
-    h = -np.sum(p * np.log2(p + 1e-30))
-    h_max = np.log2(len(p))
+    p = pxx_lin / total                    # normalised spectral distribution
+    h = -np.sum(p * np.log2(p + 1e-30))   # Shannon entropy H (bits)
+    h_max = np.log2(len(p))                # H_max = log2(M) for M bins
     return round(float(h / h_max) if h_max > 0 else 1.0, 4)
 
 
