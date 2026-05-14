@@ -671,19 +671,20 @@ def _render_page(
     filename: str,
     page_label: str,
 ) -> Path:
-    """Render a 6-panel figure page."""
+    """Render a multi-panel figure page."""
     apply_style()
 
     ds = df_sym.iloc[::10].copy()
+    n = len(panels)
 
-    fig = plt.figure(figsize=(16, 24))
-    gs = gridspec.GridSpec(6, 1, height_ratios=[1, 1, 1, 1, 1, 1.2],
-                           hspace=0.25)
+    fig = plt.figure(figsize=(16, 4 * n))
+    ratios = [1] * (n - 1) + [1.2]
+    gs = gridspec.GridSpec(n, 1, height_ratios=ratios, hspace=0.25)
 
-    axes = [fig.add_subplot(gs[i]) for i in range(6)]
+    axes = [fig.add_subplot(gs[i]) for i in range(n)]
 
-    # Hide x labels on upper panels (except bars/heatmap which have different x)
-    for a in axes[:4]:
+    # Hide x labels on upper panels
+    for a in axes[:max(1, n - 2)]:
         plt.setp(a.get_xticklabels(), visible=False)
 
     for i, (func, data_key) in enumerate(panels):
@@ -727,6 +728,7 @@ PAGE1_PANELS = [
 ]
 
 PAGE2_PANELS = [
+    (panel_price_spread, "ds"),
     (panel_toxicity, "ds"),
     (panel_trend_regime, "ds"),
     (panel_funding_oi, "ds"),
@@ -760,8 +762,8 @@ def generate_visualization(
     df_sym = df_sym.sort_values("timestamp_ns").reset_index(drop=True)
     df_sym = _ensure_datetime(df_sym)
 
-    # Compute derived features for page 2
-    if page in ("2", "all"):
+    # Compute derived features for page 1 (advanced)
+    if page in ("1", "all"):
         df_sym = _compute_derived_viz(df_sym)
 
     if window_minutes is None:
@@ -786,16 +788,16 @@ def _render_single(
     ts_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     outputs = []
 
-    if page in ("1", "all"):
+    if page in ("0", "all"):
         out = _render_page(PAGE1_PANELS, df_sym, bars, symbol,
                            title_suffix, output_dir,
-                           f"15m_viz_p1_{symbol}_{ts_str}.png", "Page 1")
+                           f"15m_viz_{symbol}__{ts_str}__0.png", "Page 0")
         outputs.append(out)
 
-    if page in ("2", "all"):
+    if page in ("1", "all"):
         out = _render_page(PAGE2_PANELS, df_sym, bars, symbol,
                            title_suffix, output_dir,
-                           f"15m_viz_p2_{symbol}_{ts_str}.png", "Page 2")
+                           f"15m_viz_{symbol}__{ts_str}__1.png", "Page 1")
         outputs.append(out)
 
     return outputs
@@ -837,15 +839,15 @@ def _render_windowed(
         win_start = pd.to_datetime(t0, unit="ns").strftime("%H:%M")
         win_end = pd.to_datetime(t1, unit="ns").strftime("%H:%M")
         title = f"{window_minutes}min Window {i + 1} ({win_start}\u2013{win_end})"
-        base = f"15m_viz_{{page}}_{symbol}_w{i + 1:02d}_{win_start.replace(':', '')}_{win_end.replace(':', '')}.png"
+        base = f"15m_viz_{symbol}_w{i + 1:02d}_{win_start.replace(':', '')}_{win_end.replace(':', '')}__{{pg}}.png"
 
-        if page in ("1", "all"):
+        if page in ("0", "all"):
             out = _render_page(PAGE1_PANELS, chunk, bars, symbol, title,
-                               output_dir, base.format(page="p1"), "Page 1")
+                               output_dir, base.format(pg="0"), "Page 0")
             outputs.append(out)
-        if page in ("2", "all"):
+        if page in ("1", "all"):
             out = _render_page(PAGE2_PANELS, chunk, bars, symbol, title,
-                               output_dir, base.format(page="p2"), "Page 2")
+                               output_dir, base.format(pg="1"), "Page 1")
             outputs.append(out)
 
     return outputs
@@ -911,8 +913,8 @@ def main():
                         help="Bar aggregation timeframe (default: 1min)")
     parser.add_argument("--window", type=int, default=None, metavar="MINUTES",
                         help="Split data into N-minute windows (e.g. --window 15)")
-    parser.add_argument("--page", type=str, default="all", choices=["1", "2", "all"],
-                        help="Which page(s) to generate: 1=basic, 2=advanced, all=both")
+    parser.add_argument("--page", type=str, default="all", choices=["0", "1", "all"],
+                        help="Which page(s) to generate: 0=basic, 1=advanced, all=both")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
