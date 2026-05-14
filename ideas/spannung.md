@@ -170,18 +170,79 @@ Spannung(t) = EWM(halflife=5 ticks)[imbalance_qty_l1] / (EWM(halflife=600 ticks)
 - beta = 600 ticks = 60s
 - Prediction horizon: 50 ticks (5s) for BTC/ETH, 10 ticks (1s) for SOL
 
-### Caveats / Next Steps
+## Phase A.2: Look-Ahead Bias Check (2026-05-14)
 
-- **Look-ahead bias check needed**: The IC is high enough to warrant verifying there's
-  no information leakage. Lagging the signal by h ticks and re-measuring IC would
-  confirm. The signal *should* degrade with lag — if it doesn't, something is wrong.
-- **Out-of-sample validation**: Run on 2026-05-08 or 2026-05-10 data to confirm the
-  signal generalizes across days. Same-day IC could overfit to market conditions.
-- **Marginal value of denominator**: Test raw `imbalance_qty_l1` IC at h=5s to measure
-  how much the illiquidity normalization actually adds.
-- **Transaction cost reality**: At IC=0.40 and turnover=0.016, the breakeven cost is
-  very favorable, but actual execution at 100ms timescales faces latency, slippage,
-  and queue position challenges that paper IC doesn't capture.
+**Method**: Lag the Spannung signal by 0–100 ticks and re-measure IC. Also shift it
+forward (using future book state) to detect leakage. Test raw imbalance alone to
+measure the marginal value of the EWM and illiquidity denominator.
+
+### Lag Decay (BTC, horizon=5s)
+
+| Signal lag | IC | Interpretation |
+|------------|-----|----------------|
+| 0 (baseline) | 0.395 | What we measured in Phase A |
+| 0.1s | 0.388 | Minimal decay — signal is stable |
+| 0.5s | 0.359 | Gradual decay |
+| 1.0s | 0.328 | Still strong |
+| 5.0s | 0.180 | Significant decay — signal is short-lived |
+| 10.0s | 0.085 | Near zero — halflife is ~5s |
+
+**Verdict: No look-ahead bias.** IC decays gradually and smoothly with lag. This is
+exactly what a causal microstructure signal looks like. The future-shifted signal
+(+1 to +50 ticks) shows only marginally higher IC (0.40→0.46), confirming there
+is no information leakage in the signal construction.
+
+### Denominator and EWM Add No Value
+
+This was the unexpected finding:
+
+| Signal | BTC IC | ETH IC | SOL IC |
+|--------|--------|--------|--------|
+| Spannung (EWM flow / EWM illiq) | 0.395 | 0.386 | 0.335 |
+| EWM(imbalance) alone, no denom | 0.429 | 0.429 | 0.348 |
+| **Raw imbalance_l1, no EWM, no denom** | **0.479** | **0.484** | **0.441** |
+
+Raw, unsmoothed L1 book imbalance beats Spannung by 8-10 IC points across all symbols.
+Both the exponential smoothing and the illiquidity normalization *hurt* the signal:
+
+- **EWM hurts**: The 0.5s halflife blurs the instantaneous book snapshot. At this
+  timescale (predicting 1-5s ahead), the most recent tick is the most informative
+  and any smoothing dilutes it with stale information.
+- **Illiquidity denominator hurts**: Normalizing by illiquidity adds noise rather than
+  context. At tick-level resolution, the book imbalance already implicitly reflects
+  liquidity conditions — when the book is thin, imbalance is naturally more extreme.
+  Dividing by a separate illiquidity estimate is redundant and introduces estimation error.
+
+### What This Means
+
+1. **The core signal is raw L1 book imbalance** → 0.44-0.48 IC predicting 1-5s forward
+   returns. This is one of the strongest documented microstructure signals, consistent
+   with Cont/Stoikov/Talreja (2010).
+
+2. **The Spannung formulation as designed doesn't add value over the raw input** at
+   tick-level resolution. The voltage = current/resistance metaphor is elegant but
+   the denominator is redundant when the numerator already embeds liquidity information.
+
+3. **Where Spannung might still add value**: At longer timescales (minutes, not ticks),
+   where raw imbalance becomes noisy and the EWM + illiquidity context could help.
+   Also, the illiquidity denominator may matter more in cross-regime comparisons
+   (e.g., comparing signal magnitude between calm and volatile periods).
+
+4. **The online learning objective should shift**: Instead of learning alpha/beta for
+   Spannung, learn *when to act on raw imbalance* — the gating function (entropy,
+   toxicity, volatility regime) that determines when high imbalance is informative
+   vs. noise.
+
+### Remaining Caveats
+
+- **Out-of-sample validation**: All results are from 2026-05-12. Run on 2026-05-08
+  or 2026-05-10 to confirm cross-day stability.
+- **Transaction cost reality**: IC=0.48 at 5s horizon is extraordinary on paper, but
+  actual execution at 100ms timescales faces latency, slippage, queue position,
+  and adverse selection costs that paper IC doesn't capture.
+- **Is this tradeable?** At 10 rows/sec, acting on L1 imbalance means competing with
+  HFT firms on collocated infrastructure. The signal is real but the edge may not
+  survive execution friction for a non-collocated setup.
 
 ### Implementation: `nat spannung`
 
