@@ -1,12 +1,13 @@
 """15-Minute Visual Health Check — market microstructure snapshot.
 
-Companion to 15m_test.py. Produces a 6-panel PNG per symbol showing
-price, depth, flow, microstructure quality, entropy regime, and a
-feature heatmap for quick visual QA.
+Companion to 15m_test.py. Produces two pages of 6-panel PNGs per symbol:
+  Page 1: Price, Depth, Flow, Microstructure, Entropy, Heatmap
+  Page 2: Toxicity, Trend Regime, Funding/OI, Illiquidity, Multi-scale Entropy, Interactions
 
 Usage:
-    python3 scripts/15m_visualize.py --data-dir data/features/2026-05-12-clean --symbol BTC
-    python3 scripts/15m_visualize.py --data-dir data/features/2026-05-12-clean --symbol all
+    python3 scripts/15m_visualize.py --latest --symbol BTC
+    python3 scripts/15m_visualize.py --latest --symbol all --page 2
+    python3 scripts/15m_visualize.py --data-dir data/features/2026-05-12 --symbol BTC --window 5
 """
 
 from __future__ import annotations
@@ -78,6 +79,13 @@ def _bar_col(bars: pd.DataFrame, base: str, preferred_suffix: str = "sum") -> Op
     return None
 
 
+def _no_data(ax: plt.Axes, msg: str, title: str) -> None:
+    """Show placeholder when data is missing."""
+    ax.text(0.5, 0.5, msg, transform=ax.transAxes,
+            ha="center", va="center", fontsize=12, color="#8b949e")
+    ax.set_title(title, fontsize=10, color="#c9d1d9")
+
+
 def _detect_anomalies(df: pd.DataFrame, symbol: str) -> list[str]:
     warnings = []
     ts = df["timestamp_ns"].values
@@ -111,7 +119,65 @@ def _detect_anomalies(df: pd.DataFrame, symbol: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Panel functions
+# Derived features (computed at viz time)
+# ---------------------------------------------------------------------------
+
+
+def _compute_derived_viz(df: pd.DataFrame) -> pd.DataFrame:
+    """Add exploratory derived columns for page 2 panels."""
+    df = df.copy()
+
+    # A. Flow momentum: short/long ratio smoothed
+    f5 = _safe_col(df, "flow_count_5s")
+    f30 = _safe_col(df, "flow_count_30s")
+    if f5 is not None and f30 is not None:
+        ratio = f5.ewm(span=30, min_periods=5).mean() / (f30.ewm(span=30, min_periods=5).mean() + 1e-8)
+        df["viz_flow_momentum"] = ratio
+        df["viz_flow_acceleration"] = ratio.diff(10)
+
+    # B. Book pressure gradient: L1 vs L5 imbalance
+    l1 = _safe_col(df, "imbalance_qty_l1")
+    l5 = _safe_col(df, "imbalance_qty_l5")
+    if l1 is not None and l5 is not None:
+        df["viz_book_pressure_gradient"] = l1 / (l5.abs() + 1e-8)
+
+    # C. VPIN regime z-score
+    vpin = _safe_col(df, "toxic_vpin_50")
+    if vpin is not None:
+        mu = vpin.rolling(300, min_periods=30).mean()
+        sd = vpin.rolling(300, min_periods=30).std()
+        df["viz_vpin_zscore"] = (vpin - mu) / (sd + 1e-8)
+
+    # D. Entropy slope across timescales (per row)
+    ent_cols = ["ent_tick_1s", "ent_tick_5s", "ent_tick_10s", "ent_tick_15s",
+                "ent_tick_30s", "ent_tick_1m", "ent_tick_15m"]
+    log_windows = np.log([1, 5, 10, 15, 30, 60, 900])
+    available = [(c, lw) for c, lw in zip(ent_cols, log_windows) if _safe_col(df, c) is not None]
+    if len(available) >= 3:
+        ent_matrix = np.column_stack([df[c].values for c, _ in available])
+        lw = np.array([w for _, w in available])
+        # Vectorized linear regression slope per row
+        lw_centered = lw - lw.mean()
+        denom = np.sum(lw_centered ** 2)
+        ent_centered = ent_matrix - ent_matrix.mean(axis=1, keepdims=True)
+        df["viz_entropy_slope"] = ent_centered @ lw_centered / (denom + 1e-10)
+
+    # E. Rolling correlation: flow aggressor vs tick entropy
+    aggr = _safe_col(df, "flow_aggressor_ratio_5s")
+    ent1m = _safe_col(df, "ent_tick_1m")
+    if aggr is not None and ent1m is not None:
+        df["viz_corr_flow_entropy"] = aggr.rolling(600, min_periods=60).corr(ent1m)
+
+    # F. Rolling correlation: VPIN vs Kyle lambda
+    kyle = _safe_col(df, "illiq_kyle_100")
+    if vpin is not None and kyle is not None:
+        df["viz_corr_vpin_kyle"] = vpin.rolling(600, min_periods=60).corr(kyle)
+
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Page 1 panels (existing)
 # ---------------------------------------------------------------------------
 
 
@@ -119,9 +185,7 @@ def panel_price_spread(ax: plt.Axes, df: pd.DataFrame) -> None:
     """Panel 1: Midprice line + spread area fill."""
     mid = _safe_col(df, "raw_midprice")
     if mid is None:
-        ax.text(0.5, 0.5, "No midprice data", transform=ax.transAxes,
-                ha="center", va="center", fontsize=12, color="#8b949e")
-        ax.set_title("Price + Spread", fontsize=10, color="#c9d1d9")
+        _no_data(ax, "No midprice data", "Price + Spread")
         return
 
     x = df["datetime"]
@@ -147,9 +211,7 @@ def panel_book_depth(ax: plt.Axes, df: pd.DataFrame) -> None:
     bid = _safe_col(df, "raw_bid_depth_5")
     ask = _safe_col(df, "raw_ask_depth_5")
     if bid is None and ask is None:
-        ax.text(0.5, 0.5, "No depth data", transform=ax.transAxes,
-                ha="center", va="center", fontsize=12, color="#8b949e")
-        ax.set_title("Book Depth + Imbalance", fontsize=10, color="#c9d1d9")
+        _no_data(ax, "No depth data", "Book Depth + Imbalance")
         return
 
     x = df["datetime"]
@@ -179,9 +241,7 @@ def panel_trade_flow(ax: plt.Axes, bars: pd.DataFrame) -> None:
     """Panel 3: Volume bars colored by aggressor + trade count step."""
     vol = _bar_col(bars, "flow_volume_1s", "sum")
     if vol is None:
-        ax.text(0.5, 0.5, "No flow data", transform=ax.transAxes,
-                ha="center", va="center", fontsize=12, color="#8b949e")
-        ax.set_title("Trade Flow", fontsize=10, color="#c9d1d9")
+        _no_data(ax, "No flow data", "Trade Flow")
         return
 
     x = bars["bar_start"]
@@ -214,7 +274,7 @@ def panel_trade_flow(ax: plt.Axes, bars: pd.DataFrame) -> None:
 def panel_microstructure(ax: plt.Axes, df: pd.DataFrame) -> None:
     """Panel 4: Kyle lambda, spread vol, VPIN — z-scored."""
     features = [
-        ("illiq_kyle_100", "Kyle λ", COLORS[0]),
+        ("illiq_kyle_100", "Kyle \u03bb", COLORS[0]),
         ("vol_spread_std_1m", "Spread Vol", COLORS[1]),
         ("toxic_vpin_10", "VPIN", COLORS[2]),
     ]
@@ -227,8 +287,7 @@ def panel_microstructure(ax: plt.Axes, df: pd.DataFrame) -> None:
             plotted = True
 
     if not plotted:
-        ax.text(0.5, 0.5, "No microstructure data", transform=ax.transAxes,
-                ha="center", va="center", fontsize=12, color="#8b949e")
+        _no_data(ax, "No microstructure data", "Microstructure Quality")
 
     ax.set_title("Microstructure Quality (z-scored)", fontsize=10, color="#c9d1d9")
     ax.set_ylabel("Z-score", fontsize=8)
@@ -264,8 +323,7 @@ def panel_entropy_regime(ax: plt.Axes, df: pd.DataFrame) -> None:
         ax.fill_between(x, 0, _zscore(pd.Series(neg)), alpha=0.15, color=COLORS[2])
 
     if not plotted:
-        ax.text(0.5, 0.5, "No entropy data", transform=ax.transAxes,
-                ha="center", va="center", fontsize=12, color="#8b949e")
+        _no_data(ax, "No entropy data", "Entropy + Regime")
 
     ax.set_title("Entropy + Regime", fontsize=10, color="#c9d1d9")
     ax.set_ylabel("Z-score", fontsize=8)
@@ -285,9 +343,7 @@ def panel_feature_heatmap(ax: plt.Axes, bars: pd.DataFrame, df_raw: pd.DataFrame
                  and bars[c].notna().mean() > 0.5]
 
     if len(feat_cols) < 2:
-        ax.text(0.5, 0.5, "Insufficient features for heatmap", transform=ax.transAxes,
-                ha="center", va="center", fontsize=12, color="#8b949e")
-        ax.set_title("Feature Heatmap", fontsize=10, color="#c9d1d9")
+        _no_data(ax, "Insufficient features for heatmap", "Feature Heatmap")
         return
 
     # Rank by variance, take top 20
@@ -315,8 +371,8 @@ def panel_feature_heatmap(ax: plt.Axes, bars: pd.DataFrame, df_raw: pd.DataFrame
     im = ax.pcolormesh(normed, cmap="inferno", vmin=0, vmax=1)
 
     # Y labels = feature names (shortened)
-    short_names = [c.replace("_mean", "").replace("_std", "σ").replace("_sum", "Σ")
-                   .replace("_last", "†").replace("_slope", "∇")
+    short_names = [c.replace("_mean", "").replace("_std", "\u03c3").replace("_sum", "\u03a3")
+                   .replace("_last", "\u2020").replace("_slope", "\u2207")
                    for c in top_cols]
     ax.set_yticks(np.arange(len(short_names)) + 0.5)
     ax.set_yticklabels(short_names, fontsize=6)
@@ -332,58 +388,326 @@ def panel_feature_heatmap(ax: plt.Axes, bars: pd.DataFrame, df_raw: pd.DataFrame
 
 
 # ---------------------------------------------------------------------------
-# Orchestrator
+# Page 2 panels (new — advanced analytics)
 # ---------------------------------------------------------------------------
 
 
-def _render_snapshot(
+def panel_toxicity(ax: plt.Axes, df: pd.DataFrame) -> None:
+    """Panel 7: VPIN + adverse selection + flow imbalance + toxic index bg."""
+    x = df["datetime"]
+    plotted = False
+
+    vpin = _safe_col(df, "toxic_vpin_50")
+    if vpin is not None:
+        ax.plot(x, vpin, color=COLORS[0], linewidth=0.7, label="VPIN(50)")
+        ax.axhline(0.5, color=COLORS[0], linewidth=0.4, linestyle=":", alpha=0.5)
+        plotted = True
+
+    adv = _safe_col(df, "toxic_adverse_selection")
+    if adv is not None:
+        ax.plot(x, _zscore(adv), color=COLORS[4], linewidth=0.6, alpha=0.7,
+                label="adverse sel (z)")
+        plotted = True
+
+    # Toxic index as background shading
+    tidx = _safe_col(df, "toxic_index")
+    if tidx is not None:
+        ax.fill_between(x, 0, tidx, alpha=0.12, color=COLORS[2], label="toxic index")
+
+    # VPIN z-score from derived
+    vz = _safe_col(df, "viz_vpin_zscore")
+    if vz is not None:
+        ax_r = ax.twinx()
+        ax_r.plot(x, vz, color=COLORS[3], linewidth=0.5, alpha=0.7, label="VPIN z-score")
+        ax_r.set_ylabel("VPIN z-score", color=COLORS[3], fontsize=8)
+        ax_r.tick_params(axis="y", labelcolor=COLORS[3], labelsize=7)
+        ax_r.axhline(2, color=COLORS[2], linewidth=0.4, linestyle="--", alpha=0.4)
+        ax_r.axhline(-2, color=COLORS[1], linewidth=0.4, linestyle="--", alpha=0.4)
+        ax_r.set_facecolor("none")
+
+    if not plotted:
+        _no_data(ax, "No toxicity data", "Toxicity & Informed Trading")
+
+    ax.set_title("Toxicity & Informed Trading", fontsize=10, color="#c9d1d9")
+    ax.set_ylabel("VPIN / z-score", fontsize=8)
+    ax.tick_params(axis="y", labelsize=7)
+    ax.legend(loc="upper left", fontsize=6, framealpha=0.3)
+    ax.grid(True, alpha=0.3)
+
+
+def panel_trend_regime(ax: plt.Axes, df: pd.DataFrame) -> None:
+    """Panel 8: Hurst exponent + momentum R2 + regime indicator background."""
+    x = df["datetime"]
+    plotted = False
+
+    hurst = _safe_col(df, "trend_hurst_300")
+    if hurst is not None:
+        ax.plot(x, hurst, color=COLORS[0], linewidth=0.7, label="Hurst(300)")
+        ax.axhline(0.5, color="#8b949e", linewidth=0.5, linestyle="--", alpha=0.6)
+        plotted = True
+
+    r2 = _safe_col(df, "trend_momentum_r2_300")
+    if r2 is not None:
+        ax.plot(x, r2, color=COLORS[4], linewidth=0.6, alpha=0.7, label="R\u00b2(300)")
+        plotted = True
+
+    # Regime indicator as background
+    regime = _safe_col(df, "derived_regime_indicator")
+    if regime is not None:
+        r = regime.values
+        trending = np.where(r < 0, 1, 0)
+        reverting = np.where(r > 0, 1, 0)
+        ax.fill_between(x, 0, 1, where=trending.astype(bool),
+                        alpha=0.08, color=COLORS[1], transform=ax.get_xaxis_transform(),
+                        label="trending")
+        ax.fill_between(x, 0, 1, where=reverting.astype(bool),
+                        alpha=0.08, color=COLORS[2], transform=ax.get_xaxis_transform(),
+                        label="reverting")
+
+    # Momentum as bars on secondary axis
+    mom = _safe_col(df, "trend_momentum_300")
+    if mom is not None:
+        ax_r = ax.twinx()
+        ax_r.fill_between(x, 0, mom, alpha=0.2, color=COLORS[3])
+        ax_r.set_ylabel("Momentum", color=COLORS[3], fontsize=8)
+        ax_r.tick_params(axis="y", labelcolor=COLORS[3], labelsize=7)
+        ax_r.set_facecolor("none")
+
+    if not plotted:
+        _no_data(ax, "No trend data", "Trend Regime & Persistence")
+
+    ax.set_title("Trend Regime (H>0.5=trend, H<0.5=revert)", fontsize=10, color="#c9d1d9")
+    ax.set_ylabel("Hurst / R\u00b2", fontsize=8)
+    ax.tick_params(axis="y", labelsize=7)
+    ax.legend(loc="upper right", fontsize=6, framealpha=0.3)
+    ax.grid(True, alpha=0.3)
+
+
+def panel_funding_oi(ax: plt.Axes, df: pd.DataFrame) -> None:
+    """Panel 9: Funding rate + open interest + OI change + premium."""
+    x = df["datetime"]
+    plotted = False
+
+    funding = _safe_col(df, "ctx_funding_rate")
+    if funding is not None:
+        ax.plot(x, funding * 100, color=COLORS[0], linewidth=0.7, label="funding (%)")
+        ax.axhline(0, color="#8b949e", linewidth=0.4, linestyle="--")
+        plotted = True
+
+    premium = _safe_col(df, "ctx_premium_bps")
+    if premium is not None:
+        ax.plot(x, premium, color=COLORS[4], linewidth=0.5, alpha=0.6, label="premium (bps)")
+        plotted = True
+
+    ax.set_ylabel("Funding % / Premium bps", fontsize=8)
+    ax.tick_params(axis="y", labelsize=7)
+
+    # OI on secondary axis
+    oi = _safe_col(df, "ctx_open_interest")
+    if oi is not None:
+        ax_r = ax.twinx()
+        ax_r.fill_between(x, oi, alpha=0.15, color=COLORS[1])
+        ax_r.plot(x, oi, color=COLORS[1], linewidth=0.5, alpha=0.5, label="OI")
+        ax_r.set_ylabel("Open Interest", color=COLORS[1], fontsize=8)
+        ax_r.tick_params(axis="y", labelcolor=COLORS[1], labelsize=7)
+        ax_r.set_facecolor("none")
+        plotted = True
+
+    if not plotted:
+        _no_data(ax, "No context data", "Funding & Open Interest")
+
+    ax.set_title("Funding & Open Interest", fontsize=10, color="#c9d1d9")
+    ax.legend(loc="upper left", fontsize=6, framealpha=0.3)
+    ax.grid(True, alpha=0.3)
+
+
+def panel_illiquidity(ax: plt.Axes, df: pd.DataFrame) -> None:
+    """Panel 10: Kyle lambda short/long + ratio + composite."""
+    x = df["datetime"]
+    plotted = False
+
+    kyle100 = _safe_col(df, "illiq_kyle_100")
+    kyle500 = _safe_col(df, "illiq_kyle_500")
+    if kyle100 is not None:
+        ax.plot(x, _zscore(kyle100), color=COLORS[0], linewidth=0.7,
+                label="Kyle \u03bb(100) z")
+        plotted = True
+    if kyle500 is not None:
+        ax.plot(x, _zscore(kyle500), color=COLORS[5], linewidth=0.6, alpha=0.7,
+                label="Kyle \u03bb(500) z")
+        plotted = True
+
+    # Composite as shaded area
+    comp = _safe_col(df, "illiq_composite")
+    if comp is not None:
+        ax.fill_between(x, 0, _zscore(comp), alpha=0.1, color=COLORS[3])
+
+    # Kyle ratio on secondary axis
+    ratio = _safe_col(df, "illiq_kyle_ratio")
+    if ratio is not None:
+        ax_r = ax.twinx()
+        ax_r.plot(x, ratio, color=COLORS[2], linewidth=0.5, alpha=0.6,
+                  label="kyle ratio (100/500)")
+        ax_r.axhline(1.0, color=COLORS[2], linewidth=0.4, linestyle=":", alpha=0.4)
+        ax_r.set_ylabel("Kyle Ratio", color=COLORS[2], fontsize=8)
+        ax_r.tick_params(axis="y", labelcolor=COLORS[2], labelsize=7)
+        ax_r.set_facecolor("none")
+        plotted = True
+
+    if not plotted:
+        _no_data(ax, "No illiquidity data", "Illiquidity Dynamics")
+
+    ax.set_title("Illiquidity Dynamics (ratio>1 = fragile)", fontsize=10, color="#c9d1d9")
+    ax.set_ylabel("Z-score", fontsize=8)
+    ax.tick_params(axis="y", labelsize=7)
+    ax.axhline(0, color="#8b949e", linewidth=0.4, linestyle="--")
+    ax.legend(loc="upper left", fontsize=6, framealpha=0.3)
+    ax.grid(True, alpha=0.3)
+
+
+def panel_multiscale_entropy(ax: plt.Axes, df: pd.DataFrame) -> None:
+    """Panel 11: Tick entropy at multiple timescales + entropy slope."""
+    x = df["datetime"]
+    plotted = False
+
+    ent_specs = [
+        ("ent_tick_1s", "1s", COLORS[0]),
+        ("ent_tick_5s", "5s", COLORS[1]),
+        ("ent_tick_30s", "30s", COLORS[3]),
+        ("ent_tick_1m", "1m", COLORS[4]),
+        ("ent_tick_15m", "15m", COLORS[5]),
+    ]
+    for col, label, color in ent_specs:
+        s = _safe_col(df, col)
+        if s is not None:
+            ax.plot(x, s, color=color, linewidth=0.5, alpha=0.7, label=label)
+            plotted = True
+
+    ax.set_ylabel("Tick Entropy", fontsize=8)
+    ax.tick_params(axis="y", labelsize=7)
+
+    # Entropy slope on secondary axis
+    slope = _safe_col(df, "viz_entropy_slope")
+    if slope is not None:
+        ax_r = ax.twinx()
+        ax_r.plot(x, slope, color=COLORS[2], linewidth=0.6, alpha=0.7,
+                  label="entropy slope")
+        ax_r.axhline(0, color=COLORS[2], linewidth=0.3, linestyle=":", alpha=0.4)
+        ax_r.set_ylabel("Entropy Slope", color=COLORS[2], fontsize=8)
+        ax_r.tick_params(axis="y", labelcolor=COLORS[2], labelsize=7)
+        ax_r.set_facecolor("none")
+
+    if not plotted:
+        _no_data(ax, "No entropy data", "Multi-scale Entropy")
+
+    ax.set_title("Multi-scale Entropy (1s \u2192 15m)", fontsize=10, color="#c9d1d9")
+    ax.legend(loc="upper left", fontsize=6, framealpha=0.3, ncol=3)
+    ax.grid(True, alpha=0.3)
+
+
+def panel_cross_interactions(ax: plt.Axes, df: pd.DataFrame) -> None:
+    """Panel 12: Rolling correlations + derived interaction scores."""
+    x = df["datetime"]
+    plotted = False
+
+    # Rolling correlations
+    corr_fe = _safe_col(df, "viz_corr_flow_entropy")
+    if corr_fe is not None:
+        ax.plot(x, corr_fe, color=COLORS[0], linewidth=0.6, alpha=0.8,
+                label="corr(flow, entropy)")
+        plotted = True
+
+    corr_vk = _safe_col(df, "viz_corr_vpin_kyle")
+    if corr_vk is not None:
+        ax.plot(x, corr_vk, color=COLORS[4], linewidth=0.6, alpha=0.8,
+                label="corr(VPIN, Kyle)")
+        plotted = True
+
+    ax.axhline(0, color="#8b949e", linewidth=0.4, linestyle="--")
+    ax.set_ylabel("Rolling Correlation", fontsize=8)
+    ax.tick_params(axis="y", labelsize=7)
+    ax.set_ylim(-1.05, 1.05)
+
+    # Derived scores on secondary axis
+    ax_r = ax.twinx()
+    informed = _safe_col(df, "derived_informed_trend_score")
+    if informed is not None:
+        ax_r.plot(x, _zscore(informed), color=COLORS[1], linewidth=0.5, alpha=0.6,
+                  label="informed trend (z)")
+        plotted = True
+
+    chop = _safe_col(df, "derived_toxic_chop_score")
+    if chop is not None:
+        ax_r.plot(x, _zscore(chop), color=COLORS[2], linewidth=0.5, alpha=0.6,
+                  label="toxic chop (z)")
+        plotted = True
+
+    ax_r.set_ylabel("Interaction Z-score", fontsize=8)
+    ax_r.tick_params(axis="y", labelsize=7)
+    ax_r.set_facecolor("none")
+    ax_r.legend(loc="lower right", fontsize=6, framealpha=0.3)
+
+    if not plotted:
+        _no_data(ax, "No interaction data", "Cross-Feature Interactions")
+
+    ax.set_title("Cross-Feature Interactions", fontsize=10, color="#c9d1d9")
+    ax.legend(loc="upper left", fontsize=6, framealpha=0.3)
+    ax.grid(True, alpha=0.3)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+
+
+def _render_page(
+    panels: list[tuple],
     df_sym: pd.DataFrame,
     bars: pd.DataFrame,
     symbol: str,
     title_suffix: str,
     output_dir: Path,
     filename: str,
+    page_label: str,
 ) -> Path:
-    """Render the 6-panel figure for a single data slice."""
+    """Render a 6-panel figure page."""
     apply_style()
 
-    # Downsample tick data for plotting (every 10th row ~ 1/sec)
     ds = df_sym.iloc[::10].copy()
 
     fig = plt.figure(figsize=(16, 24))
     gs = gridspec.GridSpec(6, 1, height_ratios=[1, 1, 1, 1, 1, 1.2],
                            hspace=0.25)
 
-    ax0 = fig.add_subplot(gs[0])
-    ax1 = fig.add_subplot(gs[1], sharex=ax0)
-    ax2 = fig.add_subplot(gs[2])  # bars have different x
-    ax3 = fig.add_subplot(gs[3], sharex=ax0)
-    ax4 = fig.add_subplot(gs[4], sharex=ax0)
-    ax5 = fig.add_subplot(gs[5])  # heatmap has different x
+    axes = [fig.add_subplot(gs[i]) for i in range(6)]
 
-    for a in [ax0, ax1, ax3]:
+    # Hide x labels on upper panels (except bars/heatmap which have different x)
+    for a in axes[:4]:
         plt.setp(a.get_xticklabels(), visible=False)
 
-    panels = [
-        (panel_price_spread, ax0, [ds]),
-        (panel_book_depth, ax1, [ds]),
-        (panel_trade_flow, ax2, [bars]),
-        (panel_microstructure, ax3, [ds]),
-        (panel_entropy_regime, ax4, [ds]),
-        (panel_feature_heatmap, ax5, [bars, df_sym]),
-    ]
-
-    for func, ax, args in panels:
+    for i, (func, data_key) in enumerate(panels):
+        ax = axes[i]
         try:
-            func(ax, *args)
+            if data_key == "ds":
+                func(ax, ds)
+            elif data_key == "bars":
+                func(ax, bars)
+            elif data_key == "bars+raw":
+                func(ax, bars, df_sym)
+            else:
+                func(ax, ds)
         except Exception as e:
             log.warning("Panel %s failed: %s", func.__name__, e)
             ax.text(0.5, 0.5, f"Error: {e}", transform=ax.transAxes,
                     ha="center", va="center", fontsize=10, color=COLORS[2])
 
-    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+    # Format time axes on panels that use bar data
+    for ax in axes:
+        if ax.get_xlabel() == "" and len(ax.get_xticks()) > 0:
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
 
-    fig.suptitle(f"{symbol} — {title_suffix}",
+    fig.suptitle(f"{symbol} — {title_suffix} [{page_label}]",
                  fontsize=14, color="#c9d1d9", y=0.995)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -393,17 +717,41 @@ def _render_snapshot(
     return out_path
 
 
+PAGE1_PANELS = [
+    (panel_price_spread, "ds"),
+    (panel_book_depth, "ds"),
+    (panel_trade_flow, "bars"),
+    (panel_microstructure, "ds"),
+    (panel_entropy_regime, "ds"),
+    (panel_feature_heatmap, "bars+raw"),
+]
+
+PAGE2_PANELS = [
+    (panel_toxicity, "ds"),
+    (panel_trend_regime, "ds"),
+    (panel_funding_oi, "ds"),
+    (panel_illiquidity, "ds"),
+    (panel_multiscale_entropy, "ds"),
+    (panel_cross_interactions, "ds"),
+]
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+
+
 def generate_visualization(
     df: pd.DataFrame,
     symbol: str,
     output_dir: Path,
     timeframe: str = "1min",
     window_minutes: Optional[int] = None,
+    page: str = "all",
 ) -> list[Path]:
-    """Generate 6-panel microstructure snapshot(s) for one symbol.
+    """Generate microstructure snapshot(s) for one symbol.
 
-    If window_minutes is set, the data is split into consecutive windows
-    and one PNG is produced per window. Otherwise one PNG for all data.
+    page: "1" = existing panels, "2" = new panels, "all" = both pages.
     """
     df_sym = df[df["symbol"] == symbol].copy()
     if df_sym.empty:
@@ -412,19 +760,56 @@ def generate_visualization(
     df_sym = df_sym.sort_values("timestamp_ns").reset_index(drop=True)
     df_sym = _ensure_datetime(df_sym)
 
-    if window_minutes is None:
-        # Single snapshot of all data
-        bars = aggregate_bars(df_sym, timeframe)
-        bars["bar_start"] = pd.to_datetime(bars["bar_start"])
-        ts_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        out = _render_snapshot(
-            df_sym, bars, symbol,
-            "Microstructure Snapshot",
-            output_dir, f"15m_viz_{symbol}_{ts_str}.png",
-        )
-        return [out]
+    # Compute derived features for page 2
+    if page in ("2", "all"):
+        df_sym = _compute_derived_viz(df_sym)
 
-    # Split into consecutive windows
+    if window_minutes is None:
+        return _render_single(df_sym, symbol, output_dir, timeframe, page,
+                              "Microstructure Snapshot")
+
+    return _render_windowed(df_sym, symbol, output_dir, timeframe, page,
+                            window_minutes)
+
+
+def _render_single(
+    df_sym: pd.DataFrame,
+    symbol: str,
+    output_dir: Path,
+    timeframe: str,
+    page: str,
+    title_suffix: str,
+) -> list[Path]:
+    """Render one or two pages for the full data range."""
+    bars = aggregate_bars(df_sym, timeframe)
+    bars["bar_start"] = pd.to_datetime(bars["bar_start"])
+    ts_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    outputs = []
+
+    if page in ("1", "all"):
+        out = _render_page(PAGE1_PANELS, df_sym, bars, symbol,
+                           title_suffix, output_dir,
+                           f"15m_viz_p1_{symbol}_{ts_str}.png", "Page 1")
+        outputs.append(out)
+
+    if page in ("2", "all"):
+        out = _render_page(PAGE2_PANELS, df_sym, bars, symbol,
+                           title_suffix, output_dir,
+                           f"15m_viz_p2_{symbol}_{ts_str}.png", "Page 2")
+        outputs.append(out)
+
+    return outputs
+
+
+def _render_windowed(
+    df_sym: pd.DataFrame,
+    symbol: str,
+    output_dir: Path,
+    timeframe: str,
+    page: str,
+    window_minutes: int,
+) -> list[Path]:
+    """Split data into consecutive windows and render each."""
     ts_min = df_sym["timestamp_ns"].min()
     ts_max = df_sym["timestamp_ns"].max()
     window_ns = int(window_minutes * 60 * 1e9)
@@ -451,11 +836,17 @@ def generate_visualization(
 
         win_start = pd.to_datetime(t0, unit="ns").strftime("%H:%M")
         win_end = pd.to_datetime(t1, unit="ns").strftime("%H:%M")
-        title = f"{window_minutes}min Window {i + 1} ({win_start}–{win_end})"
-        fname = f"15m_viz_{symbol}_w{i + 1:02d}_{win_start.replace(':', '')}_{win_end.replace(':', '')}.png"
+        title = f"{window_minutes}min Window {i + 1} ({win_start}\u2013{win_end})"
+        base = f"15m_viz_{{page}}_{symbol}_w{i + 1:02d}_{win_start.replace(':', '')}_{win_end.replace(':', '')}.png"
 
-        out = _render_snapshot(chunk, bars, symbol, title, output_dir, fname)
-        outputs.append(out)
+        if page in ("1", "all"):
+            out = _render_page(PAGE1_PANELS, chunk, bars, symbol, title,
+                               output_dir, base.format(page="p1"), "Page 1")
+            outputs.append(out)
+        if page in ("2", "all"):
+            out = _render_page(PAGE2_PANELS, chunk, bars, symbol, title,
+                               output_dir, base.format(page="p2"), "Page 2")
+            outputs.append(out)
 
     return outputs
 
@@ -471,7 +862,7 @@ def print_summary(df: pd.DataFrame, symbols: list[str], data_dir: str) -> None:
     print("  15-Minute Visual Health Check")
     print("=" * 60)
     print(f"  Data:     {data_dir}")
-    print(f"  Window:   {ts_min.strftime('%H:%M:%S')} — {ts_max.strftime('%H:%M:%S')} UTC")
+    print(f"  Window:   {ts_min.strftime('%H:%M:%S')} \u2014 {ts_max.strftime('%H:%M:%S')} UTC")
     print(f"  Duration: {dur:.0f}s ({dur / 60:.1f}min)")
     print(f"  Rows:     {len(df):,}")
     print(f"  Symbols:  {', '.join(symbols)}")
@@ -520,6 +911,8 @@ def main():
                         help="Bar aggregation timeframe (default: 1min)")
     parser.add_argument("--window", type=int, default=None, metavar="MINUTES",
                         help="Split data into N-minute windows (e.g. --window 15)")
+    parser.add_argument("--page", type=str, default="all", choices=["1", "2", "all"],
+                        help="Which page(s) to generate: 1=basic, 2=advanced, all=both")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -569,9 +962,9 @@ def main():
     print_summary(df, symbols, str(args.data_dir))
 
     for sym in targets:
-        log.info("Generating visualization for %s ...", sym)
+        log.info("Generating visualization for %s (page=%s)...", sym, args.page)
         outputs = generate_visualization(
-            df, sym, args.output, args.timeframe, args.window,
+            df, sym, args.output, args.timeframe, args.window, args.page,
         )
         for out in outputs:
             print(f"  Saved: {out}")

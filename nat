@@ -1361,6 +1361,8 @@ def cmd_15m_viz(args):
     window = getattr(args, 'window', None)
     if window:
         extra += f" --window {window}"
+    page = getattr(args, 'page', 'all')
+    extra += f" --page {page}"
     _py(f"scripts/15m_visualize.py{extra} --symbol {sym} -v")
 
 
@@ -1578,7 +1580,8 @@ def cmd_help(args=None):
     nat 15m                    Ingest 15min → validate → profile → cluster → report
     nat 15m --duration 300     Short 5-min experiment
     nat 15m offline            Analyze existing data (--data DIR, no ingestion)
-    nat 15m viz                Visualize latest experiment (--symbol, --window)
+    nat 15m viz                Visualize latest experiment (page 1+2)
+    nat 15m viz --page 2       Advanced panels (toxicity, trend, OI, illiq)
     nat 15m viz --symbol all   All symbols
     nat 15m test               Run unit tests
 
@@ -2022,6 +2025,8 @@ def build_parser():
     smv.add_argument('--data', type=str, default=None, help='Data directory (default: latest)')
     smv.add_argument('--symbol', type=str, default='BTC', help='Symbol or "all"')
     smv.add_argument('--window', type=int, default=None, help='Window size in minutes')
+    smv.add_argument('--page', type=str, default='all', choices=['1', '2', 'all'],
+                     help='Page: 1=basic, 2=advanced, all=both')
     smv.set_defaults(func=cmd_15m_viz)
     smsub.add_parser('test', help='Run unit tests').set_defaults(func=cmd_15m_test)
 
