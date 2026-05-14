@@ -1380,6 +1380,9 @@ def cmd_spannung(args):
     sym = getattr(args, 'symbol', 'all')
     top = getattr(args, 'top', 20)
     cmd = f"scripts/spannung_grid.py --data-dir {data} --symbol {sym} --top {top}"
+    horizons = getattr(args, 'horizons', None)
+    if horizons:
+        cmd += " --horizons " + " ".join(str(h) for h in horizons)
     output = getattr(args, 'output', None)
     if output:
         cmd += f" --output {output}"
@@ -2050,6 +2053,8 @@ def build_parser():
     spn_p = sub.add_parser('spannung', help='Spannung signal grid search')
     spn_p.add_argument('--data', type=str, default=None, help='Data dir (auto-detects latest)')
     spn_p.add_argument('--symbol', type=str, default='all', help='Symbol or "all" (default: all)')
+    spn_p.add_argument('--horizons', type=int, nargs='+', default=None,
+                       help='Forward horizons in ticks (1 tick=100ms, default: 10 50 100 300 600)')
     spn_p.add_argument('--top', type=int, default=20, help='Top N results to display')
     spn_p.add_argument('--output', type=str, default=None, help='Output directory')
     spn_p.set_defaults(func=cmd_spannung)
