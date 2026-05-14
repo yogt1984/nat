@@ -1,7 +1,7 @@
 # Spannung — Online Flow/Illiquidity Tension Metric
 
 **Date**: 2026-05-14
-**Status**: Phase A complete — grid search validates signal
+**Status**: Phase B complete — signal validated but not tradeable at retail fees
 
 ## Original Idea
 
@@ -267,35 +267,132 @@ old ingestor bug). Valid OOS dates: 2026-05-11, 2026-05-10, 2026-04-25.
 4. **The signal passes OOS validation decisively** — raw L1 book imbalance is a genuine,
    persistent microstructure signal that generalizes across days.
 
-### Remaining Caveats
+## Phase B: Cost-Aware Backtest (2026-05-14)
 
-- **Transaction cost reality**: IC=0.48 at 5s horizon is extraordinary on paper, but
-  actual execution at 100ms timescales faces latency, slippage, queue position,
-  and adverse selection costs that paper IC doesn't capture.
-- **Is this tradeable?** At 10 rows/sec, acting on L1 imbalance means competing with
-  HFT firms on collocated infrastructure. The signal is real but the edge may not
-  survive execution friction for a non-collocated setup.
-- **Longer-term OOS**: Need weeks/months of data to confirm stability across major
-  market regime changes (bull/bear transitions, volatility spikes, liquidity crises).
+**Strategy**: At each h-tick interval, observe imbalance_qty_l1. If |imbalance| >
+threshold, take position in sign(imbalance). Hold for h ticks. Sweep thresholds
+0.0–0.8. Costs: taker 3.5 bps/side, maker 1.0 bps/side.
+
+### Results (2026-05-12 data, best threshold per symbol)
+
+| Symbol | Horizon | Gross Sharpe | Net Sharpe (taker) | Net Sharpe (maker) | Gross bps | Net bps (taker) | bps/trade |
+|--------|---------|-------------|-------------------|-------------------|-----------|----------------|-----------|
+| BTC | 5.0s | 672 | **-1,054** | -335 | +1,533 | -7,256 | 0.27 |
+| ETH | 5.0s | 727 | **-1,152** | -285 | +2,082 | -8,666 | 0.37 |
+| SOL | 1.0s | 1,387 | **-2,038** | -849 | +4,877 | -27,025 | 0.17 |
+
+**The signal does NOT survive transaction costs.** Every threshold level loses money
+after both taker and maker fees across all three symbols.
+
+### Why It Fails
+
+1. **Per-trade edge is microscopic**: 0.17–0.37 bps gross per trade, vs 7 bps
+   round-trip taker cost. The signal needs ~20x more edge per trade to break even.
+
+2. **Excessive turnover**: The signal flips direction constantly — 1,200–7,700 position
+   changes over 10 hours. Each flip incurs cost. The IC comes from directional
+   accuracy in aggregate, but the per-trade magnitude is too small.
+
+3. **Hit rate is only 30–45%**: Most individual trades lose. The overall IC is positive
+   because winners are slightly larger than losers, but not by enough to cover costs.
+
+4. **This is the HFT problem**: The signal is real (IC 0.45+) but lives at a timescale
+   (100ms–5s) where execution costs dominate. This is exactly the domain of collocated
+   market makers with sub-millisecond latency, maker rebates, and queue priority.
+
+## Phase B.2: Regime Gating (2026-05-14)
+
+**Method**: Condition the imbalance signal on entropy, VPIN, volatility, and illiquidity
+regimes. Split each regime feature at its median, test single and combined conditions.
+
+### Results (BTC, threshold=0.3)
+
+| Regime | Condition | N intervals | IC | Net Sharpe (taker) |
+|--------|-----------|------------|-----|-------------------|
+| ALL (baseline) | no filter | 5,647 | 0.480 | -1,214 |
+| Low entropy | ent < 0.63 | 2,823 | 0.475 | -1,301 |
+| High entropy | ent >= 0.63 | 2,824 | 0.484 | -1,378 |
+| Low vol | vol < median | 2,823 | 0.489 | -1,162 |
+| High illiq | kyle >= 0.55 | 2,824 | 0.488 | -1,223 |
+| Low ent + High illiq | informed + fragile | 1,265 | 0.510 | -1,328 |
+| High vol + High illiq | volatile + fragile | 1,321 | 0.508 | -1,436 |
+
+**Regime gating does not help.** No regime combination produces positive net Sharpe.
+The IC varies slightly across regimes (0.42–0.51) but the cost problem dominates
+everywhere. Even the best regime ("low entropy + high illiquidity", IC=0.51) still
+loses -1,328 Sharpe after taker fees.
+
+### Key Insight
+
+The regime gating hypothesis — that imbalance is more informative in structured,
+fragile markets — is **directionally correct** (IC does increase from 0.48 to 0.51
+in the "informed + fragile" regime). But the improvement is far too small to overcome
+the fundamental cost problem. The signal needs 20x more edge per trade, not 6% more IC.
+
+## Conclusions and Next Directions
+
+### What We Learned
+
+1. **L1 book imbalance is a genuine microstructure signal** — IC 0.44–0.48, no
+   look-ahead bias, generalizes across days and symbols. This is consistent with
+   Cont/Stoikov/Talreja (2010).
+
+2. **The Spannung formulation (EWM + illiq denominator) hurts at tick timescales** —
+   raw imbalance beats it. Both smoothing and normalization add noise, not signal.
+
+3. **The signal is not tradeable at retail fee levels** — per-trade edge (0.2–0.4 bps)
+   is 20x too small relative to round-trip costs (7 bps taker). No threshold or
+   regime filter can fix a 20x cost-to-edge mismatch.
+
+4. **Regime gating is directionally correct but insufficient** — the "informed + fragile"
+   regime does improve IC, but not enough to bridge the cost gap.
+
+### Where to Go From Here
+
+The raw signal discovery is valuable — the question is *at what timescale and in what
+form* it becomes tradeable:
+
+1. **Longer horizons with aggregated signals**: Instead of tick-level imbalance at 5s
+   horizon, aggregate imbalance over minutes and predict at 15m–1h horizons. Fewer
+   trades, larger per-trade edge, costs become manageable. The original Spannung
+   EWM formulation may add value here (where it was designed to operate).
+
+2. **Imbalance as a feature, not a strategy**: Feed imbalance into a multi-feature
+   model (with entropy, toxicity, trend, volatility) that trades at lower frequency.
+   The IC=0.48 at 5s makes it the strongest single input — but it needs to be
+   combined with other signals at a tradeable timescale.
+
+3. **Maker strategy**: If you can reliably post limit orders (1 bps/side = 2 bps
+   round trip), the cost picture improves 3.5x. Still not enough for pure imbalance
+   at 5s, but combined with longer horizons it might work.
+
+4. **Cross-symbol signals**: Does BTC imbalance predict ETH/SOL returns at longer
+   horizons? Cross-asset information flow operates at slower timescales where
+   costs are less punishing.
 
 ### Implementation: `nat spannung`
 
 ```bash
-nat spannung                                    # auto-detect best data, all symbols
+nat spannung                                    # grid search (IC landscape)
 nat spannung --data data/features/2026-05-12    # specific date
 nat spannung --symbol BTC --top 30              # single symbol
 nat spannung --horizons 5 10 20 50              # custom horizons (ticks)
+nat spannung backtest                           # cost-aware backtest + regime gating
+nat spannung backtest --symbol BTC --horizon 50 # single symbol backtest
 ```
 
-Output: `reports/spannung/spannung_{SYM}.json` + `spannung_summary.json`
+Output: `reports/spannung/` — per-symbol grid, backtest, regime, and summary JSONs.
 
 ## Open Questions
 
-- Should Spannung be computed per-symbol or cross-symbol (e.g., BTC flow / ETH illiquidity)?
-- Is there an asymmetry to exploit — does buy-side Spannung predict differently than sell-side?
-- How does Spannung interact with the existing `derived_informed_trend_score` (kyle x monotonicity)?
-- Can a gating function (entropy/toxicity regime) improve the raw imbalance signal?
-- At what timescale does the illiquidity denominator start adding value? (minutes? hours?)
-- ~~How much IC comes from numerator vs denominator?~~ **Answered**: all from numerator (raw imbalance)
-- ~~Does the signal survive a 1-tick lag?~~ **Answered**: yes, smooth decay, no look-ahead bias
+- At what timescale does aggregated imbalance become cost-positive? (test 1m, 5m, 15m bars)
+- Does the Spannung EWM formulation add value at minute+ horizons?
+- Can imbalance be used as the strongest input feature in a multi-signal model?
+- Does BTC imbalance predict ETH/SOL returns (cross-symbol information flow)?
+- Is there an asymmetry — does buy-side imbalance predict differently than sell-side?
+- Can a maker-only execution model (limit orders, queue position) close the cost gap?
+- ~~How much IC comes from numerator vs denominator?~~ **Answered**: all from numerator
+- ~~Does the signal survive a 1-tick lag?~~ **Answered**: yes, smooth decay, no bias
 - ~~Does the signal generalize across days?~~ **Answered**: yes, IC 0.27-0.48 across 4 dates
+- ~~Can a gating function improve the signal?~~ **Answered**: directionally yes (+6% IC), but insufficient to overcome costs
+- ~~Is the signal tradeable at retail fees?~~ **Answered**: no, 20x cost-to-edge mismatch

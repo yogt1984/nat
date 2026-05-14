@@ -1389,6 +1389,18 @@ def cmd_spannung(args):
     _py(cmd)
 
 
+def cmd_spannung_backtest(args):
+    """Run Spannung cost-aware backtest + regime gating."""
+    _banner("Spannung Backtest + Regime Gating")
+    data = _data(args)
+    sym = getattr(args, 'symbol', 'all')
+    cmd = f"scripts/spannung_backtest.py --data-dir {data} --symbol {sym}"
+    horizon = getattr(args, 'horizon', None)
+    if horizon:
+        cmd += f" --horizon {horizon}"
+    _py(cmd)
+
+
 # ── Docker commands ──────────────────────────────────────────────────────────
 
 def cmd_docker_build(args):
@@ -1459,6 +1471,7 @@ def cmd_help(args=None):
     nat profile                Run regime profiling
     nat profile scalp          Scalping feature profiler (--symbol, --top, --forward-test)
     nat spannung               Spannung signal grid search (--data, --symbol, --top)
+    nat spannung backtest      Spannung cost-aware backtest + regime gating
     nat report                 Generate full experiment report
     nat macro                  Daily MA crossover signals
     nat screen [args]          Alpha screening
@@ -2058,6 +2071,12 @@ def build_parser():
     spn_p.add_argument('--top', type=int, default=20, help='Top N results to display')
     spn_p.add_argument('--output', type=str, default=None, help='Output directory')
     spn_p.set_defaults(func=cmd_spannung)
+    spn_sub = spn_p.add_subparsers(dest='spn_subcmd')
+    spn_bt = spn_sub.add_parser('backtest', help='Cost-aware backtest + regime gating')
+    spn_bt.add_argument('--data', type=str, default=None, help='Data dir')
+    spn_bt.add_argument('--symbol', type=str, default='all', help='Symbol or "all"')
+    spn_bt.add_argument('--horizon', type=int, default=None, help='Horizon in ticks')
+    spn_bt.set_defaults(func=cmd_spannung_backtest)
 
     return p
 
