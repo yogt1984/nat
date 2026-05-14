@@ -1,7 +1,7 @@
 # Spannung — Online Flow/Illiquidity Tension Metric
 
 **Date**: 2026-05-14
-**Status**: Phase B complete — signal validated but not tradeable at retail fees
+**Status**: Phase C complete — longer horizons tested, signal does not survive aggregation
 
 ## Original Idea
 
@@ -347,28 +347,87 @@ the fundamental cost problem. The signal needs 20x more edge per trade, not 6% m
 4. **Regime gating is directionally correct but insufficient** — the "informed + fragile"
    regime does improve IC, but not enough to bridge the cost gap.
 
+## Phase C: Longer-Horizon Sweep (2026-05-14)
+
+**Method**: Aggregate tick-level data into bars (30s, 1min, 2min, 5min, 10min, 15min).
+At each bar, compute 6 signal variants from the underlying ticks. Test forward returns
+at 1, 2, 4, 8 bars ahead. Total: 144 combinations per symbol per date.
+
+### Signal Variants Tested
+
+1. **imbalance_mean** — mean(imbalance_qty_l1) over bar (baseline)
+2. **imbalance_last** — last tick imbalance in bar
+3. **imbalance_trend** — OLS slope of imbalance over bar (is pressure building?)
+4. **imbalance_persistence** — fraction of ticks where sign(imbalance) matches bar mean
+5. **spannung_mean** — mean(EWM_flow / EWM_illiq) over bar (original Spannung at bar level)
+6. **imbalance_x_illiq** — imbalance_mean × illiq_composite_mean (interaction product)
+
+### Results Summary
+
+| Date | Symbol | Hours | Profitable combos (net > 0) | Best net Sharpe | Best breakeven |
+|------|--------|-------|-----------------------------|-----------------|----------------|
+| 2026-05-12 (IS) | BTC | 10.0h | **0 / 96** | -23.3 | 2.2 bps/side |
+| 2026-05-12 (IS) | ETH | 10.0h | **3 / 96** | 5.2 (5min, 600s) | 3.9 bps/side |
+| 2026-05-11 (OOS) | BTC | 24.0h | **4 / 144** | 8.0 (15min, 7200s) | 158.3 bps/side |
+| 2026-05-11 (OOS) | ETH | 24.0h | **7 / 144** | 10.8 (10min, 4800s) | 5.5 bps/side |
+
+### Why This Doesn't Work
+
+1. **Zero overlap between in-sample and OOS profitable combos.** Different signals,
+   different timeframes, different horizons. The "profitable" combinations are noise
+   artifacts from thin data (70–200 bars per run), not robust strategies.
+
+2. **IC degrades catastrophically with aggregation.** Tick-level IC was 0.44–0.48.
+   At bar level, best ICs are 0.15–0.23 — a 2–3x drop. The raw signal lives at
+   the tick, and aggregating it destroys most of its information content.
+
+3. **Negative IC on profitable combos.** Most combos that show positive net P&L have
+   *negative* IC (mean-reversion, signal flipped). This is consistent with noise:
+   with 70 bars, a few random reversals can produce apparent profitability.
+
+4. **Cost still dominates.** Even where gross returns are large (e.g., 344 bps for
+   imbalance_trend at 2min/960s), costs consume it all (net = -562 bps). The
+   problem is turnover: aggregated signals still flip frequently enough to eat
+   the larger per-trade edge.
+
+5. **The Spannung EWM formulation does not help at bar level either.** spannung_mean
+   performs comparably to or worse than imbalance_mean at every timeframe.
+
+### What This Means for the Spannung Thesis
+
+The original hope — that aggregating the tick signal to longer bars would preserve
+enough IC while reducing costs — does not hold. The fundamental problem is that
+**L1 book imbalance is an inherently short-lived signal**:
+
+- At tick level: IC=0.48, 100% hit rate, 0.2–0.4 bps/trade edge → not enough for costs
+- At bar level: IC=0.05–0.20, inconsistent across dates, insufficient edge → still not enough
+- The signal's predictive power decays exponentially with timescale. There is no
+  "sweet spot" where IC is high enough and costs are low enough.
+
+This is consistent with the academic literature. Cont/Stoikov/Talreja (2010) showed
+book imbalance predicts at the *tick* timescale. It was never expected to predict
+at minutes-to-hours horizons — that requires fundamentally different signals
+(order flow toxicity accumulation, inventory effects, information cascades).
+
 ### Where to Go From Here
 
-The raw signal discovery is valuable — the question is *at what timescale and in what
-form* it becomes tradeable:
-
-1. **Longer horizons with aggregated signals**: Instead of tick-level imbalance at 5s
-   horizon, aggregate imbalance over minutes and predict at 15m–1h horizons. Fewer
-   trades, larger per-trade edge, costs become manageable. The original Spannung
-   EWM formulation may add value here (where it was designed to operate).
-
-2. **Imbalance as a feature, not a strategy**: Feed imbalance into a multi-feature
+1. **Imbalance as a feature, not a strategy**: Feed imbalance into a multi-feature
    model (with entropy, toxicity, trend, volatility) that trades at lower frequency.
    The IC=0.48 at 5s makes it the strongest single input — but it needs to be
    combined with other signals at a tradeable timescale.
 
-3. **Maker strategy**: If you can reliably post limit orders (1 bps/side = 2 bps
+2. **Maker strategy**: If you can reliably post limit orders (1 bps/side = 2 bps
    round trip), the cost picture improves 3.5x. Still not enough for pure imbalance
    at 5s, but combined with longer horizons it might work.
 
-4. **Cross-symbol signals**: Does BTC imbalance predict ETH/SOL returns at longer
+3. **Cross-symbol signals**: Does BTC imbalance predict ETH/SOL returns at longer
    horizons? Cross-asset information flow operates at slower timescales where
    costs are less punishing.
+
+4. **Abandon single-signal strategies at retail**: The core lesson from Phases A–C
+   is that no single microstructure signal (no matter how strong its IC) generates
+   enough per-trade edge to overcome retail taker fees. The path forward is
+   multi-signal combination at lower trading frequency.
 
 ### Implementation: `nat spannung`
 
@@ -379,14 +438,16 @@ nat spannung --symbol BTC --top 30              # single symbol
 nat spannung --horizons 5 10 20 50              # custom horizons (ticks)
 nat spannung backtest                           # cost-aware backtest + regime gating
 nat spannung backtest --symbol BTC --horizon 50 # single symbol backtest
+nat spannung horizon                            # longer-horizon bar sweep
+nat spannung horizon --data data/features/2026-05-11 --symbol BTC  # specific date
 ```
 
 Output: `reports/spannung/` — per-symbol grid, backtest, regime, and summary JSONs.
 
 ## Open Questions
 
-- At what timescale does aggregated imbalance become cost-positive? (test 1m, 5m, 15m bars)
-- Does the Spannung EWM formulation add value at minute+ horizons?
+- ~~At what timescale does aggregated imbalance become cost-positive?~~ **Answered**: none tested (30s–15min). IC degrades too much with aggregation.
+- ~~Does the Spannung EWM formulation add value at minute+ horizons?~~ **Answered**: no, performs comparably or worse than raw mean imbalance at all bar timeframes.
 - Can imbalance be used as the strongest input feature in a multi-signal model?
 - Does BTC imbalance predict ETH/SOL returns (cross-symbol information flow)?
 - Is there an asymmetry — does buy-side imbalance predict differently than sell-side?

@@ -1401,6 +1401,18 @@ def cmd_spannung_backtest(args):
     _py(cmd)
 
 
+def cmd_spannung_horizon(args):
+    """Run Spannung longer-horizon sweep (30s–15min bars)."""
+    _banner("Spannung Horizon Sweep")
+    data = _data(args)
+    sym = getattr(args, 'symbol', 'all')
+    cmd = f"scripts/spannung_horizon_sweep.py --data-dir {data} --symbol {sym}"
+    output = getattr(args, 'output', None)
+    if output:
+        cmd += f" --output {output}"
+    _py(cmd)
+
+
 # ── Docker commands ──────────────────────────────────────────────────────────
 
 def cmd_docker_build(args):
@@ -1472,6 +1484,7 @@ def cmd_help(args=None):
     nat profile scalp          Scalping feature profiler (--symbol, --top, --forward-test)
     nat spannung               Spannung signal grid search (--data, --symbol, --top)
     nat spannung backtest      Spannung cost-aware backtest + regime gating
+    nat spannung horizon       Spannung longer-horizon sweep (30s–15min bars)
     nat report                 Generate full experiment report
     nat macro                  Daily MA crossover signals
     nat screen [args]          Alpha screening
@@ -2077,6 +2090,11 @@ def build_parser():
     spn_bt.add_argument('--symbol', type=str, default='all', help='Symbol or "all"')
     spn_bt.add_argument('--horizon', type=int, default=None, help='Horizon in ticks')
     spn_bt.set_defaults(func=cmd_spannung_backtest)
+    spn_hz = spn_sub.add_parser('horizon', help='Longer-horizon sweep (30s–15min bars)')
+    spn_hz.add_argument('--data', type=str, default=None, help='Data dir')
+    spn_hz.add_argument('--symbol', type=str, default='all', help='Symbol or "all"')
+    spn_hz.add_argument('--output', type=str, default=None, help='Output directory')
+    spn_hz.set_defaults(func=cmd_spannung_horizon)
 
     return p
 
