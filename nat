@@ -1413,6 +1413,18 @@ def cmd_spannung_horizon(args):
     _py(cmd)
 
 
+def cmd_spannung_spectral(args):
+    """Run Spannung spectral analysis (PSD, coherence, ACF, band IC)."""
+    _banner("Spannung Spectral Analysis")
+    data = _data(args)
+    sym = getattr(args, 'symbol', 'all')
+    cmd = f"scripts/spannung_spectral.py --data-dir {data} --symbol {sym}"
+    output = getattr(args, 'output', None)
+    if output:
+        cmd += f" --output {output}"
+    _py(cmd)
+
+
 # ── Docker commands ──────────────────────────────────────────────────────────
 
 def cmd_docker_build(args):
@@ -1485,6 +1497,7 @@ def cmd_help(args=None):
     nat spannung               Spannung signal grid search (--data, --symbol, --top)
     nat spannung backtest      Spannung cost-aware backtest + regime gating
     nat spannung horizon       Spannung longer-horizon sweep (30s–15min bars)
+    nat spannung spectral      Spannung spectral analysis (PSD, coherence, ACF, band IC)
     nat report                 Generate full experiment report
     nat macro                  Daily MA crossover signals
     nat screen [args]          Alpha screening
@@ -2095,6 +2108,11 @@ def build_parser():
     spn_hz.add_argument('--symbol', type=str, default='all', help='Symbol or "all"')
     spn_hz.add_argument('--output', type=str, default=None, help='Output directory')
     spn_hz.set_defaults(func=cmd_spannung_horizon)
+    spn_sp = spn_sub.add_parser('spectral', help='Spectral analysis (PSD, coherence, ACF, band IC)')
+    spn_sp.add_argument('--data', type=str, default=None, help='Data dir')
+    spn_sp.add_argument('--symbol', type=str, default='all', help='Symbol or "all"')
+    spn_sp.add_argument('--output', type=str, default=None, help='Output directory')
+    spn_sp.set_defaults(func=cmd_spannung_spectral)
 
     return p
 
