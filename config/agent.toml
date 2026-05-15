@@ -124,3 +124,17 @@ primary = ["BTC", "ETH", "SOL"]
 [agent_macro.paths]
 data_dir = "data/features"
 state_dir = "data/agent_macro"
+
+# ─────────────────────────────────────────────────────────────
+# Meta-Agent (Orchestrator)
+# Coordinates all research agents, no hypothesis generation
+# ─────────────────────────────────────────────────────────────
+
+[meta_agent]
+cycle_interval_s = 21600        # 6 hours
+correlation_threshold = 0.70    # cross-agent dedup threshold
+min_portfolio_signals = 2       # minimum signals for portfolio assembly
+
+[meta_agent.promotion]
+paper_sharpe_min = 1.5
+paper_days = 7

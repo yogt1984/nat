@@ -81,9 +81,11 @@ Key files:
 - `scripts/agent/mf_runner.py` — MediumFrequencyRunner(BaseRunner) 4-gate executor
 - `scripts/agent/macro_daemon.py` — MacroAgent(ResearchAgent) + CLI for 1h-24h signals
 - `scripts/agent/macro_runner.py` — MacroRunner(BaseRunner) 4-gate executor
+- `scripts/agent/meta_daemon.py` — MetaAgent orchestrator (cross-agent budget, correlation, portfolio)
+- `scripts/agent/meta_portfolio.py` — Risk parity weights, portfolio metrics, promotion evaluation
 - `scripts/agent/cache.py` — Deterministic command cache
 - `scripts/agent_dashboard.py` — Agent web dashboard with IC heatmap
-- `config/agent.toml` — Gate thresholds, promotion criteria, generator config (`[agent]` + `[agent_mf]` + `[agent_macro]`)
+- `config/agent.toml` — Gate thresholds, promotion criteria, generator config (`[agent]` + `[agent_mf]` + `[agent_macro]` + `[meta_agent]`)
 
 ## Cargo Workspace
 

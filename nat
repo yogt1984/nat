@@ -1228,6 +1228,45 @@ def cmd_macro_agent_report(args):
     _py(f"{MACRO_AGENT_SCRIPT} report")
 
 
+# ── Meta-Agent (orchestrator) commands ────────────────────────────────────────
+
+META_AGENT_SCRIPT = "scripts/agent/meta_daemon.py"
+
+def cmd_meta_agent_start(args):
+    _banner("Starting Meta-Agent orchestrator")
+    _py(f"{META_AGENT_SCRIPT} start")
+
+def cmd_meta_agent_stop(args):
+    """Send SIGTERM to running meta-agent."""
+    import signal as sig
+    r = _sh("pgrep -f 'agent/meta_daemon.py start'")
+    if r.returncode == 0 and r.stdout.strip():
+        pid = int(r.stdout.strip().split("\n")[0])
+        os.kill(pid, sig.SIGTERM)
+        _p("✓", G, f"Sent SIGTERM to meta-agent (pid {pid})")
+    else:
+        _p("–", Y, "No running meta-agent found")
+
+def cmd_meta_agent_once(args):
+    _banner("Running single meta-agent cycle")
+    _py(f"{META_AGENT_SCRIPT} once")
+
+def cmd_meta_agent_status(args):
+    _py(f"{META_AGENT_SCRIPT} status")
+
+def cmd_meta_agent_portfolio(args):
+    _py(f"{META_AGENT_SCRIPT} portfolio")
+
+def cmd_meta_agent_correlation(args):
+    _py(f"{META_AGENT_SCRIPT} correlation")
+
+def cmd_meta_agent_budget(args):
+    _py(f"{META_AGENT_SCRIPT} budget")
+
+def cmd_meta_agent_report(args):
+    _py(f"{META_AGENT_SCRIPT} report")
+
+
 # ── Signal commands ──────────────────────────────────────────────────────────
 
 def cmd_signal_test(args):
@@ -2306,6 +2345,19 @@ def build_parser():
     masub.add_parser('registry', help='Validated signals').set_defaults(func=cmd_macro_agent_registry)
     masub.add_parser('graveyard', help='Failed hypotheses').set_defaults(func=cmd_macro_agent_graveyard)
     masub.add_parser('report', help='Full summary report').set_defaults(func=cmd_macro_agent_report)
+
+    # ── meta-agent ──
+    me_p = sub.add_parser('meta-agent', help='Meta-agent orchestrator (cross-agent)')
+    me_p.set_defaults(func=cmd_meta_agent_status)
+    mesub = me_p.add_subparsers(dest='subcmd')
+    mesub.add_parser('start', help='Launch meta-agent daemon').set_defaults(func=cmd_meta_agent_start)
+    mesub.add_parser('stop', help='Graceful shutdown (SIGTERM)').set_defaults(func=cmd_meta_agent_stop)
+    mesub.add_parser('once', help='Run single orchestration cycle').set_defaults(func=cmd_meta_agent_once)
+    mesub.add_parser('status', help='Current state & budgets').set_defaults(func=cmd_meta_agent_status)
+    mesub.add_parser('portfolio', help='Signal portfolio').set_defaults(func=cmd_meta_agent_portfolio)
+    mesub.add_parser('correlation', help='Cross-agent correlation matrix').set_defaults(func=cmd_meta_agent_correlation)
+    mesub.add_parser('budget', help='Agent budget allocation').set_defaults(func=cmd_meta_agent_budget)
+    mesub.add_parser('report', help='Full orchestrator report').set_defaults(func=cmd_meta_agent_report)
 
     return p
 
