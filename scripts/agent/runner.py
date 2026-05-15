@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from .base import BaseRunner, apply_fdr  # noqa: F401 — apply_fdr re-exported
 from .cache import ReportCache
 from .hypothesis import Hypothesis, RegisteredSignal
 from .manifest import load_manifest
@@ -228,67 +229,6 @@ def check_cost_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
                     + (" PASS" if passed else " FAIL"))
 
 
-def _extract_pvalue(gate_msg: str) -> Optional[float]:
-    """Extract p=... from a gate result message."""
-    if "p=" not in gate_msg:
-        return None
-    try:
-        return float(gate_msg.split("p=")[1].split()[0])
-    except (IndexError, ValueError):
-        return None
-
-
-def apply_fdr(hypotheses: list, q: float = 0.05) -> list[str]:
-    """Benjamini-Hochberg FDR control across a batch of tested hypotheses.
-
-    Collects the IC p-value from each hypothesis that passed discovery,
-    applies BH at level q, and returns IDs of hypotheses that should be
-    rejected (marked fdr_rejected).
-
-    Args:
-        hypotheses: list of Hypothesis objects (or dicts) from this cycle
-        q: false discovery rate threshold (default 0.05)
-
-    Returns:
-        List of hypothesis IDs that fail FDR correction.
-    """
-    # Collect (id, pvalue) for hypotheses that passed discovery
-    pvals = []
-    for h in hypotheses:
-        results = h.get("results") if isinstance(h, dict) else getattr(h, "results", None)
-        hyp_id = h.get("id") if isinstance(h, dict) else getattr(h, "id", None)
-        status = h.get("status") if isinstance(h, dict) else getattr(h, "status", None)
-        if results is None or status == "queued":
-            continue
-        # Look for p-value in gate_results
-        for gr in (results.get("gate_results") or []):
-            p = _extract_pvalue(gr.get("msg", ""))
-            if p is not None:
-                pvals.append((hyp_id, p))
-                break  # one p-value per hypothesis (first IC gate)
-
-    if len(pvals) < 2:
-        return []  # nothing to correct with fewer than 2 tests
-
-    # Sort by p-value (ascending)
-    pvals.sort(key=lambda x: x[1])
-    m = len(pvals)
-
-    # BH: find largest k where p(k) <= k/m * q
-    bh_threshold = 0.0
-    for k, (hyp_id, p) in enumerate(pvals, 1):
-        if p <= (k / m) * q:
-            bh_threshold = p
-
-    # Reject hypotheses with p > bh_threshold (they don't survive FDR)
-    rejected = []
-    for hyp_id, p in pvals:
-        if p > bh_threshold and bh_threshold > 0:
-            rejected.append(hyp_id)
-
-    return rejected
-
-
 def _parse_gate_spec(gate_str: str) -> Optional[tuple[str, str, str]]:
     """Parse 'ent_book_shape<P40' into ('ent_book_shape', '<', 'P40')."""
     m = re.match(r'^([a-z_0-9]+)([<>])(P\d+)$', gate_str)
@@ -441,13 +381,8 @@ def check_walkforward_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
 # Runner
 # ---------------------------------------------------------------------------
 
-class ExperimentRunner:
-    """Runs a single hypothesis through its test protocol."""
-
-    def __init__(self, hypothesis: Hypothesis, manifest: dict):
-        self.h = hypothesis
-        self.manifest = manifest
-        self.gate_results: list[dict] = []
+class MicrostructureRunner(BaseRunner):
+    """Runs a microstructure hypothesis through the 5-gate protocol."""
 
     def run_discovery(self) -> bool:
         """Execute the test protocol and check gates at each step."""
@@ -638,20 +573,15 @@ class ExperimentRunner:
                 return False
         return True
 
-    def run_full(self) -> bool:
-        """Run the complete 5-gate protocol: discovery, cost, temporal, symbol, dedup."""
-        if not self.run_discovery():
-            return False
-        if not self.run_cost_check():
-            return False
-        if not self.run_replication_temporal():
-            return False
-        if not self.run_replication_symbol():
-            return False
-        if not self.run_correlation_check():
-            return False
-        self.register_signal()
-        return True
+    def steps(self) -> list:
+        """5-gate protocol: discovery → cost → temporal → symbol → dedup."""
+        return [
+            self.run_discovery,
+            self.run_cost_check,
+            self.run_replication_temporal,
+            self.run_replication_symbol,
+            self.run_correlation_check,
+        ]
 
     # -- helpers ------------------------------------------------------------
 
@@ -667,22 +597,6 @@ class ExperimentRunner:
             if not passed:
                 return False, f"{name}: {msg}"
         return True, " | ".join(msgs)
-
-    def _extract_data_dir(self) -> str:
-        for cmd_str in self.h.test_protocol:
-            parts = cmd_str.split()
-            for i, p in enumerate(parts):
-                if p in ("--data", "--data-dir") and i + 1 < len(parts):
-                    return parts[i + 1]
-        return f"data/features/{sorted(self.manifest.get('dates', {}).keys())[-1]}"
-
-    @staticmethod
-    def _extract_symbol(cmd_str: str) -> str:
-        parts = cmd_str.split()
-        for i, p in enumerate(parts):
-            if p == "--symbol" and i + 1 < len(parts):
-                return parts[i + 1]
-        return "BTC"
 
     def _extract_features(self) -> list[str]:
         claim = self.h.claim.lower()
@@ -710,3 +624,7 @@ class ExperimentRunner:
             with open(REGISTRY_PATH) as f:
                 return json.load(f)
         return []
+
+
+# Backward compatibility alias
+ExperimentRunner = MicrostructureRunner

@@ -4,7 +4,7 @@
 Main loop:
     1. UPDATE MANIFEST  — scan data/features/, write manifest.json
     2. GENERATE         — each generator emits hypotheses into queue
-    3. EXECUTE          — pop highest-priority, run 3-gate protocol
+    3. EXECUTE          — pop highest-priority, run 5-gate protocol
     4. MONITOR          — check paper trading metrics for registered signals
     5. SLEEP            — wait until next cycle
 
@@ -22,21 +22,19 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import signal
 import sys
-import time
 from datetime import datetime, timezone
-from enum import Enum
 from pathlib import Path
 
 # Ensure project root is importable
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from agent.hypothesis import Hypothesis, GeneratorStats
-from agent.hypothesis_queue import HypothesisQueue
-from agent.manifest import build_manifest, load_manifest
-from agent.runner import ExperimentRunner
+from agent.base import (  # noqa: E402
+    ResearchAgent, BaseRunner, AgentPhase, AgentState,  # re-export for compat
+)
+from agent.hypothesis import Hypothesis, GeneratorStats  # noqa: E402
+from agent.hypothesis_queue import HypothesisQueue  # noqa: E402
 
 log = logging.getLogger("nat.agent")
 
@@ -75,77 +73,7 @@ def load_config() -> dict:
     return DEFAULT_CONFIG
 
 
-# ---------------------------------------------------------------------------
-# Agent state (persistent)
-# ---------------------------------------------------------------------------
-
-class AgentPhase(str, Enum):
-    IDLE = "IDLE"
-    MANIFEST = "MANIFEST"
-    GENERATE = "GENERATE"
-    EXECUTE = "EXECUTE"
-    MONITOR = "MONITOR"
-    SLEEPING = "SLEEPING"
-    STOPPED = "STOPPED"
-    ERROR = "ERROR"
-
-
-class AgentState:
-    """Persistent agent state — survives restarts."""
-
-    def __init__(self, path: Path = STATE_PATH):
-        self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._data = self._load()
-
-    def _load(self) -> dict:
-        if self.path.exists():
-            with open(self.path) as f:
-                return json.load(f)
-        return {
-            "phase": AgentPhase.IDLE.value,
-            "cycle_count": 0,
-            "total_hypotheses_tested": 0,
-            "total_signals_registered": 0,
-            "current_hypothesis": None,
-            "started_at": None,
-            "last_cycle_at": None,
-            "history": [],
-        }
-
-    def save(self) -> None:
-        with open(self.path, "w") as f:
-            json.dump(self._data, f, indent=2, default=str)
-
-    def transition(self, phase: AgentPhase, msg: str = "") -> None:
-        old = self._data["phase"]
-        self._data["phase"] = phase.value
-        self._data["history"].append({
-            "from": old, "to": phase.value,
-            "at": datetime.now(timezone.utc).isoformat(),
-            "msg": msg,
-        })
-        # Keep history bounded
-        if len(self._data["history"]) > 500:
-            self._data["history"] = self._data["history"][-200:]
-        self.save()
-
-    def get(self, key: str, default=None):
-        return self._data.get(key, default)
-
-    def set(self, key: str, value) -> None:
-        self._data[key] = value
-        self.save()
-
-    @property
-    def phase(self) -> AgentPhase:
-        return AgentPhase(self._data["phase"])
-
-
-# ---------------------------------------------------------------------------
-# Generator stats persistence
-# ---------------------------------------------------------------------------
-
+# Backward compatibility — module-level functions still importable
 def load_gen_stats() -> dict[str, GeneratorStats]:
     if STATS_PATH.exists():
         with open(STATS_PATH) as f:
@@ -162,173 +90,86 @@ def save_gen_stats(stats: dict[str, GeneratorStats]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Generator dispatch
+# MicrostructureAgent — the NAT alpha discovery agent
 # ---------------------------------------------------------------------------
 
-def run_generators(queue: HypothesisQueue, manifest: dict,
-                   config: dict, gen_stats: dict[str, GeneratorStats]) -> int:
-    """Run all enabled generators and push hypotheses into the queue."""
-    total = 0
-    for gen_name in config["generators_enabled"]:
+class MicrostructureAgent(ResearchAgent):
+    """Microstructure research agent for HFT alpha discovery.
+
+    Discovers scalping signals (5s horizon) from Hyperliquid perpetual
+    futures data. Uses 6 generators and a 5-gate replication protocol.
+    """
+
+    agent_type = "microstructure"
+    default_generators = [
+        "systematic", "spectral", "regime",
+        "cross_asset", "recycler", "ensemble",
+    ]
+
+    # --- Path overrides (use module-level vars for monkeypatchability) -----
+
+    @property
+    def root(self) -> Path:
+        return ROOT
+
+    @property
+    def state_path(self) -> Path:
+        return STATE_PATH
+
+    @property
+    def queue_path(self) -> Path:
+        return ROOT / "data" / "agent" / "hypotheses.json"
+
+    @property
+    def stats_path(self) -> Path:
+        return STATS_PATH
+
+    # --- Config -----------------------------------------------------------
+
+    def load_config(self) -> dict:
+        return load_config()
+
+    # --- Abstract hook implementations ------------------------------------
+
+    def get_generator(self, name: str):
+        """Lazy-import microstructure generator functions."""
         try:
-            gen_func = _get_generator(gen_name)
-            if gen_func is None:
-                continue
-            hypotheses = gen_func(manifest, queue, gen_stats.get(gen_name))
-            for h in hypotheses:
-                queue.push(h)
-                total += 1
-        except Exception as e:
-            log.warning("Generator %s failed: %s", gen_name, e)
-    log.info("Generated %d new hypotheses", total)
-    return total
+            if name == "systematic":
+                from agent.generators.systematic import generate
+                return generate
+            elif name == "spectral":
+                from agent.generators.spectral import generate
+                return generate
+            elif name == "regime":
+                from agent.generators.regime import generate
+                return generate
+            elif name == "cross_asset":
+                from agent.generators.cross_asset import generate
+                return generate
+            elif name == "recycler":
+                from agent.generators.recycler import generate
+                return generate
+            elif name == "ensemble":
+                from agent.generators.ensemble import generate
+                return generate
+        except ImportError as e:
+            log.debug("Generator %s not yet implemented: %s", name, e)
+        return None
 
+    def create_runner(self, hypothesis: Hypothesis, manifest: dict) -> BaseRunner:
+        from agent.runner import MicrostructureRunner
+        return MicrostructureRunner(hypothesis, manifest)
 
-def _get_generator(name: str):
-    """Lazy-import generator functions."""
-    try:
-        if name == "systematic":
-            from agent.generators.systematic import generate
-            return generate
-        elif name == "spectral":
-            from agent.generators.spectral import generate
-            return generate
-        elif name == "regime":
-            from agent.generators.regime import generate
-            return generate
-        elif name == "cross_asset":
-            from agent.generators.cross_asset import generate
-            return generate
-        elif name == "recycler":
-            from agent.generators.recycler import generate
-            return generate
-        elif name == "ensemble":
-            from agent.generators.ensemble import generate
-            return generate
-    except ImportError as e:
-        log.debug("Generator %s not yet implemented: %s", name, e)
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Main loop
-# ---------------------------------------------------------------------------
-
-class AgentDaemon:
-    """The autonomous research agent."""
-
-    def __init__(self):
-        self.config = load_config()
-        self.state = AgentState()
-        self.queue = HypothesisQueue(path=ROOT / "data" / "agent" / "hypotheses.json")
-        self.gen_stats = load_gen_stats()
-        self._shutdown = False
-
-        # Graceful shutdown
-        signal.signal(signal.SIGTERM, self._handle_signal)
-        signal.signal(signal.SIGINT, self._handle_signal)
-
-    def _handle_signal(self, signum, frame):
-        log.info("Received signal %d, will stop after current experiment", signum)
-        self._shutdown = True
-
-    @staticmethod
-    def _remove_from_registry(hypothesis_id: str) -> None:
-        """Remove a signal from the registry by its hypothesis_id."""
-        from agent.runner import REGISTRY_PATH
-        if not REGISTRY_PATH.exists():
-            return
-        with open(REGISTRY_PATH) as f:
-            registry = json.load(f)
-        registry = [s for s in registry if s.get("hypothesis_id") != hypothesis_id]
-        with open(REGISTRY_PATH, "w") as f:
-            json.dump(registry, f, indent=2)
-
-    def run_cycle(self) -> None:
-        """Execute one complete research cycle."""
-        cycle_start = time.monotonic()
-
-        # 1. Update manifest
-        self.state.transition(AgentPhase.MANIFEST, "scanning data")
-        manifest = build_manifest()
-
-        # 2. Generate hypotheses
-        self.state.transition(AgentPhase.GENERATE, "generating hypotheses")
-        run_generators(self.queue, manifest, self.config, self.gen_stats)
-
-        # 2b. Adaptive IC threshold — raise the bar as registry quality grows
+    def pre_execute(self, hypothesis: Hypothesis) -> None:
+        """Inject adaptive IC threshold — raises the bar as registry grows."""
         adaptive_min_ic = self._compute_adaptive_ic()
+        hypothesis.thresholds.setdefault("min_ic", 0.10)
+        if adaptive_min_ic > hypothesis.thresholds["min_ic"]:
+            hypothesis.thresholds["min_ic"] = adaptive_min_ic
 
-        # 3. Execute experiments (budget-limited)
-        self.state.transition(AgentPhase.EXECUTE, "running experiments")
-        n_run = 0
-        n_registered = 0
-        max_run = self.config["max_experiments_per_cycle"]
-        max_time = self.config["max_cycle_runtime_s"]
-        cycle_hypotheses = []
-
-        while n_run < max_run and not self._shutdown:
-            elapsed = time.monotonic() - cycle_start
-            if elapsed > max_time:
-                log.info("Cycle time budget exhausted (%.0fs)", elapsed)
-                break
-
-            hypothesis = self.queue.pop(manifest)
-            if hypothesis is None:
-                log.info("Queue empty, ending execution phase")
-                break
-
-            self.state.set("current_hypothesis", hypothesis.id)
-            # Inject adaptive IC threshold (raises bar as registry grows)
-            hypothesis.thresholds.setdefault("min_ic", 0.10)
-            if adaptive_min_ic > hypothesis.thresholds["min_ic"]:
-                hypothesis.thresholds["min_ic"] = adaptive_min_ic
-            runner = ExperimentRunner(hypothesis, manifest)
-            success = runner.run_full()
-
-            # Update stats
-            gen_name = hypothesis.generator
-            if gen_name in self.gen_stats:
-                self.gen_stats[gen_name].record(success)
-
-            self.queue.update(hypothesis)
-            cycle_hypotheses.append(hypothesis)
-            n_run += 1
-            self.state.set("total_hypotheses_tested",
-                          self.state.get("total_hypotheses_tested", 0) + 1)
-            if success:
-                n_registered += 1
-                self.state.set("total_signals_registered",
-                              self.state.get("total_signals_registered", 0) + 1)
-
-        # 3b. FDR control — retroactively reject hypotheses that don't survive
-        #     Benjamini-Hochberg correction across this cycle's tests.
-        from agent.runner import apply_fdr
-        fdr_q = self.config.get("gates", {}).get("fdr_q", 0.05)
-        rejected_ids = apply_fdr(
-            [h.to_dict() for h in cycle_hypotheses], q=fdr_q
-        )
-        if rejected_ids:
-            for h in cycle_hypotheses:
-                if h.id in rejected_ids and h.status == "replicated":
-                    log.info("  FDR rejected: %s (was replicated)", h.claim[:60])
-                    h.fail("fdr_rejected")
-                    self.queue.update(h)
-                    # Remove from registry
-                    self._remove_from_registry(h.id)
-                    n_registered -= 1
-                    self.state.set("total_signals_registered",
-                                  max(0, self.state.get("total_signals_registered", 0) - 1))
-            log.info("FDR control (q=%.2f): %d/%d rejected",
-                     fdr_q, len(rejected_ids), len(cycle_hypotheses))
-
-        # 3c. Hypothesis chaining — spawn follow-up hypotheses from near-misses
-        n_chained = self._chain_hypotheses(cycle_hypotheses)
-        if n_chained:
-            log.info("Chaining: spawned %d follow-up hypotheses", n_chained)
-
-        save_gen_stats(self.gen_stats)
-        self.state.set("current_hypothesis", None)
+    def post_cycle(self, cycle_hypotheses: list) -> int:
+        """Hypothesis chaining + cache stats logging."""
+        n = self._chain_hypotheses(cycle_hypotheses)
 
         # Log cache stats
         from agent.runner import get_cache
@@ -336,114 +177,11 @@ class AgentDaemon:
         log.info("Cache stats: %d hits, %d misses (%.0f%% hit rate, %d entries)",
                  cache_stats["hits"], cache_stats["misses"],
                  cache_stats["hit_rate"] * 100, cache_stats["entries"])
+        return n
 
-        # 4. Monitor registered signals
-        self.state.transition(AgentPhase.MONITOR, "checking registered signals")
-        self.run_monitor()
-
-        # 5. Update cycle counter
-        self.state.set("cycle_count", self.state.get("cycle_count", 0) + 1)
-        self.state.set("last_cycle_at", datetime.now(timezone.utc).isoformat())
-        log.info("Cycle complete: %d experiments, queue depth=%d", n_run, self.queue.depth)
-
-    def _chain_hypotheses(self, cycle_hypotheses: list) -> int:
-        """Spawn follow-up hypotheses from near-misses and strong results.
-
-        Rule 1 — Symbol-specific variant: if a hypothesis passed discovery,
-        cost, and temporal replication but failed symbol replication on
-        exactly 1 symbol, spawn a symbol-specific variant (primary + passing
-        symbol only) with lower priority.
-
-        Rule 2 — Ensemble promotion: if a hypothesis passed with dIC >> min_dIC
-        (at least 2x), it's a strong single gate. Trigger the ensemble generator
-        to pair it with other strong gates. (Ensemble generator picks these up
-        automatically on the next cycle; here we just log the signal.)
-
-        Returns the number of chained hypotheses spawned.
-        """
-        n_spawned = 0
-        min_dIC = self.config.get("gates", {}).get("min_dIC", 0.05)
-
-        for h in cycle_hypotheses:
-            # Rule 1: symbol-specific variant
-            if (h.status == "failed"
-                    and h.failure_reason == "no_replication"
-                    and h.results
-                    and "symbol_replication" in h.results):
-                sr = h.results["symbol_replication"]
-                passed_syms = sr.get("passed", [])
-                failed_syms = sr.get("failed", [])
-
-                # Failed on exactly 1 symbol → spawn variant for passing symbols
-                if len(failed_syms) == 1 and len(passed_syms) >= 2:
-                    claim = f"{h.claim} [symbol-specific: {','.join(passed_syms)}]"
-                    existing = {x.claim for x in self.queue._all}
-                    if claim not in existing:
-                        variant = Hypothesis.create(
-                            claim=claim,
-                            generator=h.generator,
-                            test_protocol=h.test_protocol,
-                            priority=h.priority * 0.7,
-                            thresholds={
-                                **h.thresholds,
-                                "min_symbols": len(passed_syms),
-                                "symbols_override": passed_syms,
-                            },
-                            parent_id=h.id,
-                        )
-                        self.queue.push(variant)
-                        n_spawned += 1
-                        log.info("  Chained symbol-specific: %s (%s)",
-                                 claim[:60], ",".join(passed_syms))
-
-            # Rule 2: strong dIC → flag for ensemble pairing
-            if h.status in ("replicated", "passed") and h.results:
-                dIC = self._extract_dIC_from_results(h)
-                if dIC >= min_dIC * 2:
-                    log.info("  Strong gate (dIC=%.3f): %s — ensemble candidate",
-                             dIC, h.claim[:60])
-                    # Ensemble generator will pick this up next cycle
-
-        return n_spawned
-
-    @staticmethod
-    def _extract_dIC_from_results(h) -> float:
-        """Extract dIC value from hypothesis gate results."""
-        if not h.results or "gate_results" not in h.results:
-            return 0.0
-        for gr in h.results["gate_results"]:
-            msg = gr.get("msg", "")
-            if "dIC=" in msg:
-                try:
-                    return float(msg.split("dIC=")[1].split()[0])
-                except (IndexError, ValueError):
-                    pass
-        return 0.0
-
-    def _compute_adaptive_ic(self) -> float:
-        """Compute adaptive IC threshold: max(0.10, median(registry_ic) * 0.8).
-
-        As the registry grows with high-quality signals, the bar rises so
-        marginal signals are rejected. Floor is always the config min_ic.
-        """
-        from agent.runner import REGISTRY_PATH
-        floor_ic = self.config.get("gates", {}).get("min_ic", 0.10)
-        if not REGISTRY_PATH.exists():
-            log.info("Adaptive IC: no registry, using floor %.2f", floor_ic)
-            return floor_ic
-        with open(REGISTRY_PATH) as f:
-            registry = json.load(f)
-        ics = [s.get("expected_ic", 0) for s in registry
-               if s.get("status") != "retired"]
-        if not ics:
-            log.info("Adaptive IC: empty registry, using floor %.2f", floor_ic)
-            return floor_ic
-        ics.sort()
-        median_ic = ics[len(ics) // 2]
-        adaptive = max(floor_ic, median_ic * 0.8)
-        log.info("Adaptive IC: median=%.3f -> threshold=%.3f (floor=%.2f, %d signals)",
-                 median_ic, adaptive, floor_ic, len(ics))
-        return adaptive
+    def on_fdr_reject(self, hypothesis: Hypothesis) -> None:
+        """Remove FDR-rejected signal from registry."""
+        self._remove_from_registry(hypothesis.id)
 
     def run_monitor(self) -> None:
         """Check registered signals for IC decay and promotion.
@@ -547,6 +285,119 @@ class AgentDaemon:
 
         log.info("Monitor: %d validated, %d paper, %d promotable, %d retired this cycle",
                  n_validated, n_paper, n_promotable, n_retired)
+
+    # --- Domain-specific methods ------------------------------------------
+
+    @staticmethod
+    def _remove_from_registry(hypothesis_id: str) -> None:
+        """Remove a signal from the registry by its hypothesis_id."""
+        from agent.runner import REGISTRY_PATH
+        if not REGISTRY_PATH.exists():
+            return
+        with open(REGISTRY_PATH) as f:
+            registry = json.load(f)
+        registry = [s for s in registry if s.get("hypothesis_id") != hypothesis_id]
+        with open(REGISTRY_PATH, "w") as f:
+            json.dump(registry, f, indent=2)
+
+    def _chain_hypotheses(self, cycle_hypotheses: list) -> int:
+        """Spawn follow-up hypotheses from near-misses and strong results.
+
+        Rule 1 — Symbol-specific variant: if a hypothesis passed discovery,
+        cost, and temporal replication but failed symbol replication on
+        exactly 1 symbol, spawn a symbol-specific variant (primary + passing
+        symbol only) with lower priority.
+
+        Rule 2 — Ensemble promotion: if a hypothesis passed with dIC >> min_dIC
+        (at least 2x), it's a strong single gate. Trigger the ensemble generator
+        to pair it with other strong gates. (Ensemble generator picks these up
+        automatically on the next cycle; here we just log the signal.)
+
+        Returns the number of chained hypotheses spawned.
+        """
+        n_spawned = 0
+        min_dIC = self.config.get("gates", {}).get("min_dIC", 0.05)
+
+        for h in cycle_hypotheses:
+            # Rule 1: symbol-specific variant
+            if (h.status == "failed"
+                    and h.failure_reason == "no_replication"
+                    and h.results
+                    and "symbol_replication" in h.results):
+                sr = h.results["symbol_replication"]
+                passed_syms = sr.get("passed", [])
+                failed_syms = sr.get("failed", [])
+
+                # Failed on exactly 1 symbol → spawn variant for passing symbols
+                if len(failed_syms) == 1 and len(passed_syms) >= 2:
+                    claim = f"{h.claim} [symbol-specific: {','.join(passed_syms)}]"
+                    existing = {x.claim for x in self.queue._all}
+                    if claim not in existing:
+                        variant = Hypothesis.create(
+                            claim=claim,
+                            generator=h.generator,
+                            test_protocol=h.test_protocol,
+                            priority=h.priority * 0.7,
+                            thresholds={
+                                **h.thresholds,
+                                "min_symbols": len(passed_syms),
+                                "symbols_override": passed_syms,
+                            },
+                            parent_id=h.id,
+                        )
+                        self.queue.push(variant)
+                        n_spawned += 1
+                        log.info("  Chained symbol-specific: %s (%s)",
+                                 claim[:60], ",".join(passed_syms))
+
+            # Rule 2: strong dIC → flag for ensemble pairing
+            if h.status in ("replicated", "passed") and h.results:
+                dIC = self._extract_dIC_from_results(h)
+                if dIC >= min_dIC * 2:
+                    log.info("  Strong gate (dIC=%.3f): %s — ensemble candidate",
+                             dIC, h.claim[:60])
+                    # Ensemble generator will pick this up next cycle
+
+        return n_spawned
+
+    @staticmethod
+    def _extract_dIC_from_results(h) -> float:
+        """Extract dIC value from hypothesis gate results."""
+        if not h.results or "gate_results" not in h.results:
+            return 0.0
+        for gr in h.results["gate_results"]:
+            msg = gr.get("msg", "")
+            if "dIC=" in msg:
+                try:
+                    return float(msg.split("dIC=")[1].split()[0])
+                except (IndexError, ValueError):
+                    pass
+        return 0.0
+
+    def _compute_adaptive_ic(self) -> float:
+        """Compute adaptive IC threshold: max(0.10, median(registry_ic) * 0.8).
+
+        As the registry grows with high-quality signals, the bar rises so
+        marginal signals are rejected. Floor is always the config min_ic.
+        """
+        from agent.runner import REGISTRY_PATH
+        floor_ic = self.config.get("gates", {}).get("min_ic", 0.10)
+        if not REGISTRY_PATH.exists():
+            log.info("Adaptive IC: no registry, using floor %.2f", floor_ic)
+            return floor_ic
+        with open(REGISTRY_PATH) as f:
+            registry = json.load(f)
+        ics = [s.get("expected_ic", 0) for s in registry
+               if s.get("status") != "retired"]
+        if not ics:
+            log.info("Adaptive IC: empty registry, using floor %.2f", floor_ic)
+            return floor_ic
+        ics.sort()
+        median_ic = ics[len(ics) // 2]
+        adaptive = max(floor_ic, median_ic * 0.8)
+        log.info("Adaptive IC: median=%.3f -> threshold=%.3f (floor=%.2f, %d signals)",
+                 median_ic, adaptive, floor_ic, len(ics))
+        return adaptive
 
     def _compute_rolling_ic(self, sig: dict) -> float | None:
         """Compute rolling IC for a registered signal on the latest available data.
@@ -679,55 +530,9 @@ class AgentDaemon:
 
         print()
 
-    def run(self) -> None:
-        """Run the agent loop until shutdown."""
-        self.state.set("started_at", datetime.now(timezone.utc).isoformat())
-        self.state.transition(AgentPhase.IDLE, "agent started")
-        log.info("NAT Agent started (cycle_interval=%ds)", self.config["cycle_interval_s"])
 
-        while not self._shutdown:
-            try:
-                self.run_cycle()
-            except Exception as e:
-                log.error("Cycle error: %s", e, exc_info=True)
-                self.state.transition(AgentPhase.ERROR, str(e))
-
-            if self._shutdown:
-                break
-
-            self.state.transition(AgentPhase.SLEEPING, "waiting for next cycle")
-            # Sleep in small increments so we can respond to signals
-            sleep_s = self.config["cycle_interval_s"]
-            for _ in range(sleep_s):
-                if self._shutdown:
-                    break
-                time.sleep(1)
-
-        self.state.transition(AgentPhase.STOPPED, "graceful shutdown")
-        log.info("NAT Agent stopped")
-
-    def print_status(self) -> None:
-        """Print current agent status."""
-        s = self.state
-        print(f"Phase:       {s.phase.value}")
-        print(f"Cycles:      {s.get('cycle_count', 0)}")
-        print(f"Tested:      {s.get('total_hypotheses_tested', 0)} hypotheses")
-        print(f"Registered:  {s.get('total_signals_registered', 0)} signals")
-        print(f"Queue depth: {self.queue.depth}")
-        print(f"Graveyard:   {len(self.queue.graveyard)}")
-        print(f"Started:     {s.get('started_at', 'never')}")
-        print(f"Last cycle:  {s.get('last_cycle_at', 'never')}")
-        current = s.get("current_hypothesis")
-        if current:
-            print(f"Running:     {current}")
-
-        # Generator stats
-        print("\nGenerator performance:")
-        for name, gs in self.gen_stats.items():
-            print(f"  {name:15s}  attempts={gs.attempts:3d}  "
-                  f"successes={gs.successes:3d}  "
-                  f"hit_rate={gs.hit_rate:.0%}  "
-                  f"weight={gs.weight:.3f}")
+# Backward compatibility alias
+AgentDaemon = MicrostructureAgent
 
 
 # ---------------------------------------------------------------------------

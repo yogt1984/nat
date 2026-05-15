@@ -73,7 +73,9 @@ When adding a new feature category:
 `scripts/agent/daemon.py`: MANIFEST → GENERATE → EXECUTE → FDR → MONITOR → SLEEP. State persisted in `data/agent/agent_state.json`. 5-gate protocol per hypothesis: discovery (IC+dIC) → cost → temporal replication → symbol replication → correlation dedup. FDR control (BH q=0.05) at end of each cycle. Computation cache in `scripts/agent/cache.py` (SHA-256 keys, 7-day TTL). Web dashboard in `scripts/agent_dashboard.py` (stdlib HTTP on port 8060).
 
 Key files:
-- `scripts/agent/runner.py` — 5-gate experiment executor
+- `scripts/agent/base.py` — ResearchAgent ABC + BaseRunner ABC (multi-agent foundation)
+- `scripts/agent/daemon.py` — MicrostructureAgent(ResearchAgent) + CLI (aliased as AgentDaemon)
+- `scripts/agent/runner.py` — MicrostructureRunner(BaseRunner) 5-gate executor (aliased as ExperimentRunner)
 - `scripts/agent/hypothesis_queue.py` — JSON-backed priority queue (renamed from `queue.py` to avoid stdlib shadow)
 - `scripts/agent/cache.py` — Deterministic command cache
 - `scripts/agent_dashboard.py` — Agent web dashboard with IC heatmap

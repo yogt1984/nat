@@ -40,6 +40,11 @@ class Hypothesis:
     }
 
     @classmethod
+    def register_prefix(cls, generator: str, prefix: str) -> None:
+        """Register a new generator prefix for hypothesis ID generation."""
+        cls.GEN_PREFIX[generator] = prefix
+
+    @classmethod
     def create(
         cls,
         claim: str,
