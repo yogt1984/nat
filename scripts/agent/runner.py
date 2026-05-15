@@ -133,6 +133,32 @@ def check_dIC_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
                     f"vs min={min_dIC}" + (" PASS" if passed else " FAIL"))
 
 
+def check_cost_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
+    """Check if signal has sufficient per-trade edge to be worth pursuing.
+
+    Uses avg_return_per_trade_bps from the best threshold level in the
+    backtest report. This measures gross signal edge — a necessary
+    (not sufficient) condition for profitability after costs.
+
+    Note: the backtest tests the ungated signal. Regime-gated versions
+    should have higher per-trade returns. This gate filters out signals
+    with zero or negligible directional value.
+    """
+    min_avg_bps = thresholds.get("min_avg_return_bps", 0.1)
+    entries = report.get("thresholds", [])
+    if not entries:
+        return True, "no backtest thresholds, cost check skipped"
+
+    best = max(entries, key=lambda t: t.get("avg_return_per_trade_bps", 0))
+    avg_ret = best.get("avg_return_per_trade_bps", 0)
+    maker_sharpe = best.get("net_sharpe_maker", 0)
+    thresh = best.get("threshold", 0)
+    passed = avg_ret >= min_avg_bps
+    return passed, (f"avg_ret={avg_ret:.3f}bps (maker_sharpe={maker_sharpe:.1f}) "
+                    f"at thresh={thresh:.1f} vs min={min_avg_bps}bps"
+                    + (" PASS" if passed else " FAIL"))
+
+
 def check_coverage_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
     """Check if regime coverage exceeds minimum."""
     min_coverage = thresholds.get("min_coverage", 0.20)
@@ -289,9 +315,47 @@ class ExperimentRunner:
         log.info("  REGISTERED: %s (IC=%.3f)", signal.name, signal.expected_ic)
         return signal
 
+    def run_cost_check(self) -> bool:
+        """Run backtest and check if signal survives transaction costs.
+
+        Runs after discovery passes. Signals that fail cost are marked
+        'cost_killed' — they are real but untradeable, eligible for recycler.
+        """
+        # Find the data dir from the test protocol
+        data_dir = None
+        for cmd_str in self.h.test_protocol:
+            parts = cmd_str.split()
+            for i, p in enumerate(parts):
+                if p in ("--data", "--data-dir") and i + 1 < len(parts):
+                    data_dir = parts[i + 1]
+                    break
+        if data_dir is None:
+            data_dir = f"data/features/{sorted(self.manifest.get('dates', {}).keys())[-1]}"
+
+        symbol = self._extract_symbol(self.h.test_protocol[0])
+        cmd_parts = ["spannung", "backtest", "--data", data_dir, "--symbol", symbol]
+        result = run_nat(cmd_parts)
+        if result.returncode != 0:
+            log.warning("  Cost check: backtest failed (rc=%d), skipping", result.returncode)
+            return True  # Don't block on backtest failure
+
+        report = parse_report("spannung backtest", symbol=symbol)
+        if report is None:
+            log.warning("  Cost check: could not parse backtest report, skipping")
+            return True
+
+        passed, msg = check_cost_gate(report, self.h.thresholds)
+        log.info("  Cost check: %s", msg)
+        self.h.results = {**(self.h.results or {}), "cost_check": msg}
+        if not passed:
+            self.h.fail("cost_killed")
+        return passed
+
     def run_full(self) -> bool:
-        """Run the complete 3-gate replication protocol."""
+        """Run the complete 4-gate protocol: discovery, cost, temporal, symbol."""
         if not self.run_discovery():
+            return False
+        if not self.run_cost_check():
             return False
         if not self.run_replication_temporal():
             return False

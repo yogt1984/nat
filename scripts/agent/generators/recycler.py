@@ -62,6 +62,21 @@ def generate(
                 )
                 hypotheses.append(recycled)
 
+        elif reason == "cost_killed":
+            # Signal is real but unprofitable — re-test when registry grows
+            # (complementary signals may reduce turnover or improve per-trade edge)
+            registry_size = len([x for x in queue._all if x.status == "replicated"])
+            if registry_size > h.thresholds.get("_last_registry_size", 0) + 3:
+                recycled = Hypothesis.create(
+                    claim=h.claim,
+                    generator="recycler",
+                    test_protocol=h.test_protocol,
+                    priority=h.priority * 0.6,  # Lower priority — costs rarely change
+                    thresholds={**h.thresholds, "_last_registry_size": registry_size},
+                    parent_id=h.id,
+                )
+                hypotheses.append(recycled)
+
     log.info("Recycler generator: %d hypotheses from %d graveyard entries",
              len(hypotheses), len(graveyard))
     return hypotheses
