@@ -1189,6 +1189,45 @@ def cmd_mf_agent_report(args):
     _py(f"{MF_AGENT_SCRIPT} report")
 
 
+# ── Macro agent commands ─────────────────────────────────────────────────────
+
+MACRO_AGENT_SCRIPT = "scripts/agent/macro_daemon.py"
+
+def cmd_macro_agent_start(args):
+    _banner("Starting Macro Agent daemon")
+    _py(f"{MACRO_AGENT_SCRIPT} start")
+
+def cmd_macro_agent_stop(args):
+    """Send SIGTERM to running macro agent."""
+    import signal as sig
+    r = _sh("pgrep -f 'agent/macro_daemon.py start'")
+    if r.returncode == 0 and r.stdout.strip():
+        pid = int(r.stdout.strip().split("\n")[0])
+        os.kill(pid, sig.SIGTERM)
+        _p("✓", G, f"Sent SIGTERM to macro agent (pid {pid})")
+    else:
+        _p("–", Y, "No running macro agent found")
+
+def cmd_macro_agent_once(args):
+    _banner("Running single macro agent cycle")
+    _py(f"{MACRO_AGENT_SCRIPT} once")
+
+def cmd_macro_agent_status(args):
+    _py(f"{MACRO_AGENT_SCRIPT} status")
+
+def cmd_macro_agent_queue(args):
+    _py(f"{MACRO_AGENT_SCRIPT} queue")
+
+def cmd_macro_agent_registry(args):
+    _py(f"{MACRO_AGENT_SCRIPT} registry")
+
+def cmd_macro_agent_graveyard(args):
+    _py(f"{MACRO_AGENT_SCRIPT} graveyard")
+
+def cmd_macro_agent_report(args):
+    _py(f"{MACRO_AGENT_SCRIPT} report")
+
+
 # ── Signal commands ──────────────────────────────────────────────────────────
 
 def cmd_signal_test(args):
@@ -2254,6 +2293,19 @@ def build_parser():
     mfsub.add_parser('registry', help='Validated signals').set_defaults(func=cmd_mf_agent_registry)
     mfsub.add_parser('graveyard', help='Failed hypotheses').set_defaults(func=cmd_mf_agent_graveyard)
     mfsub.add_parser('report', help='Full summary report').set_defaults(func=cmd_mf_agent_report)
+
+    # ── macro-agent ──
+    ma_p = sub.add_parser('macro-agent', help='Macro research agent (1h-24h)')
+    ma_p.set_defaults(func=cmd_macro_agent_status)
+    masub = ma_p.add_subparsers(dest='subcmd')
+    masub.add_parser('start', help='Launch macro agent daemon').set_defaults(func=cmd_macro_agent_start)
+    masub.add_parser('stop', help='Graceful shutdown (SIGTERM)').set_defaults(func=cmd_macro_agent_stop)
+    masub.add_parser('once', help='Run single cycle (testing)').set_defaults(func=cmd_macro_agent_once)
+    masub.add_parser('status', help='Current state & stats').set_defaults(func=cmd_macro_agent_status)
+    masub.add_parser('queue', help='Queued hypotheses by priority').set_defaults(func=cmd_macro_agent_queue)
+    masub.add_parser('registry', help='Validated signals').set_defaults(func=cmd_macro_agent_registry)
+    masub.add_parser('graveyard', help='Failed hypotheses').set_defaults(func=cmd_macro_agent_graveyard)
+    masub.add_parser('report', help='Full summary report').set_defaults(func=cmd_macro_agent_report)
 
     return p
 

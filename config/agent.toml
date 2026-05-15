@@ -90,3 +90,37 @@ primary = ["BTC", "ETH", "SOL"]
 [agent_mf.paths]
 data_dir = "data/features"
 state_dir = "data/agent_mf"
+
+# ─────────────────────────────────────────────────────────────
+# Macro Agent (1h–24h horizons, 1h bar resolution)
+# Uses funding rate, OI divergence, whale flow features
+# ─────────────────────────────────────────────────────────────
+
+[agent_macro]
+cycle_interval_s = 14400
+max_experiments_per_cycle = 6
+max_cycle_runtime_s = 7200
+timeframe = "1h"
+generators_enabled = [
+    "funding_meanrev",
+    "oi_divergence",
+    "whale_momentum",
+]
+
+[agent_macro.gates]
+min_ic = 0.07       # lowest: ~24 bars/day at 1h
+min_dIC = 0.02
+fdr_q = 0.05
+min_oos_dates = 2
+min_symbols = 2
+
+[agent_macro.decay]
+ic_decay_ratio = 0.5
+consecutive_days_limit = 14
+
+[agent_macro.symbols]
+primary = ["BTC", "ETH", "SOL"]
+
+[agent_macro.paths]
+data_dir = "data/features"
+state_dir = "data/agent_macro"

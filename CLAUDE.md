@@ -79,9 +79,11 @@ Key files:
 - `scripts/agent/hypothesis_queue.py` — JSON-backed priority queue (renamed from `queue.py` to avoid stdlib shadow)
 - `scripts/agent/mf_daemon.py` — MediumFrequencyAgent(ResearchAgent) + CLI for 1min-1h signals
 - `scripts/agent/mf_runner.py` — MediumFrequencyRunner(BaseRunner) 4-gate executor
+- `scripts/agent/macro_daemon.py` — MacroAgent(ResearchAgent) + CLI for 1h-24h signals
+- `scripts/agent/macro_runner.py` — MacroRunner(BaseRunner) 4-gate executor
 - `scripts/agent/cache.py` — Deterministic command cache
 - `scripts/agent_dashboard.py` — Agent web dashboard with IC heatmap
-- `config/agent.toml` — Gate thresholds, promotion criteria, generator config (`[agent]` + `[agent_mf]`)
+- `config/agent.toml` — Gate thresholds, promotion criteria, generator config (`[agent]` + `[agent_mf]` + `[agent_macro]`)
 
 ## Cargo Workspace
 
