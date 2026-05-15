@@ -1425,6 +1425,18 @@ def cmd_spannung_spectral(args):
     _py(cmd)
 
 
+def cmd_spannung_regime(args):
+    """Run Spannung regime screener (systematic condition search)."""
+    _banner("Spannung Regime Screener")
+    data = _data(args)
+    sym = getattr(args, 'symbol', 'all')
+    cmd = f"scripts/spannung_regime_screener.py --data-dir {data} --symbol {sym}"
+    output = getattr(args, 'output', None)
+    if output:
+        cmd += f" --output {output}"
+    _py(cmd)
+
+
 # ── Docker commands ──────────────────────────────────────────────────────────
 
 def cmd_docker_build(args):
@@ -1498,6 +1510,7 @@ def cmd_help(args=None):
     nat spannung backtest      Spannung cost-aware backtest + regime gating
     nat spannung horizon       Spannung longer-horizon sweep (30s–15min bars)
     nat spannung spectral      Spannung spectral analysis (PSD, coherence, ACF, band IC)
+    nat spannung regime        Systematic regime condition screener (quintile, Pareto)
     nat report                 Generate full experiment report
     nat macro                  Daily MA crossover signals
     nat screen [args]          Alpha screening
@@ -2113,6 +2126,11 @@ def build_parser():
     spn_sp.add_argument('--symbol', type=str, default='all', help='Symbol or "all"')
     spn_sp.add_argument('--output', type=str, default=None, help='Output directory')
     spn_sp.set_defaults(func=cmd_spannung_spectral)
+    spn_rg = spn_sub.add_parser('regime', help='Systematic regime condition screener')
+    spn_rg.add_argument('--data', type=str, default=None, help='Data dir')
+    spn_rg.add_argument('--symbol', type=str, default='all', help='Symbol or "all"')
+    spn_rg.add_argument('--output', type=str, default=None, help='Output directory')
+    spn_rg.set_defaults(func=cmd_spannung_regime)
 
     return p
 
