@@ -77,9 +77,11 @@ Key files:
 - `scripts/agent/daemon.py` — MicrostructureAgent(ResearchAgent) + CLI (aliased as AgentDaemon)
 - `scripts/agent/runner.py` — MicrostructureRunner(BaseRunner) 5-gate executor (aliased as ExperimentRunner)
 - `scripts/agent/hypothesis_queue.py` — JSON-backed priority queue (renamed from `queue.py` to avoid stdlib shadow)
+- `scripts/agent/mf_daemon.py` — MediumFrequencyAgent(ResearchAgent) + CLI for 1min-1h signals
+- `scripts/agent/mf_runner.py` — MediumFrequencyRunner(BaseRunner) 4-gate executor
 - `scripts/agent/cache.py` — Deterministic command cache
 - `scripts/agent_dashboard.py` — Agent web dashboard with IC heatmap
-- `config/agent.toml` — Gate thresholds, promotion criteria, generator config
+- `config/agent.toml` — Gate thresholds, promotion criteria, generator config (`[agent]` + `[agent_mf]`)
 
 ## Cargo Workspace
 

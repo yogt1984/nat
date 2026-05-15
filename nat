@@ -1150,6 +1150,45 @@ def cmd_agent_report(args):
     _py(f"{AGENT_SCRIPT} report")
 
 
+# ── Medium-frequency agent commands ──────────────────────────────────────────
+
+MF_AGENT_SCRIPT = "scripts/agent/mf_daemon.py"
+
+def cmd_mf_agent_start(args):
+    _banner("Starting Medium-Frequency Agent daemon")
+    _py(f"{MF_AGENT_SCRIPT} start")
+
+def cmd_mf_agent_stop(args):
+    """Send SIGTERM to running MF agent."""
+    import signal as sig
+    r = _sh("pgrep -f 'agent/mf_daemon.py start'")
+    if r.returncode == 0 and r.stdout.strip():
+        pid = int(r.stdout.strip().split("\n")[0])
+        os.kill(pid, sig.SIGTERM)
+        _p("✓", G, f"Sent SIGTERM to MF agent (pid {pid})")
+    else:
+        _p("–", Y, "No running MF agent found")
+
+def cmd_mf_agent_once(args):
+    _banner("Running single MF agent cycle")
+    _py(f"{MF_AGENT_SCRIPT} once")
+
+def cmd_mf_agent_status(args):
+    _py(f"{MF_AGENT_SCRIPT} status")
+
+def cmd_mf_agent_queue(args):
+    _py(f"{MF_AGENT_SCRIPT} queue")
+
+def cmd_mf_agent_registry(args):
+    _py(f"{MF_AGENT_SCRIPT} registry")
+
+def cmd_mf_agent_graveyard(args):
+    _py(f"{MF_AGENT_SCRIPT} graveyard")
+
+def cmd_mf_agent_report(args):
+    _py(f"{MF_AGENT_SCRIPT} report")
+
+
 # ── Signal commands ──────────────────────────────────────────────────────────
 
 def cmd_signal_test(args):
@@ -2202,6 +2241,19 @@ def build_parser():
     dash_p = agsub.add_parser('dashboard', help='Launch web dashboard (port 8060)')
     dash_p.add_argument('--port', type=int, default=8060)
     dash_p.set_defaults(func=cmd_agent_dashboard)
+
+    # ── mf-agent ──
+    mf_p = sub.add_parser('mf-agent', help='Medium-frequency research agent (1min-1h)')
+    mf_p.set_defaults(func=cmd_mf_agent_status)
+    mfsub = mf_p.add_subparsers(dest='subcmd')
+    mfsub.add_parser('start', help='Launch MF agent daemon').set_defaults(func=cmd_mf_agent_start)
+    mfsub.add_parser('stop', help='Graceful shutdown (SIGTERM)').set_defaults(func=cmd_mf_agent_stop)
+    mfsub.add_parser('once', help='Run single cycle (testing)').set_defaults(func=cmd_mf_agent_once)
+    mfsub.add_parser('status', help='Current state & stats').set_defaults(func=cmd_mf_agent_status)
+    mfsub.add_parser('queue', help='Queued hypotheses by priority').set_defaults(func=cmd_mf_agent_queue)
+    mfsub.add_parser('registry', help='Validated signals').set_defaults(func=cmd_mf_agent_registry)
+    mfsub.add_parser('graveyard', help='Failed hypotheses').set_defaults(func=cmd_mf_agent_graveyard)
+    mfsub.add_parser('report', help='Full summary report').set_defaults(func=cmd_mf_agent_report)
 
     return p
 

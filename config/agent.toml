@@ -56,3 +56,37 @@ primary = ["BTC", "ETH", "SOL"]
 data_dir = "data/features"
 state_dir = "data/agent"
 report_dir = "reports"
+
+# ─────────────────────────────────────────────────────────────
+# Medium-Frequency Agent (1min–1h horizons, 5min bar resolution)
+# Runs alongside microstructure agent with separate state
+# ─────────────────────────────────────────────────────────────
+
+[agent_mf]
+cycle_interval_s = 7200
+max_experiments_per_cycle = 8
+max_cycle_runtime_s = 5400
+timeframe = "5min"
+generators_enabled = [
+    "momentum",
+    "vol_breakout",
+    "flow_cluster",
+]
+
+[agent_mf.gates]
+min_ic = 0.08       # lower than micro: fewer obs per day at 5min bars
+min_dIC = 0.03
+fdr_q = 0.05
+min_oos_dates = 2
+min_symbols = 2
+
+[agent_mf.decay]
+ic_decay_ratio = 0.5
+consecutive_days_limit = 14
+
+[agent_mf.symbols]
+primary = ["BTC", "ETH", "SOL"]
+
+[agent_mf.paths]
+data_dir = "data/features"
+state_dir = "data/agent_mf"
