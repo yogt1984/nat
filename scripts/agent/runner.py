@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from .cache import ReportCache
 from .hypothesis import Hypothesis, RegisteredSignal
 from .manifest import load_manifest
 
@@ -27,6 +28,24 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 NAT_PATH = ROOT / "nat"
 REGISTRY_PATH = ROOT / "data" / "agent" / "registry.json"
 REPORTS_DIR = ROOT / "reports"
+CACHE_DIR = ROOT / "data" / "agent" / "cache"
+
+# Module-level cache instance (shared across all runners in a cycle)
+_report_cache: Optional[ReportCache] = None
+
+
+def get_cache() -> ReportCache:
+    """Get or create the module-level cache instance."""
+    global _report_cache
+    if _report_cache is None:
+        _report_cache = ReportCache(CACHE_DIR)
+    return _report_cache
+
+
+def set_cache(cache: Optional[ReportCache]) -> None:
+    """Replace the module-level cache (for testing)."""
+    global _report_cache
+    _report_cache = cache
 
 # Map nat subcommands to their JSON output paths
 REPORT_PATTERNS = {
@@ -53,6 +72,37 @@ def run_nat(cmd_parts: list[str], timeout_s: int = 900) -> subprocess.CompletedP
         log.warning("nat %s failed (rc=%d): %s",
                      " ".join(cmd_parts), result.returncode, result.stderr[:500])
     return result
+
+
+def run_nat_cached(cmd_parts: list[str], symbol: str = "BTC",
+                   timeout_s: int = 900) -> tuple[subprocess.CompletedProcess, Optional[dict]]:
+    """Execute a nat command with caching. Returns (process_result, cached_report).
+
+    If a cached report exists, returns a synthetic CompletedProcess (rc=0)
+    and the cached report dict. Otherwise runs the command, caches the
+    report, and returns both.
+    """
+    cache = get_cache()
+
+    # Check cache first
+    cached = cache.get(cmd_parts)
+    if cached is not None:
+        # Return a synthetic successful result
+        synthetic = subprocess.CompletedProcess(
+            args=cmd_parts, returncode=0, stdout="[cached]", stderr=""
+        )
+        return synthetic, cached
+
+    # Cache miss — run the command
+    result = run_nat(cmd_parts, timeout_s=timeout_s)
+    report = None
+    if result.returncode == 0:
+        cmd_str = " ".join(cmd_parts)
+        report = parse_report(cmd_str, symbol=symbol)
+        if report is not None:
+            cache.put(cmd_parts, report)
+
+    return result, report
 
 
 def parse_report(cmd_str: str, symbol: str = "BTC", timeframe: str = "1min") -> Optional[dict]:
@@ -405,16 +455,14 @@ class ExperimentRunner:
 
         for i, cmd_str in enumerate(self.h.test_protocol):
             cmd_parts = cmd_str.split()
-            result = run_nat(cmd_parts)
+            symbol = self._extract_symbol(cmd_str)
+            result, report = run_nat_cached(cmd_parts, symbol=symbol)
 
             if result.returncode != 0:
                 self.h.fail("command_error")
                 self.h.results = {"failed_cmd": cmd_str, "stderr": result.stderr[:500]}
                 return False
 
-            # Try to parse and check gates
-            symbol = self._extract_symbol(cmd_str)
-            report = parse_report(cmd_str, symbol=symbol)
             if report:
                 passed, msg = self._check_gates(report)
                 self.gate_results.append({"cmd": cmd_str, "passed": passed, "msg": msg})
@@ -457,7 +505,8 @@ class ExperimentRunner:
                 if not skip_next and "--data" not in cmd_str:
                     new_parts.extend(["--data", data_dir])
 
-                result = run_nat(new_parts)
+                symbol = self._extract_symbol(cmd_str)
+                result, _ = run_nat_cached(new_parts, symbol=symbol)
                 n_tested += 1
                 if result.returncode == 0:
                     n_pass += 1
@@ -480,13 +529,11 @@ class ExperimentRunner:
         for sym in other_symbols:
             for cmd_str in self.h.test_protocol[:1]:
                 cmd_parts = cmd_str.replace(f"--symbol {primary_sym}", f"--symbol {sym}").split()
-                result = run_nat(cmd_parts)
-                if result.returncode == 0:
-                    report = parse_report(cmd_str, symbol=sym)
-                    if report:
-                        passed, _ = self._check_gates(report)
-                        if passed:
-                            n_pass += 1
+                result, report = run_nat_cached(cmd_parts, symbol=sym)
+                if result.returncode == 0 and report:
+                    passed, _ = self._check_gates(report)
+                    if passed:
+                        n_pass += 1
 
         min_symbols = self.h.thresholds.get("min_symbols", 2) - 1  # -1 for primary
         if n_pass >= min_symbols:
@@ -530,12 +577,11 @@ class ExperimentRunner:
         data_dir = self._extract_data_dir()
         symbol = self._extract_symbol(self.h.test_protocol[0])
         cmd_parts = ["spannung", "backtest", "--data", data_dir, "--symbol", symbol]
-        result = run_nat(cmd_parts)
+        result, report = run_nat_cached(cmd_parts, symbol=symbol)
         if result.returncode != 0:
             log.warning("  Cost check: backtest failed (rc=%d), skipping", result.returncode)
             return True  # Don't block on backtest failure
 
-        report = parse_report("spannung backtest", symbol=symbol)
         if report is None:
             log.warning("  Cost check: could not parse backtest report, skipping")
             return True

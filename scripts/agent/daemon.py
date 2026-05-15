@@ -314,6 +314,13 @@ class AgentDaemon:
         save_gen_stats(self.gen_stats)
         self.state.set("current_hypothesis", None)
 
+        # Log cache stats
+        from agent.runner import get_cache
+        cache_stats = get_cache().stats
+        log.info("Cache stats: %d hits, %d misses (%.0f%% hit rate, %d entries)",
+                 cache_stats["hits"], cache_stats["misses"],
+                 cache_stats["hit_rate"] * 100, cache_stats["entries"])
+
         # 4. Update cycle counter
         self.state.set("cycle_count", self.state.get("cycle_count", 0) + 1)
         self.state.set("last_cycle_at", datetime.now(timezone.utc).isoformat())
