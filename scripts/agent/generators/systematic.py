@@ -85,6 +85,7 @@ def generate(
                         priority=priority,
                         thresholds={
                             "min_ic": 0.10,
+                            "min_dIC": 0.05,
                             "min_coverage": 0.10,
                             "min_hours": 4,
                             "symbols": ["BTC"],

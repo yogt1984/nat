@@ -21,6 +21,7 @@ generators_enabled = [
 [agent.gates]
 # Minimum thresholds for passing through the research pipeline
 min_ic = 0.10
+min_dIC = 0.05  # gate must improve IC by at least this over ungated baseline
 min_coverage = 0.10
 min_walkforward_sign_consistency = 0.80
 min_oos_dates = 2

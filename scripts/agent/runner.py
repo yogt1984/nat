@@ -69,22 +69,68 @@ def parse_report(cmd_str: str, symbol: str = "BTC", timeframe: str = "1min") -> 
 # Gate checks — evaluate hypothesis thresholds against results
 # ---------------------------------------------------------------------------
 
+def _find_gate_entry(report: dict, regime_gate: str) -> Optional[dict]:
+    """Find the single_factors entry matching a regime_gate label (e.g. 'ent_book_shape<P40')."""
+    for entry in report.get("single_factors", []):
+        if entry.get("label") == regime_gate:
+            return entry
+    return None
+
+
 def check_ic_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
-    """Check if IC exceeds minimum threshold."""
+    """Check if IC exceeds minimum threshold.
+
+    If the hypothesis specifies a regime_gate, extract the gate-specific IC
+    from the single_factors array. Otherwise fall back to aggregate IC.
+    """
     min_ic = thresholds.get("min_ic", 0.10)
-    # Try various report formats
+    regime_gate = thresholds.get("regime_gate")
     ic = None
-    if "baseline_ic_filt_5s" in report:
-        ic = report["baseline_ic_filt_5s"]
-    elif "best_ic" in report:
-        ic = report["best_ic"]
-    elif "profiles" in report and len(report["profiles"]) > 0:
-        ic = max(abs(p.get("ic_best", 0)) for p in report["profiles"])
+
+    # Gate-specific IC: look up in single_factors
+    if regime_gate and "single_factors" in report:
+        entry = _find_gate_entry(report, regime_gate)
+        if entry:
+            ic = entry.get("ic_filt_5s")
+
+    # Fallback: aggregate report IC
+    if ic is None:
+        if "baseline_ic_filt_5s" in report:
+            ic = report["baseline_ic_filt_5s"]
+        elif "best_ic" in report:
+            ic = report["best_ic"]
+        elif "profiles" in report and len(report["profiles"]) > 0:
+            ic = max(abs(p.get("ic_best", 0)) for p in report["profiles"])
 
     if ic is None:
         return False, "could not extract IC from report"
     passed = abs(ic) >= min_ic
-    return passed, f"IC={ic:.4f} vs min={min_ic}" + (" PASS" if passed else " FAIL")
+    label = f"gated({regime_gate})" if regime_gate else "aggregate"
+    return passed, f"IC={ic:.4f} [{label}] vs min={min_ic}" + (" PASS" if passed else " FAIL")
+
+
+def check_dIC_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
+    """Check that the regime gate improves IC over the ungated baseline.
+
+    dIC = gated_IC - baseline_IC. The gate must ADD value, not just
+    pass because the underlying signal is strong.
+    """
+    min_dIC = thresholds.get("min_dIC", 0.05)
+    regime_gate = thresholds.get("regime_gate")
+
+    if not regime_gate or "single_factors" not in report:
+        return True, "no regime gate, dIC check skipped"
+
+    baseline = report.get("baseline_ic_filt_5s", 0.0)
+    entry = _find_gate_entry(report, regime_gate)
+    if entry is None:
+        return False, f"gate {regime_gate} not found in report FAIL"
+
+    gated_ic = entry.get("ic_filt_5s", 0.0)
+    dIC = gated_ic - baseline
+    passed = dIC >= min_dIC
+    return passed, (f"dIC={dIC:+.4f} (gated={gated_ic:.4f} - base={baseline:.4f}) "
+                    f"vs min={min_dIC}" + (" PASS" if passed else " FAIL"))
 
 
 def check_coverage_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
@@ -257,14 +303,17 @@ class ExperimentRunner:
     # -- helpers ------------------------------------------------------------
 
     def _check_gates(self, report: dict) -> tuple[bool, str]:
-        """Run all applicable gate checks."""
+        """Run all applicable gate checks: gate-specific IC and dIC."""
         checks = [
-            check_ic_gate(report, self.h.thresholds),
+            ("IC", check_ic_gate(report, self.h.thresholds)),
+            ("dIC", check_dIC_gate(report, self.h.thresholds)),
         ]
-        for passed, msg in checks:
+        msgs = []
+        for name, (passed, msg) in checks:
+            msgs.append(msg)
             if not passed:
-                return False, msg
-        return True, checks[0][1]
+                return False, f"{name}: {msg}"
+        return True, " | ".join(msgs)
 
     @staticmethod
     def _extract_symbol(cmd_str: str) -> str:
