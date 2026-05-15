@@ -1677,6 +1677,8 @@ def cmd_help(args=None):
     nat agent queue            Queued hypotheses by priority
     nat agent registry         Validated signals
     nat agent graveyard        Failed hypotheses with reasons
+    nat agent report           Full summary (registry + graveyard + generators + cache)
+    nat agent dashboard        Web dashboard on :8060 (IC heatmap, auto-refresh)
 
   {BOLD}API & Services{W}
     nat api start              REST/WebSocket API server
@@ -1711,6 +1713,7 @@ def cmd_help(args=None):
   {BOLD}Dashboards{W}
     Port 8080  Rust real-time feature dashboard (embedded in ingestor, ING_DASHBOARD_ENABLED=true)
     Port 8050  Python analysis dashboard (Dash/Plotly, nat pipeline dashboard)
+    Port 8060  Agent research dashboard (nat agent dashboard, IC heatmap)
 
   Options like --data, --symbol go BEFORE the subcommand:
     nat backtest --symbol ETH --data ./data/features validate

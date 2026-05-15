@@ -14,8 +14,8 @@
 NAT is an autonomous research agent that discovers tradeable alpha signals from
 Hyperliquid perpetual futures microstructure. A Rust ingestor computes 191
 order book features at 100ms resolution; an autonomous Python agent generates
-hypotheses, tests them through a 3-gate replication protocol, and registers
-validated signals — without human intervention.
+hypotheses, tests them through a 5-gate replication protocol with FDR control,
+and registers validated signals — without human intervention.
 
 ## System Overview
 
@@ -74,6 +74,8 @@ nat agent status      # phase, cycle count, registry size, generator stats
 nat agent queue       # queued hypotheses by priority
 nat agent registry    # validated signals
 nat agent graveyard   # failed hypotheses with reasons
+nat agent report      # full summary (registry + graveyard + generators + cache)
+nat agent dashboard   # web dashboard on :8060 with IC heatmap
 ```
 
 ### What It Tests
@@ -109,21 +111,25 @@ microstructure regimes where signal quality varies:
 **Search space**: 7 signals x 17 gates x 4 thresholds x 2 directions = 952 hypotheses.
 Thresholds are unconditional quintile breakpoints: `{P20, P40, P60, P80}`.
 
-### Three-Gate Replication Protocol
+### Five-Gate Replication Protocol
 
-Every hypothesis must independently pass three gates before registration.
+Every hypothesis must independently pass five gates before registration.
 This controls the false discovery rate under multiple testing
 (Harvey, Liu & Zhu, 2016).
 
 ```
-DISCOVERY ──> TEMPORAL REPLICATION ──> SYMBOL REPLICATION ──> REGISTER
-    |                 |                        |
-    v                 v                        v
-GRAVEYARD         GRAVEYARD                GRAVEYARD
+DISCOVERY ──> COST ──> TEMPORAL ──> SYMBOL ──> CORRELATION ──> REGISTER
+    |           |          |           |             |
+    v           v          v           v             v
+GRAVEYARD  GRAVEYARD  GRAVEYARD  GRAVEYARD      GRAVEYARD
+
+                     + FDR control (BH, q=0.05) at end of each cycle
 ```
 
-**Gate 1 — Discovery.** Run `nat spannung regime` + `nat profile scalp --forward-test`
-on BTC with latest data. Pass condition: Spearman rank IC >= 0.10.
+**Gate 1 — Discovery (IC + dIC).** Run `nat spannung regime` on BTC with latest data.
+Extract gate-specific IC (not aggregate). Pass conditions:
+- Spearman rank IC >= 0.10
+- dIC >= 0.05 (gated IC must exceed ungated baseline)
 
 ```
                   6 * sum(d_i^2)
@@ -131,14 +137,28 @@ on BTC with latest data. Pass condition: Spearman rank IC >= 0.10.
                   n * (n^2 - 1)
 ```
 
-**Gate 2 — Temporal replication.** Re-run on 2 other dates from the manifest.
+**Gate 2 — Cost.** Run `nat spannung backtest` and parse `avg_return_per_trade_bps`.
+Pass condition: gross return per trade >= 0.1 bps. Signals that cannot cover
+execution costs are parked (eligible for recycler re-evaluation).
+
+**Gate 3 — Temporal replication.** Re-run on 2 other dates from the manifest.
 Pass condition: IC gate holds on >= 1 additional date. A signal that works on
 only one date is a statistical artifact (White, 2000).
 
-**Gate 3 — Symbol replication.** Re-run on ETH and SOL.
+**Gate 4 — Symbol replication.** Re-run on ETH and SOL.
 Pass condition: IC gate holds on >= 1 other symbol. Cross-asset replication is
 the strongest evidence of a structural microstructure effect vs. asset-specific
 overfitting (Gueant, Lehalle & Fernandez-Tapia, 2012).
+
+**Gate 5 — Correlation deduplication.** Compute max Spearman correlation of the
+candidate signal against all existing registry signals (on regime-gated values
+loaded from Parquet). Pass condition: max rho < 0.7. Redundant signals are
+rejected to keep the registry diverse.
+
+**FDR control.** At the end of each cycle, a Benjamini-Hochberg procedure is
+applied across all tested hypotheses at q=0.05. IC p-values are computed via
+z-test: `z = IC * sqrt(n)`, two-sided `p = erfc(z/sqrt(2))`. Hypotheses that
+don't survive FDR correction are removed from the registry.
 
 ### Five Hypothesis Generators
 
@@ -235,10 +255,16 @@ make release            # release build (LTO, stripped)
 make run                # build + start ingestor
 make run_and_serve      # ingestor + dashboard on :8080
 
-# Agent
-nat agent start         # launch autonomous research daemon
-nat agent once          # single research cycle
-nat agent status        # current state
+# Agent (autonomous research)
+make agent_start        # launch daemon in tmux (or: nat agent start)
+make agent_stop         # graceful shutdown
+make agent_status       # current state
+make agent_report       # full summary (registry + graveyard + generators + cache)
+make agent_dashboard    # web dashboard on :8060 with IC heatmap
+
+# Agent watchdog (auto-restart via cron)
+make agent_watchdog_install   # checks every 5 minutes
+make agent_watchdog_remove    # remove cron entry
 
 # Manual research
 nat spannung --symbol BTC               # signal grid search
@@ -255,6 +281,7 @@ cd rust && cargo test -- test_name      # single test
 pytest scripts/tests/                   # Python tests
 make validate                           # live API validation
 make test_pipeline                      # pipeline state machine
+make test_agent                         # agent tests (cache + dashboard, 101 tests)
 ```
 
 ## Configuration
@@ -262,7 +289,7 @@ make test_pipeline                      # pipeline state machine
 | File | Purpose |
 |------|---------|
 | `config/ing.toml` | Ingestor: WebSocket URL, symbols, emission interval, output format |
-| `config/agent.toml` | Agent: cycle interval, experiment budget, gate thresholds, promotion criteria |
+| `config/agent.toml` | Agent: cycle interval, experiment budget, 5-gate thresholds (IC, dIC, cost, FDR q), promotion criteria |
 | `config/pipeline.toml` | Pipeline orchestration: ingestion duration, analysis thresholds |
 
 Environment: `RUST_LOG`, `REDIS_URL`, `ING_DASHBOARD_ENABLED`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
@@ -284,15 +311,17 @@ scripts/
   agent/                  Autonomous research agent
     daemon.py               Main loop: manifest -> generate -> execute -> monitor
     hypothesis.py           Hypothesis, RegisteredSignal, GeneratorStats dataclasses
-    queue.py                JSON-backed priority queue with dedup
+    hypothesis_queue.py     JSON-backed priority queue with dedup
     manifest.py             Data availability scanner
-    runner.py               3-gate experiment executor (state machine)
+    runner.py               5-gate experiment executor (IC, cost, temporal, symbol, correlation)
+    cache.py                Computation cache (SHA-256 keys, TTL-based, corruption-resilient)
     generators/             5 hypothesis generators
       systematic.py           Exhaustive feature x gate x threshold search
       spectral.py             PSD/OU anomaly detector
       regime.py               HMM transition detector
       cross_asset.py          Lead-lag prober (BTC/ETH/SOL)
       recycler.py             Graveyard re-evaluator
+  agent_dashboard.py        Agent web dashboard (stdlib HTTP, port 8060, IC heatmap)
   spannung_regime_screener.py   Quintile regime IC screening
   spannung_spectral.py          Frequency-domain analysis
   scalping_profiler.py          Walk-forward feature profiler
@@ -349,29 +378,53 @@ Wire into `ExperimentRunner._check_gates()`.
 ### Agent State Machine
 
 ```
-Per-cycle:   MANIFEST -> GENERATE -> EXECUTE (budget: 10 or 90min) -> MONITOR -> SLEEP
+Per-cycle:   MANIFEST -> GENERATE -> EXECUTE (budget: 10 or 90min)
+             -> FDR control (BH q=0.05) -> MONITOR -> SLEEP
 
 Per-hypothesis:
-  SETUP -> DISCOVERY -> REPLICATE_TEMPORAL -> REPLICATE_SYMBOL -> REGISTER
-    |          |               |                     |
-    v          v               v                     v
-  ABORT    GRAVEYARD       GRAVEYARD             GRAVEYARD
+  SETUP -> DISCOVERY (IC+dIC) -> COST -> TEMPORAL -> SYMBOL -> CORRELATION -> REGISTER
+    |          |                   |        |          |            |
+    v          v                   v        v          v            v
+  ABORT    GRAVEYARD          GRAVEYARD  GRAVEYARD  GRAVEYARD   GRAVEYARD
+           (no_effect)        (cost_killed)        (no_repl)   (redundant)
 ```
 
 State persists to `data/agent/agent_state.json`. The daemon handles SIGTERM
 gracefully (finishes current experiment before stopping).
 
+### Computation Cache
+
+Deterministic `nat` commands (`spannung regime`, `spannung spectral`,
+`spannung backtest`, `profile scalp`) on the same (date, symbol) produce
+identical output. The cache stores report JSONs keyed by
+`SHA-256(canonical_command)` with TTL-based expiry (7 days default).
+Flag order is canonicalized so `--symbol BTC --data X` and `--data X --symbol BTC`
+produce the same cache key. Measured: 85% hit rate, 56% cycle speedup.
+
+### Agent Dashboard
+
+`nat agent dashboard` launches a stdlib HTTP server on port 8060 with:
+- Agent status panel (phase, cycle count, queue depth)
+- Registry table (validated signals with IC)
+- (Signal x Gate) IC heatmap (green=registered, red=graveyard, gray=untested)
+- Graveyard table with failure reasons
+- Queue panel (next hypotheses by priority)
+- Generator performance stats
+- Cache statistics
+- 10-second auto-refresh, dark theme
+
 ### Signal Lifecycle
 
 ```
-Hypothesis (queued) -> Discovery (IC check) -> Temporal replication (2+ dates)
-  -> Symbol replication (ETH + SOL) -> Registry (validated)
-  -> Paper trading -> Live (with human approval)
+Hypothesis (queued) -> Discovery (IC+dIC) -> Cost (gross edge >= 0.1 bps)
+  -> Temporal replication (2+ dates) -> Symbol replication (ETH + SOL)
+  -> Correlation dedup (rho < 0.7) -> FDR control (BH q=0.05)
+  -> Registry (validated) -> Paper trading -> Live (with human approval)
 ```
 
 Registered signals are promoted through: `validated -> paper -> live -> retired`.
 Paper-to-live promotion requires: 7-day Sharpe > 1.5, realized/predicted IC > 0.8,
-max drawdown < 2%.
+max drawdown < 2%. The MONITOR phase checks these criteria every cycle.
 
 ## Multi-Machine Setup
 

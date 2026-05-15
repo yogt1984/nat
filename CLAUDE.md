@@ -27,6 +27,7 @@ make validate                           # Live API validation (4 binaries agains
 pytest scripts/tests/                   # Python tests
 make test_dashboard                     # Dashboard endpoint tests
 make test_pipeline                      # Pipeline state machine tests
+make test_agent                         # Agent tests (cache + dashboard, 101 tests)
 ```
 
 ## Architecture
@@ -67,6 +68,17 @@ When adding a new feature category:
 
 `scripts/pipeline_runner.py`: IDLE → BUILDING → INGESTING → COLLECTING → ANALYZING → DONE. State persisted in `data/pipeline_state.json` for resume-on-interrupt.
 
+### Autonomous Research Agent (Python)
+
+`scripts/agent/daemon.py`: MANIFEST → GENERATE → EXECUTE → FDR → MONITOR → SLEEP. State persisted in `data/agent/agent_state.json`. 5-gate protocol per hypothesis: discovery (IC+dIC) → cost → temporal replication → symbol replication → correlation dedup. FDR control (BH q=0.05) at end of each cycle. Computation cache in `scripts/agent/cache.py` (SHA-256 keys, 7-day TTL). Web dashboard in `scripts/agent_dashboard.py` (stdlib HTTP on port 8060).
+
+Key files:
+- `scripts/agent/runner.py` — 5-gate experiment executor
+- `scripts/agent/hypothesis_queue.py` — JSON-backed priority queue (renamed from `queue.py` to avoid stdlib shadow)
+- `scripts/agent/cache.py` — Deterministic command cache
+- `scripts/agent_dashboard.py` — Agent web dashboard with IC heatmap
+- `config/agent.toml` — Gate thresholds, promotion criteria, generator config
+
 ## Cargo Workspace
 
 Two crates in `rust/`:
@@ -78,6 +90,7 @@ Release profile: LTO, single codegen unit, panic=abort, stripped.
 ## Configuration
 
 - `config/ing.toml` — Ingestor (WebSocket URL, symbols, emission interval, output format)
+- `config/agent.toml` — Agent daemon (cycle interval, 5-gate thresholds, FDR q, promotion criteria)
 - `config/pipeline.toml` — Pipeline orchestration (ingestion duration, analysis thresholds)
 - `config/hypothesis_testing.toml` — Hypothesis test parameters
 
