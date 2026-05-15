@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..hypothesis import Hypothesis, GeneratorStats
-from ..queue import HypothesisQueue
+from ..hypothesis_queue import HypothesisQueue
 
 log = logging.getLogger(__name__)
 

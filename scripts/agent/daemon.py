@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from agent.hypothesis import Hypothesis, GeneratorStats
-from agent.queue import HypothesisQueue
+from agent.hypothesis_queue import HypothesisQueue
 from agent.manifest import build_manifest, load_manifest
 from agent.runner import ExperimentRunner
 
@@ -228,6 +228,18 @@ class AgentDaemon:
         log.info("Received signal %d, will stop after current experiment", signum)
         self._shutdown = True
 
+    @staticmethod
+    def _remove_from_registry(hypothesis_id: str) -> None:
+        """Remove a signal from the registry by its hypothesis_id."""
+        from agent.runner import REGISTRY_PATH
+        if not REGISTRY_PATH.exists():
+            return
+        with open(REGISTRY_PATH) as f:
+            registry = json.load(f)
+        registry = [s for s in registry if s.get("hypothesis_id") != hypothesis_id]
+        with open(REGISTRY_PATH, "w") as f:
+            json.dump(registry, f, indent=2)
+
     def run_cycle(self) -> None:
         """Execute one complete research cycle."""
         cycle_start = time.monotonic()
@@ -243,8 +255,10 @@ class AgentDaemon:
         # 3. Execute experiments (budget-limited)
         self.state.transition(AgentPhase.EXECUTE, "running experiments")
         n_run = 0
+        n_registered = 0
         max_run = self.config["max_experiments_per_cycle"]
         max_time = self.config["max_cycle_runtime_s"]
+        cycle_hypotheses = []
 
         while n_run < max_run and not self._shutdown:
             elapsed = time.monotonic() - cycle_start
@@ -267,12 +281,35 @@ class AgentDaemon:
                 self.gen_stats[gen_name].record(success)
 
             self.queue.update(hypothesis)
+            cycle_hypotheses.append(hypothesis)
             n_run += 1
             self.state.set("total_hypotheses_tested",
                           self.state.get("total_hypotheses_tested", 0) + 1)
             if success:
+                n_registered += 1
                 self.state.set("total_signals_registered",
                               self.state.get("total_signals_registered", 0) + 1)
+
+        # 3b. FDR control — retroactively reject hypotheses that don't survive
+        #     Benjamini-Hochberg correction across this cycle's tests.
+        from agent.runner import apply_fdr
+        fdr_q = self.config.get("gates", {}).get("fdr_q", 0.05)
+        rejected_ids = apply_fdr(
+            [h.to_dict() for h in cycle_hypotheses], q=fdr_q
+        )
+        if rejected_ids:
+            for h in cycle_hypotheses:
+                if h.id in rejected_ids and h.status == "replicated":
+                    log.info("  FDR rejected: %s (was replicated)", h.claim[:60])
+                    h.fail("fdr_rejected")
+                    self.queue.update(h)
+                    # Remove from registry
+                    self._remove_from_registry(h.id)
+                    n_registered -= 1
+                    self.state.set("total_signals_registered",
+                                  max(0, self.state.get("total_signals_registered", 0) - 1))
+            log.info("FDR control (q=%.2f): %d/%d rejected",
+                     fdr_q, len(rejected_ids), len(cycle_hypotheses))
 
         save_gen_stats(self.gen_stats)
         self.state.set("current_hypothesis", None)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -77,21 +78,37 @@ def _find_gate_entry(report: dict, regime_gate: str) -> Optional[dict]:
     return None
 
 
+def _ic_pvalue(ic: float, n_obs: int) -> float:
+    """Two-sided p-value for Spearman IC under H0: no predictive power.
+
+    Under H0, IC ~ N(0, 1/sqrt(n)).  z = IC * sqrt(n) is standard normal.
+    """
+    from math import erfc, sqrt
+    if n_obs < 2:
+        return 1.0
+    z = abs(ic) * sqrt(n_obs)
+    return erfc(z / sqrt(2))  # two-sided
+
+
 def check_ic_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
     """Check if IC exceeds minimum threshold.
 
     If the hypothesis specifies a regime_gate, extract the gate-specific IC
     from the single_factors array. Otherwise fall back to aggregate IC.
+
+    Also computes a p-value (appended to the message as p=...) for FDR control.
     """
     min_ic = thresholds.get("min_ic", 0.10)
     regime_gate = thresholds.get("regime_gate")
     ic = None
+    n_obs = report.get("n_rows", 0)
 
     # Gate-specific IC: look up in single_factors
     if regime_gate and "single_factors" in report:
         entry = _find_gate_entry(report, regime_gate)
         if entry:
             ic = entry.get("ic_filt_5s")
+            n_obs = entry.get("n_obs", n_obs)
 
     # Fallback: aggregate report IC
     if ic is None:
@@ -104,9 +121,11 @@ def check_ic_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
 
     if ic is None:
         return False, "could not extract IC from report"
+    pval = _ic_pvalue(ic, n_obs)
     passed = abs(ic) >= min_ic
     label = f"gated({regime_gate})" if regime_gate else "aggregate"
-    return passed, f"IC={ic:.4f} [{label}] vs min={min_ic}" + (" PASS" if passed else " FAIL")
+    return passed, (f"IC={ic:.4f} [{label}] vs min={min_ic} p={pval:.2e}"
+                    + (" PASS" if passed else " FAIL"))
 
 
 def check_dIC_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
@@ -157,6 +176,193 @@ def check_cost_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
     return passed, (f"avg_ret={avg_ret:.3f}bps (maker_sharpe={maker_sharpe:.1f}) "
                     f"at thresh={thresh:.1f} vs min={min_avg_bps}bps"
                     + (" PASS" if passed else " FAIL"))
+
+
+def _extract_pvalue(gate_msg: str) -> Optional[float]:
+    """Extract p=... from a gate result message."""
+    if "p=" not in gate_msg:
+        return None
+    try:
+        return float(gate_msg.split("p=")[1].split()[0])
+    except (IndexError, ValueError):
+        return None
+
+
+def apply_fdr(hypotheses: list, q: float = 0.05) -> list[str]:
+    """Benjamini-Hochberg FDR control across a batch of tested hypotheses.
+
+    Collects the IC p-value from each hypothesis that passed discovery,
+    applies BH at level q, and returns IDs of hypotheses that should be
+    rejected (marked fdr_rejected).
+
+    Args:
+        hypotheses: list of Hypothesis objects (or dicts) from this cycle
+        q: false discovery rate threshold (default 0.05)
+
+    Returns:
+        List of hypothesis IDs that fail FDR correction.
+    """
+    # Collect (id, pvalue) for hypotheses that passed discovery
+    pvals = []
+    for h in hypotheses:
+        results = h.get("results") if isinstance(h, dict) else getattr(h, "results", None)
+        hyp_id = h.get("id") if isinstance(h, dict) else getattr(h, "id", None)
+        status = h.get("status") if isinstance(h, dict) else getattr(h, "status", None)
+        if results is None or status == "queued":
+            continue
+        # Look for p-value in gate_results
+        for gr in (results.get("gate_results") or []):
+            p = _extract_pvalue(gr.get("msg", ""))
+            if p is not None:
+                pvals.append((hyp_id, p))
+                break  # one p-value per hypothesis (first IC gate)
+
+    if len(pvals) < 2:
+        return []  # nothing to correct with fewer than 2 tests
+
+    # Sort by p-value (ascending)
+    pvals.sort(key=lambda x: x[1])
+    m = len(pvals)
+
+    # BH: find largest k where p(k) <= k/m * q
+    bh_threshold = 0.0
+    for k, (hyp_id, p) in enumerate(pvals, 1):
+        if p <= (k / m) * q:
+            bh_threshold = p
+
+    # Reject hypotheses with p > bh_threshold (they don't survive FDR)
+    rejected = []
+    for hyp_id, p in pvals:
+        if p > bh_threshold and bh_threshold > 0:
+            rejected.append(hyp_id)
+
+    return rejected
+
+
+def _parse_gate_spec(gate_str: str) -> Optional[tuple[str, str, str]]:
+    """Parse 'ent_book_shape<P40' into ('ent_book_shape', '<', 'P40')."""
+    m = re.match(r'^([a-z_0-9]+)([<>])(P\d+)$', gate_str)
+    if m:
+        return m.group(1), m.group(2), m.group(3)
+    return None
+
+
+def _load_feature_data(data_dir: str, symbol: str):
+    """Load and concatenate all Parquet files for a symbol from a data dir."""
+    import pandas as pd
+
+    data_path = ROOT / data_dir
+    if not data_path.exists():
+        return None
+    files = sorted(data_path.glob("*.parquet"))
+    if not files:
+        return None
+    frames = []
+    for f in files:
+        try:
+            frames.append(pd.read_parquet(f))
+        except Exception:
+            continue  # skip corrupted files
+    if not frames:
+        return None
+    df = pd.concat(frames, ignore_index=True)
+    return df[df["symbol"] == symbol] if "symbol" in df.columns else df
+
+
+def _extract_gated_signal(df, feature: str,
+                          gate_spec: Optional[str]):
+    """Extract a feature column masked by an optional regime gate.
+
+    Returns the feature values where the gate condition is True, NaN elsewhere.
+    This lets correlation measure agreement in the active regime only.
+    """
+    import numpy as np
+
+    if feature not in df.columns:
+        return None
+    values = df[feature].to_numpy(dtype=float)
+
+    if gate_spec is None:
+        return values
+
+    parsed = _parse_gate_spec(gate_spec)
+    if parsed is None:
+        return values
+
+    gate_feat, direction, percentile_str = parsed
+    if gate_feat not in df.columns:
+        return values
+
+    pct_val = int(percentile_str[1:])  # 'P40' -> 40
+    gate_col = df[gate_feat].to_numpy(dtype=float)
+    threshold = np.nanpercentile(gate_col, pct_val)
+
+    if direction == "<":
+        mask = gate_col < threshold
+    else:
+        mask = gate_col > threshold
+
+    gated = np.full_like(values, np.nan)
+    gated[mask] = values[mask]
+    return gated
+
+
+def check_correlation_gate(
+    candidate_feature: str,
+    candidate_gate: Optional[str],
+    registry: list[dict],
+    data_dir: str,
+    symbol: str = "BTC",
+    max_corr: float = 0.70,
+) -> tuple[bool, str]:
+    """Check if a candidate signal is redundant with existing registry signals.
+
+    Computes Spearman rank correlation between the candidate's gated feature
+    values and each registered signal's gated feature values. Rejects if
+    any pairwise correlation exceeds max_corr.
+    """
+    import numpy as np
+    import pandas as pd
+
+    if not registry:
+        return True, "empty registry, no dedup needed PASS"
+
+    df = _load_feature_data(data_dir, symbol)
+    if df is None or len(df) == 0:
+        log.warning("  Correlation check: could not load data from %s", data_dir)
+        return True, "no data for correlation check, skipped"
+
+    cand_vals = _extract_gated_signal(df, candidate_feature, candidate_gate)
+    if cand_vals is None:
+        return True, f"feature {candidate_feature} not in data, skipped"
+
+    worst_corr = 0.0
+    worst_name = ""
+    for sig in registry:
+        sig_features = sig.get("features", [])
+        sig_gate = sig.get("regime_gate")
+        for sf in sig_features:
+            ref_vals = _extract_gated_signal(df, sf, sig_gate)
+            if ref_vals is None:
+                continue
+            # Spearman on non-NaN overlap
+            valid = ~(np.isnan(cand_vals) | np.isnan(ref_vals))
+            if valid.sum() < 100:
+                continue
+            corr = pd.Series(cand_vals[valid]).corr(
+                pd.Series(ref_vals[valid]), method="spearman"
+            )
+            if abs(corr) > abs(worst_corr):
+                worst_corr = corr
+                worst_name = f"{sf}|{sig_gate or 'ungated'}"
+
+    passed = abs(worst_corr) <= max_corr
+    if worst_name:
+        msg = (f"max_corr={worst_corr:+.3f} vs {worst_name} "
+               f"(threshold={max_corr})" + (" PASS" if passed else " REDUNDANT"))
+    else:
+        msg = "no comparable registry signals PASS"
+    return passed, msg
 
 
 def check_coverage_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
@@ -321,17 +527,7 @@ class ExperimentRunner:
         Runs after discovery passes. Signals that fail cost are marked
         'cost_killed' — they are real but untradeable, eligible for recycler.
         """
-        # Find the data dir from the test protocol
-        data_dir = None
-        for cmd_str in self.h.test_protocol:
-            parts = cmd_str.split()
-            for i, p in enumerate(parts):
-                if p in ("--data", "--data-dir") and i + 1 < len(parts):
-                    data_dir = parts[i + 1]
-                    break
-        if data_dir is None:
-            data_dir = f"data/features/{sorted(self.manifest.get('dates', {}).keys())[-1]}"
-
+        data_dir = self._extract_data_dir()
         symbol = self._extract_symbol(self.h.test_protocol[0])
         cmd_parts = ["spannung", "backtest", "--data", data_dir, "--symbol", symbol]
         result = run_nat(cmd_parts)
@@ -351,8 +547,37 @@ class ExperimentRunner:
             self.h.fail("cost_killed")
         return passed
 
+    def run_correlation_check(self) -> bool:
+        """Check if signal is redundant with existing registry entries.
+
+        Runs after replication passes, before registration. Prevents the
+        registry from filling with near-identical signals (e.g. imbalance_l1
+        and imbalance_l5 gated by the same regime — Spearman rho > 0.93).
+        """
+        registry = self._load_registry()
+        if not registry:
+            return True
+
+        data_dir = self._extract_data_dir()
+        symbol = self._extract_symbol(self.h.test_protocol[0])
+        features = self._extract_features()
+        gate = self.h.thresholds.get("regime_gate")
+        max_corr = self.h.thresholds.get("max_corr", 0.70)
+
+        # Check each feature in the candidate against the full registry
+        for feat in features:
+            passed, msg = check_correlation_gate(
+                feat, gate, registry, data_dir, symbol, max_corr
+            )
+            log.info("  Correlation check (%s): %s", feat, msg)
+            self.h.results = {**(self.h.results or {}), "correlation_check": msg}
+            if not passed:
+                self.h.fail("redundant")
+                return False
+        return True
+
     def run_full(self) -> bool:
-        """Run the complete 4-gate protocol: discovery, cost, temporal, symbol."""
+        """Run the complete 5-gate protocol: discovery, cost, temporal, symbol, dedup."""
         if not self.run_discovery():
             return False
         if not self.run_cost_check():
@@ -360,6 +585,8 @@ class ExperimentRunner:
         if not self.run_replication_temporal():
             return False
         if not self.run_replication_symbol():
+            return False
+        if not self.run_correlation_check():
             return False
         self.register_signal()
         return True
@@ -378,6 +605,14 @@ class ExperimentRunner:
             if not passed:
                 return False, f"{name}: {msg}"
         return True, " | ".join(msgs)
+
+    def _extract_data_dir(self) -> str:
+        for cmd_str in self.h.test_protocol:
+            parts = cmd_str.split()
+            for i, p in enumerate(parts):
+                if p in ("--data", "--data-dir") and i + 1 < len(parts):
+                    return parts[i + 1]
+        return f"data/features/{sorted(self.manifest.get('dates', {}).keys())[-1]}"
 
     @staticmethod
     def _extract_symbol(cmd_str: str) -> str:
