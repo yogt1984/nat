@@ -1107,6 +1107,42 @@ def cmd_pipeline_dashboard(args):
     _py(f"scripts/dashboard.py --config {_pipe_cfg(args)} --port {port}")
 
 
+# ── Agent commands ───────────────────────────────────────────────────────────
+
+AGENT_SCRIPT = "scripts/agent/daemon.py"
+
+def cmd_agent_start(args):
+    _banner("Starting NAT Agent daemon")
+    _py(f"{AGENT_SCRIPT} start")
+
+def cmd_agent_stop(args):
+    """Send SIGTERM to running agent."""
+    import signal as sig
+    r = _sh("pgrep -f 'agent/daemon.py start'")
+    if r.returncode == 0 and r.stdout.strip():
+        pid = int(r.stdout.strip().split("\n")[0])
+        os.kill(pid, sig.SIGTERM)
+        _p("✓", G, f"Sent SIGTERM to agent (pid {pid})")
+    else:
+        _p("–", Y, "No running agent found")
+
+def cmd_agent_once(args):
+    _banner("Running single agent cycle")
+    _py(f"{AGENT_SCRIPT} once")
+
+def cmd_agent_status(args):
+    _py(f"{AGENT_SCRIPT} status")
+
+def cmd_agent_queue(args):
+    _py(f"{AGENT_SCRIPT} queue")
+
+def cmd_agent_registry(args):
+    _py(f"{AGENT_SCRIPT} registry")
+
+def cmd_agent_graveyard(args):
+    _py(f"{AGENT_SCRIPT} graveyard")
+
+
 # ── Signal commands ──────────────────────────────────────────────────────────
 
 def cmd_signal_test(args):
@@ -1626,6 +1662,15 @@ def cmd_help(args=None):
     nat eamm regime            Regime analysis
     nat eamm backtest          Stateful backtest (--gamma, --q-max)
 
+  {BOLD}Agent (autonomous research){W}
+    nat agent start            Launch agent daemon (hypothesis loop)
+    nat agent stop             Graceful shutdown (SIGTERM)
+    nat agent once             Run single cycle (for testing)
+    nat agent status           Current state & generator stats
+    nat agent queue            Queued hypotheses by priority
+    nat agent registry         Validated signals
+    nat agent graveyard        Failed hypotheses with reasons
+
   {BOLD}API & Services{W}
     nat api start              REST/WebSocket API server
     nat api alerts             Telegram alert service
@@ -2131,6 +2176,18 @@ def build_parser():
     spn_rg.add_argument('--symbol', type=str, default='all', help='Symbol or "all"')
     spn_rg.add_argument('--output', type=str, default=None, help='Output directory')
     spn_rg.set_defaults(func=cmd_spannung_regime)
+
+    # ── agent ──
+    ag_p = sub.add_parser('agent', help='Autonomous research agent')
+    ag_p.set_defaults(func=cmd_agent_status)
+    agsub = ag_p.add_subparsers(dest='subcmd')
+    agsub.add_parser('start', help='Launch agent daemon').set_defaults(func=cmd_agent_start)
+    agsub.add_parser('stop', help='Graceful shutdown (SIGTERM)').set_defaults(func=cmd_agent_stop)
+    agsub.add_parser('once', help='Run single cycle (testing)').set_defaults(func=cmd_agent_once)
+    agsub.add_parser('status', help='Current state & stats').set_defaults(func=cmd_agent_status)
+    agsub.add_parser('queue', help='Queued hypotheses by priority').set_defaults(func=cmd_agent_queue)
+    agsub.add_parser('registry', help='Validated signals').set_defaults(func=cmd_agent_registry)
+    agsub.add_parser('graveyard', help='Failed hypotheses').set_defaults(func=cmd_agent_graveyard)
 
     return p
 

@@ -1,0 +1,50 @@
+# NAT Agent Configuration
+# Autonomous hypothesis-driven alpha discovery daemon
+
+[agent]
+# Cycle interval — time between research cycles (seconds)
+cycle_interval_s = 3600
+
+# Per-cycle budget
+max_experiments_per_cycle = 10
+max_cycle_runtime_s = 5400  # 90 minutes
+
+# Enabled generators (order = execution order)
+generators_enabled = [
+    "systematic",
+    "spectral",
+    "regime",
+    "cross_asset",
+    "recycler",
+]
+
+[agent.gates]
+# Minimum thresholds for passing through the research pipeline
+min_ic = 0.10
+min_coverage = 0.10
+min_walkforward_sign_consistency = 0.80
+min_oos_dates = 2
+min_symbols = 2
+
+[agent.cost]
+# Trading cost assumptions (bps, one-way)
+taker_fee_bps = 3.5
+# Minimum net Sharpe after costs to pass cost gate
+min_net_sharpe = 0.5
+
+[agent.promotion]
+# Paper trading → live promotion criteria
+paper_sharpe_min = 1.5
+paper_days = 7
+realized_ic_ratio_min = 0.8
+max_drawdown_pct = 2.0
+
+[agent.symbols]
+# Symbols to research
+primary = ["BTC", "ETH", "SOL"]
+
+[agent.paths]
+# Relative to project root
+data_dir = "data/features"
+state_dir = "data/agent"
+report_dir = "reports"
