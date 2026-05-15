@@ -958,7 +958,7 @@ test_agent:
 	@echo "║          TESTING AGENT SUBSYSTEM                                 ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
 	@echo ""
-	cd scripts && $(PYTHON) -m pytest tests/test_agent_cache.py tests/test_agent_dashboard.py -v
+	cd scripts && $(PYTHON) -m pytest tests/test_agent_cache.py tests/test_agent_dashboard.py tests/test_agent_monitor.py -v
 
 # Install cron watchdog (restarts agent if it dies)
 agent_watchdog_install:

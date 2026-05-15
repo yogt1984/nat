@@ -34,6 +34,11 @@ taker_fee_bps = 3.5
 # Minimum net Sharpe after costs to pass cost gate
 min_net_sharpe = 0.5
 
+[agent.decay]
+# IC decay monitoring — auto-retire degraded signals
+ic_decay_ratio = 0.5          # retire if IC < 50% of discovery IC
+consecutive_days_limit = 14   # must decay for this many consecutive days
+
 [agent.promotion]
 # Paper trading → live promotion criteria
 paper_sharpe_min = 1.5

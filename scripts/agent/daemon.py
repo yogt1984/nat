@@ -252,6 +252,9 @@ class AgentDaemon:
         self.state.transition(AgentPhase.GENERATE, "generating hypotheses")
         run_generators(self.queue, manifest, self.config, self.gen_stats)
 
+        # 2b. Adaptive IC threshold — raise the bar as registry quality grows
+        adaptive_min_ic = self._compute_adaptive_ic()
+
         # 3. Execute experiments (budget-limited)
         self.state.transition(AgentPhase.EXECUTE, "running experiments")
         n_run = 0
@@ -272,6 +275,10 @@ class AgentDaemon:
                 break
 
             self.state.set("current_hypothesis", hypothesis.id)
+            # Inject adaptive IC threshold (raises bar as registry grows)
+            hypothesis.thresholds.setdefault("min_ic", 0.10)
+            if adaptive_min_ic > hypothesis.thresholds["min_ic"]:
+                hypothesis.thresholds["min_ic"] = adaptive_min_ic
             runner = ExperimentRunner(hypothesis, manifest)
             success = runner.run_full()
 
@@ -330,11 +337,39 @@ class AgentDaemon:
         self.state.set("last_cycle_at", datetime.now(timezone.utc).isoformat())
         log.info("Cycle complete: %d experiments, queue depth=%d", n_run, self.queue.depth)
 
-    def run_monitor(self) -> None:
-        """Check registered signals for health/promotion.
+    def _compute_adaptive_ic(self) -> float:
+        """Compute adaptive IC threshold: max(0.10, median(registry_ic) * 0.8).
 
-        Reads the registry and promotion config. Logs warnings for signals
-        that may have degraded. Flags promotion-eligible signals.
+        As the registry grows with high-quality signals, the bar rises so
+        marginal signals are rejected. Floor is always the config min_ic.
+        """
+        from agent.runner import REGISTRY_PATH
+        floor_ic = self.config.get("gates", {}).get("min_ic", 0.10)
+        if not REGISTRY_PATH.exists():
+            log.info("Adaptive IC: no registry, using floor %.2f", floor_ic)
+            return floor_ic
+        with open(REGISTRY_PATH) as f:
+            registry = json.load(f)
+        ics = [s.get("expected_ic", 0) for s in registry
+               if s.get("status") != "retired"]
+        if not ics:
+            log.info("Adaptive IC: empty registry, using floor %.2f", floor_ic)
+            return floor_ic
+        ics.sort()
+        median_ic = ics[len(ics) // 2]
+        adaptive = max(floor_ic, median_ic * 0.8)
+        log.info("Adaptive IC: median=%.3f -> threshold=%.3f (floor=%.2f, %d signals)",
+                 median_ic, adaptive, floor_ic, len(ics))
+        return adaptive
+
+    def run_monitor(self) -> None:
+        """Check registered signals for IC decay and promotion.
+
+        For each registered signal:
+        1. Compute IC on the latest data window
+        2. If IC < 50% of discovery IC, increment decay counter
+        3. Auto-retire after 14 consecutive decay days
+        4. Check paper trading signals for promotion eligibility
         """
         from agent.runner import REGISTRY_PATH
         if not REGISTRY_PATH.exists():
@@ -344,12 +379,55 @@ class AgentDaemon:
         if not registry:
             return
 
+        decay_cfg = self.config.get("decay", {})
+        decay_ratio = decay_cfg.get("ic_decay_ratio", 0.5)
+        decay_days_limit = decay_cfg.get("consecutive_days_limit", 14)
+
         promotion = self.config.get("promotion", {})
         paper_sharpe_min = promotion.get("paper_sharpe_min", 1.5)
         paper_days = promotion.get("paper_days", 7)
         realized_ic_ratio_min = promotion.get("realized_ic_ratio_min", 0.8)
         max_drawdown_pct = promotion.get("max_drawdown_pct", 2.0)
 
+        # IC decay monitoring
+        n_retired = 0
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        modified = False
+        for sig in registry:
+            if sig.get("status") == "retired":
+                continue
+            rolling_ic = self._compute_rolling_ic(sig)
+            if rolling_ic is not None:
+                expected_ic = sig.get("expected_ic", 0)
+                threshold = expected_ic * decay_ratio
+                sig.setdefault("ic_history", [])
+                sig["ic_history"].append({"date": today, "ic": rolling_ic})
+                # Keep last 30 entries
+                sig["ic_history"] = sig["ic_history"][-30:]
+                sig["latest_ic"] = rolling_ic
+                modified = True
+
+                if rolling_ic < threshold:
+                    days = sig.get("decay_days", 0) + 1
+                    sig["decay_days"] = days
+                    log.warning("  IC DECAY: %s IC=%.3f < %.3f (%.0f%% of %.3f), day %d/%d",
+                                sig["name"][:40], rolling_ic, threshold,
+                                decay_ratio * 100, expected_ic, days, decay_days_limit)
+                    if days >= decay_days_limit:
+                        sig["status"] = "retired"
+                        sig["retired_reason"] = "ic_decay"
+                        sig["retired_date"] = today
+                        n_retired += 1
+                        log.info("  AUTO-RETIRED: %s (IC decayed for %d days)",
+                                 sig["name"][:40], days)
+                else:
+                    # Reset decay counter on recovery
+                    if sig.get("decay_days", 0) > 0:
+                        log.info("  IC recovered: %s IC=%.3f >= %.3f, resetting decay counter",
+                                 sig["name"][:40], rolling_ic, threshold)
+                    sig["decay_days"] = 0
+
+        # Promotion check
         n_validated = 0
         n_paper = 0
         n_promotable = 0
@@ -359,7 +437,6 @@ class AgentDaemon:
                 n_validated += 1
             elif status == "paper":
                 n_paper += 1
-                # Check promotion criteria (when paper trading data is available)
                 paper_sharpe = sig.get("paper_sharpe")
                 paper_days_actual = sig.get("paper_days_elapsed", 0)
                 realized_ic = sig.get("realized_ic", 0)
@@ -376,8 +453,79 @@ class AgentDaemon:
                              sig["name"][:50], paper_sharpe, paper_days_actual,
                              realized_ic / expected_ic if expected_ic else 0)
 
-        log.info("Monitor: %d validated, %d paper, %d promotable",
-                 n_validated, n_paper, n_promotable)
+        # Save registry if modified
+        if modified or n_retired > 0:
+            with open(REGISTRY_PATH, "w") as f:
+                json.dump(registry, f, indent=2)
+
+        if n_retired > 0:
+            self.state.set("total_signals_registered",
+                          max(0, self.state.get("total_signals_registered", 0) - n_retired))
+
+        log.info("Monitor: %d validated, %d paper, %d promotable, %d retired this cycle",
+                 n_validated, n_paper, n_promotable, n_retired)
+
+    def _compute_rolling_ic(self, sig: dict) -> float | None:
+        """Compute rolling IC for a registered signal on the latest available data.
+
+        Loads the most recent date's Parquet data, applies the regime gate,
+        and computes Spearman correlation between the signal feature and
+        5-second forward returns.
+
+        Returns None if data is unavailable or insufficient.
+        """
+        try:
+            import numpy as np
+            import pandas as pd
+        except ImportError:
+            return None
+
+        from agent.runner import _load_feature_data, _extract_gated_signal
+
+        # Find the latest data directory
+        data_root = ROOT / "data" / "features"
+        if not data_root.exists():
+            return None
+        dates = sorted(d.name for d in data_root.iterdir() if d.is_dir())
+        if not dates:
+            return None
+
+        features = sig.get("features", [])
+        if not features:
+            return None
+        feature = features[0]
+        gate = sig.get("regime_gate")
+        symbol = sig.get("symbols", ["BTC"])[0]
+
+        # Try latest date, fall back to second latest
+        for date in reversed(dates[-2:]):
+            data_dir = f"data/features/{date}"
+            df = _load_feature_data(data_dir, symbol)
+            if df is None or len(df) < 500:
+                continue
+
+            signal_vals = _extract_gated_signal(df, feature, gate)
+            if signal_vals is None:
+                continue
+
+            # Compute 5s forward returns (50 rows at 100ms)
+            if "raw_midprice" not in df.columns:
+                continue
+            mid = df["raw_midprice"].to_numpy(dtype=float)
+            fwd = np.full_like(mid, np.nan)
+            fwd[:-50] = (mid[50:] - mid[:-50]) / mid[:-50]
+
+            # Spearman on valid overlap
+            valid = ~(np.isnan(signal_vals) | np.isnan(fwd))
+            if valid.sum() < 200:
+                continue
+
+            ic = pd.Series(signal_vals[valid]).corr(
+                pd.Series(fwd[valid]), method="spearman"
+            )
+            return float(ic) if not np.isnan(ic) else None
+
+        return None
 
     def print_report(self) -> None:
         """Print a full summary: registry + queue + graveyard + generator stats."""
