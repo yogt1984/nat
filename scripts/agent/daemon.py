@@ -321,10 +321,132 @@ class AgentDaemon:
                  cache_stats["hits"], cache_stats["misses"],
                  cache_stats["hit_rate"] * 100, cache_stats["entries"])
 
-        # 4. Update cycle counter
+        # 4. Monitor registered signals
+        self.state.transition(AgentPhase.MONITOR, "checking registered signals")
+        self.run_monitor()
+
+        # 5. Update cycle counter
         self.state.set("cycle_count", self.state.get("cycle_count", 0) + 1)
         self.state.set("last_cycle_at", datetime.now(timezone.utc).isoformat())
         log.info("Cycle complete: %d experiments, queue depth=%d", n_run, self.queue.depth)
+
+    def run_monitor(self) -> None:
+        """Check registered signals for health/promotion.
+
+        Reads the registry and promotion config. Logs warnings for signals
+        that may have degraded. Flags promotion-eligible signals.
+        """
+        from agent.runner import REGISTRY_PATH
+        if not REGISTRY_PATH.exists():
+            return
+        with open(REGISTRY_PATH) as f:
+            registry = json.load(f)
+        if not registry:
+            return
+
+        promotion = self.config.get("promotion", {})
+        paper_sharpe_min = promotion.get("paper_sharpe_min", 1.5)
+        paper_days = promotion.get("paper_days", 7)
+        realized_ic_ratio_min = promotion.get("realized_ic_ratio_min", 0.8)
+        max_drawdown_pct = promotion.get("max_drawdown_pct", 2.0)
+
+        n_validated = 0
+        n_paper = 0
+        n_promotable = 0
+        for sig in registry:
+            status = sig.get("status", "validated")
+            if status == "validated":
+                n_validated += 1
+            elif status == "paper":
+                n_paper += 1
+                # Check promotion criteria (when paper trading data is available)
+                paper_sharpe = sig.get("paper_sharpe")
+                paper_days_actual = sig.get("paper_days_elapsed", 0)
+                realized_ic = sig.get("realized_ic", 0)
+                expected_ic = sig.get("expected_ic", 1)
+                max_dd = sig.get("max_drawdown_pct", 100)
+
+                if (paper_sharpe is not None
+                        and paper_sharpe >= paper_sharpe_min
+                        and paper_days_actual >= paper_days
+                        and (realized_ic / expected_ic if expected_ic else 0) >= realized_ic_ratio_min
+                        and max_dd <= max_drawdown_pct):
+                    n_promotable += 1
+                    log.info("  PROMOTION ELIGIBLE: %s (Sharpe=%.2f, %dd, IC ratio=%.2f)",
+                             sig["name"][:50], paper_sharpe, paper_days_actual,
+                             realized_ic / expected_ic if expected_ic else 0)
+
+        log.info("Monitor: %d validated, %d paper, %d promotable",
+                 n_validated, n_paper, n_promotable)
+
+    def print_report(self) -> None:
+        """Print a full summary: registry + queue + graveyard + generator stats."""
+        from agent.runner import REGISTRY_PATH
+        s = self.state
+
+        print("=" * 60)
+        print("  NAT Agent Report")
+        print("=" * 60)
+
+        # Status
+        print(f"\nPhase:       {s.phase.value}")
+        print(f"Cycles:      {s.get('cycle_count', 0)}")
+        print(f"Tested:      {s.get('total_hypotheses_tested', 0)} hypotheses")
+        print(f"Registered:  {s.get('total_signals_registered', 0)} signals")
+        print(f"Queue depth: {self.queue.depth}")
+        print(f"Graveyard:   {len(self.queue.graveyard)}")
+
+        # Registry
+        print(f"\n{'─' * 60}")
+        print("REGISTRY")
+        print(f"{'─' * 60}")
+        if REGISTRY_PATH.exists():
+            with open(REGISTRY_PATH) as f:
+                registry = json.load(f)
+            if registry:
+                for sig in registry:
+                    print(f"  IC={sig['expected_ic']:.3f}  gate={sig.get('regime_gate', '-'):30s}  "
+                          f"{sig['name'][:50]}")
+            else:
+                print("  (empty)")
+        else:
+            print("  (no registry file)")
+
+        # Graveyard breakdown
+        print(f"\n{'─' * 60}")
+        print("GRAVEYARD BREAKDOWN")
+        print(f"{'─' * 60}")
+        reasons = {}
+        for h in self.queue.graveyard:
+            r = h.failure_reason or "unknown"
+            reasons[r] = reasons.get(r, 0) + 1
+        if reasons:
+            for r, count in sorted(reasons.items(), key=lambda x: -x[1]):
+                print(f"  {r:20s}  {count}")
+        else:
+            print("  (no failures)")
+
+        # Generator stats
+        print(f"\n{'─' * 60}")
+        print("GENERATOR PERFORMANCE")
+        print(f"{'─' * 60}")
+        for name, gs in self.gen_stats.items():
+            print(f"  {name:15s}  attempts={gs.attempts:3d}  "
+                  f"successes={gs.successes:3d}  "
+                  f"hit_rate={gs.hit_rate:.0%}  "
+                  f"weight={gs.weight:.3f}")
+
+        # Cache
+        cache_dir = ROOT / "data" / "agent" / "cache"
+        if cache_dir.exists():
+            entries = len(list(cache_dir.glob("*.meta.json")))
+            size_kb = sum(f.stat().st_size for f in cache_dir.glob("*.json")) / 1024
+            print(f"\n{'─' * 60}")
+            print("CACHE")
+            print(f"{'─' * 60}")
+            print(f"  Entries: {entries}  Size: {size_kb:.1f} KB")
+
+        print()
 
     def run(self) -> None:
         """Run the agent loop until shutdown."""
@@ -390,7 +512,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="NAT Agent Daemon")
     parser.add_argument("action", choices=["start", "status", "once", "queue",
-                                            "registry", "graveyard"],
+                                            "registry", "graveyard", "report"],
                         help="Action to perform")
     args = parser.parse_args()
 
@@ -417,6 +539,8 @@ def main():
     elif args.action == "graveyard":
         for h in agent.queue.graveyard[-20:]:
             print(f"  {h.id}  {h.failure_reason or '??':20s}  {h.claim[:50]}")
+    elif args.action == "report":
+        agent.print_report()
 
 
 if __name__ == "__main__":

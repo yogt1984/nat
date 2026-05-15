@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner dashboard test_dashboard signal_test signal_test_all exp_start exp_stop exp_status exp_check exp_midweek exp_analyze eamm_run eamm_regime eamm_backtest eamm_test eamm_test_integration 15m 15m_offline 15m_viz test_15m
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner dashboard test_dashboard signal_test signal_test_all exp_start exp_stop exp_status exp_check exp_midweek exp_analyze eamm_run eamm_regime eamm_backtest eamm_test eamm_test_integration 15m 15m_offline 15m_viz test_15m agent_start agent_stop agent_status agent_report agent_dashboard test_agent agent_watchdog_install agent_watchdog_remove
 
 # Python interpreter — prefer 'python' (often conda/venv) over system 'python3'.
 # Override with: make PYTHON=/usr/bin/python3
@@ -914,6 +914,66 @@ test_15m:
 	cd scripts && $(PYTHON) -m pytest tests/test_15m_test.py -v
 
 # =============================================================================
+# AUTONOMOUS RESEARCH AGENT
+# =============================================================================
+
+AGENT_DASHBOARD_PORT ?= 8060
+
+# Start the agent daemon in tmux
+agent_start:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          STARTING NAT RESEARCH AGENT                             ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@-pkill -f 'agent/daemon.py start' 2>/dev/null; sleep 1
+	@tmux kill-session -t nat-agent 2>/dev/null || true
+	tmux new-session -d -s nat-agent '$(PYTHON) scripts/agent/daemon.py start; read'
+	@echo "Agent running in tmux session 'nat-agent'"
+	@echo "  attach: tmux attach -t nat-agent"
+	@echo "  status: make agent_status"
+
+# Stop the agent gracefully
+agent_stop:
+	@echo "Stopping NAT agent..."
+	@-pkill -f 'agent/daemon.py start' 2>/dev/null && echo "Agent stopped" || echo "Agent not running"
+
+# Show agent status
+agent_status:
+	@$(PYTHON) scripts/agent/daemon.py status
+
+# Full agent report (registry + graveyard + generators + cache)
+agent_report:
+	@$(PYTHON) scripts/agent/daemon.py report
+
+# Start agent dashboard
+agent_dashboard:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          NAT AGENT DASHBOARD                                     ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	$(PYTHON) scripts/agent_dashboard.py --port $(AGENT_DASHBOARD_PORT)
+
+# Run agent tests (cache + dashboard)
+test_agent:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          TESTING AGENT SUBSYSTEM                                 ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	cd scripts && $(PYTHON) -m pytest tests/test_agent_cache.py tests/test_agent_dashboard.py -v
+
+# Install cron watchdog (restarts agent if it dies)
+agent_watchdog_install:
+	@echo "Installing agent watchdog cron..."
+	@(crontab -l 2>/dev/null | grep -v 'agent/daemon.py'; \
+	  echo "*/5 * * * * pgrep -f 'agent/daemon.py start' >/dev/null || cd $(CURDIR) && $(PYTHON) scripts/agent/daemon.py start >> data/agent/watchdog.log 2>&1") | crontab -
+	@echo "Watchdog installed (checks every 5 minutes)"
+
+# Remove cron watchdog
+agent_watchdog_remove:
+	@echo "Removing agent watchdog cron..."
+	@(crontab -l 2>/dev/null | grep -v 'agent/daemon.py') | crontab -
+	@echo "Watchdog removed"
+
+# =============================================================================
 # HELP
 # =============================================================================
 
@@ -1086,4 +1146,16 @@ help:
 	@echo "  exp_check         Daily validation (last 24h)"
 	@echo "  exp_midweek       Full validation + schema scan"
 	@echo "  exp_analyze       Stop, validate, profile, quality gates"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " AUTONOMOUS RESEARCH AGENT"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  agent_start             Start agent daemon in tmux"
+	@echo "  agent_stop              Stop agent gracefully"
+	@echo "  agent_status            Show agent state, queue, generators"
+	@echo "  agent_report            Full summary (registry + graveyard + cache)"
+	@echo "  agent_dashboard         Start agent dashboard (port $(AGENT_DASHBOARD_PORT))"
+	@echo "  test_agent              Run agent tests (cache + dashboard)"
+	@echo "  agent_watchdog_install  Install cron watchdog (auto-restart)"
+	@echo "  agent_watchdog_remove   Remove cron watchdog"
 	@echo ""

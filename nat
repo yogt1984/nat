@@ -1146,6 +1146,9 @@ def cmd_agent_dashboard(args):
     port = getattr(args, 'port', 8060)
     _py(f"scripts/agent_dashboard.py --port {port}")
 
+def cmd_agent_report(args):
+    _py(f"{AGENT_SCRIPT} report")
+
 
 # ── Signal commands ──────────────────────────────────────────────────────────
 
@@ -2192,6 +2195,7 @@ def build_parser():
     agsub.add_parser('queue', help='Queued hypotheses by priority').set_defaults(func=cmd_agent_queue)
     agsub.add_parser('registry', help='Validated signals').set_defaults(func=cmd_agent_registry)
     agsub.add_parser('graveyard', help='Failed hypotheses').set_defaults(func=cmd_agent_graveyard)
+    agsub.add_parser('report', help='Full summary report').set_defaults(func=cmd_agent_report)
     dash_p = agsub.add_parser('dashboard', help='Launch web dashboard (port 8060)')
     dash_p.add_argument('--port', type=int, default=8060)
     dash_p.set_defaults(func=cmd_agent_dashboard)
