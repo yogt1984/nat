@@ -54,6 +54,7 @@ DEFAULT_CONFIG = {
         "regime",
         "cross_asset",
         "recycler",
+        "ensemble",
     ],
 }
 
@@ -201,6 +202,9 @@ def _get_generator(name: str):
         elif name == "recycler":
             from agent.generators.recycler import generate
             return generate
+        elif name == "ensemble":
+            from agent.generators.ensemble import generate
+            return generate
     except ImportError as e:
         log.debug("Generator %s not yet implemented: %s", name, e)
     return None
@@ -216,7 +220,7 @@ class AgentDaemon:
     def __init__(self):
         self.config = load_config()
         self.state = AgentState()
-        self.queue = HypothesisQueue()
+        self.queue = HypothesisQueue(path=ROOT / "data" / "agent" / "hypotheses.json")
         self.gen_stats = load_gen_stats()
         self._shutdown = False
 
@@ -318,6 +322,11 @@ class AgentDaemon:
             log.info("FDR control (q=%.2f): %d/%d rejected",
                      fdr_q, len(rejected_ids), len(cycle_hypotheses))
 
+        # 3c. Hypothesis chaining — spawn follow-up hypotheses from near-misses
+        n_chained = self._chain_hypotheses(cycle_hypotheses)
+        if n_chained:
+            log.info("Chaining: spawned %d follow-up hypotheses", n_chained)
+
         save_gen_stats(self.gen_stats)
         self.state.set("current_hypothesis", None)
 
@@ -336,6 +345,80 @@ class AgentDaemon:
         self.state.set("cycle_count", self.state.get("cycle_count", 0) + 1)
         self.state.set("last_cycle_at", datetime.now(timezone.utc).isoformat())
         log.info("Cycle complete: %d experiments, queue depth=%d", n_run, self.queue.depth)
+
+    def _chain_hypotheses(self, cycle_hypotheses: list) -> int:
+        """Spawn follow-up hypotheses from near-misses and strong results.
+
+        Rule 1 — Symbol-specific variant: if a hypothesis passed discovery,
+        cost, and temporal replication but failed symbol replication on
+        exactly 1 symbol, spawn a symbol-specific variant (primary + passing
+        symbol only) with lower priority.
+
+        Rule 2 — Ensemble promotion: if a hypothesis passed with dIC >> min_dIC
+        (at least 2x), it's a strong single gate. Trigger the ensemble generator
+        to pair it with other strong gates. (Ensemble generator picks these up
+        automatically on the next cycle; here we just log the signal.)
+
+        Returns the number of chained hypotheses spawned.
+        """
+        n_spawned = 0
+        min_dIC = self.config.get("gates", {}).get("min_dIC", 0.05)
+
+        for h in cycle_hypotheses:
+            # Rule 1: symbol-specific variant
+            if (h.status == "failed"
+                    and h.failure_reason == "no_replication"
+                    and h.results
+                    and "symbol_replication" in h.results):
+                sr = h.results["symbol_replication"]
+                passed_syms = sr.get("passed", [])
+                failed_syms = sr.get("failed", [])
+
+                # Failed on exactly 1 symbol → spawn variant for passing symbols
+                if len(failed_syms) == 1 and len(passed_syms) >= 2:
+                    claim = f"{h.claim} [symbol-specific: {','.join(passed_syms)}]"
+                    existing = {x.claim for x in self.queue._all}
+                    if claim not in existing:
+                        variant = Hypothesis.create(
+                            claim=claim,
+                            generator=h.generator,
+                            test_protocol=h.test_protocol,
+                            priority=h.priority * 0.7,
+                            thresholds={
+                                **h.thresholds,
+                                "min_symbols": len(passed_syms),
+                                "symbols_override": passed_syms,
+                            },
+                            parent_id=h.id,
+                        )
+                        self.queue.push(variant)
+                        n_spawned += 1
+                        log.info("  Chained symbol-specific: %s (%s)",
+                                 claim[:60], ",".join(passed_syms))
+
+            # Rule 2: strong dIC → flag for ensemble pairing
+            if h.status in ("replicated", "passed") and h.results:
+                dIC = self._extract_dIC_from_results(h)
+                if dIC >= min_dIC * 2:
+                    log.info("  Strong gate (dIC=%.3f): %s — ensemble candidate",
+                             dIC, h.claim[:60])
+                    # Ensemble generator will pick this up next cycle
+
+        return n_spawned
+
+    @staticmethod
+    def _extract_dIC_from_results(h) -> float:
+        """Extract dIC value from hypothesis gate results."""
+        if not h.results or "gate_results" not in h.results:
+            return 0.0
+        for gr in h.results["gate_results"]:
+            msg = gr.get("msg", "")
+            if "dIC=" in msg:
+                try:
+                    return float(msg.split("dIC=")[1].split()[0])
+                except (IndexError, ValueError):
+                    pass
+        return 0.0
 
     def _compute_adaptive_ic(self) -> float:
         """Compute adaptive IC threshold: max(0.10, median(registry_ic) * 0.8).

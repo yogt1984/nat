@@ -526,6 +526,8 @@ class ExperimentRunner:
         other_symbols = [s for s in ["BTC", "ETH", "SOL"] if s != primary_sym]
 
         n_pass = 0
+        passed_symbols = [primary_sym]
+        failed_symbols = []
         for sym in other_symbols:
             for cmd_str in self.h.test_protocol[:1]:
                 cmd_parts = cmd_str.replace(f"--symbol {primary_sym}", f"--symbol {sym}").split()
@@ -534,6 +536,20 @@ class ExperimentRunner:
                     passed, _ = self._check_gates(report)
                     if passed:
                         n_pass += 1
+                        passed_symbols.append(sym)
+                    else:
+                        failed_symbols.append(sym)
+                else:
+                    failed_symbols.append(sym)
+
+        # Store per-symbol results for hypothesis chaining
+        self.h.results = {**(self.h.results or {}),
+                          "symbol_replication": {
+                              "passed": passed_symbols,
+                              "failed": failed_symbols,
+                              "n_pass": n_pass,
+                              "n_total": len(other_symbols),
+                          }}
 
         min_symbols = self.h.thresholds.get("min_symbols", 2) - 1  # -1 for primary
         if n_pass >= min_symbols:

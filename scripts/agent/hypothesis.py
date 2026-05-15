@@ -36,6 +36,7 @@ class Hypothesis:
         "regime": "REG",
         "cross_asset": "XAS",
         "recycler": "REC",
+        "ensemble": "ENS",
     }
 
     @classmethod

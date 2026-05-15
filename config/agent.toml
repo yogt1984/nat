@@ -16,6 +16,7 @@ generators_enabled = [
     "regime",
     "cross_asset",
     "recycler",
+    "ensemble",
 ]
 
 [agent.gates]
