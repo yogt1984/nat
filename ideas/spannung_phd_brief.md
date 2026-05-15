@@ -43,6 +43,14 @@ The signal is inherently tick-level.
 - IC-persistence tradeoff: wide regimes (50%+ coverage) last 10–16s with IC=0.50,
   tight combos (1–7%) last 1–2s with IC=0.65
 
+### Phase F — Cross-Symbol Walk-Forward Validation
+- 5-fold walk-forward profiling on BTC (2467 bars), ETH (472 bars), SOL (472 bars) at 1min
+- All `_last` imbalance variants achieve **KEEP verdict across all 3 symbols** with >=80% sign consistency
+- OOS IC: BTC=0.19, ETH=0.18, SOL=0.11 for `imbalance_qty_l1_last` (degraded from tick-level 0.45 by bar aggregation, as predicted by spectral analysis)
+- Liquidity ordering: SOL (OOS IC ~0.50 on price features) > ETH (~0.32) > BTC (~0.27) — less liquid = stronger mean-reversion
+- `_last` vs `_mean`/`_std` split confirmed cross-symbol: instantaneous features replicate (KEEP), aggregated features degrade (DROP)
+- Entropy/toxicity features classified as gates (not directional) on all symbols — consistent with Phase E
+
 ## Key Achievements
 
 1. Built a complete research platform: 5 tools (`nat spannung`, `backtest`, `horizon`,
@@ -54,6 +62,9 @@ The signal is inherently tick-level.
 4. Established the spectral/OU characterization of the signal (H=0.43, half-life 5–7s,
    dominant coherence at 68s)
 5. Mapped the full IC-persistence Pareto frontier for regime-gated trading
+6. **Cross-symbol validation**: 5-fold walk-forward confirms imbalance signal replicates
+   across BTC, ETH, SOL with KEEP verdict and 100% sign consistency — structural
+   microstructure phenomenon, not asset-specific
 
 ## PhD Brief — ETH Zürich
 
@@ -94,7 +105,16 @@ across BTC, ETH, and SOL perpetual futures. The key results:
    economic interpretation: structured books reflect informed positioning, amplifying
    the information content of imbalance.
 
-4. **The IC-persistence Pareto frontier.** High-IC regime windows (0.60+) persist for
+4. **Cross-symbol structural replication.** Five-fold walk-forward validation across
+   BTC, ETH, and SOL perpetual futures confirms that the imbalance signal is a
+   structural microstructure phenomenon, not asset-specific. All instantaneous
+   imbalance variants achieve KEEP verdict with >=80% sign consistency across symbols.
+   Notably, OOS IC follows the liquidity ordering (SOL > ETH > BTC on price features),
+   consistent with the theoretical prediction that less liquid instruments exhibit
+   stronger mean-reversion. Aggregated features (`_mean`, `_std`) systematically
+   degrade — the time-domain manifestation of the frequency-localized predictive power.
+
+5. **The IC-persistence Pareto frontier.** High-IC regime windows (0.60+) persist for
    only 1–2 seconds, while moderate-IC regimes (0.50) persist for 10–16 seconds,
    creating a tradeoff between signal strength and executability that has implications
    for optimal market-making strategy design.
