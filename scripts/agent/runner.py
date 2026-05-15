@@ -223,7 +223,7 @@ class ExperimentRunner:
     def register_signal(self) -> RegisteredSignal:
         """Create a RegisteredSignal from a replicated hypothesis."""
         signal = RegisteredSignal(
-            name=self.h.id,
+            name=self.h.claim,
             features=self._extract_features(),
             regime_gate=self.h.thresholds.get("regime_gate"),
             extraction=self.h.thresholds.get("extraction", "raw"),

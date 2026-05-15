@@ -366,8 +366,8 @@ def main():
         if reg_path.exists():
             with open(reg_path) as f:
                 for sig in json.load(f):
-                    print(f"  {sig['name']:30s}  IC={sig['expected_ic']:.3f}  "
-                          f"symbols={sig['symbols']}  status={sig['status']}")
+                    print(f"  IC={sig['expected_ic']:.3f}  {sig['status']:10s}  "
+                          f"{','.join(sig['symbols']):12s}  {sig['name']}")
         else:
             print("  (empty)")
     elif args.action == "graveyard":
