@@ -49,7 +49,7 @@ and registers validated signals — without human intervention.
                     |        NAT AGENT DAEMON        |
                     |                                |
                     |  5 Generators --> Priority Q    |
-                    |  Runner: 3-gate replication     |
+                    |  Runner: 5-gate replication     |
                     |  Registry: validated signals    |
                     +----------------+---------------+
                                      |
@@ -128,7 +128,7 @@ GRAVEYARD  GRAVEYARD  GRAVEYARD  GRAVEYARD      GRAVEYARD
 
 **Gate 1 — Discovery (IC + dIC).** Run `nat spannung regime` on BTC with latest data.
 Extract gate-specific IC (not aggregate). Pass conditions:
-- Spearman rank IC >= 0.10
+- Spearman rank IC >= `min_ic` (adaptive, see below)
 - dIC >= 0.05 (gated IC must exceed ungated baseline)
 
 ```
@@ -159,6 +159,41 @@ rejected to keep the registry diverse.
 applied across all tested hypotheses at q=0.05. IC p-values are computed via
 z-test: `z = IC * sqrt(n)`, two-sided `p = erfc(z/sqrt(2))`. Hypotheses that
 don't survive FDR correction are removed from the registry.
+
+### Adaptive IC Threshold
+
+The IC acceptance threshold rises as the registry accumulates high-quality signals:
+
+```
+  min_ic(t)  =  max( floor,  median{ IC_i : i in R(t), status != retired } * 0.8 )
+```
+
+where `R(t)` is the registry at cycle `t` and `floor = 0.10` (configurable).
+With a single registered signal at IC = 0.569, the threshold rises from 0.10
+to 0.455 — marginal signals cannot enter a strong registry. Computed once at
+the start of each cycle and injected into every hypothesis before execution.
+
+### IC Decay Monitoring
+
+Registered signals are continuously monitored for degradation. Each cycle,
+the MONITOR phase computes a rolling Spearman IC on the latest data:
+
+```
+  IC_rolling(s)  =  rho_S( F_s[mask_G], r_{t+h}[mask_G] )
+```
+
+where `F_s` is the signal feature, `mask_G` is the regime gate, and `r_{t+h}` is
+the 5-second forward return. If `IC_rolling` drops below 50% of discovery IC
+for 14 consecutive days, the signal is auto-retired:
+
+```
+  if IC_rolling(s) < IC_discovery(s) * 0.5   for 14 consecutive cycles:
+      status(s) ← retired,  reason ← ic_decay
+```
+
+The decay counter resets on recovery. IC history (last 30 entries) is persisted
+per signal for trend analysis. Both `ic_decay_ratio` (default 0.5) and
+`consecutive_days_limit` (default 14) are configurable in `config/agent.toml`.
 
 ### Five Hypothesis Generators
 
@@ -281,7 +316,7 @@ cd rust && cargo test -- test_name      # single test
 pytest scripts/tests/                   # Python tests
 make validate                           # live API validation
 make test_pipeline                      # pipeline state machine
-make test_agent                         # agent tests (cache + dashboard, 101 tests)
+make test_agent                         # agent tests (cache + dashboard + monitor, 129 tests)
 ```
 
 ## Configuration
@@ -289,7 +324,7 @@ make test_agent                         # agent tests (cache + dashboard, 101 te
 | File | Purpose |
 |------|---------|
 | `config/ing.toml` | Ingestor: WebSocket URL, symbols, emission interval, output format |
-| `config/agent.toml` | Agent: cycle interval, experiment budget, 5-gate thresholds (IC, dIC, cost, FDR q), promotion criteria |
+| `config/agent.toml` | Agent: cycle interval, experiment budget, 5-gate thresholds (IC, dIC, cost, FDR q), decay monitoring, promotion criteria |
 | `config/pipeline.toml` | Pipeline orchestration: ingestion duration, analysis thresholds |
 
 Environment: `RUST_LOG`, `REDIS_URL`, `ING_DASHBOARD_ENABLED`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
@@ -378,8 +413,8 @@ Wire into `ExperimentRunner._check_gates()`.
 ### Agent State Machine
 
 ```
-Per-cycle:   MANIFEST -> GENERATE -> EXECUTE (budget: 10 or 90min)
-             -> FDR control (BH q=0.05) -> MONITOR -> SLEEP
+Per-cycle:   MANIFEST -> GENERATE -> ADAPTIVE IC -> EXECUTE (budget: 10 or 90min)
+             -> FDR control (BH q=0.05) -> MONITOR (decay + promotion) -> SLEEP
 
 Per-hypothesis:
   SETUP -> DISCOVERY (IC+dIC) -> COST -> TEMPORAL -> SYMBOL -> CORRELATION -> REGISTER
@@ -424,7 +459,9 @@ Hypothesis (queued) -> Discovery (IC+dIC) -> Cost (gross edge >= 0.1 bps)
 
 Registered signals are promoted through: `validated -> paper -> live -> retired`.
 Paper-to-live promotion requires: 7-day Sharpe > 1.5, realized/predicted IC > 0.8,
-max drawdown < 2%. The MONITOR phase checks these criteria every cycle.
+max drawdown < 2%. The MONITOR phase checks these criteria every cycle and
+auto-retires signals whose rolling IC decays below 50% of discovery IC for 14
+consecutive days.
 
 ## Multi-Machine Setup
 
@@ -445,18 +482,19 @@ make docker_down        # stop
 1. Amihud, Y. (2002). Illiquidity and stock returns. *Journal of Financial Markets*, 5(1), 31-56.
 2. Avellaneda, M. & Stoikov, S. (2008). High-frequency trading in a limit order book. *Quantitative Finance*, 8(3), 217-224.
 3. Bandt, C. & Pompe, B. (2002). Permutation entropy. *Physical Review Letters*, 88(17), 174102.
-4. Cont, R., Stoikov, S. & Talreja, R. (2010). A stochastic model for order book dynamics. *Operations Research*, 58(3), 549-563.
-5. Easley, D., Lopez de Prado, M. & O'Hara, M. (2012). Flow toxicity and liquidity in a high-frequency world. *Review of Financial Studies*, 25(5), 1457-1493.
-6. Gatheral, J. & Oomen, R. (2010). Zero-intelligence realized variance estimation. *Finance and Stochastics*, 14(2), 249-283.
-7. Glosten, L.R. & Milgrom, P.R. (1985). Bid, ask and transaction prices in a specialist market. *Journal of Financial Economics*, 14(1), 71-100.
-8. Gueant, O., Lehalle, C.A. & Fernandez-Tapia, J. (2012). Dealing with the inventory risk. *Mathematics and Financial Economics*, 4(7), 477-507.
-9. Hamilton, J.D. (1989). A new approach to nonstationary time series. *Econometrica*, 57(2), 357-384.
-10. Harvey, C.R., Liu, Y. & Zhu, H. (2016). ... and the Cross-Section of Expected Returns. *Review of Financial Studies*, 29(1), 5-68.
-11. Kyle, A.S. (1985). Continuous auctions and insider trading. *Econometrica*, 53(6), 1315-1335.
-12. Mandelbrot, B.B. & Van Ness, J.W. (1968). Fractional Brownian motions. *SIAM Review*, 10(4), 422-437.
-13. Parkinson, M. (1980). The extreme value method for estimating the variance of the rate of return. *Journal of Business*, 53(1), 61-65.
-14. Priestley, M.B. (1981). *Spectral Analysis and Time Series*. Academic Press.
-15. Rabiner, L.R. (1989). A tutorial on hidden Markov models. *Proceedings of the IEEE*, 77(2), 257-286.
-16. Shannon, C.E. (1948). A mathematical theory of communication. *Bell System Technical Journal*, 27(3), 379-423.
-17. Thompson, W.R. (1933). On the likelihood that one unknown probability exceeds another. *Biometrika*, 25(3-4), 285-294.
-18. White, H. (2000). A reality check for data snooping. *Econometrica*, 68(5), 1097-1126.
+4. Benjamini, Y. & Hochberg, Y. (1995). Controlling the false discovery rate. *Journal of the Royal Statistical Society B*, 57(1), 289-300.
+5. Cont, R., Stoikov, S. & Talreja, R. (2010). A stochastic model for order book dynamics. *Operations Research*, 58(3), 549-563.
+6. Easley, D., Lopez de Prado, M. & O'Hara, M. (2012). Flow toxicity and liquidity in a high-frequency world. *Review of Financial Studies*, 25(5), 1457-1493.
+7. Gatheral, J. & Oomen, R. (2010). Zero-intelligence realized variance estimation. *Finance and Stochastics*, 14(2), 249-283.
+8. Glosten, L.R. & Milgrom, P.R. (1985). Bid, ask and transaction prices in a specialist market. *Journal of Financial Economics*, 14(1), 71-100.
+9. Gueant, O., Lehalle, C.A. & Fernandez-Tapia, J. (2012). Dealing with the inventory risk. *Mathematics and Financial Economics*, 4(7), 477-507.
+10. Hamilton, J.D. (1989). A new approach to nonstationary time series. *Econometrica*, 57(2), 357-384.
+11. Harvey, C.R., Liu, Y. & Zhu, H. (2016). ... and the Cross-Section of Expected Returns. *Review of Financial Studies*, 29(1), 5-68.
+12. Kyle, A.S. (1985). Continuous auctions and insider trading. *Econometrica*, 53(6), 1315-1335.
+13. Mandelbrot, B.B. & Van Ness, J.W. (1968). Fractional Brownian motions. *SIAM Review*, 10(4), 422-437.
+14. Parkinson, M. (1980). The extreme value method for estimating the variance of the rate of return. *Journal of Business*, 53(1), 61-65.
+15. Priestley, M.B. (1981). *Spectral Analysis and Time Series*. Academic Press.
+16. Rabiner, L.R. (1989). A tutorial on hidden Markov models. *Proceedings of the IEEE*, 77(2), 257-286.
+17. Shannon, C.E. (1948). A mathematical theory of communication. *Bell System Technical Journal*, 27(3), 379-423.
+18. Thompson, W.R. (1933). On the likelihood that one unknown probability exceeds another. *Biometrika*, 25(3-4), 285-294.
+19. White, H. (2000). A reality check for data snooping. *Econometrica*, 68(5), 1097-1126.
