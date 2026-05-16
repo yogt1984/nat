@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Write;
@@ -389,10 +389,10 @@ fn analyze_entropy(snapshots: &[EntropySnapshot]) -> EntropyAnalysis {
 
     let max_theoretical_entropy = 3.0_f64.ln(); // ln(3) for 3 states
 
-    let mut tick_1s: Vec<f64> = snapshots.iter().filter_map(|s| s.tick_entropy_1s).collect();
-    let mut tick_5s: Vec<f64> = snapshots.iter().filter_map(|s| s.tick_entropy_5s).collect();
-    let mut tick_30s: Vec<f64> = snapshots.iter().filter_map(|s| s.tick_entropy_30s).collect();
-    let mut tick_1m: Vec<f64> = snapshots.iter().filter_map(|s| s.tick_entropy_1m).collect();
+    let tick_1s: Vec<f64> = snapshots.iter().filter_map(|s| s.tick_entropy_1s).collect();
+    let tick_5s: Vec<f64> = snapshots.iter().filter_map(|s| s.tick_entropy_5s).collect();
+    let tick_30s: Vec<f64> = snapshots.iter().filter_map(|s| s.tick_entropy_30s).collect();
+    let tick_1m: Vec<f64> = snapshots.iter().filter_map(|s| s.tick_entropy_1m).collect();
 
     let all_entropy: Vec<f64> = [&tick_1s, &tick_5s, &tick_30s, &tick_1m]
         .iter()

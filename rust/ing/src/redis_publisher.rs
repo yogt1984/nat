@@ -12,7 +12,7 @@
 use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
 use serde::Serialize;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::features::{Features, RegimeFeatures, WhaleFlowFeatures};
 

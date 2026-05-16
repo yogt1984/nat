@@ -603,7 +603,7 @@ fn evaluate_threshold(
     // Success criteria
     let lift_passes = lift >= config.min_lift;
     let precision_passes = oos_metrics.precision >= config.min_precision;
-    let recall_passes = oos_metrics.recall >= config.min_recall;
+    let _recall_passes = oos_metrics.recall >= config.min_recall;
 
     if lift_passes && precision_passes {
         (true, format!(
@@ -628,7 +628,7 @@ fn analyze_lead_time(
     cascades: &[bool],
     amount: f64,
     distance: f64,
-    config: &H3TestConfig,
+    _config: &H3TestConfig,
 ) -> LeadTimeAnalysis {
     let n = data.prices.len();
     let bucket = H3TestData::distance_to_bucket(distance);

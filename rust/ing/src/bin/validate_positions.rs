@@ -39,8 +39,8 @@ struct ValidationStats {
     avg_fetch_time_ms: f64,
 
     // Cross-validation
-    trades_matched_to_positions: usize,
-    trades_not_matched: usize,
+    _trades_matched_to_positions: usize,
+    _trades_not_matched: usize,
 }
 
 #[derive(Debug, Serialize)]

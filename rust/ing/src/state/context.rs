@@ -25,7 +25,7 @@ pub struct MarketContext {
     /// Premium (mark - oracle)
     premium: f64,
     /// Last update timestamp
-    last_update: u64,
+    _last_update: u64,
     /// Whether context has been initialized
     initialized: bool,
 }
@@ -43,7 +43,7 @@ impl MarketContext {
             volume_24h: 0.0,
             volume_history: RingBuffer::new(288),
             premium: 0.0,
-            last_update: 0,
+            _last_update: 0,
             initialized: false,
         }
     }

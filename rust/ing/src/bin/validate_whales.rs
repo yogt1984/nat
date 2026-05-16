@@ -253,7 +253,7 @@ async fn main() -> Result<()> {
 }
 
 /// Discover wallets by collecting from trades WebSocket
-async fn discover_wallets_from_trades(client: &reqwest::Client) -> Result<Vec<String>> {
+async fn discover_wallets_from_trades(_client: &reqwest::Client) -> Result<Vec<String>> {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::{connect_async, tungstenite::Message};
 

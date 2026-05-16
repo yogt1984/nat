@@ -273,6 +273,7 @@ impl PriceBuffer {
         self.prices.len()
     }
 
+    #[allow(dead_code)]
     fn to_vec(&self) -> Vec<f64> {
         self.prices.iter().cloned().collect()
     }

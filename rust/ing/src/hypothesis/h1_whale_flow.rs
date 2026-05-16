@@ -35,8 +35,8 @@
 //! - Walk-forward degradation > 60%
 
 use crate::hypothesis::stats::{
-    pearson_correlation, spearman_correlation, mutual_information_adaptive,
-    t_test_correlation, bonferroni_correct, correlation_test,
+    mutual_information_adaptive,
+    bonferroni_correct, correlation_test,
     walk_forward_correlation, CorrelationResult, WalkForwardResult,
 };
 use crate::hypothesis::HypothesisDecision;

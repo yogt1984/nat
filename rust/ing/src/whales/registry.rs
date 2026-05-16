@@ -8,7 +8,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::{WhaleClassification, WhaleConfig, WalletStats, WhaleTier};
 

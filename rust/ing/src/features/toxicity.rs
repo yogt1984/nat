@@ -422,6 +422,7 @@ fn compute_toxicity_index(vpin: f64, adverse_selection: f64, flow_imbalance_abs:
 // ============================================================================
 
 /// Module for skeptical statistical tests on toxicity features
+#[allow(dead_code)]
 pub mod skeptical_tests {
     //! Skeptical tests to validate toxicity feature effectiveness
     //!

@@ -3,7 +3,6 @@
 use parking_lot::RwLock;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::broadcast;
 
 /// Log entry for streaming to dashboard

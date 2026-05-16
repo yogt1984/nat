@@ -1,6 +1,6 @@
 //! Order book state management
 
-use crate::ws::{WsBook, WsLevel};
+use crate::ws::WsBook;
 
 /// A single price level in the order book
 #[derive(Debug, Clone, Default)]
@@ -202,13 +202,13 @@ impl OrderBook {
         let mut bid_pressure = 0.0;
         let mut ask_pressure = 0.0;
 
-        for (i, level) in self.bids.iter().enumerate() {
+        for (_i, level) in self.bids.iter().enumerate() {
             let distance = (mid - level.price).abs() / mid;
             let weight = 1.0 / (1.0 + distance * 100.0);  // Decay with distance
             bid_pressure += level.size * weight;
         }
 
-        for (i, level) in self.asks.iter().enumerate() {
+        for (_i, level) in self.asks.iter().enumerate() {
             let distance = (level.price - mid).abs() / mid;
             let weight = 1.0 / (1.0 + distance * 100.0);
             ask_pressure += level.size * weight;
@@ -226,6 +226,7 @@ impl OrderBook {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ws::WsLevel;
 
     fn create_test_book() -> OrderBook {
         let mut book = OrderBook::new(10);

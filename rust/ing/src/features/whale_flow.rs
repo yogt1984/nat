@@ -162,7 +162,7 @@ pub struct WhaleFlowBuffer {
     /// Previous flow values for momentum calculation
     prev_flow_1h: f64,
     /// Last computation timestamp
-    last_compute_ms: i64,
+    _last_compute_ms: i64,
 }
 
 impl WhaleFlowBuffer {
@@ -173,7 +173,7 @@ impl WhaleFlowBuffer {
             changes: VecDeque::with_capacity(2000),
             abs_flow_history: VecDeque::with_capacity(200),
             prev_flow_1h: 0.0,
-            last_compute_ms: 0,
+            _last_compute_ms: 0,
         }
     }
 

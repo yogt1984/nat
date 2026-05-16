@@ -16,7 +16,7 @@
 //! - Each feature must have MI > 0.01 bits with target to be included
 
 use super::stats::{pearson_correlation, spearman_correlation, mutual_information_adaptive};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// Configuration for feature analysis
 #[derive(Debug, Clone)]
@@ -100,6 +100,7 @@ pub struct FeatureCluster {
 }
 
 /// Hierarchical clustering node
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct ClusterNode {
     /// Features in this node

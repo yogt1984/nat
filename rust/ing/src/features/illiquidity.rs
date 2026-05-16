@@ -404,6 +404,7 @@ fn compute_composite(kyle: f64, amihud: f64, hasbrouck: f64) -> f64 {
 // ============================================================================
 
 /// Module for skeptical statistical tests on illiquidity features
+#[allow(dead_code)]
 pub mod skeptical_tests {
     //! Skeptical tests to validate illiquidity feature effectiveness
     //!

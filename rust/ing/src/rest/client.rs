@@ -3,7 +3,6 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, warn};
 
 const INFO_URL: &str = "https://api.hyperliquid.xyz/info";
 

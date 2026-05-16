@@ -8,9 +8,9 @@ use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use std::fs::{self, File};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{info, debug};
+use tracing::info;
 
 use crate::config::OutputConfig;
 use crate::features::Features;

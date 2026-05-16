@@ -3,9 +3,9 @@
 //! Computes concentration metrics, skill analysis, and behavioral patterns.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
-use super::{WhaleClassification, WhaleTier};
+use super::WhaleClassification;
+#[cfg(test)]
+use super::WhaleTier;
 
 /// Concentration metrics for whale analysis
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

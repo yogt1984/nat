@@ -22,6 +22,7 @@ pub fn create_schema() -> Arc<Schema> {
 }
 
 /// Get column names
+#[allow(dead_code)]
 pub fn column_names() -> Vec<String> {
     let mut names = vec![
         "timestamp_ns".to_string(),

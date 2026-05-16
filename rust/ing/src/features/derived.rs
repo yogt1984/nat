@@ -125,7 +125,7 @@ pub fn compute(
     volatility: &VolatilityFeatures,
     illiquidity: &IlliquidityFeatures,
     toxicity: &ToxicityFeatures,
-    flow: &FlowFeatures,
+    _flow: &FlowFeatures,
 ) -> DerivedFeatures {
     // Get key base features with defaults
     let tick_entropy = entropy.tick_entropy_30s;
@@ -321,6 +321,7 @@ fn compute_regime_confidence(
 // Skeptical Tests Module
 // ============================================================================
 
+#[allow(dead_code)]
 pub mod skeptical_tests {
     //! Skeptical tests to validate derived feature effectiveness
     //!

@@ -287,7 +287,7 @@ impl Features {
 
 /// Feature computer that manages all feature calculations
 pub struct FeatureComputer {
-    config: FeaturesConfig,
+    _config: FeaturesConfig,
     spread_buffer: RingBuffer<f64>,
     midprice_buffer: RingBuffer<f64>,
     entropy_buffer: RingBuffer<f64>,
@@ -304,7 +304,7 @@ impl FeatureComputer {
     /// Create a new feature computer
     pub fn new(config: &FeaturesConfig) -> Self {
         Self {
-            config: config.clone(),
+            _config: config.clone(),
             spread_buffer: RingBuffer::new(600),   // 1 minute at 100ms
             midprice_buffer: RingBuffer::new(3000), // 5 minutes at 100ms
             entropy_buffer: RingBuffer::new(600),  // 1 minute at 100ms
