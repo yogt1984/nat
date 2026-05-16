@@ -17,6 +17,7 @@ use ing::dashboard::state::FeaturesSummary;
 use ing::metrics::Metrics;
 use ing::output::ParquetWriter;
 use ing::redis_publisher::{RedisConfig, RedisPublisher};
+use ing::features::CrossSymbolState;
 use ing::state::MarketState;
 use ing::ws::{HyperliquidClient, WsMessage};
 use ing::FeatureVector;
@@ -141,6 +142,7 @@ async fn main() -> Result<()> {
 
     // Initialize market state for each symbol
     let mut handles = Vec::new();
+    let cross_symbol_state = CrossSymbolState::new();
 
     for symbol in &config.symbols.assets {
         let symbol = symbol.clone();
@@ -150,6 +152,7 @@ async fn main() -> Result<()> {
         let dashboard_state = Arc::clone(&dashboard_state);
         let redis_publisher = redis_publisher.clone();
         let alert_config = alert_config.clone();
+        let cross_symbol = cross_symbol_state.clone();
 
         let handle = tokio::spawn(async move {
             run_symbol_ingestor(
@@ -160,6 +163,7 @@ async fn main() -> Result<()> {
                 dashboard_state,
                 redis_publisher,
                 alert_config,
+                cross_symbol,
             ).await
         });
 
@@ -191,10 +195,12 @@ async fn run_symbol_ingestor(
     dashboard_state: Arc<DashboardState>,
     redis_publisher: Option<Arc<Mutex<RedisPublisher>>>,
     alert_config: AlertConfig,
+    cross_symbol_state: CrossSymbolState,
 ) -> Result<()> {
     info!(%symbol, "Starting ingestor");
 
     let mut state = MarketState::new(&symbol, &config.features);
+    state.set_cross_symbol_state(cross_symbol_state);
     let mut client = HyperliquidClient::new(&config.websocket, &symbol);
     let mut sequence_id: u64 = 0;
     let mut message_count: u64 = 0;

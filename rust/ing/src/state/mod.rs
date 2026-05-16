@@ -11,7 +11,7 @@ pub use context::MarketContext;
 pub use ring_buffer::RingBuffer;
 
 use crate::config::FeaturesConfig;
-use crate::features::{Features, FeatureComputer, RegimeBuffer, RegimeConfig, GmmClassificationFeatures};
+use crate::features::{Features, FeatureComputer, RegimeBuffer, RegimeConfig, GmmClassificationFeatures, CrossSymbolState};
 use crate::ml::regime::RegimeClassifier;
 use crate::ws::WsMessage;
 use std::path::Path;
@@ -29,6 +29,8 @@ pub struct MarketState {
     regime_buffer: RegimeBuffer,
     /// GMM regime classifier (optional, loaded from model file)
     regime_classifier: Option<RegimeClassifier>,
+    /// Cross-symbol shared OBI state (optional, set when multi-symbol tracking is active)
+    cross_symbol_state: Option<CrossSymbolState>,
     /// Current minute timestamp (floored to minute)
     current_minute: u64,
     /// Accumulated volume this minute
@@ -73,6 +75,7 @@ impl MarketState {
             initialized: false,
             regime_buffer: RegimeBuffer::new(RegimeConfig::default()),
             regime_classifier,
+            cross_symbol_state: None,
             current_minute: 0,
             minute_volume: 0.0,
             minute_buy_volume: 0.0,
@@ -89,6 +92,11 @@ impl MarketState {
                 if let Some(mid) = self.order_book.midprice() {
                     self.price_buffer.push(mid);
                     self.minute_last_price = Some(mid);
+                }
+                // Update cross-symbol shared state with current OBI_l5
+                if let Some(ref css) = self.cross_symbol_state {
+                    let obi_l5 = self.order_book.volume_imbalance(5);
+                    css.update(&self.symbol, obi_l5);
                 }
                 if !self.initialized {
                     self.initialized = true;
@@ -164,6 +172,11 @@ impl MarketState {
             &self.price_buffer,
         );
 
+        // Add cross-symbol features if shared state is available
+        if let Some(ref css) = self.cross_symbol_state {
+            features.cross_symbol = Some(css.compute(&self.symbol));
+        }
+
         // Add regime features if buffer has enough data
         if self.regime_buffer.is_ready() {
             let regime_features = self.regime_buffer.compute();
@@ -216,6 +229,11 @@ impl MarketState {
     /// Check if GMM classifier is loaded
     pub fn has_gmm_classifier(&self) -> bool {
         self.regime_classifier.is_some()
+    }
+
+    /// Set shared cross-symbol state for cross-symbol feature computation
+    pub fn set_cross_symbol_state(&mut self, state: CrossSymbolState) {
+        self.cross_symbol_state = Some(state);
     }
 }
 

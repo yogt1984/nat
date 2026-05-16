@@ -1,6 +1,6 @@
 //! Feature Computation Module
 //!
-//! Extracts 191 features from Hyperliquid WebSocket market data across 15 categories.
+//! Extracts 208 features from Hyperliquid WebSocket market data across 19 categories.
 //! See `FEATURES.md` at the project root for the full feature manifest with formulas,
 //! interpretation, and paper references.
 //!
@@ -13,23 +13,27 @@
 //! | Flow | 12 | `flow_` | All working | — |
 //! | Volatility | 8 | `vol_` | 6 working, 2 placeholder | Parkinson (1980) |
 //! | Entropy | 24 | `ent_` | All warmup-dependent | Bandt & Pompe (2002) |
-//! | Context | 9 | `ctx_` | All working | — |
+//! | Context | 12 | `ctx_` | All working | — |
 //! | Trend | 15 | `trend_` | All working | Jegadeesh & Titman (1993) |
 //! | Illiquidity | 12 | `illiq_` | All working | Kyle (1985) |
 //! | Toxicity | 10 | `toxic_` | All working | Easley et al. (2012) |
 //! | Derived | 15 | `derived_` | All working | — |
+//! | Microstructure | 5 | `micro_` | All working | Biais et al. (1995) |
+//! | Resilience | 3 | `resilience_` | All working | Biais et al. (1995) |
+//! | Hawkes | 3 | `hawkes_` | All working | Bacry et al. (2015) |
 //! | *Whale Flow* | 12 | `whale_` | Optional (NaN if absent) | — |
 //! | *Liquidation* | 13 | `liquidation_` | Optional (NaN if absent) | — |
 //! | *Concentration* | 15 | `top`/mixed | Optional (NaN if absent) | — |
 //! | *Regime* | 20 | `regime_` | Optional (NaN if absent) | — |
 //! | *GMM* | 8 | `regime`/`prob_` | Optional (NaN if absent) | — |
+//! | *Cross-Symbol* | 3 | `cross_` | Optional (NaN if absent) | — |
 //!
-//! Base features (123) are always computed. Optional features (68) require
+//! Base features (137) are always computed. Optional features (71) require
 //! additional data sources or warmup time and are NaN-padded when absent.
 //!
 //! # Data Contract
 //!
-//! `Features::to_vec()` always returns exactly `count_all()` = 191 elements.
+//! `Features::to_vec()` always returns exactly `count_all()` = 208 elements.
 //! `Features::names_all()` returns the corresponding column names.
 //! The Parquet schema is built from `names_all()` in `output/schema.rs`.
 
@@ -43,6 +47,10 @@ mod trend;
 mod illiquidity;
 mod toxicity;
 mod derived;
+mod microstructure;
+mod resilience;
+mod hawkes;
+pub mod cross_symbol;
 pub mod whale_flow;
 pub mod liquidation;
 pub mod concentration;
@@ -58,6 +66,10 @@ pub use trend::TrendFeatures;
 pub use illiquidity::IlliquidityFeatures;
 pub use toxicity::ToxicityFeatures;
 pub use derived::DerivedFeatures;
+pub use microstructure::MicrostructureFeatures;
+pub use resilience::{ResilienceFeatures, ResilienceTracker};
+pub use hawkes::HawkesFeatures;
+pub use cross_symbol::{CrossSymbolFeatures, CrossSymbolState};
 pub use whale_flow::{WhaleFlowFeatures, WhaleFlowBuffer, WhaleFlowConfig, WhalePositionChange};
 pub use liquidation::{LiquidationRiskFeatures, LiquidationRiskConfig, LiquidationPosition};
 pub use concentration::{ConcentrationFeatures, ConcentrationBuffer, ConcentrationConfig, Position as ConcentrationPosition};
@@ -85,6 +97,12 @@ pub struct Features {
     pub illiquidity: IlliquidityFeatures,
     pub toxicity: ToxicityFeatures,
     pub derived: DerivedFeatures,
+    /// OBI dynamics + queue position proxy (5.2 + 5.5)
+    pub microstructure: MicrostructureFeatures,
+    /// Order book resilience after large takes (5.1)
+    pub resilience: ResilienceFeatures,
+    /// Hawkes self-exciting trade intensity (5.3)
+    pub hawkes: HawkesFeatures,
     /// Whale flow features (Hyperliquid-unique, requires position tracking)
     pub whale_flow: Option<WhaleFlowFeatures>,
     /// Liquidation risk features (Hyperliquid-unique, requires position tracking)
@@ -95,10 +113,12 @@ pub struct Features {
     pub regime: Option<RegimeFeatures>,
     /// GMM regime classification output (regime label, probabilities, confidence)
     pub gmm_classification: Option<GmmClassificationFeatures>,
+    /// Cross-symbol OBI divergence (5.4, requires multi-symbol shared state)
+    pub cross_symbol: Option<CrossSymbolFeatures>,
 }
 
 impl Features {
-    /// Get total number of base features (excluding whale flow)
+    /// Get total number of base features (always computed)
     pub fn count() -> usize {
         RawFeatures::count() +
         ImbalanceFeatures::count() +
@@ -109,7 +129,10 @@ impl Features {
         TrendFeatures::count() +
         IlliquidityFeatures::count() +
         ToxicityFeatures::count() +
-        DerivedFeatures::count()
+        DerivedFeatures::count() +
+        MicrostructureFeatures::count() +
+        ResilienceFeatures::count() +
+        HawkesFeatures::count()
     }
 
     /// Get total number of features including whale flow
@@ -124,7 +147,13 @@ impl Features {
 
     /// Get total number of features including all optional features
     pub fn count_all() -> usize {
-        Self::count() + WhaleFlowFeatures::count() + LiquidationRiskFeatures::count() + ConcentrationFeatures::count() + RegimeFeatures::count() + GmmClassificationFeatures::count()
+        Self::count()
+            + WhaleFlowFeatures::count()
+            + LiquidationRiskFeatures::count()
+            + ConcentrationFeatures::count()
+            + RegimeFeatures::count()
+            + GmmClassificationFeatures::count()
+            + CrossSymbolFeatures::count()
     }
 
     /// Convert to flat vector of f64 (fixed-length, NaN for missing optional features)
@@ -141,6 +170,9 @@ impl Features {
         v.extend(self.illiquidity.to_vec());
         v.extend(self.toxicity.to_vec());
         v.extend(self.derived.to_vec());
+        v.extend(self.microstructure.to_vec());
+        v.extend(self.resilience.to_vec());
+        v.extend(self.hawkes.to_vec());
         // Optional features (NaN when not yet available)
         match &self.whale_flow {
             Some(wf) => v.extend(wf.to_vec()),
@@ -162,6 +194,10 @@ impl Features {
             Some(g) => v.extend(g.to_vec()),
             None => v.extend(std::iter::repeat(f64::NAN).take(GmmClassificationFeatures::count())),
         }
+        match &self.cross_symbol {
+            Some(cs) => v.extend(cs.to_vec()),
+            None => v.extend(std::iter::repeat(f64::NAN).take(CrossSymbolFeatures::count())),
+        }
         v
     }
 
@@ -178,6 +214,9 @@ impl Features {
         names.extend(IlliquidityFeatures::names());
         names.extend(ToxicityFeatures::names());
         names.extend(DerivedFeatures::names());
+        names.extend(MicrostructureFeatures::names());
+        names.extend(ResilienceFeatures::names());
+        names.extend(HawkesFeatures::names());
         names
     }
 
@@ -205,6 +244,7 @@ impl Features {
         names.extend(ConcentrationFeatures::names());
         names.extend(RegimeFeatures::names());
         names.extend(GmmClassificationFeatures::names());
+        names.extend(CrossSymbolFeatures::names());
         names
     }
 
@@ -237,6 +277,12 @@ impl Features {
         self.gmm_classification = Some(gmm);
         self
     }
+
+    /// Set cross-symbol features
+    pub fn with_cross_symbol(mut self, cross_symbol: CrossSymbolFeatures) -> Self {
+        self.cross_symbol = Some(cross_symbol);
+        self
+    }
 }
 
 /// Feature computer that manages all feature calculations
@@ -246,6 +292,12 @@ pub struct FeatureComputer {
     midprice_buffer: RingBuffer<f64>,
     entropy_buffer: RingBuffer<f64>,
     imbalance_buffer: RingBuffer<f64>,
+    /// OBI_l5 history for microstructure OBI dynamics (5.2)
+    obi_buffer: RingBuffer<f64>,
+    /// Total L5 depth history for microstructure depth recovery (5.2)
+    depth_buffer: RingBuffer<f64>,
+    /// Resilience tracker state machine (5.1)
+    resilience_tracker: ResilienceTracker,
 }
 
 impl FeatureComputer {
@@ -257,6 +309,9 @@ impl FeatureComputer {
             midprice_buffer: RingBuffer::new(3000), // 5 minutes at 100ms
             entropy_buffer: RingBuffer::new(600),  // 1 minute at 100ms
             imbalance_buffer: RingBuffer::new(16), // 16 samples for permutation entropy
+            obi_buffer: RingBuffer::new(600),      // 1 minute at 100ms for OBI dynamics
+            depth_buffer: RingBuffer::new(600),    // 1 minute at 100ms for depth recovery
+            resilience_tracker: ResilienceTracker::new(),
         }
     }
 
@@ -277,6 +332,12 @@ impl FeatureComputer {
         }
         let imbalance_l1 = order_book.volume_imbalance(1);
         self.imbalance_buffer.push(imbalance_l1);
+
+        // Update OBI and depth buffers for microstructure features
+        let obi_l5 = order_book.volume_imbalance(5);
+        self.obi_buffer.push(obi_l5);
+        let total_depth = order_book.bid_depth(5) + order_book.ask_depth(5);
+        self.depth_buffer.push(total_depth);
 
         let raw = raw::compute(order_book);
         let imbalance = imbalance::compute(order_book);
@@ -305,6 +366,14 @@ impl FeatureComputer {
             &flow,
         );
 
+        // New Phase 5 base features
+        let micro = microstructure::compute(
+            order_book, trade_buffer,
+            &self.obi_buffer, &self.depth_buffer,
+        );
+        let resilience_features = self.resilience_tracker.update(total_depth);
+        let hawkes_features = hawkes::compute(trade_buffer);
+
         Features {
             raw,
             imbalance,
@@ -316,11 +385,15 @@ impl FeatureComputer {
             illiquidity,
             toxicity,
             derived,
+            microstructure: micro,
+            resilience: resilience_features,
+            hawkes: hawkes_features,
             whale_flow: None, // Computed separately via WhaleFlowBuffer
             liquidation_risk: None, // Computed separately via liquidation::compute()
             concentration: None, // Computed separately via ConcentrationBuffer
             regime: None, // Computed separately via RegimeBuffer at minute intervals
             gmm_classification: None, // Computed when regime features are ready
+            cross_symbol: None, // Computed separately via CrossSymbolState
         }
     }
 }

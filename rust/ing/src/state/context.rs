@@ -169,6 +169,61 @@ impl MarketContext {
         self.premium.abs()
     }
 
+    /// Get funding rate momentum: current - 8h ago (Hyperliquid 8h settlement cycle)
+    /// 8h = 96 samples at 5-min intervals
+    pub fn funding_momentum_8h(&self) -> f64 {
+        let lookback = 96; // 8h / 5min
+        if self.funding_history.len() < lookback + 1 {
+            return 0.0;
+        }
+        let past = self.funding_history.get(
+            self.funding_history.len().saturating_sub(lookback)
+        ).copied().unwrap_or(self.funding_rate);
+        self.funding_rate - past
+    }
+
+    /// Get funding acceleration: momentum change (finite difference of momentum)
+    /// Approximated as current_zscore - previous_zscore_equivalent
+    pub fn funding_acceleration(&self) -> f64 {
+        let lookback_current = 96;
+        let lookback_prev = 108; // 9h ago — gives 1h difference in momentum
+        if self.funding_history.len() < lookback_prev + 1 {
+            return 0.0;
+        }
+        let current = self.funding_rate;
+        let past_8h = self.funding_history.get(
+            self.funding_history.len().saturating_sub(lookback_current)
+        ).copied().unwrap_or(current);
+        let past_9h = self.funding_history.get(
+            self.funding_history.len().saturating_sub(lookback_prev)
+        ).copied().unwrap_or(current);
+
+        // funding_1h_ago (approximated from 9h-ago minus 8h-ago momentum)
+        let prev_funding = self.funding_history.get(
+            self.funding_history.len().saturating_sub(12)  // 1h ago
+        ).copied().unwrap_or(current);
+
+        let momentum_now = current - past_8h;
+        let momentum_prev = prev_funding - past_9h;
+        momentum_now - momentum_prev
+    }
+
+    /// Get OI momentum over 1 hour (~720 samples at 5s updates, capped to buffer)
+    pub fn oi_momentum_1h(&self) -> f64 {
+        // oi_history has 60 samples (~5 min). Use full buffer for best approximation.
+        let n = self.oi_history.len();
+        if n < 2 {
+            return 0.0;
+        }
+        let current = self.open_interest;
+        let oldest = self.oi_history.first().copied().unwrap_or(current);
+        if oldest > 0.0 {
+            (current - oldest) / oldest * 100.0
+        } else {
+            0.0
+        }
+    }
+
     /// Check if context has been initialized
     pub fn is_initialized(&self) -> bool {
         self.initialized

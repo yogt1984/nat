@@ -4,7 +4,7 @@
 //! These features capture macro-level conditions (funding, open interest, premium)
 //! that drive regime transitions and inform position sizing.
 //!
-//! # Features (9 total)
+//! # Features (12 total)
 //!
 //! | Feature | Description | Range | Interpretation |
 //! |---------|-------------|-------|----------------|
@@ -17,12 +17,16 @@
 //! | **Volume 24h** | Rolling 24-hour traded volume | [0, +inf) | Absolute liquidity measure |
 //! | **Volume ratio** | Current vs average 24h volume | [0, +inf) | >1 = above-average activity |
 //! | **Mark-oracle divergence** | Mark price minus oracle price | (-inf, +inf) | Measures pricing dislocation |
+//! | **Funding momentum 8h** | funding(t) - funding(t-8h) | (-inf, +inf) | Mean-reversion timing signal |
+//! | **Funding acceleration** | d(momentum)/dt over 1h | (-inf, +inf) | Second derivative of funding |
+//! | **OI momentum 1h** | OI % change over available buffer | (-inf, +inf) | Position flow momentum |
 //!
 //! Note: OI change uses a 60-sample lookback (~5 min at ~5s context updates).
+//! Funding momentum uses 8h lookback (Hyperliquid settlement cycle).
 
 use crate::state::MarketContext;
 
-/// Context features (9 features)
+/// Context features (12 features)
 #[derive(Debug, Clone, Default)]
 pub struct ContextFeatures {
     /// Current funding rate
@@ -43,10 +47,16 @@ pub struct ContextFeatures {
     pub volume_ratio: f64,
     /// Mark-oracle divergence
     pub mark_oracle_divergence: f64,
+    /// Funding rate momentum: funding(t) - funding(t - 8h)
+    pub funding_momentum_8h: f64,
+    /// Funding acceleration: d(momentum)/dt
+    pub funding_acceleration: f64,
+    /// OI momentum over available buffer (~5min)
+    pub oi_momentum_1h: f64,
 }
 
 impl ContextFeatures {
-    pub fn count() -> usize { 9 }
+    pub fn count() -> usize { 12 }
 
     pub fn names() -> Vec<&'static str> {
         vec![
@@ -59,6 +69,9 @@ impl ContextFeatures {
             "ctx_volume_24h",
             "ctx_volume_ratio",
             "ctx_mark_oracle_divergence",
+            "ctx_funding_momentum_8h",
+            "ctx_funding_acceleration",
+            "ctx_oi_momentum_1h",
         ]
     }
 
@@ -73,6 +86,9 @@ impl ContextFeatures {
             self.volume_24h,
             self.volume_ratio,
             self.mark_oracle_divergence,
+            self.funding_momentum_8h,
+            self.funding_acceleration,
+            self.oi_momentum_1h,
         ]
     }
 }
@@ -89,5 +105,8 @@ pub fn compute(market_context: &MarketContext) -> ContextFeatures {
         volume_24h: market_context.volume_24h(),
         volume_ratio: market_context.volume_ratio(),
         mark_oracle_divergence: market_context.mark_oracle_divergence(),
+        funding_momentum_8h: market_context.funding_momentum_8h(),
+        funding_acceleration: market_context.funding_acceleration(),
+        oi_momentum_1h: market_context.oi_momentum_1h(),
     }
 }
