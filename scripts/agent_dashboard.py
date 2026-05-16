@@ -13,6 +13,7 @@ Serves:
     /api/cross_symbol_ic  — Per-symbol IC for cross-symbol scatter
     /api/ic_decay    — IC history curves for registered signals
     /api/correlation_matrix — Pairwise correlation across registered signals
+    /api/ic_threshold_curve — IC as function of gate threshold (P20→P80)
 
 Usage:
     python scripts/agent_dashboard.py                  # default port 8060
@@ -278,6 +279,105 @@ def build_correlation_matrix(registry: list[dict]) -> dict:
     return {"signals": names, "matrix": matrix}
 
 
+def build_ic_threshold_curve(hypotheses: list[dict]) -> dict:
+    """Build IC-as-function-of-threshold data from tested hypotheses.
+
+    Groups hypotheses by (signal_feature, gate_feature, direction) and collects
+    the IC observed at each percentile threshold. Each group becomes one curve
+    showing how IC varies from P20 to P80.
+
+    Also computes baseline IC (ungated) per signal for the horizontal reference.
+    """
+    import re
+
+    # Collect per-group (signal, gate_feat, direction) → [(percentile, ic)]
+    curves_raw: dict[tuple[str, str, str], list[tuple[int, float]]] = {}
+    baselines: dict[str, float] = {}  # signal → baseline IC
+
+    for h in hypotheses:
+        if h.get("status") == "queued":
+            continue
+        claim = h.get("claim", "")
+        thresholds = h.get("thresholds", {})
+        gate = thresholds.get("regime_gate", "")
+
+        # Parse signal feature from claim
+        parts = claim.split(" gated by ")
+        if len(parts) < 2:
+            # Might be an ungated hypothesis — extract baseline IC
+            signal_feat = claim.split(" predicts ")[0].strip() if " predicts " in claim else ""
+            if signal_feat:
+                ic = _extract_ic_from_hypothesis(h)
+                if ic is not None:
+                    baselines.setdefault(signal_feat, ic)
+            continue
+
+        signal_feat = parts[0].strip()
+
+        # Parse gate: "ent_book_shape<P40" → (ent_book_shape, <, 40)
+        m = re.match(r'^([a-z_0-9]+)([<>])(P(\d+))$', gate)
+        if not m:
+            continue
+        gate_feat = m.group(1)
+        direction = m.group(2)
+        percentile = int(m.group(4))
+
+        ic = _extract_ic_from_hypothesis(h)
+        if ic is None:
+            continue
+
+        key = (signal_feat, gate_feat, direction)
+        curves_raw.setdefault(key, []).append((percentile, ic))
+
+    # Build output curves — sort each by percentile
+    curves = []
+    for (signal_feat, gate_feat, direction), points in curves_raw.items():
+        points.sort(key=lambda x: x[0])
+
+        # Deduplicate: keep last IC per percentile (latest run wins)
+        seen: dict[int, float] = {}
+        for pct, ic in points:
+            seen[pct] = ic
+
+        sorted_points = [{"percentile": p, "ic": ic}
+                         for p, ic in sorted(seen.items())]
+
+        if len(sorted_points) < 2:
+            continue  # Need ≥2 thresholds to form a curve
+
+        baseline_ic = baselines.get(signal_feat)
+
+        curves.append({
+            "signal": signal_feat,
+            "gate": gate_feat,
+            "direction": direction,
+            "label": f"{signal_feat} | {gate_feat}{direction}",
+            "baseline_ic": baseline_ic,
+            "points": sorted_points,
+        })
+
+    # Sort by peak IC descending so the most interesting curves render first
+    curves.sort(
+        key=lambda c: max((p["ic"] for p in c["points"]), default=0),
+        reverse=True,
+    )
+
+    return {"curves": curves}
+
+
+def _extract_ic_from_hypothesis(h: dict) -> float | None:
+    """Extract numeric IC from a hypothesis's gate_results messages."""
+    results = h.get("results") or {}
+    for gr in results.get("gate_results", []):
+        msg = gr.get("msg", "")
+        if "IC=" in msg:
+            try:
+                return float(msg.split("IC=")[1].split()[0])
+            except (IndexError, ValueError):
+                pass
+    return None
+
+
 # ---------------------------------------------------------------------------
 # HTML template
 # ---------------------------------------------------------------------------
@@ -408,6 +508,12 @@ td { font-family: monospace; }
     <div class="card card-full">
         <h2>Signal Correlation Matrix</h2>
         <div id="corr-matrix">Loading...</div>
+    </div>
+
+    <!-- 3.3 IC by threshold curve -->
+    <div class="card card-full">
+        <h2>IC by Threshold Curve</h2>
+        <svg id="ic-threshold" width="100%" height="280" style="overflow:visible;"></svg>
     </div>
 </div>
 
@@ -704,10 +810,89 @@ async function refreshCorrMatrix() {
     document.getElementById('corr-matrix').innerHTML = html;
 }
 
+// --- 3.3 IC by threshold curve ---
+async function refreshICThreshold() {
+    const data = await fetch(API+'/api/ic_threshold_curve').then(r=>r.json());
+    const svg = document.getElementById('ic-threshold');
+    if (!data.curves.length) {
+        svg.innerHTML = '<text x="20" y="30" fill="#8b949e" font-size="13">Need hypotheses tested at multiple thresholds (P20-P80)</text>';
+        return;
+    }
+    const W = svg.clientWidth || 700, H = 280, pad = 50, rPad = 10;
+    const colors = ['#58a6ff','#3fb950','#d29922','#bc8cff','#f0883e','#f85149','#8b949e','#79c0ff'];
+
+    // Collect all IC values and percentiles for axis scaling
+    let allICs = [], allPcts = [];
+    data.curves.forEach(c => {
+        c.points.forEach(p => { allICs.push(p.ic); allPcts.push(p.percentile); });
+        if (c.baseline_ic !== null && c.baseline_ic !== undefined) allICs.push(c.baseline_ic);
+    });
+    const minIC = Math.min(...allICs) * 0.95;
+    const maxIC = Math.max(...allICs) * 1.05;
+    const minPct = Math.min(...allPcts);
+    const maxPct = Math.max(...allPcts);
+    const pctRange = maxPct - minPct || 1;
+
+    function xPos(pct) { return pad + ((pct - minPct) / pctRange) * (W - pad - rPad); }
+    function yPos(ic) { return H - pad - ((ic - minIC) / (maxIC - minIC)) * (H - pad - 15); }
+
+    let content = '';
+    // X axis + labels
+    content += `<line x1="${pad}" y1="${H-pad}" x2="${W-rPad}" y2="${H-pad}" stroke="#30363d"/>`;
+    content += `<text x="${(pad+W-rPad)/2}" y="${H-8}" fill="#8b949e" font-size="10" text-anchor="middle">Gate Percentile</text>`;
+    for (let p = minPct; p <= maxPct; p += 10) {
+        const x = xPos(p);
+        content += `<line x1="${x}" y1="${H-pad}" x2="${x}" y2="${H-pad+4}" stroke="#8b949e"/>`;
+        content += `<text x="${x}" y="${H-pad+15}" fill="#8b949e" font-size="9" text-anchor="middle">P${p}</text>`;
+    }
+    // Y axis + ticks
+    content += `<line x1="${pad}" y1="15" x2="${pad}" y2="${H-pad}" stroke="#30363d"/>`;
+    const nTicks = 5;
+    for (let t = 0; t <= nTicks; t++) {
+        const ic = minIC + (t / nTicks) * (maxIC - minIC);
+        const y = yPos(ic);
+        content += `<line x1="${pad-4}" y1="${y}" x2="${W-rPad}" y2="${y}" stroke="#30363d" stroke-dasharray="2"/>`;
+        content += `<text x="${pad-6}" y="${y+3}" fill="#8b949e" font-size="9" text-anchor="end">${ic.toFixed(3)}</text>`;
+    }
+
+    // Draw curves
+    data.curves.forEach((curve, ci) => {
+        const col = colors[ci % colors.length];
+        const pts = curve.points;
+        if (pts.length < 2) return;
+        // Baseline horizontal line
+        if (curve.baseline_ic !== null && curve.baseline_ic !== undefined) {
+            const by = yPos(curve.baseline_ic);
+            content += `<line x1="${pad}" y1="${by}" x2="${W-rPad}" y2="${by}" stroke="${col}" stroke-dasharray="6,3" opacity="0.35"/>`;
+        }
+        // Curve path
+        let path = '';
+        pts.forEach((p, i) => {
+            const x = xPos(p.percentile), y = yPos(p.ic);
+            path += (i === 0 ? 'M' : 'L') + `${x},${y}`;
+        });
+        content += `<path d="${path}" fill="none" stroke="${col}" stroke-width="2"/>`;
+        // Points
+        pts.forEach(p => {
+            const x = xPos(p.percentile), y = yPos(p.ic);
+            content += `<circle cx="${x}" cy="${y}" r="3.5" fill="${col}" stroke="var(--bg)" stroke-width="1">
+                <title>${curve.label} @ P${p.percentile}\\nIC=${p.ic.toFixed(4)}</title></circle>`;
+        });
+        // Peak marker
+        const peak = pts.reduce((a, b) => b.ic > a.ic ? b : a);
+        const px = xPos(peak.percentile), py = yPos(peak.ic);
+        content += `<circle cx="${px}" cy="${py}" r="5" fill="none" stroke="${col}" stroke-width="2"/>`;
+        // Legend
+        content += `<text x="${W-rPad}" y="${20+ci*14}" fill="${col}" font-size="10" text-anchor="end">${curve.label.substring(0,45)}</text>`;
+    });
+    svg.innerHTML = content;
+}
+
 async function refreshAll() {
     await Promise.all([refreshSummary(), refreshRegistry(), refreshHeatmap(),
                        refreshGraveyard(), refreshQueue(), refreshGenStats(), refreshCache(),
-                       refreshSankey(), refreshCrossSymbol(), refreshICDecay(), refreshCorrMatrix()]);
+                       refreshSankey(), refreshCrossSymbol(), refreshICDecay(), refreshCorrMatrix(),
+                       refreshICThreshold()]);
     document.getElementById('lastRefresh').textContent = 'Updated: ' + new Date().toLocaleTimeString();
 }
 
@@ -790,6 +975,10 @@ class AgentDashboardHandler(BaseHTTPRequestHandler):
         elif path == "/api/correlation_matrix":
             registry = read_registry()
             self._json_response(build_correlation_matrix(registry))
+
+        elif path == "/api/ic_threshold_curve":
+            hyps = read_hypotheses()
+            self._json_response(build_ic_threshold_curve(hyps))
 
         else:
             self.send_error(404)

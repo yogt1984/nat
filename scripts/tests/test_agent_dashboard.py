@@ -19,6 +19,7 @@ from agent_dashboard import (
     get_cache_stats, get_summary,
     build_graveyard_sankey, build_cross_symbol_ic,
     build_ic_decay_data, build_correlation_matrix,
+    build_ic_threshold_curve, _extract_ic_from_hypothesis,
     AgentDashboardHandler, DASHBOARD_HTML,
 )
 from http.server import HTTPServer
@@ -640,3 +641,275 @@ class TestDashboardHTML:
         assert "/api/cross_symbol_ic" in DASHBOARD_HTML
         assert "/api/ic_decay" in DASHBOARD_HTML
         assert "/api/correlation_matrix" in DASHBOARD_HTML
+        assert "/api/ic_threshold_curve" in DASHBOARD_HTML
+
+    def test_contains_ic_threshold_panel(self):
+        assert "IC by Threshold" in DASHBOARD_HTML
+        assert "refreshICThreshold" in DASHBOARD_HTML
+        assert "ic-threshold" in DASHBOARD_HTML
+
+
+# ---------------------------------------------------------------------------
+# _extract_ic_from_hypothesis (helper)
+# ---------------------------------------------------------------------------
+
+class TestExtractICFromHypothesis:
+    """Skeptical tests for IC extraction — the parser that feeds the curve."""
+
+    def test_extracts_positive_ic(self):
+        h = {"results": {"gate_results": [{"msg": "IC=0.5689 [gated] p=0.00e+00 PASS"}]}}
+        assert _extract_ic_from_hypothesis(h) == pytest.approx(0.5689)
+
+    def test_extracts_negative_ic(self):
+        """IC can be negative — must not silently discard."""
+        h = {"results": {"gate_results": [{"msg": "IC=-0.1234 [gated] p=1e-5 FAIL"}]}}
+        assert _extract_ic_from_hypothesis(h) == pytest.approx(-0.1234)
+
+    def test_returns_none_on_missing_results(self):
+        assert _extract_ic_from_hypothesis({}) is None
+        assert _extract_ic_from_hypothesis({"results": None}) is None
+
+    def test_returns_none_on_no_ic_in_message(self):
+        h = {"results": {"gate_results": [{"msg": "some unrelated message"}]}}
+        assert _extract_ic_from_hypothesis(h) is None
+
+    def test_returns_none_on_empty_gate_results(self):
+        h = {"results": {"gate_results": []}}
+        assert _extract_ic_from_hypothesis(h) is None
+
+    def test_returns_none_on_malformed_ic(self):
+        """IC= followed by garbage should not crash."""
+        h = {"results": {"gate_results": [{"msg": "IC=notanumber FAIL"}]}}
+        assert _extract_ic_from_hypothesis(h) is None
+
+    def test_takes_first_ic_match(self):
+        """If multiple gate_results have IC=, take the first."""
+        h = {"results": {"gate_results": [
+            {"msg": "IC=0.30 [gated] PASS"},
+            {"msg": "IC=0.50 dIC check"},
+        ]}}
+        assert _extract_ic_from_hypothesis(h) == pytest.approx(0.30)
+
+
+# ---------------------------------------------------------------------------
+# build_ic_threshold_curve
+# ---------------------------------------------------------------------------
+
+class TestBuildICThresholdCurve:
+    """Skeptical tests — verify the curve builder handles real and adversarial data."""
+
+    def _make_hyp(self, signal, gate, ic, status="replicated"):
+        """Helper to build a hypothesis with a gate and IC."""
+        return {
+            "claim": f"{signal} gated by {gate} predicts 5s returns",
+            "generator": "systematic",
+            "status": status,
+            "thresholds": {"regime_gate": gate},
+            "results": {"gate_results": [{"msg": f"IC={ic:.4f} [gated] p=0.00e+00 PASS"}]},
+        }
+
+    def test_basic_curve_from_multiple_thresholds(self):
+        """Three thresholds → one curve with 3 points, sorted by percentile."""
+        hyps = [
+            self._make_hyp("imbalance_qty_l1", "ent_book_shape<P20", 0.56),
+            self._make_hyp("imbalance_qty_l1", "ent_book_shape<P40", 0.54),
+            self._make_hyp("imbalance_qty_l1", "ent_book_shape<P60", 0.48),
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert len(result["curves"]) == 1
+        curve = result["curves"][0]
+        assert curve["signal"] == "imbalance_qty_l1"
+        assert curve["gate"] == "ent_book_shape"
+        assert curve["direction"] == "<"
+        assert len(curve["points"]) == 3
+        # Points must be sorted by percentile, not by IC
+        pcts = [p["percentile"] for p in curve["points"]]
+        assert pcts == [20, 40, 60]
+
+    def test_empty_input(self):
+        result = build_ic_threshold_curve([])
+        assert result["curves"] == []
+
+    def test_single_threshold_produces_no_curve(self):
+        """A single threshold cannot form a curve — need ≥2 points."""
+        hyps = [self._make_hyp("sig", "gate<P40", 0.5)]
+        result = build_ic_threshold_curve(hyps)
+        assert result["curves"] == []
+
+    def test_queued_hypotheses_excluded(self):
+        """Queued hypotheses have no results — must not appear in curves."""
+        hyps = [
+            self._make_hyp("sig", "gate<P20", 0.5),
+            self._make_hyp("sig", "gate<P40", 0.4),
+            {
+                "claim": "sig gated by gate<P60 predicts 5s returns",
+                "status": "queued",
+                "thresholds": {"regime_gate": "gate<P60"},
+                "results": None,
+            },
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert len(result["curves"]) == 1
+        assert len(result["curves"][0]["points"]) == 2  # P60 excluded
+
+    def test_different_directions_are_separate_curves(self):
+        """ent<P40 and ent>P40 are different conditioning — must not merge."""
+        hyps = [
+            self._make_hyp("sig", "ent<P20", 0.50),
+            self._make_hyp("sig", "ent<P40", 0.45),
+            self._make_hyp("sig", "ent>P20", 0.30),
+            self._make_hyp("sig", "ent>P40", 0.35),
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert len(result["curves"]) == 2
+        directions = {c["direction"] for c in result["curves"]}
+        assert directions == {"<", ">"}
+
+    def test_different_signals_are_separate_curves(self):
+        """Two signals with the same gate feature → separate curves."""
+        hyps = [
+            self._make_hyp("sig_a", "gate<P20", 0.50),
+            self._make_hyp("sig_a", "gate<P40", 0.45),
+            self._make_hyp("sig_b", "gate<P20", 0.30),
+            self._make_hyp("sig_b", "gate<P40", 0.25),
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert len(result["curves"]) == 2
+        signals = {c["signal"] for c in result["curves"]}
+        assert signals == {"sig_a", "sig_b"}
+
+    def test_different_gate_features_are_separate_curves(self):
+        """Same signal, different gate features → separate curves."""
+        hyps = [
+            self._make_hyp("sig", "ent_book<P20", 0.50),
+            self._make_hyp("sig", "ent_book<P40", 0.45),
+            self._make_hyp("sig", "toxic_vpin<P20", 0.40),
+            self._make_hyp("sig", "toxic_vpin<P40", 0.35),
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert len(result["curves"]) == 2
+        gates = {c["gate"] for c in result["curves"]}
+        assert gates == {"ent_book", "toxic_vpin"}
+
+    def test_duplicate_percentile_keeps_last(self):
+        """If the same threshold is tested twice, keep the later IC (list order)."""
+        hyps = [
+            self._make_hyp("sig", "gate<P20", 0.50),  # first run
+            self._make_hyp("sig", "gate<P40", 0.45),
+            self._make_hyp("sig", "gate<P20", 0.52),  # re-run overwrites
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert len(result["curves"]) == 1
+        p20 = [p for p in result["curves"][0]["points"] if p["percentile"] == 20]
+        assert len(p20) == 1
+        assert p20[0]["ic"] == pytest.approx(0.52)  # last wins
+
+    def test_baseline_ic_from_ungated_hypothesis(self):
+        """Ungated hypotheses (no 'gated by') provide the baseline IC."""
+        hyps = [
+            {
+                "claim": "imb_l1 predicts 5s returns",
+                "status": "replicated",
+                "thresholds": {},
+                "results": {"gate_results": [{"msg": "IC=0.4200 [aggregate] PASS"}]},
+            },
+            self._make_hyp("imb_l1", "ent<P20", 0.56),
+            self._make_hyp("imb_l1", "ent<P40", 0.50),
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert len(result["curves"]) == 1
+        assert result["curves"][0]["baseline_ic"] == pytest.approx(0.42)
+
+    def test_baseline_ic_is_none_when_no_ungated(self):
+        """If there's no ungated hypothesis, baseline should be None, not crash."""
+        hyps = [
+            self._make_hyp("sig", "gate<P20", 0.50),
+            self._make_hyp("sig", "gate<P40", 0.45),
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert result["curves"][0]["baseline_ic"] is None
+
+    def test_curves_sorted_by_peak_ic_descending(self):
+        """Best curves (highest IC) should render first."""
+        hyps = [
+            self._make_hyp("weak", "gate<P20", 0.10),
+            self._make_hyp("weak", "gate<P40", 0.12),
+            self._make_hyp("strong", "gate<P20", 0.50),
+            self._make_hyp("strong", "gate<P40", 0.55),
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert result["curves"][0]["signal"] == "strong"
+        assert result["curves"][1]["signal"] == "weak"
+
+    def test_failed_hypotheses_included(self):
+        """Failed hypotheses still have IC values — they belong in the curve."""
+        hyps = [
+            self._make_hyp("sig", "gate<P20", 0.50, status="failed"),
+            self._make_hyp("sig", "gate<P40", 0.42, status="failed"),
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert len(result["curves"]) == 1
+        assert len(result["curves"][0]["points"]) == 2
+
+    def test_hypothesis_with_no_ic_is_skipped(self):
+        """If IC extraction fails, don't crash — skip the data point."""
+        hyps = [
+            self._make_hyp("sig", "gate<P20", 0.50),
+            {
+                "claim": "sig gated by gate<P40 predicts 5s returns",
+                "status": "failed",
+                "thresholds": {"regime_gate": "gate<P40"},
+                "results": {"gate_results": [{"msg": "no IC here, just a message"}]},
+            },
+            self._make_hyp("sig", "gate<P60", 0.44),
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert len(result["curves"]) == 1
+        assert len(result["curves"][0]["points"]) == 2  # P40 skipped
+
+    def test_malformed_gate_spec_skipped(self):
+        """Non-standard gate specs (no percentile) should be silently dropped."""
+        hyps = [
+            {
+                "claim": "sig gated by some_random_gate predicts 5s returns",
+                "status": "replicated",
+                "thresholds": {"regime_gate": "some_random_gate"},
+                "results": {"gate_results": [{"msg": "IC=0.45 PASS"}]},
+            },
+            self._make_hyp("sig", "gate<P20", 0.50),
+            self._make_hyp("sig", "gate<P40", 0.45),
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert len(result["curves"]) == 1  # malformed one dropped
+
+    def test_label_format(self):
+        hyps = [
+            self._make_hyp("imb_l1", "ent_shape<P20", 0.50),
+            self._make_hyp("imb_l1", "ent_shape<P40", 0.45),
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert result["curves"][0]["label"] == "imb_l1 | ent_shape<"
+
+    def test_wide_percentile_range(self):
+        """P10 through P90 — boundary percentiles should work."""
+        hyps = [
+            self._make_hyp("sig", f"gate<P{p}", 0.5 - p * 0.003)
+            for p in range(10, 91, 10)
+        ]
+        result = build_ic_threshold_curve(hyps)
+        assert len(result["curves"]) == 1
+        assert len(result["curves"][0]["points"]) == 9
+        pcts = [p["percentile"] for p in result["curves"][0]["points"]]
+        assert pcts == list(range(10, 91, 10))
+
+
+# ---------------------------------------------------------------------------
+# HTTP endpoint for ic_threshold_curve
+# ---------------------------------------------------------------------------
+
+class TestICThresholdEndpoint(TestHTTPEndpoints):
+    """Verify the /api/ic_threshold_curve endpoint works end-to-end."""
+
+    def test_api_ic_threshold_curve(self):
+        data = self._get("/api/ic_threshold_curve")
+        assert "curves" in data
