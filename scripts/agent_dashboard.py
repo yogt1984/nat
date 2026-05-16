@@ -9,6 +9,10 @@ Serves:
     /api/graveyard   — Failed hypotheses with reasons
     /api/heatmap     — (signal x gate) IC matrix data
     /api/cache       — Cache stats
+    /api/graveyard_sankey — Generator → failure_reason flow data
+    /api/cross_symbol_ic  — Per-symbol IC for cross-symbol scatter
+    /api/ic_decay    — IC history curves for registered signals
+    /api/correlation_matrix — Pairwise correlation across registered signals
 
 Usage:
     python scripts/agent_dashboard.py                  # default port 8060
@@ -159,6 +163,121 @@ def get_summary(hypotheses: list[dict], registry: list[dict], state: dict) -> di
     }
 
 
+def build_graveyard_sankey(hypotheses: list[dict]) -> dict:
+    """Build generator → failure_reason flow counts for Sankey diagram."""
+    flows: dict[tuple[str, str], int] = {}
+    generators = set()
+    reasons = set()
+    for h in hypotheses:
+        if h.get("status") != "failed":
+            continue
+        gen = h.get("generator", "unknown")
+        reason = h.get("failure_reason", "unknown")
+        generators.add(gen)
+        reasons.add(reason)
+        flows[(gen, reason)] = flows.get((gen, reason), 0) + 1
+
+    links = []
+    for (gen, reason), count in sorted(flows.items(), key=lambda x: -x[1]):
+        links.append({"source": gen, "target": reason, "count": count})
+
+    return {
+        "generators": sorted(generators),
+        "reasons": sorted(reasons),
+        "links": links,
+    }
+
+
+def build_cross_symbol_ic(hypotheses: list[dict]) -> dict:
+    """Extract per-symbol IC from hypothesis results for cross-symbol scatter."""
+    points = []
+    for h in hypotheses:
+        if h.get("status") == "queued":
+            continue
+        results = h.get("results") or {}
+        sym_results = results.get("symbol_replication") or {}
+        if not sym_results:
+            continue
+        # Extract IC per symbol
+        ics = {}
+        for symbol, data in sym_results.items():
+            if isinstance(data, dict):
+                ic = data.get("ic")
+                if ic is not None:
+                    ics[symbol] = ic
+            elif isinstance(data, (int, float, bool)):
+                # Older format: just pass/fail, try to get IC from gate_results
+                pass
+        if len(ics) >= 2:
+            points.append({
+                "id": h.get("id", ""),
+                "generator": h.get("generator", ""),
+                "claim": h.get("claim", "")[:60],
+                "ics": ics,
+            })
+
+    return {"points": points}
+
+
+def build_ic_decay_data(registry: list[dict]) -> dict:
+    """Extract IC history curves from registered signals."""
+    curves = []
+    for sig in registry:
+        if sig.get("status") == "retired":
+            continue
+        ic_history = sig.get("ic_history", [])
+        if not ic_history:
+            continue
+        discovery_ic = sig.get("expected_ic", 0)
+        # ic_history entries are {date, ic} dicts
+        points = []
+        for entry in ic_history:
+            if isinstance(entry, dict):
+                points.append({"date": entry.get("date", ""), "ic": entry.get("ic", 0)})
+            elif isinstance(entry, (int, float)):
+                points.append({"date": "", "ic": entry})
+        curves.append({
+            "name": sig.get("name", "")[:50],
+            "discovery_ic": discovery_ic,
+            "retirement_threshold": discovery_ic * 0.5,
+            "points": points,
+        })
+
+    return {"curves": curves}
+
+
+def build_correlation_matrix(registry: list[dict]) -> dict:
+    """Build pairwise correlation data from registry signals."""
+    signals = [s for s in registry if s.get("status") != "retired"]
+    if len(signals) < 2:
+        return {"signals": [], "matrix": []}
+
+    names = [s.get("name", "")[:40] for s in signals]
+    corr_data = []
+    for s in signals:
+        corr_with = s.get("correlation_with", {})
+        corr_data.append(corr_with)
+
+    # Build NxN matrix from correlation_with fields
+    matrix = []
+    for i, sig_i in enumerate(signals):
+        row = []
+        for j, sig_j in enumerate(signals):
+            if i == j:
+                row.append(1.0)
+            else:
+                # Check if i has correlation with j
+                corr_i = sig_i.get("correlation_with", {})
+                corr_j = sig_j.get("correlation_with", {})
+                name_j = sig_j.get("name", "")
+                name_i = sig_i.get("name", "")
+                c = corr_i.get(name_j, corr_j.get(name_i))
+                row.append(c)
+        matrix.append(row)
+
+    return {"signals": names, "matrix": matrix}
+
+
 # ---------------------------------------------------------------------------
 # HTML template
 # ---------------------------------------------------------------------------
@@ -265,6 +384,30 @@ td { font-family: monospace; }
     <div class="card">
         <h2>Cache</h2>
         <div id="cache-stats">Loading...</div>
+    </div>
+
+    <!-- 3.4 Graveyard Sankey -->
+    <div class="card card-full">
+        <h2>Graveyard Analysis (Generator &rarr; Failure Reason)</h2>
+        <div id="sankey" style="min-height:200px;">Loading...</div>
+    </div>
+
+    <!-- 3.5 Cross-symbol IC scatter -->
+    <div class="card card-full">
+        <h2>Cross-Symbol IC Scatter</h2>
+        <div id="cross-symbol" style="display:flex;gap:12px;flex-wrap:wrap;">Loading...</div>
+    </div>
+
+    <!-- 3.6 IC decay curves -->
+    <div class="card card-full">
+        <h2>IC Decay Curves</h2>
+        <svg id="ic-decay" width="100%" height="250" style="overflow:visible;"></svg>
+    </div>
+
+    <!-- 3.7 Correlation clustermap -->
+    <div class="card card-full">
+        <h2>Signal Correlation Matrix</h2>
+        <div id="corr-matrix">Loading...</div>
     </div>
 </div>
 
@@ -400,9 +543,171 @@ async function refreshCache() {
     `;
 }
 
+// --- 3.4 Graveyard Sankey ---
+async function refreshSankey() {
+    const data = await fetch(API+'/api/graveyard_sankey').then(r=>r.json());
+    if (!data.links.length) {
+        document.getElementById('sankey').innerHTML = '<p style="color:#8b949e">No failures yet</p>';
+        return;
+    }
+    // Render as horizontal bar-flow diagram
+    const maxCount = Math.max(...data.links.map(l=>l.count));
+    const colors = ['#58a6ff','#3fb950','#f85149','#d29922','#bc8cff','#f0883e','#8b949e'];
+    const genColors = {};
+    data.generators.forEach((g,i) => genColors[g] = colors[i % colors.length]);
+
+    let html = '<div style="display:flex;flex-direction:column;gap:4px;">';
+    data.links.forEach(l => {
+        const pct = Math.max((l.count / maxCount) * 100, 8);
+        const c = genColors[l.source] || '#8b949e';
+        html += `<div style="display:flex;align-items:center;gap:8px;font-size:12px;">
+            <span style="width:120px;text-align:right;color:${c};font-weight:600">${l.source}</span>
+            <span style="flex:none;color:#8b949e">&rarr;</span>
+            <div style="background:${c}33;border-left:3px solid ${c};height:20px;width:${pct}%;display:flex;align-items:center;padding-left:6px;border-radius:0 3px 3px 0;">
+                <span style="font-weight:bold;color:${c}">${l.count}</span>
+            </div>
+            <span style="color:#8b949e">${l.target}</span>
+        </div>`;
+    });
+    html += '</div>';
+    document.getElementById('sankey').innerHTML = html;
+}
+
+// --- 3.5 Cross-symbol IC scatter ---
+async function refreshCrossSymbol() {
+    const data = await fetch(API+'/api/cross_symbol_ic').then(r=>r.json());
+    if (!data.points.length) {
+        document.getElementById('cross-symbol').innerHTML = '<p style="color:#8b949e">No cross-symbol data yet</p>';
+        return;
+    }
+    const symbols = ['BTC','ETH','SOL'];
+    const pairs = [];
+    for (let i=0; i<symbols.length; i++)
+        for (let j=i+1; j<symbols.length; j++)
+            pairs.push([symbols[i], symbols[j]]);
+
+    const genColors = {};
+    const colors = ['#58a6ff','#3fb950','#f85149','#d29922','#bc8cff','#f0883e'];
+    let ci = 0;
+
+    let html = '';
+    pairs.forEach(([sx, sy]) => {
+        const W = 220, H = 220, pad = 35;
+        let svg = `<svg width="${W}" height="${H}" style="background:var(--card);border:1px solid var(--border);border-radius:6px;">`;
+        // Axes
+        svg += `<line x1="${pad}" y1="${H-pad}" x2="${W-5}" y2="${H-pad}" stroke="#30363d"/>`;
+        svg += `<line x1="${pad}" y1="5" x2="${pad}" y2="${H-pad}" stroke="#30363d"/>`;
+        svg += `<text x="${W/2}" y="${H-5}" fill="#8b949e" font-size="10" text-anchor="middle">${sx} IC</text>`;
+        svg += `<text x="10" y="${H/2}" fill="#8b949e" font-size="10" text-anchor="middle" transform="rotate(-90,10,${H/2})">${sy} IC</text>`;
+        // Diagonal
+        svg += `<line x1="${pad}" y1="${H-pad}" x2="${W-5}" y2="5" stroke="#30363d" stroke-dasharray="4"/>`;
+        // Points
+        data.points.forEach(p => {
+            const icx = p.ics[sx], icy = p.ics[sy];
+            if (icx===undefined || icy===undefined) return;
+            if (!genColors[p.generator]) genColors[p.generator] = colors[ci++ % colors.length];
+            const x = pad + (icx + 0.5) * (W - pad - 5);
+            const y = (H - pad) - (icy + 0.5) * (H - pad - 5);
+            svg += `<circle cx="${x}" cy="${y}" r="4" fill="${genColors[p.generator]}" opacity="0.8">
+                <title>${p.claim}\\n${sx}=${icx?.toFixed(3)} ${sy}=${icy?.toFixed(3)}</title></circle>`;
+        });
+        svg += '</svg>';
+        html += svg;
+    });
+    document.getElementById('cross-symbol').innerHTML = html;
+}
+
+// --- 3.6 IC decay curves ---
+async function refreshICDecay() {
+    const data = await fetch(API+'/api/ic_decay').then(r=>r.json());
+    const svg = document.getElementById('ic-decay');
+    if (!data.curves.length) {
+        svg.innerHTML = '<text x="20" y="30" fill="#8b949e" font-size="13">No IC history data</text>';
+        return;
+    }
+    const W = svg.clientWidth || 700, H = 250, pad = 45;
+    const colors = ['#58a6ff','#3fb950','#d29922','#bc8cff','#f0883e','#f85149'];
+
+    // Find IC range
+    let allICs = [];
+    data.curves.forEach(c => c.points.forEach(p => allICs.push(p.ic)));
+    const minIC = Math.min(0, ...allICs);
+    const maxIC = Math.max(0.1, ...allICs) * 1.1;
+
+    let content = '';
+    // Y axis ticks
+    for (let t = 0; t <= 1; t += 0.25) {
+        const ic = minIC + t * (maxIC - minIC);
+        const y = H - pad - t * (H - 2 * pad);
+        content += `<line x1="${pad}" y1="${y}" x2="${W-5}" y2="${y}" stroke="#30363d" stroke-dasharray="2"/>`;
+        content += `<text x="${pad-5}" y="${y+3}" fill="#8b949e" font-size="9" text-anchor="end">${ic.toFixed(2)}</text>`;
+    }
+
+    data.curves.forEach((curve, ci) => {
+        const col = colors[ci % colors.length];
+        const n = curve.points.length;
+        if (n < 2) return;
+        // Threshold line
+        const thY = H - pad - ((curve.retirement_threshold - minIC) / (maxIC - minIC)) * (H - 2 * pad);
+        content += `<line x1="${pad}" y1="${thY}" x2="${W-5}" y2="${thY}" stroke="${col}" stroke-dasharray="4" opacity="0.4"/>`;
+        // Curve
+        let path = '';
+        curve.points.forEach((p, i) => {
+            const x = pad + (i / (n - 1)) * (W - pad - 5);
+            const y = H - pad - ((p.ic - minIC) / (maxIC - minIC)) * (H - 2 * pad);
+            path += (i === 0 ? 'M' : 'L') + `${x},${y}`;
+        });
+        content += `<path d="${path}" fill="none" stroke="${col}" stroke-width="2"/>`;
+        // Legend
+        content += `<text x="${W - 5}" y="${20 + ci * 14}" fill="${col}" font-size="10" text-anchor="end">${curve.name.substring(0,35)}</text>`;
+    });
+    svg.innerHTML = content;
+}
+
+// --- 3.7 Correlation clustermap ---
+async function refreshCorrMatrix() {
+    const data = await fetch(API+'/api/correlation_matrix').then(r=>r.json());
+    if (!data.signals.length) {
+        document.getElementById('corr-matrix').innerHTML = '<p style="color:#8b949e">Need 2+ signals for correlation</p>';
+        return;
+    }
+    const n = data.signals.length;
+    const cellSz = Math.min(50, Math.max(25, 300 / n));
+
+    function corrColor(c) {
+        if (c === null || c === undefined) return '#30363d';
+        // Blue (negative) → gray (0) → red (positive)
+        const v = Math.max(-1, Math.min(1, c));
+        if (v >= 0) {
+            const t = v;
+            return `rgb(${60+Math.round(t*195)},${60+Math.round((1-t)*60)},60)`;
+        } else {
+            const t = -v;
+            return `rgb(${60+Math.round((1-t)*20)},${60+Math.round((1-t)*60)},${60+Math.round(t*195)})`;
+        }
+    }
+
+    let html = `<div class="heatmap" style="grid-template-columns: 140px repeat(${n}, ${cellSz}px);">`;
+    // Header
+    html += '<div class="hm-label"></div>';
+    data.signals.forEach(s => html += `<div class="hm-label" title="${s}" style="writing-mode:vertical-rl;transform:rotate(180deg);height:80px;">${s.substring(0,15)}</div>`);
+    // Rows
+    data.signals.forEach((sig, i) => {
+        html += `<div class="hm-label" title="${sig}">${sig.substring(0,18)}</div>`;
+        data.matrix[i].forEach((c, j) => {
+            const bg = corrColor(c);
+            const label = c !== null && c !== undefined ? (c === 1 ? '1.0' : c.toFixed(2)) : '';
+            html += `<div class="hm-cell" style="background:${bg};width:${cellSz}px;height:${cellSz}px;" title="${sig} vs ${data.signals[j]}: ${label}">${label}</div>`;
+        });
+    });
+    html += '</div>';
+    document.getElementById('corr-matrix').innerHTML = html;
+}
+
 async function refreshAll() {
     await Promise.all([refreshSummary(), refreshRegistry(), refreshHeatmap(),
-                       refreshGraveyard(), refreshQueue(), refreshGenStats(), refreshCache()]);
+                       refreshGraveyard(), refreshQueue(), refreshGenStats(), refreshCache(),
+                       refreshSankey(), refreshCrossSymbol(), refreshICDecay(), refreshCorrMatrix()]);
     document.getElementById('lastRefresh').textContent = 'Updated: ' + new Date().toLocaleTimeString();
 }
 
@@ -469,6 +774,22 @@ class AgentDashboardHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/cache":
             self._json_response(get_cache_stats())
+
+        elif path == "/api/graveyard_sankey":
+            hyps = read_hypotheses()
+            self._json_response(build_graveyard_sankey(hyps))
+
+        elif path == "/api/cross_symbol_ic":
+            hyps = read_hypotheses()
+            self._json_response(build_cross_symbol_ic(hyps))
+
+        elif path == "/api/ic_decay":
+            registry = read_registry()
+            self._json_response(build_ic_decay_data(registry))
+
+        elif path == "/api/correlation_matrix":
+            registry = read_registry()
+            self._json_response(build_correlation_matrix(registry))
 
         else:
             self.send_error(404)

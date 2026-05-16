@@ -17,6 +17,8 @@ from agent_dashboard import (
     read_state, read_hypotheses, read_registry, read_gen_stats,
     get_queue, get_graveyard, get_tested, build_heatmap_data,
     get_cache_stats, get_summary,
+    build_graveyard_sankey, build_cross_symbol_ic,
+    build_ic_decay_data, build_correlation_matrix,
     AgentDashboardHandler, DASHBOARD_HTML,
 )
 from http.server import HTTPServer
@@ -417,6 +419,190 @@ class TestHTTPEndpoints:
         data = self._get("/api/state")
         assert "_gen_stats" in data
 
+    def test_api_graveyard_sankey(self):
+        data = self._get("/api/graveyard_sankey")
+        assert "generators" in data
+        assert "reasons" in data
+        assert "links" in data
+
+    def test_api_cross_symbol_ic(self):
+        data = self._get("/api/cross_symbol_ic")
+        assert "points" in data
+
+    def test_api_ic_decay(self):
+        data = self._get("/api/ic_decay")
+        assert "curves" in data
+
+    def test_api_correlation_matrix(self):
+        data = self._get("/api/correlation_matrix")
+        assert "signals" in data
+        assert "matrix" in data
+
+
+# ---------------------------------------------------------------------------
+# build_graveyard_sankey
+# ---------------------------------------------------------------------------
+
+class TestBuildGraveyardSankey:
+    def test_counts_generator_reason_flows(self, sample_hypotheses):
+        result = build_graveyard_sankey(sample_hypotheses)
+        # 3 failed hypotheses: systematic→no_replication, systematic→redundant, systematic→no_effect
+        assert len(result["links"]) == 3
+        assert "systematic" in result["generators"]
+        for link in result["links"]:
+            assert link["count"] >= 1
+
+    def test_empty_hypotheses(self):
+        result = build_graveyard_sankey([])
+        assert result["links"] == []
+        assert result["generators"] == []
+        assert result["reasons"] == []
+
+    def test_only_failed_counted(self, sample_hypotheses):
+        result = build_graveyard_sankey(sample_hypotheses)
+        total = sum(l["count"] for l in result["links"])
+        assert total == 3  # 3 failed, 1 replicated, 1 queued excluded
+
+    def test_sorted_by_count_descending(self):
+        hyps = [
+            {"status": "failed", "generator": "a", "failure_reason": "x"},
+            {"status": "failed", "generator": "a", "failure_reason": "x"},
+            {"status": "failed", "generator": "b", "failure_reason": "y"},
+        ]
+        result = build_graveyard_sankey(hyps)
+        assert result["links"][0]["count"] >= result["links"][1]["count"]
+
+
+# ---------------------------------------------------------------------------
+# build_cross_symbol_ic
+# ---------------------------------------------------------------------------
+
+class TestBuildCrossSymbolIC:
+    def test_extracts_per_symbol_ic(self):
+        hyps = [{
+            "status": "replicated",
+            "id": "HYP-001",
+            "generator": "systematic",
+            "claim": "test claim",
+            "results": {
+                "symbol_replication": {
+                    "BTC": {"ic": 0.45, "pass": True},
+                    "ETH": {"ic": 0.38, "pass": True},
+                }
+            },
+        }]
+        result = build_cross_symbol_ic(hyps)
+        assert len(result["points"]) == 1
+        assert result["points"][0]["ics"]["BTC"] == 0.45
+        assert result["points"][0]["ics"]["ETH"] == 0.38
+
+    def test_skips_queued(self):
+        hyps = [{"status": "queued", "results": {"symbol_replication": {"BTC": {"ic": 0.5}}}}]
+        result = build_cross_symbol_ic(hyps)
+        assert result["points"] == []
+
+    def test_needs_at_least_2_symbols(self):
+        hyps = [{
+            "status": "replicated",
+            "results": {"symbol_replication": {"BTC": {"ic": 0.45}}},
+        }]
+        result = build_cross_symbol_ic(hyps)
+        assert result["points"] == []
+
+    def test_empty_hypotheses(self):
+        result = build_cross_symbol_ic([])
+        assert result["points"] == []
+
+
+# ---------------------------------------------------------------------------
+# build_ic_decay_data
+# ---------------------------------------------------------------------------
+
+class TestBuildICDecayData:
+    def test_extracts_ic_history(self):
+        registry = [{
+            "name": "test_signal",
+            "status": "validated",
+            "expected_ic": 0.5,
+            "ic_history": [
+                {"date": "2026-05-14", "ic": 0.48},
+                {"date": "2026-05-15", "ic": 0.45},
+            ],
+        }]
+        result = build_ic_decay_data(registry)
+        assert len(result["curves"]) == 1
+        assert result["curves"][0]["discovery_ic"] == 0.5
+        assert result["curves"][0]["retirement_threshold"] == 0.25
+        assert len(result["curves"][0]["points"]) == 2
+
+    def test_skips_retired(self):
+        registry = [{
+            "name": "old", "status": "retired",
+            "ic_history": [{"date": "d", "ic": 0.1}], "expected_ic": 0.5,
+        }]
+        result = build_ic_decay_data(registry)
+        assert result["curves"] == []
+
+    def test_skips_no_history(self):
+        registry = [{"name": "new", "status": "validated", "expected_ic": 0.5}]
+        result = build_ic_decay_data(registry)
+        assert result["curves"] == []
+
+    def test_empty_registry(self):
+        result = build_ic_decay_data([])
+        assert result["curves"] == []
+
+    def test_numeric_history_fallback(self):
+        """Handles old format where ic_history is just a list of floats."""
+        registry = [{
+            "name": "s", "status": "validated", "expected_ic": 0.4,
+            "ic_history": [0.39, 0.38, 0.37],
+        }]
+        result = build_ic_decay_data(registry)
+        assert len(result["curves"][0]["points"]) == 3
+        assert result["curves"][0]["points"][0]["ic"] == 0.39
+
+
+# ---------------------------------------------------------------------------
+# build_correlation_matrix
+# ---------------------------------------------------------------------------
+
+class TestBuildCorrelationMatrix:
+    def test_builds_matrix_from_registry(self):
+        registry = [
+            {"name": "sig_a", "status": "validated", "correlation_with": {"sig_b": 0.45}},
+            {"name": "sig_b", "status": "validated", "correlation_with": {"sig_a": 0.45}},
+        ]
+        result = build_correlation_matrix(registry)
+        assert len(result["signals"]) == 2
+        assert len(result["matrix"]) == 2
+        # Diagonal = 1.0
+        assert result["matrix"][0][0] == 1.0
+        assert result["matrix"][1][1] == 1.0
+        # Off-diagonal
+        assert result["matrix"][0][1] == 0.45
+
+    def test_needs_at_least_2_signals(self):
+        result = build_correlation_matrix([{"name": "a", "status": "validated"}])
+        assert result["signals"] == []
+        assert result["matrix"] == []
+
+    def test_excludes_retired(self):
+        registry = [
+            {"name": "a", "status": "validated"},
+            {"name": "b", "status": "retired"},
+        ]
+        result = build_correlation_matrix(registry)
+        assert result["signals"] == []  # only 1 active
+
+    def test_none_for_unknown_pairs(self):
+        registry = [
+            {"name": "a", "status": "validated"},
+            {"name": "b", "status": "validated"},
+        ]
+        result = build_correlation_matrix(registry)
+        assert result["matrix"][0][1] is None  # no correlation_with data
+
 
 # ---------------------------------------------------------------------------
 # Dashboard HTML
@@ -434,6 +620,10 @@ class TestDashboardHTML:
         assert "Queue" in DASHBOARD_HTML
         assert "Generator Performance" in DASHBOARD_HTML
         assert "Cache" in DASHBOARD_HTML
+        assert "Graveyard Analysis" in DASHBOARD_HTML
+        assert "Cross-Symbol IC" in DASHBOARD_HTML
+        assert "IC Decay" in DASHBOARD_HTML
+        assert "Correlation Matrix" in DASHBOARD_HTML
 
     def test_contains_refresh_logic(self):
         assert "refreshAll" in DASHBOARD_HTML
@@ -446,3 +636,7 @@ class TestDashboardHTML:
         assert "/api/graveyard" in DASHBOARD_HTML
         assert "/api/queue" in DASHBOARD_HTML
         assert "/api/cache" in DASHBOARD_HTML
+        assert "/api/graveyard_sankey" in DASHBOARD_HTML
+        assert "/api/cross_symbol_ic" in DASHBOARD_HTML
+        assert "/api/ic_decay" in DASHBOARD_HTML
+        assert "/api/correlation_matrix" in DASHBOARD_HTML
