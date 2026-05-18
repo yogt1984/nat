@@ -97,15 +97,16 @@ Trade arrival dynamics.
 | `flow_avg_trade_size_30s` | V_30s / N_30s | [0, 0.08] BTC |
 | `flow_intensity` | EMA of trades/sec, 5s halflife | [1.2, 17.6] |
 
-### Category 4: Volatility (8 features)
+### Category 4: Volatility (9 features)
 
-Realized and range-based estimators. Ref: Parkinson (1980).
+Realized and range-based estimators. Refs: Parkinson (1980), Garman & Klass (1980).
 
 | Feature | Formula | Range |
 |---------|---------|-------|
 | `vol_returns_1m` | RV = sqrt(sum(r_i^2) / N), N=60 ticks | [0, 0.01%] |
 | `vol_returns_5m` | RV over 300 ticks | [0, 0.01%] |
 | `vol_parkinson_5m` | sigma_P = ln(H/L) / sqrt(4 * ln(2)), 300 ticks | [0, 0.05%] |
+| `vol_garman_klass_5m` | sigma_GK = sqrt(0.5·ln(H/L)² − (2·ln2−1)·ln(C/O)²), 300 ticks | [0, 0.05%] |
 | `vol_spread_mean_1m` | Point-in-time spread (misnomer) | [1, 9] |
 | `vol_spread_std_1m` | std(spread), 600 ticks (1 min) | [0, +inf) |
 | `vol_midprice_std_1m` | std(P_mid) over 60 ticks | [0, 14.85] |

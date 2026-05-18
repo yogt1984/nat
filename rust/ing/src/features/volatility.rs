@@ -3,13 +3,14 @@
 //! Realized and range-based volatility estimators at multiple horizons.
 //! Used for risk regime detection and strategy sizing.
 //!
-//! # Features (8 total)
+//! # Features (9 total)
 //!
 //! | Feature | Description | Range | Interpretation |
 //! |---------|-------------|-------|----------------|
 //! | **Realized vol (1m/5m)** | sqrt(mean(r²)) of tick returns | [0, +inf) | Higher = more volatile |
-//! | **Parkinson vol** | Range-based estimator using high/low | [0, +inf) | More efficient than realized vol |
-//! | **Spread mean** | Current spread (point-in-time, not historical mean) | [0, +inf) | Higher = wider market |
+//! | **Parkinson vol** | Range-based using high/low | [0, +inf) | More efficient than realized vol |
+//! | **Garman-Klass vol** | OHLC-based, most efficient classical | [0, +inf) | Strictly more efficient than Parkinson |
+//! | **Spread mean** | Current spread (point-in-time) | [0, +inf) | Higher = wider market |
 //! | **Spread std** | Spread standard deviation over 1 min | [0, +inf) | Higher = unstable spread |
 //! | **Midprice std** | Price standard deviation over 1 min | [0, +inf) | Direct dispersion measure |
 //! | **Ratio short/long** | vol_1m / vol_5m | [0, +inf) | >1 = accelerating vol |
@@ -26,6 +27,14 @@
 //! (300 ticks) for simplicity. Still more efficient than close-to-close for
 //! the same window because it captures intra-period range.
 //!
+//! **Garman & Klass (1980)**: σ² = 0.5·ln(H/L)² − (2·ln2 − 1)·ln(C/O)².
+//! Uses OHLC within the 5-minute window (300 ticks). The most efficient
+//! classical volatility estimator — approximately 7.4× more efficient than
+//! close-to-close and ~1.2× more efficient than Parkinson, because it
+//! exploits both range and close-to-open information. Returns sqrt(σ²) as
+//! the volatility estimate; if σ² < 0 (rare numerical edge case where
+//! close-to-open dominates range), returns 0.0 rather than NaN.
+//!
 //! **Spread std**: Standard deviation of bid-ask spread values over 1-minute window
 //! (600 ticks at 100ms). High spread variability indicates unstable liquidity
 //! conditions — market makers are repricing frequently.
@@ -38,11 +47,11 @@
 //! # References
 //!
 //! - Parkinson (1980) - The extreme value method for estimating the variance of the rate of return
-//! - Note: Garman & Klass (1980) is a potential extension but is not currently implemented
+//! - Garman & Klass (1980) - On the estimation of security price volatilities from historical data
 
 use crate::state::{OrderBook, RingBuffer};
 
-/// Volatility features (8 features)
+/// Volatility features (9 features)
 #[derive(Debug, Clone, Default)]
 pub struct VolatilityFeatures {
     /// Realized volatility from 1-minute returns
@@ -51,6 +60,8 @@ pub struct VolatilityFeatures {
     pub returns_5m: f64,
     /// Parkinson volatility (high-low based)
     pub parkinson_5m: f64,
+    /// Garman-Klass volatility (OHLC-based, most efficient classical estimator)
+    pub garman_klass_5m: f64,
     /// Mean spread over 1 minute
     pub spread_mean_1m: f64,
     /// Spread standard deviation over 1 minute
@@ -64,13 +75,14 @@ pub struct VolatilityFeatures {
 }
 
 impl VolatilityFeatures {
-    pub fn count() -> usize { 8 }
+    pub fn count() -> usize { 9 }
 
     pub fn names() -> Vec<&'static str> {
         vec![
             "vol_returns_1m",
             "vol_returns_5m",
             "vol_parkinson_5m",
+            "vol_garman_klass_5m",
             "vol_spread_mean_1m",
             "vol_spread_std_1m",
             "vol_midprice_std_1m",
@@ -84,6 +96,7 @@ impl VolatilityFeatures {
             self.returns_1m,
             self.returns_5m,
             self.parkinson_5m,
+            self.garman_klass_5m,
             self.spread_mean_1m,
             self.spread_std_1m,
             self.midprice_std_1m,
@@ -127,7 +140,7 @@ pub fn compute(
         compute_realized_vol(&returns)
     };
 
-    // Parkinson volatility (simplified - using price range)
+    // Parkinson volatility (range-based: high/low)
     let parkinson_5m = if price_buffer.len() >= 300 {
         let prices: Vec<f64> = price_buffer.last_n(300)
             .into_iter()
@@ -136,6 +149,17 @@ pub fn compute(
         compute_parkinson_vol(&prices)
     } else {
         compute_parkinson_vol(&price_buffer.to_vec())
+    };
+
+    // Garman-Klass volatility (OHLC-based, most efficient classical estimator)
+    let garman_klass_5m = if price_buffer.len() >= 300 {
+        let prices: Vec<f64> = price_buffer.last_n(300)
+            .into_iter()
+            .cloned()
+            .collect();
+        compute_garman_klass_vol(&prices)
+    } else {
+        compute_garman_klass_vol(&price_buffer.to_vec())
     };
 
     // Spread statistics
@@ -186,6 +210,7 @@ pub fn compute(
         returns_1m,
         returns_5m,
         parkinson_5m,
+        garman_klass_5m,
         spread_mean_1m,
         spread_std_1m,
         midprice_std_1m,
@@ -216,6 +241,41 @@ fn compute_parkinson_vol(prices: &[f64]) -> f64 {
     if low > 0.0 {
         let log_ratio = (high / low).ln();
         log_ratio / (4.0 * std::f64::consts::LN_2).sqrt()
+    } else {
+        0.0
+    }
+}
+
+/// Compute Garman-Klass volatility estimator.
+///
+/// σ²_GK = 0.5 · ln(H/L)² − (2·ln2 − 1) · ln(C/O)²
+///
+/// Uses OHLC derived from the price window:
+/// - O = first price, C = last price, H = max, L = min
+///
+/// Returns sqrt(σ²_GK). If σ²_GK < 0 (rare edge case where close-to-open
+/// movement dominates range, possible with very few ticks), returns 0.0.
+fn compute_garman_klass_vol(prices: &[f64]) -> f64 {
+    if prices.len() < 2 {
+        return 0.0;
+    }
+
+    let open = prices[0];
+    let close = prices[prices.len() - 1];
+    let high = prices.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let low = prices.iter().cloned().fold(f64::INFINITY, f64::min);
+
+    if open <= 0.0 || low <= 0.0 {
+        return 0.0;
+    }
+
+    let ln_hl = (high / low).ln();
+    let ln_co = (close / open).ln();
+
+    let sigma_sq = 0.5 * ln_hl * ln_hl - (2.0 * std::f64::consts::LN_2 - 1.0) * ln_co * ln_co;
+
+    if sigma_sq > 0.0 {
+        sigma_sq.sqrt()
     } else {
         0.0
     }
@@ -292,9 +352,9 @@ mod tests {
 
     #[test]
     fn test_count_names_to_vec_length_match() {
-        assert_eq!(VolatilityFeatures::count(), 8);
-        assert_eq!(VolatilityFeatures::names().len(), 8);
-        assert_eq!(VolatilityFeatures::default().to_vec().len(), 8);
+        assert_eq!(VolatilityFeatures::count(), 9);
+        assert_eq!(VolatilityFeatures::names().len(), 9);
+        assert_eq!(VolatilityFeatures::default().to_vec().len(), 9);
     }
 
     #[test]
@@ -396,6 +456,178 @@ mod tests {
         let narrow = compute_parkinson_vol(&[99.0, 100.0, 101.0]);
         let wide = compute_parkinson_vol(&[90.0, 100.0, 110.0]);
         assert!(wide > narrow, "Wider range should give higher Parkinson vol");
+    }
+
+    // ---------- Garman-Klass vol ----------
+
+    #[test]
+    fn test_garman_klass_single_price() {
+        assert_eq!(compute_garman_klass_vol(&[100.0]), 0.0);
+    }
+
+    #[test]
+    fn test_garman_klass_empty() {
+        assert_eq!(compute_garman_klass_vol(&[]), 0.0);
+    }
+
+    #[test]
+    fn test_garman_klass_constant_prices() {
+        // No range, no close-to-open → zero vol
+        let gk = compute_garman_klass_vol(&[100.0, 100.0, 100.0, 100.0]);
+        assert_eq!(gk, 0.0);
+    }
+
+    #[test]
+    fn test_garman_klass_known_ohlc() {
+        // O=100, H=110, L=95, C=105
+        // σ² = 0.5·ln(110/95)² − (2·ln2 − 1)·ln(105/100)²
+        //     = 0.5·ln(1.15789)² − 0.38629·ln(1.05)²
+        //     = 0.5·0.14660² − 0.38629·0.04879²
+        //     = 0.5·0.021491 − 0.38629·0.002380
+        //     = 0.010746 − 0.000920 = 0.009826
+        // σ = sqrt(0.009826) ≈ 0.09913
+        let prices = vec![100.0, 95.0, 110.0, 105.0]; // O=100, L=95, H=110, C=105
+        let gk = compute_garman_klass_vol(&prices);
+        let ln_hl = (110.0_f64 / 95.0).ln();
+        let ln_co = (105.0_f64 / 100.0).ln();
+        let expected_sq = 0.5 * ln_hl * ln_hl - (2.0 * std::f64::consts::LN_2 - 1.0) * ln_co * ln_co;
+        let expected = expected_sq.sqrt();
+        assert!((gk - expected).abs() < 1e-10, "GK={}, expected={}", gk, expected);
+    }
+
+    #[test]
+    fn test_garman_klass_zero_low() {
+        // Zero price → returns 0 (guard clause)
+        let gk = compute_garman_klass_vol(&[0.0, 100.0, 50.0]);
+        assert_eq!(gk, 0.0);
+    }
+
+    #[test]
+    fn test_garman_klass_zero_open() {
+        let gk = compute_garman_klass_vol(&[0.0, 50.0, 100.0]);
+        assert_eq!(gk, 0.0);
+    }
+
+    #[test]
+    fn test_garman_klass_monotonicity_with_range() {
+        // Wider range → higher GK vol
+        let narrow = compute_garman_klass_vol(&[100.0, 99.0, 101.0, 100.0]);
+        let wide = compute_garman_klass_vol(&[100.0, 90.0, 110.0, 100.0]);
+        assert!(wide > narrow, "Wider range should give higher GK vol: {} vs {}", wide, narrow);
+    }
+
+    #[test]
+    fn test_garman_klass_open_equals_close() {
+        // When O=C, the close-to-open term vanishes → GK = 0.5·ln(H/L)²
+        // which is Parkinson² / (4·ln2) * 2 ... actually:
+        // GK_σ² = 0.5·ln(H/L)² − 0 = 0.5·ln(H/L)²
+        // Parkinson_σ = ln(H/L) / sqrt(4·ln2)
+        // So GK_σ = sqrt(0.5) · ln(H/L)
+        let prices = vec![100.0, 90.0, 110.0, 100.0]; // O=C=100
+        let gk = compute_garman_klass_vol(&prices);
+        let ln_hl = (110.0_f64 / 90.0).ln();
+        let expected = (0.5 * ln_hl * ln_hl).sqrt();
+        assert!((gk - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_garman_klass_close_to_open_reduces_vol() {
+        // When C=O (no drift), GK = sqrt(0.5)·ln(H/L)
+        // When C≠O, the (2ln2-1)·ln(C/O)² term subtracts → lower vol
+        let prices_no_drift = vec![100.0, 90.0, 110.0, 100.0]; // O=C=100
+        let prices_with_drift = vec![100.0, 90.0, 110.0, 108.0]; // C>O, same range
+        let gk_no_drift = compute_garman_klass_vol(&prices_no_drift);
+        let gk_with_drift = compute_garman_klass_vol(&prices_with_drift);
+        // Close-to-open term subtracts, so with drift vol should be lower
+        assert!(gk_with_drift < gk_no_drift,
+            "Close-to-open drift should reduce GK estimate: {} vs {}", gk_with_drift, gk_no_drift);
+    }
+
+    #[test]
+    fn test_garman_klass_non_negative() {
+        // GK should never return negative (we guard σ²<0 → 0.0)
+        // Edge case: very large drift, tiny range
+        let prices = vec![100.0, 100.0, 100.001, 200.0]; // huge C/O, tiny H/L... wait
+        // Actually H=200, L=100 → big range. Let's try:
+        // Big drift, range barely exceeds it
+        let prices2 = vec![100.0, 99.99, 100.01, 110.0]; // O=100, H=110, L=99.99, C=110
+        let gk = compute_garman_klass_vol(&prices2);
+        assert!(gk >= 0.0, "GK must be non-negative, got {}", gk);
+    }
+
+    #[test]
+    fn test_garman_klass_sigma_sq_negative_guard() {
+        // Construct a case where σ² could go negative:
+        // Very small range but large close-to-open movement
+        // This is theoretically impossible for true OHLC (range always covers C and O),
+        // but our "OHLC" is derived from tick data where O and C are first/last,
+        // and H/L cover the full range — so range always covers open and close.
+        // Verify the guard works even if we call the function directly:
+        // With only 2 prices: O=100, C=200 → H=200, L=100
+        // ln(H/L)=ln(2), ln(C/O)=ln(2)
+        // σ² = 0.5·ln(2)² − (2ln2-1)·ln(2)² = ln(2)²·(0.5 - 2ln2 + 1) = ln(2)²·(1.5 - 2ln2)
+        // 2ln2 ≈ 1.3863, so 1.5 - 1.3863 = 0.1137 > 0 → σ² > 0
+        // With tick data, H/L always covers O/C, so σ² ≥ 0 is guaranteed.
+        let gk = compute_garman_klass_vol(&[100.0, 200.0]);
+        assert!(gk >= 0.0);
+        assert!(gk > 0.0, "Two distinct prices → positive GK vol");
+    }
+
+    #[test]
+    fn test_garman_klass_two_prices() {
+        // O=100, C=110, H=110, L=100
+        // ln(H/L) = ln(1.1), ln(C/O) = ln(1.1)
+        // σ² = 0.5·ln(1.1)² − (2ln2-1)·ln(1.1)² = ln(1.1)²·(0.5 - 2ln2 + 1)
+        //     = ln(1.1)² · (1.5 - 1.38629) = ln(1.1)² · 0.11371
+        let prices = vec![100.0, 110.0];
+        let gk = compute_garman_klass_vol(&prices);
+        let ln_ratio = (1.1_f64).ln();
+        let expected_sq = ln_ratio * ln_ratio * (1.5 - 2.0 * std::f64::consts::LN_2);
+        let expected = expected_sq.sqrt();
+        assert!((gk - expected).abs() < 1e-12, "gk={}, expected={}", gk, expected);
+    }
+
+    #[test]
+    fn test_garman_klass_scaling() {
+        // Scaling all prices by a constant shouldn't change vol (it's based on ratios)
+        let prices1 = vec![100.0, 90.0, 110.0, 105.0];
+        let prices2: Vec<f64> = prices1.iter().map(|p| p * 10.0).collect();
+        let gk1 = compute_garman_klass_vol(&prices1);
+        let gk2 = compute_garman_klass_vol(&prices2);
+        assert!((gk1 - gk2).abs() < 1e-12, "GK should be scale-invariant: {} vs {}", gk1, gk2);
+    }
+
+    #[test]
+    fn test_garman_klass_in_full_compute() {
+        // Verify the feature appears in the full compute output
+        let ob = make_order_book(99.0, 101.0);
+        let prices: Vec<f64> = (0..400).map(|i| 100.0 + (i as f64) * 0.01).collect();
+        let price_buf = make_price_buffer(&prices);
+        let spread_buf = make_spread_buffer(&[2.0; 100]);
+        let vol_buf = RingBuffer::<f64>::new(36_000);
+
+        let f = compute(&price_buf, &ob, &spread_buf, &vol_buf);
+        assert!(f.garman_klass_5m > 0.0, "GK should be positive for trending prices");
+        assert!(f.garman_klass_5m.is_finite(), "GK must be finite");
+        assert!(!f.garman_klass_5m.is_nan(), "GK must not be NaN");
+    }
+
+    #[test]
+    fn test_garman_klass_leq_parkinson_for_trending() {
+        // For a monotonic trend, C≠O means the GK close-to-open term subtracts,
+        // so GK_σ < sqrt(0.5)·ln(H/L) while Parkinson_σ = ln(H/L)/sqrt(4ln2).
+        // With a strong trend, GK should be less than Parkinson.
+        let ob = make_order_book(99.0, 101.0);
+        // Strong uptrend
+        let prices: Vec<f64> = (0..400).map(|i| 100.0 + (i as f64) * 0.1).collect();
+        let price_buf = make_price_buffer(&prices);
+        let spread_buf = make_spread_buffer(&[2.0; 100]);
+        let vol_buf = RingBuffer::<f64>::new(36_000);
+
+        let f = compute(&price_buf, &ob, &spread_buf, &vol_buf);
+        assert!(f.garman_klass_5m < f.parkinson_5m,
+            "For trending data, GK ({}) should be < Parkinson ({}) due to drift correction",
+            f.garman_klass_5m, f.parkinson_5m);
     }
 
     // ---------- std_dev ----------

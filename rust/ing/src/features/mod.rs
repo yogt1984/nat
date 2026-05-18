@@ -1,6 +1,6 @@
 //! Feature Computation Module
 //!
-//! Extracts 208 features from Hyperliquid WebSocket market data across 19 categories.
+//! Extracts 209 features from Hyperliquid WebSocket market data across 19 categories.
 //! See `FEATURES.md` at the project root for the full feature manifest with formulas,
 //! interpretation, and paper references.
 //!
@@ -11,7 +11,7 @@
 //! | Raw | 10 | `raw_` | All working | Gatheral & Oomen (2010) |
 //! | Imbalance | 8 | `imbalance_` | All working | Cont, Stoikov & Talreja (2010) |
 //! | Flow | 12 | `flow_` | All working | — |
-//! | Volatility | 8 | `vol_` | All working | Parkinson (1980) |
+//! | Volatility | 9 | `vol_` | All working | Parkinson (1980), Garman & Klass (1980) |
 //! | Entropy | 24 | `ent_` | All warmup-dependent | Bandt & Pompe (2002) |
 //! | Context | 12 | `ctx_` | All working | — |
 //! | Trend | 15 | `trend_` | All working | Jegadeesh & Titman (1993) |
@@ -28,12 +28,12 @@
 //! | *GMM* | 8 | `regime`/`prob_` | Optional (NaN if absent) | — |
 //! | *Cross-Symbol* | 3 | `cross_` | Optional (NaN if absent) | — |
 //!
-//! Base features (137) are always computed. Optional features (71) require
+//! Base features (138) are always computed. Optional features (71) require
 //! additional data sources or warmup time and are NaN-padded when absent.
 //!
 //! # Data Contract
 //!
-//! `Features::to_vec()` always returns exactly `count_all()` = 208 elements.
+//! `Features::to_vec()` always returns exactly `count_all()` = 209 elements.
 //! `Features::names_all()` returns the corresponding column names.
 //! The Parquet schema is built from `names_all()` in `output/schema.rs`.
 

@@ -16,7 +16,7 @@
 | 1 | Raw | 10 | `raw_` | `features/raw.rs` | All working | Gatheral & Oomen (2010) |
 | 2 | Imbalance | 8 | `imbalance_` | `features/imbalance.rs` | All working | Cont, Stoikov & Talreja (2010) |
 | 3 | Flow | 12 | `flow_` | `features/flow.rs` | All working | — |
-| 4 | Volatility | 8 | `vol_` | `features/volatility.rs` | All working | Parkinson (1980) |
+| 4 | Volatility | 9 | `vol_` | `features/volatility.rs` | All working | Parkinson (1980), Garman & Klass (1980) |
 | 5 | Entropy | 24 | `ent_` | `features/entropy.rs` | All warmup-dependent | Bandt & Pompe (2002) |
 | 6 | Context | 9 | `ctx_` | `features/context.rs` | All working | — |
 | 7 | Trend | 15 | `trend_` | `features/trend.rs` | All working | Jegadeesh & Titman (1993) |
@@ -86,15 +86,16 @@ Trade arrival patterns and aggressor dynamics. Module: `features/flow.rs`.
 
 Window rationale: 1s = market-maker timescale, 5s = quote update cycle, 30s = informed trader execution.
 
-## 4. Volatility (8 features)
+## 4. Volatility (9 features)
 
-Realized and range-based volatility. Module: `features/volatility.rs`. Ref: Parkinson (1980).
+Realized and range-based volatility. Module: `features/volatility.rs`. Refs: Parkinson (1980), Garman & Klass (1980).
 
 | Parquet Column | Formula | Range | Status |
 |---------------|---------|-------|--------|
 | `vol_returns_1m` | sqrt(Σ r² / N), 60 ticks | [0, +inf) | Working |
 | `vol_returns_5m` | sqrt(Σ r² / N), 300 ticks | [0, +inf) | Working |
 | `vol_parkinson_5m` | ln(H/L) / sqrt(4·ln(2)), single 300-tick window | [0, +inf) | Working (single-window approx) |
+| `vol_garman_klass_5m` | sqrt(0.5·ln(H/L)² − (2·ln2−1)·ln(C/O)²), 300 ticks | [0, +inf) | Working — most efficient classical estimator |
 | `vol_spread_mean_1m` | Current spread (point-in-time, not historical mean) | [0, +inf) | Working (misnomer) |
 | `vol_spread_std_1m` | std(spread), 600 ticks (1 min) | [0, +inf) | Working — higher = unstable liquidity |
 | `vol_midprice_std_1m` | std(prices), 60 ticks | [0, +inf) | Working |
@@ -325,7 +326,7 @@ GMM input features: [kyle_lambda, vpin, absorption_zscore, hurst, whale_net_flow
 
 ## Warmup-Dependent Features
 
-All 208 features are fully implemented. Some return 0.0 during warmup until their buffers fill:
+All 209 features are fully implemented. Some return 0.0 during warmup until their buffers fill:
 
 - `vol_zscore` — requires ≥120 vol_1m samples (~12 seconds at 100ms) before producing meaningful z-scores
 - Several entropy features (`ent_permutation_imbalance_16`, `ent_spread_dispersion`, `ent_rate_of_change_5s`, `ent_zscore_1m`) — require sufficient buffer data
