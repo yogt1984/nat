@@ -16,7 +16,7 @@
 | 1 | Raw | 10 | `raw_` | `features/raw.rs` | All working | Gatheral & Oomen (2010) |
 | 2 | Imbalance | 8 | `imbalance_` | `features/imbalance.rs` | All working | Cont, Stoikov & Talreja (2010) |
 | 3 | Flow | 12 | `flow_` | `features/flow.rs` | All working | — |
-| 4 | Volatility | 8 | `vol_` | `features/volatility.rs` | 6 working, 2 placeholder | Parkinson (1980) |
+| 4 | Volatility | 8 | `vol_` | `features/volatility.rs` | All working | Parkinson (1980) |
 | 5 | Entropy | 24 | `ent_` | `features/entropy.rs` | All warmup-dependent | Bandt & Pompe (2002) |
 | 6 | Context | 9 | `ctx_` | `features/context.rs` | All working | — |
 | 7 | Trend | 15 | `trend_` | `features/trend.rs` | All working | Jegadeesh & Titman (1993) |
@@ -96,10 +96,10 @@ Realized and range-based volatility. Module: `features/volatility.rs`. Ref: Park
 | `vol_returns_5m` | sqrt(Σ r² / N), 300 ticks | [0, +inf) | Working |
 | `vol_parkinson_5m` | ln(H/L) / sqrt(4·ln(2)), single 300-tick window | [0, +inf) | Working (single-window approx) |
 | `vol_spread_mean_1m` | Current spread (point-in-time, not historical mean) | [0, +inf) | Working (misnomer) |
-| `vol_spread_std_1m` | — | 0.0 | **PLACEHOLDER** |
+| `vol_spread_std_1m` | std(spread), 600 ticks (1 min) | [0, +inf) | Working — higher = unstable liquidity |
 | `vol_midprice_std_1m` | std(prices), 60 ticks | [0, +inf) | Working |
 | `vol_ratio_short_long` | vol_1m / vol_5m | [0, +inf) | >1 = accelerating |
-| `vol_zscore` | — | 0.0 | **PLACEHOLDER** |
+| `vol_zscore` | (vol_1m − mean_1h) / std_1h, clamped ±10 | (−inf, +inf) | Working — >2 = vol spike, <−2 = unusually calm |
 
 ## 5. Entropy (24 features)
 
@@ -323,16 +323,15 @@ GMM input features: [kyle_lambda, vpin, absorption_zscore, hurst, whale_net_flow
 
 ---
 
-## Placeholder Features
+## Warmup-Dependent Features
 
-These features are hardcoded to 0.0 and need additional infrastructure to implement:
+All 208 features are fully implemented. Some return 0.0 during warmup until their buffers fill:
 
-| Feature | Module | What's Needed |
-|---------|--------|---------------|
-| `vol_spread_std_1m` | `volatility.rs:91` | Pass spread history buffer to `compute()` |
-| `vol_zscore` | `volatility.rs:112` | Hourly volatility history buffer |
+- `vol_zscore` — requires ≥120 vol_1m samples (~12 seconds at 100ms) before producing meaningful z-scores
+- Several entropy features (`ent_permutation_imbalance_16`, `ent_spread_dispersion`, `ent_rate_of_change_5s`, `ent_zscore_1m`) — require sufficient buffer data
+- Regime features (20) — require ≥5 minutes of minute-level data
 
-Note: Several entropy features (`ent_permutation_imbalance_16`, `ent_spread_dispersion`, `ent_rate_of_change_5s`, `ent_zscore_1m`) return 0.0 during warmup (insufficient buffer data) but work correctly once the buffer fills. These are **not** placeholders.
+These are **not** placeholders — they work correctly once their buffers fill.
 
 ## Information Redundancy
 
