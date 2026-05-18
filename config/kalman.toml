@@ -1,0 +1,13 @@
+[kalman]
+symbols = ["BTC", "ETH", "SOL"]
+dt = 0.1  # seconds (100ms emission interval)
+horizons = [1, 5, 10, 50, 100]  # ticks forward for IC computation
+
+[kalman.ou_prior]
+theta_init = 0.1       # mean-reversion rate (~ln(2)/half_life, half_life ≈ 7s)
+sigma_process = 0.01   # process noise std (tuned from data)
+sigma_obs = 0.1        # observation noise std (tuned from data)
+
+[kalman.regime]
+feature = "ent_book_shape"
+percentile = 30  # gate active when feature < P30
