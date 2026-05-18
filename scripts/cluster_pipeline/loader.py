@@ -15,6 +15,8 @@ Usage:
 from __future__ import annotations
 
 import os
+import re
+from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -162,9 +164,12 @@ def load_parquet(
     symbols: Optional[List[str]] = None,
     start: Optional[str] = None,
     end: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     columns: Optional[List[str]] = None,
     glob_pattern: str = "**/*.parquet",
     max_rows: Optional[int] = None,
+    max_memory_mb: Optional[float] = None,
 ) -> pd.DataFrame:
     """
     Load parquet files from a directory into a pandas DataFrame.
@@ -174,9 +179,18 @@ def load_parquet(
         symbols: optional list of symbols to filter (e.g. ["BTC", "ETH"])
         start: optional start timestamp (ISO format or nanosecond int)
         end: optional end timestamp (ISO format or nanosecond int)
+        start_date: optional start date for directory-level filtering
+            (e.g. "2026-05-10"). Files in directories before this date
+            are skipped without being read.
+        end_date: optional end date for directory-level filtering
+            (e.g. "2026-05-15"). Files in directories after this date
+            are skipped without being read.
         columns: optional list of specific columns to load (reduces memory)
         glob_pattern: glob pattern for finding parquet files
         max_rows: optional maximum number of rows to load (for sampling)
+        max_memory_mb: optional memory limit in MB. If estimated memory
+            exceeds this, only files up to the limit are loaded (most
+            recent first). Default: None (no limit).
 
     Returns:
         pd.DataFrame with all loaded data, sorted by timestamp_ns
@@ -190,6 +204,21 @@ def load_parquet(
         raise FileNotFoundError(
             f"No parquet files found in {data_dir} (pattern: {glob_pattern})"
         )
+
+    # Directory-level date filtering: skip files whose parent directory
+    # falls outside [start_date, end_date]. Directories named like
+    # "2026-05-12" or "2026-05-12-clean" are parsed; others pass through.
+    if start_date is not None or end_date is not None:
+        files = _filter_files_by_date(files, start_date=start_date, end_date=end_date)
+        if not files:
+            raise FileNotFoundError(
+                f"No parquet files in date range [{start_date}, {end_date}] "
+                f"under {data_dir}"
+            )
+
+    # Memory guard: estimate total size from file metadata and cap if needed
+    if max_memory_mb is not None:
+        files = _apply_memory_limit(files, max_memory_mb=max_memory_mb, columns=columns)
 
     # Build pyarrow filters
     filters = _build_filters(symbols=symbols, start=start, end=end)
@@ -222,7 +251,8 @@ def load_parquet(
     if not tables:
         raise ValueError(
             f"No data loaded from {data_dir} after filtering "
-            f"(symbols={symbols}, start={start}, end={end})"
+            f"(symbols={symbols}, start={start}, end={end}, "
+            f"start_date={start_date}, end_date={end_date})"
         )
 
     # Concatenate
@@ -456,6 +486,102 @@ def list_parquet_files(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+
+def _parse_dir_date(path: Path) -> Optional[date]:
+    """Extract a date from a directory name like '2026-05-12' or '2026-05-12-clean'."""
+    m = _DATE_RE.search(path.name)
+    if m:
+        try:
+            return date.fromisoformat(m.group(1))
+        except ValueError:
+            pass
+    # Also check parent (file might be directly under a date dir)
+    if path.parent != path:
+        m = _DATE_RE.search(path.parent.name)
+        if m:
+            try:
+                return date.fromisoformat(m.group(1))
+            except ValueError:
+                pass
+    return None
+
+
+def _filter_files_by_date(
+    files: List[Path],
+    *,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> List[Path]:
+    """Filter file list by the date in their parent directory name."""
+    sd = date.fromisoformat(start_date) if start_date else None
+    ed = date.fromisoformat(end_date) if end_date else None
+
+    result = []
+    for f in files:
+        d = _parse_dir_date(f)
+        if d is None:
+            # Can't determine date — include by default
+            result.append(f)
+            continue
+        if sd is not None and d < sd:
+            continue
+        if ed is not None and d > ed:
+            continue
+        result.append(f)
+    return result
+
+
+def _apply_memory_limit(
+    files: List[Path],
+    *,
+    max_memory_mb: float,
+    columns: Optional[List[str]] = None,
+) -> List[Path]:
+    """
+    Estimate in-memory size from parquet metadata and drop files if over limit.
+
+    Keeps files in order (oldest first), dropping from the front if over budget
+    so the most recent data is preserved.
+    """
+    max_bytes = max_memory_mb * 1024 * 1024
+    # Estimate bytes per row: 8 bytes per float64 column
+    BYTES_PER_CELL = 8
+
+    file_info = []  # (path, estimated_bytes)
+    for f in files:
+        try:
+            meta = pq.read_metadata(str(f))
+            n_cols = len(columns) if columns else meta.num_columns
+            est = meta.num_rows * n_cols * BYTES_PER_CELL
+            file_info.append((f, est))
+        except Exception:
+            # Corrupt — will be skipped later, include with 0 estimate
+            file_info.append((f, 0))
+
+    total_est = sum(est for _, est in file_info)
+    if total_est <= max_bytes:
+        return files
+
+    import warnings
+    warnings.warn(
+        f"Estimated memory {total_est / 1024**2:.0f} MB exceeds "
+        f"limit {max_memory_mb:.0f} MB — loading most recent files only"
+    )
+
+    # Keep most recent files (end of sorted list) that fit within budget
+    kept = []
+    budget = max_bytes
+    for fpath, est in reversed(file_info):
+        if budget - est < 0 and kept:
+            break
+        kept.append(fpath)
+        budget -= est
+    kept.reverse()
+    return kept
 
 
 def _detect_timestamp_column(df: pd.DataFrame) -> Optional[str]:

@@ -10,6 +10,9 @@ primary_symbol = "BTC"
 state_file = "data/alpha/pipeline_state.json"
 log_file = "logs/alpha_pipeline.log"
 report_dir = "reports"
+# start_date = "2026-05-06"   # uncomment to filter by directory date
+# end_date = "2026-05-18"     # uncomment to filter by directory date
+# max_memory_mb = 2000.0      # uncomment to cap in-memory size
 
 # ── Step 1: Feature Screening ──
 [screener]

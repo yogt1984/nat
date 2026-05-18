@@ -409,7 +409,12 @@ def run_pipeline(
         try:
             from cluster_pipeline.loader import load_parquet
             from cluster_pipeline.preprocess import aggregate_bars
-            df = load_parquet(pipe_cfg["data_dir"])
+            df = load_parquet(
+                pipe_cfg["data_dir"],
+                start_date=pipe_cfg.get("start_date"),
+                end_date=pipe_cfg.get("end_date"),
+                max_memory_mb=pipe_cfg.get("max_memory_mb"),
+            )
             bars = aggregate_bars(df, timeframe=pipe_cfg["timeframe"])
             price_col = config["screener"].get("price_col", "raw_midprice")
             price_mean_col = f"{price_col}_mean"
@@ -487,7 +492,12 @@ def run_pipeline(
             import polars as pl
             from cluster_pipeline.loader import load_parquet
             from cluster_pipeline.preprocess import aggregate_bars
-            df_pd = load_parquet(pipe_cfg["data_dir"])
+            df_pd = load_parquet(
+                pipe_cfg["data_dir"],
+                start_date=pipe_cfg.get("start_date"),
+                end_date=pipe_cfg.get("end_date"),
+                max_memory_mb=pipe_cfg.get("max_memory_mb"),
+            )
             bars = aggregate_bars(df_pd, timeframe=pipe_cfg["timeframe"])
             df_pl = pl.from_pandas(bars) if not isinstance(bars, pl.DataFrame) else bars
         except Exception as e:
