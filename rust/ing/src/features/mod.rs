@@ -11,7 +11,7 @@
 //! | Raw | 10 | `raw_` | All working | Gatheral & Oomen (2010) |
 //! | Imbalance | 8 | `imbalance_` | All working | Cont, Stoikov & Talreja (2010) |
 //! | Flow | 12 | `flow_` | All working | — |
-//! | Volatility | 8 | `vol_` | 6 working, 2 placeholder | Parkinson (1980) |
+//! | Volatility | 8 | `vol_` | All working | Parkinson (1980) |
 //! | Entropy | 24 | `ent_` | All warmup-dependent | Bandt & Pompe (2002) |
 //! | Context | 12 | `ctx_` | All working | — |
 //! | Trend | 15 | `trend_` | All working | Jegadeesh & Titman (1993) |
@@ -298,6 +298,8 @@ pub struct FeatureComputer {
     depth_buffer: RingBuffer<f64>,
     /// Resilience tracker state machine (5.1)
     resilience_tracker: ResilienceTracker,
+    /// Hourly vol_1m history for z-score normalization (1 hour at 100ms = 36,000 samples)
+    vol_1m_buffer: RingBuffer<f64>,
 }
 
 impl FeatureComputer {
@@ -305,13 +307,14 @@ impl FeatureComputer {
     pub fn new(config: &FeaturesConfig) -> Self {
         Self {
             _config: config.clone(),
-            spread_buffer: RingBuffer::new(600),   // 1 minute at 100ms
+            spread_buffer: RingBuffer::new(600),    // 1 minute at 100ms
             midprice_buffer: RingBuffer::new(3000), // 5 minutes at 100ms
-            entropy_buffer: RingBuffer::new(600),  // 1 minute at 100ms
-            imbalance_buffer: RingBuffer::new(16), // 16 samples for permutation entropy
-            obi_buffer: RingBuffer::new(600),      // 1 minute at 100ms for OBI dynamics
-            depth_buffer: RingBuffer::new(600),    // 1 minute at 100ms for depth recovery
+            entropy_buffer: RingBuffer::new(600),   // 1 minute at 100ms
+            imbalance_buffer: RingBuffer::new(16),  // 16 samples for permutation entropy
+            obi_buffer: RingBuffer::new(600),       // 1 minute at 100ms for OBI dynamics
+            depth_buffer: RingBuffer::new(600),     // 1 minute at 100ms for depth recovery
             resilience_tracker: ResilienceTracker::new(),
+            vol_1m_buffer: RingBuffer::new(36_000), // 1 hour at 100ms for vol z-score
         }
     }
 
@@ -342,7 +345,14 @@ impl FeatureComputer {
         let raw = raw::compute(order_book);
         let imbalance = imbalance::compute(order_book);
         let flow = flow::compute(trade_buffer);
-        let volatility = volatility::compute(price_buffer, order_book);
+        let volatility = volatility::compute(
+            price_buffer, order_book,
+            &self.spread_buffer, &self.vol_1m_buffer,
+        );
+
+        // Push current vol_1m into hourly history for z-score computation
+        self.vol_1m_buffer.push(volatility.returns_1m);
+
         let entropy = entropy::compute(
             price_buffer, order_book, trade_buffer,
             &self.imbalance_buffer, &self.spread_buffer, &self.entropy_buffer,

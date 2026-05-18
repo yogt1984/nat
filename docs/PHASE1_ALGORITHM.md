@@ -107,10 +107,10 @@ Realized and range-based estimators. Ref: Parkinson (1980).
 | `vol_returns_5m` | RV over 300 ticks | [0, 0.01%] |
 | `vol_parkinson_5m` | sigma_P = ln(H/L) / sqrt(4 * ln(2)), 300 ticks | [0, 0.05%] |
 | `vol_spread_mean_1m` | Point-in-time spread (misnomer) | [1, 9] |
-| `vol_spread_std_1m` | **Placeholder: always 0.0** | 0 |
+| `vol_spread_std_1m` | std(spread), 600 ticks (1 min) | [0, +inf) |
 | `vol_midprice_std_1m` | std(P_mid) over 60 ticks | [0, 14.85] |
 | `vol_ratio_short_long` | RV_1m / RV_5m | [0, 1.25] |
-| `vol_zscore` | **Placeholder: always 0.0** | 0 |
+| `vol_zscore` | (vol_1m − mean_1h) / std_1h, clamped ±10 | (−10, +10) |
 
 ### Category 5: Entropy (24 features)
 
