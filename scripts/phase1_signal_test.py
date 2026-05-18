@@ -17,7 +17,6 @@ Usage:
 """
 
 import argparse
-import glob
 import sys
 from pathlib import Path
 
@@ -26,21 +25,33 @@ import polars as pl
 import lightgbm as lgb
 from sklearn.metrics import accuracy_score, classification_report
 
+# Add scripts to path for cluster_pipeline imports
+sys.path.insert(0, str(Path(__file__).parent))
 
-def load_all_data(data_dir: str, symbol: str) -> pl.DataFrame:
-    """Load and concatenate all parquet files for a symbol."""
-    files = sorted(glob.glob(f"{data_dir}/**/*.parquet", recursive=True))
-    dfs = []
-    for f in files:
-        try:
-            df = pl.read_parquet(f)
-            dfs.append(df.filter(pl.col("symbol") == symbol))
-        except Exception as e:
-            print(f"  SKIP {f}: {e}")
-    if not dfs:
-        print(f"ERROR: no data found for {symbol}")
-        sys.exit(1)
-    df = pl.concat(dfs).sort("timestamp_ns")
+from cluster_pipeline.loader import load_parquet
+
+
+def load_all_data(
+    data_dir: str,
+    symbol: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    max_memory_mb: float | None = None,
+) -> pl.DataFrame:
+    """Load and concatenate all parquet files for a symbol.
+
+    Uses the hardened loader with date-range filtering and memory guard
+    to avoid OOM when data_dir contains many days of data.
+    """
+    df_pd = load_parquet(
+        data_dir,
+        symbols=[symbol],
+        start_date=start_date,
+        end_date=end_date,
+        max_memory_mb=max_memory_mb,
+    )
+    df = pl.from_pandas(df_pd)
+    df = df.sort("timestamp_ns")
     # deduplicate by timestamp
     df = df.unique(subset=["timestamp_ns"], keep="first")
     print(f"Loaded {df.shape[0]:,} rows for {symbol}")
@@ -339,15 +350,28 @@ def main():
                         help="Data directory (default: data/features)")
     parser.add_argument("--remove-leaky", action="store_true",
                         help="Remove leaky absolute-value features (midprice, OI, volume_24h)")
+    parser.add_argument("--start-date", default=None,
+                        help="Start date for directory filtering (e.g. 2026-05-10)")
+    parser.add_argument("--end-date", default=None,
+                        help="End date for directory filtering (e.g. 2026-05-15)")
+    parser.add_argument("--max-memory-mb", type=float, default=2000.0,
+                        help="Max memory in MB for data loading (default: 2000)")
     args = parser.parse_args()
 
     print(f"Phase 1: Signal Test for {args.symbol}")
     print(f"  Horizon: {args.horizon} rows ({args.horizon * 0.1:.0f}s)")
     print(f"  Spread assumption: {args.spread_bps:.1f} bps")
+    if args.start_date or args.end_date:
+        print(f"  Date range: [{args.start_date or '...'}, {args.end_date or '...'}]")
     print()
 
     # Load data
-    df = load_all_data(args.data_dir, args.symbol)
+    df = load_all_data(
+        args.data_dir, args.symbol,
+        start_date=args.start_date,
+        end_date=args.end_date,
+        max_memory_mb=args.max_memory_mb,
+    )
     feature_cols = get_feature_columns(df, remove_leaky=args.remove_leaky)
     if args.remove_leaky:
         print(f"Feature columns: {len(feature_cols)} (leaky features REMOVED)")
