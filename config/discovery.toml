@@ -1,0 +1,33 @@
+# NAT Alpha Discovery Orchestrator Configuration
+# Continuous loop: sweep signals → train → backtest → validate → paper trade
+
+[discovery]
+cycle_interval_s = 7200          # 2 hours between cycles
+data_dir = "data/features"
+state_file = "data/discovery/orchestrator_state.json"
+log_file = "logs/discovery_orchestrator.log"
+report_dir = "reports/discovery"
+max_memory_mb = 2000.0
+start_date = ""                  # empty = all available data
+end_date = ""
+
+[discovery.sweep]
+symbols = ["BTC", "ETH", "SOL"]
+horizons = [300, 3000, 18000, 36000]  # 30s, 5min, 30min, 1h (rows at 100ms)
+
+# ── Quality Gate Thresholds ──
+[gates]
+# Step 2: Signal Sweep
+min_wf_edge = 0.005              # walk-forward accuracy - base_rate
+min_gross_bps = 0.5              # minimum gross return at best confidence threshold
+
+# Step 3: Train Model
+min_test_r2 = 0.0                # model learned something (R² > 0)
+
+# Step 4: Backtest
+min_oos_sharpe = 0.5
+max_drawdown_pct = 10.0
+cost_model = "taker"             # "taker" or "conservative"
+
+# Step 5: Alpha Pipeline
+min_alpha_phase = "VALIDATING"   # must reach at least this phase

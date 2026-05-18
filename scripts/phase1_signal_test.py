@@ -145,7 +145,11 @@ def test_1_insample(X_train, y_train, X_test, y_test, feature_names):
     for name, imp in importances[:15]:
         print(f"    {name:40s} {imp:6d}")
 
-    return model
+    test1_result = {
+        "train_acc": float(train_acc),
+        "top_features": [{"name": n, "importance": int(i)} for n, i in importances[:15]],
+    }
+    return model, test1_result
 
 
 def test_2_walkforward(df: pl.DataFrame, feature_cols: list, n_splits: int = 5):
@@ -282,6 +286,7 @@ def test_3_confidence_filtered(df: pl.DataFrame, feature_cols: list, spread_bps:
     probs = model.predict_proba(X_te)[:, 1]
 
     thresholds = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80]
+    threshold_results = []
 
     print(f"  {'Threshold':>10} | {'Trades':>7} | {'Accuracy':>8} | {'Avg Ret':>10} | "
           f"{'Net(taker)':>10} | {'Net(maker)':>10} | {'Win Rate':>8}")
@@ -329,6 +334,16 @@ def test_3_confidence_filtered(df: pl.DataFrame, feature_cols: list, spread_bps:
               f"{avg_net_maker*10000:>+9.2f}bp | "
               f"{win_rate:>8.1%}")
 
+        threshold_results.append({
+            "threshold": float(thresh),
+            "trades": int(n_trades),
+            "accuracy": float(acc),
+            "gross_bps": float(avg_gross * 10000),
+            "net_taker_bps": float(avg_net_taker * 10000),
+            "net_maker_bps": float(avg_net_maker * 10000),
+            "win_rate": float(win_rate),
+        })
+
     # Summary
     print(f"\n  Trades/hour (approx): {trades_per_hour:.0f} at lowest threshold")
     print()
@@ -337,6 +352,13 @@ def test_3_confidence_filtered(df: pl.DataFrame, feature_cols: list, spread_bps:
     print("    - If only Net(maker) > 0 — need to use limit orders")
     print("    - Higher threshold = fewer but better trades")
     print("    - Win rate > 55% with positive net = tradeable signal")
+
+    best = max(threshold_results, key=lambda r: r["gross_bps"]) if threshold_results else {}
+    return {
+        "thresholds": threshold_results,
+        "best_gross_bps": best.get("gross_bps", 0.0),
+        "best_threshold": best.get("threshold", 0.0),
+    }
 
 
 def main():
@@ -356,6 +378,8 @@ def main():
                         help="End date for directory filtering (e.g. 2026-05-15)")
     parser.add_argument("--max-memory-mb", type=float, default=2000.0,
                         help="Max memory in MB for data loading (default: 2000)")
+    parser.add_argument("--json-report", default=None,
+                        help="Write structured JSON report to this path")
     args = parser.parse_args()
 
     print(f"Phase 1: Signal Test for {args.symbol}")
@@ -394,9 +418,39 @@ def main():
     y_train, y_test = y[:split], y[split:]
 
     # Run tests
-    model = test_1_insample(X_train, y_train, X_test, y_test, feature_cols)
-    results = test_2_walkforward(df, feature_cols)
-    test_3_confidence_filtered(df, feature_cols, args.spread_bps, args.horizon)
+    model, test1_result = test_1_insample(X_train, y_train, X_test, y_test, feature_cols)
+    wf_results = test_2_walkforward(df, feature_cols)
+    test3_result = test_3_confidence_filtered(df, feature_cols, args.spread_bps, args.horizon)
+
+    # Write JSON report if requested
+    if args.json_report:
+        import json
+        avg_acc = np.mean([r["accuracy"] for r in wf_results])
+        avg_base = np.mean([r["base_rate"] for r in wf_results])
+        avg_sharpe = np.mean([r["sharpe"] for r in wf_results])
+        report = {
+            "symbol": args.symbol,
+            "horizon": args.horizon,
+            "spread_bps": args.spread_bps,
+            "n_rows": int(len(df)),
+            "n_features": len(feature_cols),
+            "target_up_pct": float(up_pct),
+            "mean_forward_return_bps": float(df["forward_return"].mean() * 10000),
+            "test1_train_acc": test1_result["train_acc"],
+            "test1_top_features": test1_result["top_features"],
+            "test2_avg_accuracy": float(avg_acc),
+            "test2_avg_base_rate": float(avg_base),
+            "test2_avg_edge": float(avg_acc - avg_base),
+            "test2_avg_sharpe": float(avg_sharpe),
+            "test2_splits": wf_results,
+            "test3_thresholds": test3_result["thresholds"],
+            "test3_best_gross_bps": test3_result["best_gross_bps"],
+            "test3_best_threshold": test3_result["best_threshold"],
+        }
+        Path(args.json_report).parent.mkdir(parents=True, exist_ok=True)
+        with open(args.json_report, "w") as f:
+            json.dump(report, f, indent=2)
+        print(f"\nJSON report written to {args.json_report}")
 
     print("\n" + "=" * 60)
     print("NEXT STEPS")

@@ -76,6 +76,12 @@ Steps: (1) feature screening with FDR, (2) signal combination, (3) position sizi
 
 CLI: `start`, `resume` (with `--force-gate`), `status`, `gates`, `run-step N`. Makefile targets: `alpha_pipeline`, `alpha_pipeline_resume`, `alpha_pipeline_force`, `alpha_pipeline_status`, `alpha_pipeline_gates`, `alpha_pipeline_step`.
 
+### Alpha Discovery Orchestrator (Python)
+
+`scripts/discovery_orchestrator.py`: Continuous daemon that sweeps (symbol, horizon) combos for alpha signals, then pipelines winners through train → backtest → validate. All child scripts called via subprocess (not imported) to prevent OOM. Config in `config/discovery.toml`. State persisted in `data/discovery/orchestrator_state.json`.
+
+Cycle: DATA_HEALTH → SIGNAL_SWEEP → TRAINING → BACKTESTING → ALPHA_PIPELINE → REPORTING → SLEEPING. Signal sweep uses `phase1_signal_test.py --json-report` for structured output. Gates at each step (PASS/WEAK/FAIL). CLI: `start`, `once`, `status`, `stop`. Makefile targets: `discovery_start`, `discovery_once`, `discovery_status`, `discovery_stop`.
+
 ### Autonomous Research Agent (Python)
 
 `scripts/agent/daemon.py`: MANIFEST → GENERATE → EXECUTE → FDR → MONITOR → SLEEP. State persisted in `data/agent/agent_state.json`. 5-gate protocol per hypothesis: discovery (IC+dIC) → cost → temporal replication → symbol replication → correlation dedup. FDR control (BH q=0.05) at end of each cycle. Computation cache in `scripts/agent/cache.py` (SHA-256 keys, 7-day TTL). Web dashboard in `scripts/agent_dashboard.py` (stdlib HTTP on port 8060).

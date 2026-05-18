@@ -1011,6 +1011,29 @@ agent_watchdog_remove:
 	@echo "Watchdog removed"
 
 # =============================================================================
+# ALPHA DISCOVERY ORCHESTRATOR
+# =============================================================================
+
+DISCOVERY_CONFIG ?= config/discovery.toml
+
+discovery_start:
+	@echo "Starting Alpha Discovery Orchestrator..."
+	@-pkill -f 'discovery_orchestrator.py start' 2>/dev/null; sleep 1
+	@tmux kill-session -t nat-discovery 2>/dev/null || true
+	tmux new-session -d -s nat-discovery '$(PYTHON) scripts/discovery_orchestrator.py --config $(DISCOVERY_CONFIG) start; read'
+	@echo "Orchestrator running in tmux session 'nat-discovery'"
+
+discovery_once:
+	$(PYTHON) scripts/discovery_orchestrator.py --config $(DISCOVERY_CONFIG) once
+
+discovery_status:
+	@$(PYTHON) scripts/discovery_orchestrator.py --config $(DISCOVERY_CONFIG) status
+
+discovery_stop:
+	@echo "Stopping Discovery Orchestrator..."
+	@-pkill -f 'discovery_orchestrator.py start' 2>/dev/null && echo "Stopped" || echo "Not running"
+
+# =============================================================================
 # HELP
 # =============================================================================
 
