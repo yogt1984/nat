@@ -383,8 +383,9 @@ def step_train(
 
     cmd = [
         sys.executable, "scripts/train_baseline.py",
-        "--snapshot", config["discovery"]["data_dir"],
+        "--data-dir", config["discovery"]["data_dir"],
         "--model", "lightgbm",
+        "--symbol", symbol,
         "--horizon", str(horizon),
         "--output-dir", str(models_dir),
         "--no-tracking",
