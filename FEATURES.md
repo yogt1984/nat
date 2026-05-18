@@ -1,12 +1,12 @@
 # Feature Manifest
 
-191 features extracted from Hyperliquid WebSocket market data at 100ms intervals.
+209 features extracted from Hyperliquid WebSocket market data at 100ms intervals.
 
 ## Overview
 
-- **Base features** (123): Always computed from order book, trades, and market context.
-- **Optional features** (68): Require additional data sources or warmup. Padded with NaN when absent.
-- **Data contract**: `Features::to_vec()` returns exactly 191 elements. `Features::names_all()` returns matching column names. Parquet schema built from `names_all()` in `output/schema.rs`.
+- **Base features** (138): Always computed from order book, trades, and market context.
+- **Optional features** (71): Require additional data sources or warmup. Padded with NaN when absent.
+- **Data contract**: `Features::to_vec()` returns exactly 209 elements. `Features::names_all()` returns matching column names. Parquet schema built from `names_all()` in `output/schema.rs`.
 - **Emission rate**: ~10 rows/sec per symbol (30 rows/sec for 3 symbols). Buffer flushes every 10,000 rows (~5.5 min).
 
 ## Summary
