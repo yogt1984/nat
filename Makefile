@@ -1,7 +1,7 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner dashboard test_dashboard signal_test signal_test_all exp_start exp_stop exp_status exp_check exp_midweek exp_analyze eamm_run eamm_regime eamm_backtest eamm_test eamm_test_integration 15m 15m_offline 15m_viz test_15m agent_start agent_stop agent_status agent_report agent_dashboard test_agent agent_watchdog_install agent_watchdog_remove
+.PHONY: all run run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner dashboard test_dashboard signal_test signal_test_all exp_start exp_stop exp_status exp_check exp_midweek exp_analyze eamm_run eamm_regime eamm_backtest eamm_test eamm_test_integration 15m 15m_offline 15m_viz test_15m agent_start agent_stop agent_status agent_report agent_dashboard test_agent agent_watchdog_install agent_watchdog_remove alpha_pipeline alpha_pipeline_resume alpha_pipeline_force alpha_pipeline_status alpha_pipeline_gates alpha_pipeline_step
 
 # Python interpreter — prefer 'python' (often conda/venv) over system 'python3'.
 # Override with: make PYTHON=/usr/bin/python3
@@ -685,6 +685,43 @@ pipeline_stop:
 pipeline_status:
 	@$(PYTHON) scripts/pipeline_runner.py --config $(PIPELINE_CONFIG) status
 
+# =============================================================================
+# ALPHA PIPELINE (Signal → Portfolio → Deployment)
+# =============================================================================
+
+ALPHA_CONFIG ?= config/alpha.toml
+
+# Start the alpha pipeline from scratch
+alpha_pipeline:
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          STARTING ALPHA PIPELINE                                ║"
+	@echo "║  SCREEN → COMBINE → SIZE → VALIDATE → REGIME → PORTFOLIO → … ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	$(PYTHON) scripts/alpha/alpha_pipeline.py --config $(ALPHA_CONFIG) start
+
+# Resume alpha pipeline after interruption or gate failure
+alpha_pipeline_resume:
+	@echo "Resuming alpha pipeline from saved state..."
+	$(PYTHON) scripts/alpha/alpha_pipeline.py --config $(ALPHA_CONFIG) resume
+
+# Resume alpha pipeline, forcing past a failed gate
+alpha_pipeline_force:
+	@echo "Resuming alpha pipeline (forcing past failed gate)..."
+	$(PYTHON) scripts/alpha/alpha_pipeline.py --config $(ALPHA_CONFIG) resume --force-gate
+
+# Show alpha pipeline status
+alpha_pipeline_status:
+	@$(PYTHON) scripts/alpha/alpha_pipeline.py --config $(ALPHA_CONFIG) status
+
+# Show alpha pipeline gate verdicts
+alpha_pipeline_gates:
+	@$(PYTHON) scripts/alpha/alpha_pipeline.py --config $(ALPHA_CONFIG) gates
+
+# Run a single alpha pipeline step (e.g., make alpha_pipeline_step STEP=1)
+alpha_pipeline_step:
+	$(PYTHON) scripts/alpha/alpha_pipeline.py --config $(ALPHA_CONFIG) run-step $(STEP)
+
 # Run pipeline runner tests
 test_pipeline_runner:
 	@echo "╔══════════════════════════════════════════════════════════════════╗"
@@ -1078,6 +1115,16 @@ help:
 	@echo "  test_pipeline_runner Run pipeline runner tests"
 	@echo "  dashboard           Start read-only pipeline dashboard (port $(DASHBOARD_PORT))"
 	@echo "  test_dashboard      Run dashboard tests"
+	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " ALPHA PIPELINE (Signal → Portfolio → Deployment)"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  alpha_pipeline        Start alpha pipeline: screen → combine → … → deploy"
+	@echo "  alpha_pipeline_resume Resume after interruption (from saved state)"
+	@echo "  alpha_pipeline_force  Resume, forcing past a failed gate"
+	@echo "  alpha_pipeline_status Show current alpha pipeline state"
+	@echo "  alpha_pipeline_gates  Show gate verdicts table"
+	@echo "  alpha_pipeline_step   Run single step (STEP=1..9)"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " PHASE 1: SIGNAL TESTING"

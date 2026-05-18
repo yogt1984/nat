@@ -68,6 +68,14 @@ When adding a new feature category:
 
 `scripts/pipeline_runner.py`: IDLE → BUILDING → INGESTING → COLLECTING → ANALYZING → DONE. State persisted in `data/pipeline_state.json` for resume-on-interrupt.
 
+### Alpha Pipeline (Python)
+
+`scripts/alpha/alpha_pipeline.py`: IDLE → SCREENING → COMBINING → SIZING → VALIDATING → REGIME → MULTI_FREQ → PORTFOLIO → PAPER → DEPLOYING → DONE. Chains 9 alpha modules with quality gates (PASS/WEAK/FAIL) between each step. Config in `config/alpha.toml`. State persisted in `data/alpha/pipeline_state.json`.
+
+Steps: (1) feature screening with FDR, (2) signal combination, (3) position sizing, (4) walk-forward validation, (5) regime conditioning, (6) multi-frequency integration, (7) portfolio assembly, (8) paper trading simulation, (9) deployment readiness. Gate thresholds in `[gates]` section of config.
+
+CLI: `start`, `resume` (with `--force-gate`), `status`, `gates`, `run-step N`. Makefile targets: `alpha_pipeline`, `alpha_pipeline_resume`, `alpha_pipeline_force`, `alpha_pipeline_status`, `alpha_pipeline_gates`, `alpha_pipeline_step`.
+
 ### Autonomous Research Agent (Python)
 
 `scripts/agent/daemon.py`: MANIFEST → GENERATE → EXECUTE → FDR → MONITOR → SLEEP. State persisted in `data/agent/agent_state.json`. 5-gate protocol per hypothesis: discovery (IC+dIC) → cost → temporal replication → symbol replication → correlation dedup. FDR control (BH q=0.05) at end of each cycle. Computation cache in `scripts/agent/cache.py` (SHA-256 keys, 7-day TTL). Web dashboard in `scripts/agent_dashboard.py` (stdlib HTTP on port 8060).
@@ -100,6 +108,7 @@ Release profile: LTO, single codegen unit, panic=abort, stripped.
 - `config/ing.toml` — Ingestor (WebSocket URL, symbols, emission interval, output format)
 - `config/agent.toml` — Agent daemon (cycle interval, 5-gate thresholds, FDR q, promotion criteria)
 - `config/pipeline.toml` — Pipeline orchestration (ingestion duration, analysis thresholds)
+- `config/alpha.toml` — Alpha pipeline (gate thresholds G1-G8, step parameters, symbols)
 - `config/hypothesis_testing.toml` — Hypothesis test parameters
 
 Environment overrides: `RUST_LOG`, `REDIS_URL`, `ING_DASHBOARD_ENABLED`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.

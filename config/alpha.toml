@@ -1,0 +1,99 @@
+# NAT Alpha Pipeline Configuration
+# State machine: IDLE → SCREENING → COMBINING → SIZING → VALIDATING
+#                    → REGIME → MULTI_FREQ → PORTFOLIO → PAPER → DEPLOYING → DONE
+
+[pipeline]
+data_dir = "data/features"
+timeframe = "15min"
+symbols = ["BTC", "ETH", "SOL"]
+primary_symbol = "BTC"
+state_file = "data/alpha/pipeline_state.json"
+log_file = "logs/alpha_pipeline.log"
+report_dir = "reports"
+
+# ── Step 1: Feature Screening ──
+[screener]
+fdr_alpha = 0.05               # Benjamini-Hochberg FDR threshold
+min_ic = 0.015                 # Minimum |IC| to be considered
+min_breakeven_bps = 2.0        # Minimum breakeven cost in bps
+price_col = "raw_midprice"
+
+# ── Step 2: Signal Combination ──
+[combiner]
+top_n = 20                     # Top features by |IC| to combine
+max_corr = 0.8                 # Correlation dedup threshold
+method = "equal"               # "equal" or "ic_weighted"
+
+# ── Step 3: Position Sizing ──
+[position]
+cost_multiplier = 1.5          # E[gain] > cost * multiplier to trade
+scale = 1.0                    # Kelly fraction
+ramp_bars = 2880               # ~30 days warmup at 15min bars
+ramp_fraction = 0.5            # Scale during ramp period
+bar_minutes = 15.0
+
+# ── Step 4: Walk-Forward Validation ──
+[validation]
+entry_threshold = 0.3          # |signal| > threshold to enter
+n_splits = 5                   # Walk-forward folds
+embargo_bars = 600             # Purging gap between train/test
+directions = ["long", "short"]
+
+# ── Step 5: Regime Conditioning ──
+[regime]
+improvement_threshold = 1.5    # IC_regime / IC_global must exceed this
+top_n = 10                     # Features to test per regime
+model_path = ""                # GMM model JSON (empty = auto-detect)
+
+# ── Step 6: Multi-Frequency Integration ──
+[multi_freq]
+signal_path = ""               # Empty = use pipeline-generated signal
+
+# ── Step 7: Portfolio Assembly ──
+# Uses pipeline.symbols for multi-asset allocation
+
+# ── Step 8: Paper Trading ──
+[paper]
+backtest_sharpe = 1.0          # Baseline from validation (overridden at runtime)
+backtest_ic = 0.03             # Baseline IC (overridden at runtime)
+
+# ── Step 9: Deployment ──
+# Reads paper trading report from artifacts
+
+# ── Quality Gate Thresholds ──
+[gates]
+# G1: Screener — significant features after FDR correction
+g1_min_significant = 5         # PASS threshold
+g1_weak_significant = 1        # WEAK threshold (0 = FAIL)
+
+# G2: Combiner — composite signal quality
+g2_ic_ratio = 0.8              # combined_ic > ratio * max_individual
+g2_max_turnover_ratio = 2.0    # combined_turnover < ratio * avg_individual
+g2_max_single_corr = 0.9       # max correlation with any single feature
+
+# G3: Position sizing — cost-aware filtering
+g3_min_trade_reduction_pct = 50.0  # Must filter out at least 50% of trades
+g3_min_holding_hours = 2.0         # Mean holding time
+
+# G4: Walk-forward validation (6 sub-gates)
+g4_min_oos_sharpe = 0.5
+g4_min_oos_is_ratio = 0.7         # OOS/IS Sharpe ratio
+g4_max_deflated_sharpe_p = 0.05   # Multiple-testing correction
+g4_max_drawdown_pct = 5.0
+g4_min_trades = 30
+g4_min_profit_factor = 1.2
+
+# G5: Regime — at least one regime with improved IC
+g5_min_ic_ratio = 1.5
+
+# G6: Multi-freq — composite improves over individual
+# (no numeric threshold — it's a comparison)
+
+# G7: Portfolio — diversification benefit
+g7_dd_ratio = 0.8                  # portfolio DD < ratio * worst individual
+
+# G8: Paper trading — live stability
+g8_min_sharpe_ratio = 0.5         # paper_sharpe / backtest_sharpe
+g8_max_daily_loss_pct = 2.0
+g8_max_ic_decay_pct = 50.0
+g8_min_days = 14
