@@ -1,0 +1,99 @@
+# Algorithm Configuration
+# Each section maps to constructor kwargs for the corresponding algorithm.
+# Modify parameters here to tune algorithm behavior without changing code.
+
+[evaluation]
+symbols = ["BTC", "ETH", "SOL"]
+horizons = [1, 5, 10, 50, 100]
+regime_feature = "ent_book_shape"
+regime_percentile = 30
+
+# ── Group A: Order Flow ─────────────────────────────────────────
+
+[weighted_ofi]
+decay_lambda = 0.5          # exponential depth decay rate
+ema_span = 50               # ticks for OFI momentum EMA
+
+[trade_through]
+volume_window = 10           # ticks to accumulate volume
+aggressor_window = 50        # ticks for aggressor ratio smoothing
+
+[propagator]
+decay_exponent = 0.5         # power-law exponent (Bouchaud 2004)
+impact_window = 100          # ticks for impact estimation
+permanent_ema_span = 500     # EMA span for permanent component
+
+# ── Group B: Hawkes ──────────────────────────────────────────────
+
+[hawkes_intensity]
+baseline_window = 300        # ticks for baseline estimation
+decay_beta = 0.1             # exponential decay rate
+alpha_fraction = 0.5         # branching ratio (must be < 1)
+
+# ── Group C: Volatility & Jump ───────────────────────────────────
+
+[jump_detector]
+window = 100                 # rolling window for Lee-Mykland statistic
+significance = 3.0           # z-threshold for jump detection
+reversion_horizon = 50       # ticks to measure post-jump reversion
+
+[bipower_jump]
+window = 100                 # rolling window for bipower variation
+
+# ── Group D: Toxicity ────────────────────────────────────────────
+
+[vpin_regime]
+vpin_threshold_pct = 80      # percentile for toxic regime
+momentum_span = 50           # EMA span for VPIN momentum
+gate_window = 300            # rolling window for percentile
+
+[spread_decomp]
+ema_span = 100               # EMA span for trend smoothing
+regime_window = 300          # rolling window for spread regime
+regime_percentile = 70       # adverse threshold percentile
+
+# ── Group E: Entropy ─────────────────────────────────────────────
+
+[entropy_momentum]
+low_entropy_pct = 30         # percentile below which = "predictable"
+momentum_window = 300        # rolling window for entropy percentile
+
+[surprise_signal]
+roc_window = 50              # ticks for rate-of-change
+transition_threshold = 2.0   # z-score for regime transition
+
+# ── Group F: Cross-Asset ─────────────────────────────────────────
+
+[funding_reversion]
+zscore_entry = 2.0           # z-score threshold for signal
+momentum_span = 100          # EMA span for funding momentum
+premium_weight = 0.3         # weight of premium_bps in composite
+
+[oi_divergence]
+price_window = 300           # ticks for price trend estimation
+oi_window = 300              # ticks for OI trend estimation
+
+# ── Group G: Latent State ────────────────────────────────────────
+
+[switching_ou]
+theta_fast = 0.5             # mean-reversion speed, fast regime
+theta_slow = 0.05            # mean-reversion speed, slow regime
+transition_rate = 0.01       # prior transition probability per tick
+dt = 0.1                     # tick interval in seconds
+
+[optimal_entry]
+theta = 0.1                  # OU theta for internal Kalman
+sigma_process = 0.01         # process noise
+sigma_obs = 0.1              # observation noise
+dt = 0.1                     # tick interval
+sprt_drift = 0.001           # drift under H1
+alpha_error = 0.05           # type-I error
+beta_error = 0.20            # type-II error
+
+# ── Group H: Meta ────────────────────────────────────────────────
+
+[online_ridge]
+lambda_reg = 1.0             # L2 regularization
+learning_rate = 0.01         # step size for online update
+max_features = 20            # cap on input features
+update_interval = 10         # ticks between coefficient updates
