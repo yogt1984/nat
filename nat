@@ -8,10 +8,12 @@ Run 'nat help' for full command reference.
 from __future__ import annotations
 
 import argparse
+import json as _json
 import os
 import signal as sig
 import subprocess
 import sys
+import textwrap
 import time
 from datetime import datetime
 from pathlib import Path
@@ -74,6 +76,18 @@ def _data(args):
 
 def _sym(args):
     return getattr(args, 'symbol', None) or 'BTC'
+
+
+def _json_mode(args):
+    return getattr(args, 'json', False)
+
+
+def _output(data: dict, args, human_fn=None):
+    """Output data as JSON or human-readable. If human_fn provided, call it for human output."""
+    if _json_mode(args):
+        print(_json.dumps(data, indent=2, default=str))
+    elif human_fn:
+        human_fn(data)
 
 
 def _ensure_release():
@@ -159,24 +173,47 @@ def cmd_stop(args):
 def cmd_status(args):
     """One-line health check."""
     pid = _pid()
-    if pid:
-        _p("*", G, f"Ingestor: RUNNING (PID {pid})")
-    else:
-        _p("*", R, "Ingestor: STOPPED")
 
+    # Gather data stats
+    data_info = {"files": 0, "size_mb": 0, "days": 0, "date_range": None, "last_write_s": None}
     if DATA_DEFAULT.exists():
         parquets = list(DATA_DEFAULT.rglob("*.parquet"))
         stats = [(f, f.stat()) for f in parquets]
         valid_stats = [(f, s) for f, s in stats if s.st_size > 0]
         total_size = sum(s.st_size for _, s in valid_stats)
         days = sorted(set(p.parent.name for p in parquets))
-
-        _p("+", B, f"Data: {len(valid_stats)} files, {total_size / 1e6:.0f} MB, {len(days)} days")
+        data_info["files"] = len(valid_stats)
+        data_info["size_mb"] = round(total_size / 1e6, 1)
+        data_info["days"] = len(days)
         if days:
-            _p(" ", W, f"Range: {days[0]} to {days[-1]}")
+            data_info["date_range"] = [days[0], days[-1]]
         if stats:
-            newest = max(s.st_mtime for _, s in stats)
-            age = time.time() - newest
+            data_info["last_write_s"] = round(time.time() - max(s.st_mtime for _, s in stats), 1)
+
+    watchdog_active = "pgrep -x ing" in (_sh("crontab -l 2>/dev/null").stdout or "")
+    dashboard_running = _sh("tmux has-session -t nat-dashboard 2>/dev/null").returncode == 0
+
+    if _json_mode(args):
+        _output({
+            "ingestor": {"running": pid is not None, "pid": pid},
+            "data": data_info,
+            "watchdog": watchdog_active,
+            "dashboard": dashboard_running,
+        }, args)
+        return
+
+    # Human output
+    if pid:
+        _p("*", G, f"Ingestor: RUNNING (PID {pid})")
+    else:
+        _p("*", R, "Ingestor: STOPPED")
+
+    if data_info["files"] > 0:
+        _p("+", B, f"Data: {data_info['files']} files, {data_info['size_mb']:.0f} MB, {data_info['days']} days")
+        if data_info["date_range"]:
+            _p(" ", W, f"Range: {data_info['date_range'][0]} to {data_info['date_range'][1]}")
+        age = data_info["last_write_s"]
+        if age is not None:
             if age < 300:
                 _p("+", G, f"Last write: {age:.0f}s ago")
             elif age < 3600:
@@ -186,14 +223,12 @@ def cmd_status(args):
     else:
         _p("+", R, "Data: no data directory")
 
-    r = _sh("crontab -l 2>/dev/null")
-    if "pgrep -x ing" in (r.stdout or ""):
+    if watchdog_active:
         _p("~", G, "Watchdog: active")
     else:
         _p("~", Y, "Watchdog: not installed (run: nat start)")
 
-    r = _sh("tmux has-session -t nat-dashboard 2>/dev/null")
-    if r.returncode == 0:
+    if dashboard_running:
         _p("o", G, "Dashboard: running")
     else:
         _p("o", W, "Dashboard: not running (run: nat dashboard)")
@@ -608,13 +643,33 @@ def cmd_data(args):
     """Show data statistics."""
     dd = Path(_data(args))
     if not dd.exists():
-        _p("x", R, "No data directory")
+        if _json_mode(args):
+            _output({"error": "No data directory", "path": str(dd)}, args)
+        else:
+            _p("x", R, "No data directory")
         return
     parquets = sorted(dd.rglob("*.parquet"))
     stats = [(f, f.stat()) for f in parquets]
     valid = [(f, s) for f, s in stats if s.st_size > 0]
     total_size = sum(s.st_size for _, s in valid)
     days = sorted(set(f.parent.name for f, _ in valid))
+
+    if _json_mode(args):
+        per_day = []
+        for day in days:
+            day_files = [(f, s) for f, s in valid if f.parent.name == day]
+            day_size = sum(s.st_size for _, s in day_files)
+            per_day.append({"date": day, "files": len(day_files), "size_mb": round(day_size / 1e6, 1)})
+        _output({
+            "path": str(dd),
+            "files": len(valid), "empty_files": len(parquets) - len(valid),
+            "size_mb": round(total_size / 1e6, 1),
+            "days": len(days),
+            "date_range": [days[0], days[-1]] if days else None,
+            "estimated_rows": int(total_size // 300),
+            "per_day": per_day,
+        }, args)
+        return
 
     print(f"\n  {BOLD}Data Summary{W}\n")
     print(f"  Files:     {len(valid)} ({len(parquets) - len(valid)} empty)")
@@ -812,6 +867,12 @@ def cmd_backtest_ml_tracked(args):
 
 
 def cmd_backtest_list(args):
+    if _json_mode(args):
+        # Parse strategy list from backtest module
+        r = _sh(f"{PY} scripts/run_backtest.py --list-strategies")
+        strategies = [l.strip().lstrip("- ") for l in r.stdout.strip().splitlines() if l.strip().startswith("-")]
+        _output({"strategies": strategies}, args)
+        return
     _py("scripts/run_backtest.py --list-strategies")
 
 
@@ -1091,6 +1152,13 @@ def cmd_pipeline_stop(args):
 
 
 def cmd_pipeline_status(args):
+    if _json_mode(args):
+        p = ROOT / "data" / "pipeline_state.json"
+        if p.exists():
+            print(p.read_text())
+        else:
+            _output({"error": "No pipeline state file", "state": "UNKNOWN"}, args)
+        return
     _py(f"scripts/pipeline_runner.py --config {_pipe_cfg(args)} status")
 
 
@@ -1131,15 +1199,43 @@ def cmd_agent_once(args):
     _py(f"{AGENT_SCRIPT} once")
 
 def cmd_agent_status(args):
+    if _json_mode(args):
+        p = ROOT / "data" / "agent" / "agent_state.json"
+        if p.exists():
+            print(p.read_text())
+        else:
+            _output({"error": "No agent state file", "path": str(p)}, args)
+        return
     _py(f"{AGENT_SCRIPT} status")
 
 def cmd_agent_queue(args):
+    if _json_mode(args):
+        p = ROOT / "data" / "agent" / "hypotheses.json"
+        if p.exists():
+            print(p.read_text())
+        else:
+            _output({"hypotheses": []}, args)
+        return
     _py(f"{AGENT_SCRIPT} queue")
 
 def cmd_agent_registry(args):
+    if _json_mode(args):
+        p = ROOT / "data" / "agent" / "registry.json"
+        if p.exists():
+            print(p.read_text())
+        else:
+            _output({"signals": []}, args)
+        return
     _py(f"{AGENT_SCRIPT} registry")
 
 def cmd_agent_graveyard(args):
+    if _json_mode(args):
+        p = ROOT / "data" / "agent" / "graveyard.json"
+        if p.exists():
+            print(p.read_text())
+        else:
+            _output({"failed": []}, args)
+        return
     _py(f"{AGENT_SCRIPT} graveyard")
 
 def cmd_agent_dashboard(args):
@@ -1147,6 +1243,21 @@ def cmd_agent_dashboard(args):
     _py(f"scripts/agent_dashboard.py --port {port}")
 
 def cmd_agent_report(args):
+    if _json_mode(args):
+        # Aggregate all agent JSON state files
+        agent_dir = ROOT / "data" / "agent"
+        result = {}
+        for name in ["agent_state", "registry", "graveyard", "hypotheses"]:
+            p = agent_dir / f"{name}.json"
+            if p.exists():
+                try:
+                    result[name] = _json.loads(p.read_text())
+                except _json.JSONDecodeError:
+                    result[name] = {"error": "invalid JSON"}
+            else:
+                result[name] = None
+        _output(result, args)
+        return
     _py(f"{AGENT_SCRIPT} report")
 
 
@@ -1597,6 +1708,455 @@ def cmd_spannung_regime(args):
     _py(cmd)
 
 
+# ── Algorithm commands ───────────────────────────────────────────────────────
+
+def cmd_algorithm_evaluate(args):
+    """Evaluate algorithm IC/drift on data."""
+    cmd = f"scripts/algorithms/evaluate.py --data-dir {_data(args)} --symbol {_sym(args)}"
+    alg = getattr(args, 'algorithm', None)
+    if alg:
+        cmd += f" --algorithm {alg}"
+    elif getattr(args, 'all', False):
+        cmd += " --all"
+    else:
+        cmd += " --all"
+    report = getattr(args, 'json_report', None)
+    if report:
+        cmd += f" --json-report {report}"
+    _py(cmd)
+
+
+def cmd_algorithm_list(args):
+    """List registered algorithms."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    # Import concrete algorithms to trigger @register
+    from algorithms.kalman_imbalance import KalmanImbalance  # noqa: F401
+    from algorithms.regime_gated import RegimeGatedImbalance  # noqa: F401
+    from algorithms.multi_level_imb import MultiLevelImbalance  # noqa: F401
+    from algorithms.registry import list_algorithms
+    from algorithms import get_algorithm
+    algs = list_algorithms()
+
+    if _json_mode(args):
+        result = []
+        for name in algs:
+            alg = get_algorithm(name)
+            feats = alg.alg_features()
+            result.append({
+                "name": name,
+                "features": [{"name": f.name, "warmup": f.warmup, "description": f.description} for f in feats],
+                "required_columns": alg.required_columns(),
+            })
+        _output({"algorithms": result}, args)
+        return
+
+    print(f"\n  Registered algorithms ({len(algs)}):\n")
+    for name in algs:
+        alg = get_algorithm(name)
+        feats = alg.alg_features()
+        print(f"    {BOLD}{name}{W}  ({len(feats)} features)")
+        for f in feats:
+            print(f"      - {f.name}  (warmup={f.warmup})  {f.description}")
+    print()
+
+
+# ── Discovery orchestrator ──────────────────────────────────────────────────
+
+def cmd_health(args):
+    """Comprehensive health check across all components."""
+    health = {"timestamp": datetime.now().isoformat(), "components": {}}
+
+    # Ingestor
+    pid = _pid()
+    health["components"]["ingestor"] = {"healthy": pid is not None, "pid": pid}
+
+    # Data freshness per symbol
+    data_health = {}
+    if DATA_DEFAULT.exists():
+        for sym in ["BTC", "ETH", "SOL"]:
+            sym_files = list(DATA_DEFAULT.rglob(f"*{sym}*.parquet"))
+            if sym_files:
+                newest = max(f.stat().st_mtime for f in sym_files)
+                age_s = time.time() - newest
+                data_health[sym] = {"files": len(sym_files), "last_write_s": round(age_s, 1),
+                                    "healthy": age_s < 600}
+            else:
+                data_health[sym] = {"files": 0, "healthy": False}
+    health["components"]["data"] = data_health
+
+    # Agent phase
+    agent_state_path = ROOT / "data" / "agent" / "agent_state.json"
+    if agent_state_path.exists():
+        try:
+            state = _json.loads(agent_state_path.read_text())
+            health["components"]["agent"] = {
+                "healthy": True, "phase": state.get("phase", "UNKNOWN"),
+                "cycle": state.get("cycle", 0),
+            }
+        except _json.JSONDecodeError:
+            health["components"]["agent"] = {"healthy": False, "error": "corrupt state"}
+    else:
+        health["components"]["agent"] = {"healthy": False, "error": "no state file"}
+
+    # Pipeline state
+    pipe_path = ROOT / "data" / "pipeline_state.json"
+    if pipe_path.exists():
+        try:
+            state = _json.loads(pipe_path.read_text())
+            health["components"]["pipeline"] = {
+                "healthy": True, "state": state.get("state", "UNKNOWN"),
+            }
+        except _json.JSONDecodeError:
+            health["components"]["pipeline"] = {"healthy": False, "error": "corrupt state"}
+    else:
+        health["components"]["pipeline"] = {"state": "IDLE"}
+
+    # Watchdog
+    health["components"]["watchdog"] = {
+        "active": "pgrep -x ing" in (_sh("crontab -l 2>/dev/null").stdout or "")
+    }
+
+    # Dashboard
+    health["components"]["dashboard"] = {
+        "running": _sh("tmux has-session -t nat-dashboard 2>/dev/null").returncode == 0
+    }
+
+    # Redis
+    redis_ok = _sh("redis-cli ping 2>/dev/null").stdout.strip() == "PONG"
+    health["components"]["redis"] = {"connected": redis_ok}
+
+    # Overall
+    health["healthy"] = all(
+        c.get("healthy", c.get("active", c.get("connected", True)))
+        for c in health["components"].values() if isinstance(c, dict) and "healthy" in c
+    )
+
+    if _json_mode(args):
+        _output(health, args)
+        return
+
+    _banner("System Health")
+    for name, info in health["components"].items():
+        if isinstance(info, dict):
+            ok = info.get("healthy", info.get("active", info.get("connected", None)))
+            icon, color = ("*", G) if ok else ("x", R) if ok is False else ("-", Y)
+            detail = ", ".join(f"{k}={v}" for k, v in info.items()
+                               if k not in ("healthy", "active", "connected"))
+            _p(icon, color, f"{name}: {detail}")
+        else:
+            # data_health is a dict of symbols
+            for sym, sym_info in info.items():
+                ok = sym_info.get("healthy", False)
+                icon, color = ("*", G) if ok else ("x", R)
+                _p(icon, color, f"data/{sym}: {sym_info.get('files', 0)} files, "
+                   f"last write {sym_info.get('last_write_s', '?')}s ago")
+
+
+def cmd_config_show(args):
+    """Show full merged configuration."""
+    config_dir = ROOT / "config"
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib
+
+    merged = {}
+    for toml_file in sorted(config_dir.glob("*.toml")):
+        try:
+            with open(toml_file, "rb") as f:
+                data = tomllib.load(f)
+            merged[toml_file.stem] = data
+        except Exception as e:
+            merged[toml_file.stem] = {"_error": str(e)}
+
+    if _json_mode(args):
+        _output(merged, args)
+        return
+
+    _banner("Configuration")
+    for name, data in merged.items():
+        print(f"  {BOLD}[{name}]{W} ({config_dir / name}.toml)")
+        if isinstance(data, dict) and "_error" in data:
+            _p("x", R, f"Parse error: {data['_error']}")
+        else:
+            for key, val in data.items():
+                if isinstance(val, dict):
+                    print(f"    [{key}]")
+                    for k2, v2 in val.items():
+                        print(f"      {k2} = {v2}")
+                else:
+                    print(f"    {key} = {val}")
+        print()
+
+
+def cmd_config_get(args):
+    """Get specific config value by dot-notation key."""
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib
+
+    key_parts = args.key.split(".")
+    if len(key_parts) < 2:
+        print(f"  {R}Error:{W} Use file.section.key format, e.g. 'agent.agent.ic_threshold'")
+        return 1
+
+    config_file = ROOT / "config" / f"{key_parts[0]}.toml"
+    if not config_file.exists():
+        print(f"  {R}Error:{W} Config file not found: {config_file}")
+        return 1
+
+    with open(config_file, "rb") as f:
+        data = tomllib.load(f)
+
+    val = data
+    for part in key_parts[1:]:
+        if isinstance(val, dict) and part in val:
+            val = val[part]
+        else:
+            print(f"  {R}Error:{W} Key '{args.key}' not found")
+            return 1
+
+    if _json_mode(args):
+        _output({"key": args.key, "value": val}, args)
+    else:
+        print(f"  {args.key} = {val}")
+
+
+def cmd_config_validate(args):
+    """Validate all TOML config files for syntax errors."""
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib
+
+    config_dir = ROOT / "config"
+    results = []
+    for toml_file in sorted(config_dir.glob("*.toml")):
+        try:
+            with open(toml_file, "rb") as f:
+                tomllib.load(f)
+            results.append({"file": toml_file.name, "valid": True})
+        except Exception as e:
+            results.append({"file": toml_file.name, "valid": False, "error": str(e)})
+
+    if _json_mode(args):
+        _output({"configs": results, "all_valid": all(r["valid"] for r in results)}, args)
+        return
+
+    for r in results:
+        if r["valid"]:
+            _p("*", G, f"{r['file']}: OK")
+        else:
+            _p("x", R, f"{r['file']}: {r['error']}")
+
+
+def cmd_reports(args):
+    """List all reports."""
+    reports_dir = ROOT / "reports"
+    if not reports_dir.exists():
+        if _json_mode(args):
+            _output({"reports": []}, args)
+        else:
+            _p("x", R, "No reports directory")
+        return
+
+    entries = []
+    for f in sorted(reports_dir.rglob("*"), key=lambda p: p.stat().st_mtime, reverse=True):
+        if f.is_file():
+            s = f.stat()
+            entries.append({
+                "path": str(f.relative_to(ROOT)),
+                "type": f.suffix.lstrip(".") or "unknown",
+                "size_kb": round(s.st_size / 1024, 1),
+                "modified": datetime.fromtimestamp(s.st_mtime).isoformat(),
+            })
+
+    if _json_mode(args):
+        _output({"reports": entries, "count": len(entries)}, args)
+        return
+
+    print(f"\n  {BOLD}Reports ({len(entries)}){W}\n")
+    for e in entries[:50]:
+        print(f"  {e['modified'][:10]}  {e['size_kb']:>8.1f} KB  {e['path']}")
+    if len(entries) > 50:
+        print(f"\n  ... and {len(entries) - 50} more")
+    print()
+
+
+def cmd_reports_latest(args):
+    """Show most recent report per category."""
+    reports_dir = ROOT / "reports"
+    if not reports_dir.exists():
+        if _json_mode(args):
+            _output({"latest": {}}, args)
+        else:
+            _p("x", R, "No reports directory")
+        return
+
+    categories = {}
+    for f in reports_dir.rglob("*"):
+        if not f.is_file():
+            continue
+        cat = f.parent.name if f.parent != reports_dir else "root"
+        if cat not in categories or f.stat().st_mtime > categories[cat].stat().st_mtime:
+            categories[cat] = f
+
+    if _json_mode(args):
+        result = {cat: {"path": str(f.relative_to(ROOT)),
+                        "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()}
+                  for cat, f in categories.items()}
+        _output({"latest": result}, args)
+        return
+
+    print(f"\n  {BOLD}Latest Reports by Category{W}\n")
+    for cat, f in sorted(categories.items()):
+        mtime = datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+        print(f"  {cat:20s}  {mtime}  {f.relative_to(ROOT)}")
+    print()
+
+
+def cmd_reports_show(args):
+    """Print report content."""
+    p = Path(args.path)
+    if not p.exists():
+        p = ROOT / args.path
+    if not p.exists():
+        _p("x", R, f"Not found: {args.path}")
+        return 1
+    content = p.read_text()
+    if p.suffix == ".json":
+        try:
+            data = _json.loads(content)
+            if _json_mode(args):
+                print(content)
+            else:
+                print(_json.dumps(data, indent=2, default=str))
+        except _json.JSONDecodeError:
+            print(content)
+    else:
+        print(content)
+
+
+def cmd_log_agent(args):
+    """Tail agent daemon log."""
+    # Check for agent logs in logs/ dir or stdout
+    log_patterns = [
+        LOG_DIR / "agent_*.log",
+        ROOT / "data" / "agent" / "*.log",
+    ]
+    for pattern in log_patterns:
+        logs = sorted(pattern.parent.glob(pattern.name), key=os.path.getmtime, reverse=True)
+        if logs:
+            _p(">", B, f"Tailing {logs[0].name}")
+            os.execvp("tail", ["tail", "-f", "-n", "30", str(logs[0])])
+            return
+    _p("x", Y, "No agent logs found. Agent daemon logs to stdout by default.")
+    _p(" ", W, "Start with: nat agent start 2>&1 | tee logs/agent.log")
+
+
+def cmd_log_list(args):
+    """List all log files with sizes and dates."""
+    log_dirs = [LOG_DIR, ROOT / "data" / "agent"]
+    entries = []
+    for d in log_dirs:
+        if not d.exists():
+            continue
+        for f in d.rglob("*.log"):
+            s = f.stat()
+            entries.append({
+                "path": str(f.relative_to(ROOT)),
+                "size_kb": round(s.st_size / 1024, 1),
+                "modified": datetime.fromtimestamp(s.st_mtime).isoformat(),
+            })
+    entries.sort(key=lambda e: e["modified"], reverse=True)
+
+    if _json_mode(args):
+        _output({"logs": entries, "count": len(entries)}, args)
+        return
+
+    print(f"\n  {BOLD}Log Files ({len(entries)}){W}\n")
+    for e in entries:
+        print(f"  {e['modified'][:19]}  {e['size_kb']:>8.1f} KB  {e['path']}")
+    print()
+
+
+def cmd_commands(args):
+    """List all commands with descriptions (for AI agent discovery)."""
+    parser = build_parser()
+    commands = []
+
+    def _walk(parser_obj, prefix=""):
+        for action in parser_obj._actions:
+            if not isinstance(action, argparse._SubParsersAction):
+                continue
+            # Build help lookup from _choices_actions
+            help_map = {}
+            for ca in action._choices_actions:
+                help_map[ca.dest] = ca.help or ""
+            for name, subparser in action.choices.items():
+                full_name = f"{prefix} {name}".strip() if prefix else name
+                help_text = help_map.get(name, "")
+
+                cmd_args = []
+                for a in subparser._actions:
+                    if isinstance(a, argparse._SubParsersAction):
+                        continue
+                    if a.option_strings:
+                        entry = {
+                            "name": a.option_strings[0],
+                            "help": a.help or "",
+                        }
+                        if a.default is not None and a.default != argparse.SUPPRESS:
+                            entry["default"] = str(a.default)
+                        if getattr(a, 'required', False):
+                            entry["required"] = True
+                        if a.type:
+                            entry["type"] = a.type.__name__
+                        cmd_args.append(entry)
+                    elif a.dest not in ('subcmd', 'command', 'spn_subcmd'):
+                        cmd_args.append({
+                            "name": a.dest,
+                            "help": a.help or "",
+                            "positional": True,
+                        })
+
+                commands.append({
+                    "name": full_name,
+                    "help": help_text,
+                    "args": cmd_args if cmd_args else None,
+                })
+                _walk(subparser, full_name)
+
+    _walk(parser)
+
+    if _json_mode(args):
+        _output({"commands": commands, "count": len(commands)}, args)
+    else:
+        print(f"\n  {BOLD}Available Commands ({len(commands)}){W}\n")
+        for cmd in commands:
+            print(f"    {BOLD}nat {cmd['name']}{W}")
+            if cmd['help']:
+                print(f"      {cmd['help']}")
+        print()
+
+
+def cmd_discovery_start(args):
+    _py("scripts/discovery_orchestrator.py --config config/discovery.toml start")
+
+
+def cmd_discovery_once(args):
+    _py("scripts/discovery_orchestrator.py --config config/discovery.toml once")
+
+
+def cmd_discovery_status(args):
+    _py("scripts/discovery_orchestrator.py --config config/discovery.toml status")
+
+
+def cmd_discovery_stop(args):
+    _py("scripts/discovery_orchestrator.py --config config/discovery.toml stop")
+
+
 # ── Docker commands ──────────────────────────────────────────────────────────
 
 def cmd_docker_build(args):
@@ -1656,184 +2216,178 @@ def _remove_watchdog():
 def cmd_help(args=None):
     print(f"""
   {BOLD}nat{W} -- unified NAT research terminal
+  Quantitative research platform for Hyperliquid perpetual futures.
+  Rust ingestor (209 features, 100ms) + Python analysis/ML/backtesting.
 
-  {BOLD}Data Collection{W}
+  Global: nat --json <command>   Machine-readable JSON output (for AI agents)
+
+  {BOLD}System & Monitoring{W}
+    Ingestor lifecycle, system health, and log access.
     nat start                  Start ingestor + watchdog + dashboard
     nat stop                   Stop everything
-    nat status                 One-line health check
+    nat status                 Health check (--json for structured output)
+    nat health                 Comprehensive health: ingestor + data + agent + pipeline + Redis
     nat log                    Tail ingestor log (live)
+    nat log agent              Tail agent daemon log
+    nat log list               List all log files with sizes and dates
+    nat dashboard              Start analysis dashboard (:8050)
 
-  {BOLD}Analysis{W}
-    nat profile                Run regime profiling
-    nat profile scalp          Scalping feature profiler (--symbol, --top, --forward-test)
-    nat spannung               Spannung signal grid search (--data, --symbol, --top)
-    nat spannung backtest      Spannung cost-aware backtest + regime gating
-    nat spannung horizon       Spannung longer-horizon sweep (30s–15min bars)
-    nat spannung spectral      Spannung spectral analysis (PSD, coherence, ACF, band IC)
-    nat spannung regime        Systematic regime condition screener (quintile, Pareto)
-    nat report                 Generate full experiment report
-    nat macro                  Daily MA crossover signals
-    nat screen [args]          Alpha screening
-    nat scan                   Scalp edge scanner (--symbol, --data, --tail)
-
-  {BOLD}Alpha Pipeline{W}
-    nat alpha combine          Feature combination (--symbol, --top, --method, --screen)
-    nat alpha size             Cost-aware position sizing (--signal, --ic, --vol)
-    nat alpha validate         Walk-forward validation (--signal, --direction, --n-trials)
-    nat alpha regime           Regime conditioning (--screen, --model, --symbol)
-    nat alpha multi-freq       Multi-frequency integration (--symbol, --signal)
-    nat alpha portfolio        Portfolio assembly (--symbols BTC ETH SOL)
-    nat alpha paper            Paper trading simulation (--backtest-sharpe, --backtest-ic)
-    nat alpha deploy           Deployment status & readiness (--check)
-
-  {BOLD}Visualization{W}
-    nat visualize              All visualizations (scanner + data + profiler)
-    nat visualize scan         Scanner plots (--report, --symbol, --data)
-    nat visualize data         Data quality plots (--data)
-    nat visualize profile      Cluster profiling plots
-    nat visualize hierarchy    Hierarchical profiling plots (Phase 8)
-    nat visualize cluster      Cluster exploration plots (--subset, --cluster-method)
-    nat visualize skeptical    Skeptical validation diagnostic plots (16+ PNGs)
+  {BOLD}Configuration{W}
+    Inspect and validate TOML configuration files.
+    nat config                 Show all configs merged
+    nat config get <key>       Get value (e.g., agent.agent.cycle_interval_s)
+    nat config validate        Syntax-check all TOML files
 
   {BOLD}Data{W}
-    nat data                   Show data statistics
-    nat data validate          Validate parquet data (--hours N for recent)
+    Feature data inspection and validation (Parquet files at data/features/).
+    nat data                   Summary: files, days, size, est. rows
+    nat data validate          Schema + value validation (--hours N)
     nat data explore           Launch Jupyter notebook
-    nat data schema            Scan parquet schema & vector coverage
-
-  {BOLD}Build & Dev{W}
-    nat build                  Build release binaries (default)
-    nat build debug            Build debug binary
-    nat build api              Build API server
-    nat build clean            Remove build artifacts
-    nat build fmt              Format Rust code
-    nat build lint             Run clippy
-    nat build check            Check without building
-
-  {BOLD}Run (foreground){W}
-    nat run                    Run ingestor in foreground
-    nat run serve              Ingestor + live dashboard
-    nat run show               Real-time features (--symbol, --freq)
-    nat run tunnel             Cloudflare tunnel to dashboard
-
-  {BOLD}Test{W}
-    nat test                   All Rust unit tests
-    nat test verbose           With --nocapture
-    nat test hypotheses        H1-H5 hypothesis tests
-    nat test validate [target] Live API validations (api|positions|whales|entropy)
-    nat test api               Test API endpoints
-    nat test redis             Test Redis connection
-    nat test integration       Full integration suite
-    nat test backtest          Backtest unit tests (--coverage)
-    nat test cluster           Cluster quality tests (--coverage)
-    nat test pipeline          Cluster pipeline tests (--coverage)
-    nat test pipeline-runner   Pipeline runner tests
-    nat test dashboard         Dashboard tests
-    nat test serving           Model serving tests
-    nat test eamm              EAMM tests (--integration)
-    nat test scan              Scalp edge scanner tests (--coverage)
-    nat test viz               Scanner visualization tests (--coverage)
-
-  {BOLD}Backtest{W}
-    nat backtest               Run strategy backtest (--strategy, --symbol, --data)
-    nat backtest validate      Walk-forward validation
-    nat backtest ml            ML predictions backtest (--predictions, --entry, --exit)
-    nat backtest ml-validate   ML walk-forward validation
-    nat backtest ml-quantile   ML quantile thresholds (--entry-q, --exit-q)
-    nat backtest ml-tracked    ML with experiment tracking
-    nat backtest list          List available strategies
-
-  {BOLD}Model{W}
-    nat model train            Train baseline model (--snapshot, --type)
-    nat model train-gmm       Train GMM classifier (--auto)
-    nat model list             List saved models
-    nat model score            Score data (--model, --save, --output)
-    nat model serve            Model serving API (--port, --dev, --best, --metric)
-
-  {BOLD}Cluster{W}
-    nat cluster analyze        Cluster quality (--symbol, --hours)
-    nat cluster gmm            Analyze with trained GMM
-    nat cluster all            Analyze BTC, ETH, SOL
-    nat cluster quality        Q3 predictive quality test
-    nat cluster explore        Exploratory clustering (--symbol, --subset, --method)
-    nat cluster hmm-fit        Fit HMM via Baum-Welch (--n-states, --covariance, --timeframe)
-
-  {BOLD}Validation{W}
-    nat validate skeptical     20+ statistical tests before investment (--data, --output)
-
-  {BOLD}Experiment Tracking{W}
-    nat experiment list        List experiments (--stage)
-    nat experiment get         Get details (--id)
-    nat experiment compare     Compare (--ids)
-    nat experiment best        Best by metric (--metric)
-    nat experiment workflow    Full train -> score -> backtest
-    nat experiment snapshot    Create dataset snapshot (--name, --description)
-
-  {BOLD}Pipeline (State Machine){W}
-    nat pipeline start         IDLE -> BUILD -> INGEST -> ANALYZE -> DONE
-    nat pipeline resume        Resume from saved state
-    nat pipeline analyze       Analyze existing data
-    nat pipeline stop          Stop (preserves data)
-    nat pipeline status        Show current state
-    nat pipeline dashboard     Pipeline dashboard (--port)
+    nat data schema            Parquet schema & vector coverage
 
   {BOLD}Signal Testing{W}
-    nat signal test            Test signal existence (--symbol, --horizon, --spread-bps, --remove-leaky)
-    nat signal test-all        Full sweep across all symbols
+    IC = Spearman rho(feature, forward_return). Tests feature predictiveness.
+    nat signal test            Per-feature IC at horizon h (--symbol, --horizon, --spread-bps)
+    nat signal test-all        Full sweep: all symbols x feature sets
 
-  {BOLD}EAMM{W}
-    nat eamm run               Full EAMM pipeline (--symbol, --horizon, --mode)
+  {BOLD}Analysis{W}
+    Regime profiling, signal scanning, macro indicators.
+    nat profile                Regime profiling (permutation entropy, Parkinson vol)
+    nat profile scalp          Scalping feature profiler (--symbol, --top)
+    nat spannung               Signal grid search over (feature x horizon) pairs
+    nat spannung backtest      Cost-aware backtest + regime gating on top signals
+    nat spannung horizon       Longer-horizon sweep (30s-15min bars)
+    nat spannung spectral      PSD, coherence, ACF, frequency-band IC
+    nat spannung regime        Systematic quintile x Pareto regime screener
+    nat scan                   Scalp edge scanner: P(edge > cost | regime)
+    nat macro                  Daily MA crossover signals (7/21, 50/200, MACD, RSI)
+    nat report                 Generate full experiment report
+
+  {BOLD}Alpha Pipeline{W}
+    9-step pipeline: screen -> combine -> size -> validate -> regime ->
+    multi-freq -> portfolio -> paper -> deploy. Quality gates between each.
+    nat alpha combine          Correlation-dedup + IC-weighted combination
+    nat alpha size             Kelly criterion position sizing (f* = IC/sigma)
+    nat alpha validate         Walk-forward CV + deflated Sharpe p-value
+    nat alpha regime           Quintile regime conditioning (IC_ratio analysis)
+    nat alpha multi-freq       Multi-frequency signal integration
+    nat alpha portfolio        Multi-symbol portfolio assembly
+    nat alpha paper            Paper trading simulation
+    nat alpha deploy           Deployment readiness check
+
+  {BOLD}Algorithm Research{W}
+    Evaluate microstructure algorithms (Kalman filter, regime-gated imbalance,
+    multi-level book depth). IC at horizons [1,5,10,50,100] with regime gating.
+    nat algorithm evaluate     IC/drift evaluation (--algorithm, --all, --symbol)
+    nat algorithm list         Registered algorithms and their alg_features
+
+  {BOLD}Backtest{W}
+    Event-driven backtesting. Sharpe=(mu/sigma)*sqrt(252), MaxDD, profit factor.
+    nat backtest               Strategy backtest (--strategy, --symbol)
+    nat backtest validate      Walk-forward validation
+    nat backtest ml            ML predictions backtest (--predictions, --entry)
+    nat backtest ml-validate   ML walk-forward
+    nat backtest ml-quantile   Quantile thresholds (--entry-q, --exit-q)
+    nat backtest ml-tracked    ML + experiment tracking
+    nat backtest list          Available strategies
+
+  {BOLD}Model{W}
+    ElasticNet (L1+L2 regularization) and LightGBM (gradient boosted trees).
+    nat model train            Train baseline (--snapshot, --type elasticnet|lightgbm)
+    nat model train-gmm       Train GMM regime classifier (--auto BIC selection)
+    nat model list             List saved models
+    nat model score            Score data + evaluate (--model, --save)
+    nat model serve            REST API for model serving (--port, --best)
+
+  {BOLD}Cluster{W}
+    GMM/HMM regime classification. Baum-Welch EM with forward-backward.
+    nat cluster analyze        Cluster quality analysis (--symbol, --hours)
+    nat cluster gmm            Analyze with trained GMM model
+    nat cluster all            Analyze BTC, ETH, SOL
+    nat cluster quality        Q3 predictive quality test
+    nat cluster explore        PCA/UMAP/t-SNE visualization (--subset, --method)
+    nat cluster hmm-fit        Fit HMM via Baum-Welch (--n-states, --covariance)
+
+  {BOLD}Validation{W}
+    Statistical tests to guard against overfitting before capital deployment.
+    nat validate skeptical     20+ tests: runs, variance ratio, Ljung-Box, BDS, Hurst
+
+  {BOLD}EAMM (Market Making){W}
+    Avellaneda-Stoikov framework with entropy-aware spread and inventory penalty.
+    nat eamm run               Full pipeline (--symbol, --horizon, --mode)
     nat eamm regime            Regime analysis
-    nat eamm backtest          Stateful backtest (--gamma, --q-max)
+    nat eamm backtest          Stateful backtest (--gamma risk aversion, --q-max)
 
-  {BOLD}Agent (autonomous research){W}
-    nat agent start            Launch agent daemon (hypothesis loop)
-    nat agent stop             Graceful shutdown (SIGTERM)
-    nat agent once             Run single cycle (for testing)
-    nat agent status           Current state & generator stats
+  {BOLD}Agent (Autonomous Research){W}
+    4-agent system: microstructure (tick), medium-freq (1min-1h), macro (1h-24h),
+    meta-agent (cross-agent coordination). 5-gate protocol per hypothesis.
+    nat agent start/stop/once  Daemon lifecycle (start, stop, single cycle)
+    nat agent status           Phase + generator stats (--json for state file)
     nat agent queue            Queued hypotheses by priority
-    nat agent registry         Validated signals
-    nat agent graveyard        Failed hypotheses with reasons
-    nat agent report           Full summary (registry + graveyard + generators + cache)
-    nat agent dashboard        Web dashboard on :8060 (IC heatmap, auto-refresh)
+    nat agent registry         Validated signals (passed all gates)
+    nat agent graveyard        Failed hypotheses with gate failure reasons
+    nat agent report           Full report (registry + graveyard + generators)
+    nat agent dashboard        Web dashboard on :8060
+    nat mf-agent <cmd>         Medium-frequency agent (same subcommands)
+    nat macro-agent <cmd>      Macro agent (same subcommands)
+    nat meta-agent <cmd>       Meta-agent: portfolio, correlation, budget
 
-  {BOLD}API & Services{W}
-    nat api start              REST/WebSocket API server
-    nat api alerts             Telegram alert service
-    nat api serve-all          Full stack in tmux
+  {BOLD}Discovery{W}
+    Continuous sweep of (symbol, horizon) combos, pipelines winners through
+    train -> backtest -> validate. Config: config/discovery.toml.
+    nat discovery start        Launch orchestrator daemon
+    nat discovery once         Single sweep cycle
+    nat discovery status       Current state
+    nat discovery stop         Stop orchestrator
 
-  {BOLD}Experiment Runner{W}
-    nat exp start              Start ingestor in tmux
-    nat exp stop               Stop ingestor
-    nat exp status             Health + data stats
-    nat exp check              Daily validation (--hours)
-    nat exp midweek            Full validation + schema scan
-    nat exp analyze            End-of-experiment analysis
-    nat exp dashboard          Show dashboard URL
-    nat exp tunnel             Cloudflare tunnel
+  {BOLD}Experiment Tracking{W}
+    nat experiment list        List experiments (--stage filter)
+    nat experiment get         Details (--id)
+    nat experiment compare     Side-by-side (--ids)
+    nat experiment best        Best by metric (--metric sharpe_ratio)
+    nat experiment workflow    Full train -> score -> backtest pipeline
+    nat experiment snapshot    Create dataset snapshot (--name)
+
+  {BOLD}Pipeline (State Machine){W}
+    IDLE -> BUILDING -> INGESTING -> COLLECTING -> ANALYZING -> DONE
+    nat pipeline start/resume/analyze/stop/status/dashboard
+
+  {BOLD}Reports{W}
+    nat reports                List all reports (date, type, size)
+    nat reports latest         Most recent per category
+    nat reports show <path>    Print report content
+
+  {BOLD}Build & Dev{W}
+    nat build [debug|api|clean|fmt|lint|check]
+
+  {BOLD}Run (foreground){W}
+    nat run [serve|show|tunnel]
+
+  {BOLD}Test{W}
+    nat test [unit|verbose|hypotheses|validate|api|redis|integration|
+              backtest|cluster|pipeline|pipeline-runner|dashboard|
+              serving|eamm|scan|viz]
 
   {BOLD}Docker{W}
-    nat docker build           Build images
-    nat docker up              Start services
-    nat docker down            Stop services
-    nat docker logs            View logs
+    nat docker [build|up|down|logs]
 
   {BOLD}15-Minute Experiment{W}
-    nat 15m                    Ingest 15min → validate → profile → cluster → report
-    nat 15m --duration 300     Short 5-min experiment
-    nat 15m offline            Analyze existing data (--data DIR, no ingestion)
-    nat 15m viz                Visualize latest experiment (page 1+2)
-    nat 15m viz --page 1       Advanced panels (toxicity, trend, OI, illiq)
-    nat 15m viz --symbol all   All symbols
-    nat 15m test               Run unit tests
+    nat 15m [--duration SEC]   Ingest -> validate -> profile -> cluster -> report
+    nat 15m offline [--data]   Analyze existing data (no ingestion)
+    nat 15m viz [--page 0|1]   Visualize latest experiment
+
+  {BOLD}AI Agent Integration{W}
+    nat commands               List all 177 commands (--json for structured catalog)
+    nat --json <any command>   JSON output for any command that supports it
+    Exit codes: 0=success, 1=error, 130=interrupted
 
   {BOLD}Dashboards{W}
-    Port 8080  Rust real-time feature dashboard (embedded in ingestor, ING_DASHBOARD_ENABLED=true)
-    Port 8050  Python analysis dashboard (Dash/Plotly, nat pipeline dashboard)
-    Port 8060  Agent research dashboard (nat agent dashboard, IC heatmap)
+    :8080  Rust real-time features (ING_DASHBOARD_ENABLED=true)
+    :8050  Python analysis (Dash/Plotly)
+    :8060  Agent research (IC heatmap)
 
-  Options like --data, --symbol go BEFORE the subcommand:
-    nat backtest --symbol ETH --data ./data/features validate
+  Use --json before any command for machine-readable output.
+  Use nat <command> --help for detailed docs (includes math where applicable).
 """)
 
 
@@ -1841,19 +2395,41 @@ def cmd_help(args=None):
 
 def build_parser():
     p = argparse.ArgumentParser(prog='nat', description='NAT research terminal', add_help=False)
+    p.add_argument('--json', action='store_true', help='Output as JSON (for programmatic use)')
     sub = p.add_subparsers(dest='command')
 
     # ── Top-level commands ──
     sub.add_parser('start', help='Start ingestor + watchdog + dashboard').set_defaults(func=cmd_start)
     sub.add_parser('stop', help='Stop everything').set_defaults(func=cmd_stop)
     sub.add_parser('status', help='Health check').set_defaults(func=cmd_status)
-    sub.add_parser('log', help='Tail ingestor log').set_defaults(func=cmd_log)
-    prof_p = sub.add_parser('profile', help='Profiling')
+    log_p = sub.add_parser('log', help='Tail ingestor log')
+    log_p.set_defaults(func=cmd_log)
+    log_sub = log_p.add_subparsers(dest='subcmd')
+    log_sub.add_parser('agent', help='Tail agent daemon log').set_defaults(func=cmd_log_agent)
+    log_sub.add_parser('list', help='List all log files with sizes and dates').set_defaults(func=cmd_log_list)
+    prof_p = sub.add_parser('profile', help='Profiling',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Regime profiling of microstructure features using entropy and volatility
+        measures to characterize market states.
+
+        Key metrics:
+          Permutation entropy:  H = -Σ pᵢ·ln(pᵢ) / ln(m!)
+            where pᵢ = frequency of ordinal pattern i, m = embedding dimension
+          Parkinson volatility: σ = ln(H/L) / (4·ln(2))^0.5 ≈ ln(H/L) / 1.663
+          Book imbalance:       I = (bid_qty - ask_qty) / (bid_qty + ask_qty)
+
+        Output: per-symbol regime statistics and feature distributions.
+
+        Example:
+          nat profile                    # full profiling
+          nat profile scalp --symbol BTC # scalping features
+        """))
     prof_p.set_defaults(func=cmd_profile)
     prof_sub = prof_p.add_subparsers(dest='subcmd')
     ps = prof_sub.add_parser('scalp', help='Scalping feature profiler (--symbol, --top, --forward-test)')
-    ps.add_argument('--symbol', default='BTC')
-    ps.add_argument('--data', default=str(DATA_DEFAULT))
+    ps.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    ps.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     ps.add_argument('--top', type=int, default=None, help='Show top N features')
     ps.add_argument('--forward-test', action='store_true', help='Run forward test')
     ps.set_defaults(func=cmd_profile_scalp)
@@ -1866,9 +2442,24 @@ def build_parser():
     screen_p.add_argument('screen_args', nargs=argparse.REMAINDER)
     screen_p.set_defaults(func=cmd_screen)
 
-    scan_p = sub.add_parser('scan', help='Scalp edge scanner')
-    scan_p.add_argument('--symbol', default='BTC')
-    scan_p.add_argument('--data', default=str(DATA_DEFAULT))
+    scan_p = sub.add_parser('scan', help='Scalp edge scanner',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Scans for scalping edges by analyzing bid/ask asymmetry and tail
+        percentile behavior under different regime conditions.
+
+        Mathematics:
+          Edge = P(mid_price moves in predicted direction within horizon)
+          Tail analysis:  P(edge > threshold | regime_quintile)
+          Conditional IC: IC(feature, return | ent_book_shape ∈ Q_k)
+
+        Output: ranked list of (feature, regime, horizon) combos with edge > cost.
+
+        Example:
+          nat scan --symbol BTC --tail 95
+        """))
+    scan_p.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    scan_p.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     scan_p.add_argument('--tail', type=int, default=None, help='Tail percentile threshold')
     scan_p.set_defaults(func=cmd_scan)
 
@@ -1876,82 +2467,140 @@ def build_parser():
     alpha_p = sub.add_parser('alpha', help='Alpha research pipeline (Steps 2-9)')
     alpha_p.set_defaults(func=lambda a: alpha_p.print_help())
     asub = alpha_p.add_subparsers(dest='subcmd')
-    ac = asub.add_parser('combine', help='Feature combination (Step 2)')
-    ac.add_argument('--symbol', default='BTC')
-    ac.add_argument('--data', default=str(DATA_DEFAULT))
+    ac = asub.add_parser('combine', help='Feature combination (Step 2)',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Combines top IC features into a composite signal using correlation-aware
+        deduplication and equal or IC-weighted averaging.
+
+        Mathematics:
+          Dedup:       drop feature j if |ρ(f_i, f_j)| > max_corr  (Spearman rank)
+          Equal:       S = (1/N) Σ f_i
+          IC-weighted: S = Σ (IC_i / Σ IC_j) · f_i
+
+        Input:  Screen results JSON (from nat alpha screen or nat signal test)
+        Output: Combined signal .npy + report JSON
+
+        Example:
+          nat alpha combine --symbol BTC --top 10 --method ic_weighted
+        """))
+    ac.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    ac.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     ac.add_argument('--screen', default='reports/alpha_screen.json', help='Screen results JSON')
     ac.add_argument('--horizon', default=None, help='Filter to specific horizon')
     ac.add_argument('--top', type=int, default=20, help='Top N features')
     ac.add_argument('--max-corr', type=float, default=0.8, help='Correlation dedup threshold')
-    ac.add_argument('--timeframe', default='15min')
-    ac.add_argument('--method', default='equal', choices=['equal', 'ic_weighted'])
-    ac.add_argument('--output', default='reports/alpha_combine.json')
+    ac.add_argument('--timeframe', default='15min', help='Bar aggregation timeframe (default: 15min)')
+    ac.add_argument('--method', default='equal', choices=['equal', 'ic_weighted'], help='Combination method')
+    ac.add_argument('--output', default='reports/alpha_combine.json', help='Output JSON path')
     ac.set_defaults(func=cmd_alpha_combine)
-    az = asub.add_parser('size', help='Cost-aware position sizing (Step 3)')
+    az = asub.add_parser('size', help='Cost-aware position sizing (Step 3)',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Computes optimal position size using Kelly criterion adjusted for costs.
+
+        Mathematics:
+          Kelly fraction: f* = IC / σ_r
+          Cost-adjusted:  f_adj = f* × (1 - cost / edge)
+          Position size:  q = f_adj × scale × account_value
+          Edge estimate:  edge = IC × σ_r × √(horizon_bars / bar_minutes)
+
+        Example:
+          nat alpha size --signal signal.npy --ic 0.05 --vol 0.02
+        """))
     az.add_argument('--signal', required=True, help='Signal .npy file')
     az.add_argument('--ic', type=float, required=True, help='Estimated IC')
     az.add_argument('--vol', type=float, required=True, help='Return volatility')
-    az.add_argument('--horizon-bars', type=int, default=16)
-    az.add_argument('--cost-multiplier', type=float, default=1.5)
-    az.add_argument('--scale', type=float, default=1.0)
-    az.add_argument('--bar-minutes', type=float, default=15.0)
-    az.add_argument('--output', default='reports/alpha_position.json')
+    az.add_argument('--horizon-bars', type=int, default=16, help='Holding period in bars')
+    az.add_argument('--cost-multiplier', type=float, default=1.5, help='Cost safety multiplier')
+    az.add_argument('--scale', type=float, default=1.0, help='Position scale factor')
+    az.add_argument('--bar-minutes', type=float, default=15.0, help='Bar duration in minutes')
+    az.add_argument('--output', default='reports/alpha_position.json', help='Output JSON path')
     az.set_defaults(func=cmd_alpha_size)
-    av = asub.add_parser('validate', help='Walk-forward validation (Step 4)')
+    av = asub.add_parser('validate', help='Walk-forward validation (Step 4)',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Walk-forward cross-validation with permutation-based significance testing.
+
+        Mathematics:
+          CV:              5-fold time-series split with embargo bars between folds
+          Embargo:         gap of N bars between train/test to prevent leakage
+          Sharpe (OOS):    S = (μ_oos / σ_oos) × √(252 × bars_per_day)
+          Significance:    permutation test (n_trials shuffles), p = rank(S_real) / n_trials
+          Deflated Sharpe: adjusts for multiple testing: DSR = Φ(z_adj)
+            where z_adj accounts for number of strategies tried
+
+        Example:
+          nat alpha validate --signal signal.npy --n-splits 5 --embargo-bars 600
+        """))
     av.add_argument('--signal', required=True, help='Signal .npy file')
-    av.add_argument('--symbol', default='BTC')
-    av.add_argument('--data', default=str(DATA_DEFAULT))
-    av.add_argument('--timeframe', default='15min')
-    av.add_argument('--n-trials', type=int, default=1998)
-    av.add_argument('--entry-threshold', type=float, default=0.3)
-    av.add_argument('--n-splits', type=int, default=5)
-    av.add_argument('--embargo-bars', type=int, default=600)
-    av.add_argument('--direction', nargs='+', default=['long', 'short'], choices=['long', 'short'])
-    av.add_argument('--output', default='reports/alpha_validation.json')
+    av.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    av.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    av.add_argument('--timeframe', default='15min', help='Bar aggregation timeframe')
+    av.add_argument('--n-trials', type=int, default=1998, help='Number of permutation trials')
+    av.add_argument('--entry-threshold', type=float, default=0.3, help='Signal entry threshold')
+    av.add_argument('--n-splits', type=int, default=5, help='Walk-forward splits')
+    av.add_argument('--embargo-bars', type=int, default=600, help='Embargo bars between folds')
+    av.add_argument('--direction', nargs='+', default=['long', 'short'], choices=['long', 'short'], help='Trade direction(s)')
+    av.add_argument('--output', default='reports/alpha_validation.json', help='Output JSON path')
     av.set_defaults(func=cmd_alpha_validate)
-    ar = asub.add_parser('regime', help='Regime conditioning (Step 5)')
-    ar.add_argument('--symbol', default='BTC')
-    ar.add_argument('--data', default=str(DATA_DEFAULT))
-    ar.add_argument('--screen', default='reports/alpha_screen.json')
+    ar = asub.add_parser('regime', help='Regime conditioning (Step 5)',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Stratifies signal IC by regime variable quintiles to identify
+        conditions where the signal is strongest.
+
+        Mathematics:
+          Regime partition: Q_k = {t : percentile_{k-1} < regime_t ≤ percentile_k}, k=1..5
+          Per-quintile IC:  IC_k = Spearman ρ(signal, return | t ∈ Q_k)
+          IC ratio:         IC_ratio = max_k(IC_k) / IC_baseline
+          Gate:             only trade when regime ∈ best quintile(s)
+
+        Example:
+          nat alpha regime --symbol BTC --top-n 10
+        """))
+    ar.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    ar.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    ar.add_argument('--screen', default='reports/alpha_screen.json', help='Screen results JSON')
     ar.add_argument('--model', default=None, help='Regime GMM model JSON')
-    ar.add_argument('--timeframe', default='15min')
-    ar.add_argument('--top-n', type=int, default=10)
-    ar.add_argument('--output', default='reports/alpha_regime.json')
+    ar.add_argument('--timeframe', default='15min', help='Bar aggregation timeframe')
+    ar.add_argument('--top-n', type=int, default=10, help='Top N features to condition')
+    ar.add_argument('--output', default='reports/alpha_regime.json', help='Output JSON path')
     ar.set_defaults(func=cmd_alpha_regime)
     amf = asub.add_parser('multi-freq', help='Multi-frequency integration (Step 6)')
-    amf.add_argument('--symbol', default='BTC')
-    amf.add_argument('--data', default=str(DATA_DEFAULT))
+    amf.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    amf.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     amf.add_argument('--signal', default=None, help='Pre-computed signal JSON')
-    amf.add_argument('--timeframe', default='15min')
-    amf.add_argument('--output', default='reports/alpha_multi_freq.json')
+    amf.add_argument('--timeframe', default='15min', help='Bar aggregation timeframe')
+    amf.add_argument('--output', default='reports/alpha_multi_freq.json', help='Output JSON path')
     amf.set_defaults(func=cmd_alpha_multi_freq)
     ap = asub.add_parser('portfolio', help='Portfolio assembly (Step 7)')
-    ap.add_argument('--data', default=str(DATA_DEFAULT))
-    ap.add_argument('--symbols', nargs='+', default=['BTC', 'ETH', 'SOL'])
-    ap.add_argument('--timeframe', default='15min')
-    ap.add_argument('--output', default='reports/alpha_portfolio.json')
+    ap.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    ap.add_argument('--symbols', nargs='+', default=['BTC', 'ETH', 'SOL'], help='Symbols to include')
+    ap.add_argument('--timeframe', default='15min', help='Bar aggregation timeframe')
+    ap.add_argument('--output', default='reports/alpha_portfolio.json', help='Output JSON path')
     ap.set_defaults(func=cmd_alpha_portfolio)
     apt = asub.add_parser('paper', help='Paper trading simulation (Step 8)')
-    apt.add_argument('--symbol', default='BTC')
-    apt.add_argument('--data', default=str(DATA_DEFAULT))
-    apt.add_argument('--timeframe', default='15min')
-    apt.add_argument('--backtest-sharpe', type=float, default=1.0)
-    apt.add_argument('--backtest-ic', type=float, default=0.03)
-    apt.add_argument('--output', default='reports/alpha_paper.json')
+    apt.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    apt.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    apt.add_argument('--timeframe', default='15min', help='Bar aggregation timeframe')
+    apt.add_argument('--backtest-sharpe', type=float, default=1.0, help='Min backtest Sharpe to simulate')
+    apt.add_argument('--backtest-ic', type=float, default=0.03, help='Min backtest IC to simulate')
+    apt.add_argument('--output', default='reports/alpha_paper.json', help='Output JSON path')
     apt.set_defaults(func=cmd_alpha_paper)
     adp = asub.add_parser('deploy', help='Deployment status & readiness (Step 9)')
     adp.add_argument('--check', action='store_true', help='Run readiness check')
-    adp.add_argument('--paper-report', default='reports/alpha_paper.json')
-    adp.add_argument('--account-value', type=float, default=10000.0)
+    adp.add_argument('--paper-report', default='reports/alpha_paper.json', help='Paper trading report JSON')
+    adp.add_argument('--account-value', type=float, default=10000.0, help='Account value in USD')
     adp.set_defaults(func=cmd_alpha_deploy)
 
     # ── visualize ──
     viz_p = sub.add_parser('visualize', help='Visualization suite')
-    viz_p.add_argument('--symbol', default='BTC')
-    viz_p.add_argument('--data', default=str(DATA_DEFAULT))
+    viz_p.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    viz_p.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     viz_p.add_argument('--report', default=None, help='Scanner JSON report path')
-    viz_p.add_argument('--output', default=str(ROOT / 'reports' / 'figures' / 'scanner'))
-    viz_p.add_argument('--dpi', type=int, default=150)
+    viz_p.add_argument('--output', default=str(ROOT / 'reports' / 'figures' / 'scanner'), help='Output directory for plots')
+    viz_p.add_argument('--dpi', type=int, default=150, help='Plot DPI resolution')
     viz_p.set_defaults(func=cmd_visualize_all)
     vsub = viz_p.add_subparsers(dest='subcmd')
     vsub.add_parser('scan', help='Scanner plots (1-7)').set_defaults(func=cmd_visualize_scan)
@@ -1963,7 +2612,7 @@ def build_parser():
     hier_p.set_defaults(func=cmd_visualize_hierarchy)
     cluster_p = vsub.add_parser('cluster', help='Cluster exploration plots (PCA/UMAP/t-SNE)')
     cluster_p.add_argument('--subset', default=None, help='Feature subset (entropy, orderflow, etc.)')
-    cluster_p.add_argument('--cluster-method', default='gmm', choices=['gmm', 'kmeans', 'hdbscan', 'dbscan'])
+    cluster_p.add_argument('--cluster-method', default='gmm', choices=['gmm', 'kmeans', 'hdbscan', 'dbscan'], help='Clustering algorithm')
     cluster_p.set_defaults(func=cmd_visualize_cluster)
     vsub.add_parser('skeptical', help='Skeptical validation diagnostic plots').set_defaults(func=cmd_visualize_skeptical)
     vsub.add_parser('all', help='All visualizations').set_defaults(func=cmd_visualize_all)
@@ -1985,14 +2634,14 @@ def build_parser():
     rsub = run_p.add_subparsers(dest='subcmd')
     rsub.add_parser('serve', help='Ingestor + dashboard').set_defaults(func=cmd_run_serve)
     show_p = rsub.add_parser('show', help='Real-time features')
-    show_p.add_argument('--symbol', default='BTC')
+    show_p.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
     show_p.add_argument('--freq', type=int, default=1, help='Frequency in Hz')
     show_p.set_defaults(func=cmd_run_show)
     rsub.add_parser('tunnel', help='Cloudflare tunnel').set_defaults(func=cmd_run_tunnel)
 
     # ── data ──
     data_p = sub.add_parser('data', help='Data stats & validation')
-    data_p.add_argument('--data', default=str(DATA_DEFAULT))
+    data_p.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     data_p.set_defaults(func=cmd_data)
     dsub = data_p.add_subparsers(dest='subcmd')
     dv = dsub.add_parser('validate', help='Validate parquet data')
@@ -2016,56 +2665,74 @@ def build_parser():
     tsub.add_parser('redis', help='Test Redis').set_defaults(func=cmd_test_redis)
     tsub.add_parser('integration', help='Integration tests').set_defaults(func=cmd_test_integration)
     tb = tsub.add_parser('backtest', help='Backtest tests')
-    tb.add_argument('--coverage', action='store_true')
+    tb.add_argument('--coverage', action='store_true', help='Run with coverage reporting')
     tb.set_defaults(func=cmd_test_backtest)
     tc = tsub.add_parser('cluster', help='Cluster quality tests')
-    tc.add_argument('--coverage', action='store_true')
+    tc.add_argument('--coverage', action='store_true', help='Run with coverage reporting')
     tc.set_defaults(func=cmd_test_cluster)
     tp = tsub.add_parser('pipeline', help='Pipeline tests')
-    tp.add_argument('--coverage', action='store_true')
+    tp.add_argument('--coverage', action='store_true', help='Run with coverage reporting')
     tp.set_defaults(func=cmd_test_pipeline)
     tsub.add_parser('pipeline-runner', help='Pipeline runner tests').set_defaults(func=cmd_test_pipeline_runner)
     tsub.add_parser('dashboard', help='Dashboard tests').set_defaults(func=cmd_test_dashboard)
     tsub.add_parser('serving', help='Model serving tests').set_defaults(func=cmd_test_serving)
     te = tsub.add_parser('eamm', help='EAMM tests')
-    te.add_argument('--integration', action='store_true')
+    te.add_argument('--integration', action='store_true', help='Include integration tests')
     te.set_defaults(func=cmd_test_eamm)
     tsc = tsub.add_parser('scan', help='Scalp edge scanner tests')
-    tsc.add_argument('--coverage', action='store_true')
+    tsc.add_argument('--coverage', action='store_true', help='Run with coverage reporting')
     tsc.set_defaults(func=cmd_test_scan)
     tvz = tsub.add_parser('viz', help='Scanner visualization tests')
-    tvz.add_argument('--coverage', action='store_true')
+    tvz.add_argument('--coverage', action='store_true', help='Run with coverage reporting')
     tvz.set_defaults(func=cmd_test_viz)
 
     # ── backtest ──
-    bt_p = sub.add_parser('backtest', help='Backtesting')
-    bt_p.add_argument('--strategy', default='whale_flow_simple')
-    bt_p.add_argument('--data', default=str(DATA_DEFAULT))
-    bt_p.add_argument('--symbol', default='BTC')
+    bt_p = sub.add_parser('backtest', help='Backtesting',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Event-driven backtesting framework with walk-forward validation support.
+
+        Metrics:
+          Sharpe ratio:    S = (μ / σ) × √252
+          Max drawdown:    MDD = min_t((equity_t - peak_t) / peak_t)
+          Profit factor:   PF = Σ(winning_trades) / |Σ(losing_trades)|
+          Win rate:        W = n_winners / n_total
+          Calmar ratio:    C = annualized_return / |MDD|
+
+        Walk-forward: trains on expanding window, tests on next fold.
+        ML mode: uses pre-computed predictions from model scoring.
+
+        Example:
+          nat backtest --strategy whale_flow_simple --symbol BTC
+          nat backtest ml --predictions predictions.parquet --entry 0.001
+        """))
+    bt_p.add_argument('--strategy', default='whale_flow_simple', help='Strategy name (default: whale_flow_simple)')
+    bt_p.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    bt_p.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
     bt_p.set_defaults(func=cmd_backtest)
     btsub = bt_p.add_subparsers(dest='subcmd')
     btsub.add_parser('validate', help='Walk-forward validation').set_defaults(func=cmd_backtest_validate)
     bml = btsub.add_parser('ml', help='ML predictions backtest')
-    bml.add_argument('--predictions', default='./predictions.parquet')
-    bml.add_argument('--entry', type=float, default=0.001)
-    bml.add_argument('--exit', type=float, default=0.0)
+    bml.add_argument('--predictions', default='./predictions.parquet', help='ML predictions parquet file')
+    bml.add_argument('--entry', type=float, default=0.001, help='Entry signal threshold')
+    bml.add_argument('--exit', type=float, default=0.0, help='Exit signal threshold')
     bml.set_defaults(func=cmd_backtest_ml)
     bmlv = btsub.add_parser('ml-validate', help='ML walk-forward')
-    bmlv.add_argument('--predictions', default='./predictions.parquet')
-    bmlv.add_argument('--entry', type=float, default=0.001)
-    bmlv.add_argument('--exit', type=float, default=0.0)
+    bmlv.add_argument('--predictions', default='./predictions.parquet', help='ML predictions parquet file')
+    bmlv.add_argument('--entry', type=float, default=0.001, help='Entry signal threshold')
+    bmlv.add_argument('--exit', type=float, default=0.0, help='Exit signal threshold')
     bmlv.set_defaults(func=cmd_backtest_ml_validate)
     bmlq = btsub.add_parser('ml-quantile', help='ML quantile thresholds')
-    bmlq.add_argument('--predictions', default='./predictions.parquet')
-    bmlq.add_argument('--entry-q', type=float, default=0.75)
-    bmlq.add_argument('--exit-q', type=float, default=0.50)
+    bmlq.add_argument('--predictions', default='./predictions.parquet', help='ML predictions parquet file')
+    bmlq.add_argument('--entry-q', type=float, default=0.75, help='Entry quantile threshold')
+    bmlq.add_argument('--exit-q', type=float, default=0.50, help='Exit quantile threshold')
     bmlq.set_defaults(func=cmd_backtest_ml_quantile)
     bmlt = btsub.add_parser('ml-tracked', help='ML with tracking')
-    bmlt.add_argument('--predictions', default='./predictions.parquet')
-    bmlt.add_argument('--entry', type=float, default=0.001)
-    bmlt.add_argument('--exit', type=float, default=0.0)
-    bmlt.add_argument('--direction', default='long')
-    bmlt.add_argument('--output', default='./backtest_results.json')
+    bmlt.add_argument('--predictions', default='./predictions.parquet', help='ML predictions parquet file')
+    bmlt.add_argument('--entry', type=float, default=0.001, help='Entry signal threshold')
+    bmlt.add_argument('--exit', type=float, default=0.0, help='Exit signal threshold')
+    bmlt.add_argument('--direction', default='long', help='Trade direction (long/short)')
+    bmlt.add_argument('--output', default='./backtest_results.json', help='Output results JSON')
     bmlt.set_defaults(func=cmd_backtest_ml_tracked)
     btsub.add_parser('list', help='List strategies').set_defaults(func=cmd_backtest_list)
 
@@ -2073,31 +2740,48 @@ def build_parser():
     model_p = sub.add_parser('model', help='Model training & serving')
     model_p.set_defaults(func=lambda a: model_p.print_help())
     msub = model_p.add_subparsers(dest='subcmd')
-    mt = msub.add_parser('train', help='Train baseline model')
-    mt.add_argument('--snapshot', default='baseline_30d')
-    mt.add_argument('--type', default='elasticnet')
-    mt.add_argument('--output-dir', default='./models')
+    mt = msub.add_parser('train', help='Train baseline model',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Trains a supervised model to predict forward returns from features.
+
+        Models:
+          ElasticNet:  min (1/2n)·‖y - Xβ‖² + λ₁·‖β‖₁ + λ₂·‖β‖²₂
+                       (L1 for sparsity + L2 for stability, α and l1_ratio via CV)
+          LightGBM:    gradient boosted decision trees with leaf-wise growth
+                       (handles non-linearity, feature interactions, missing values)
+
+        Data: reads from dataset snapshots (pre-split train/val/test).
+        Output: serialized model + feature importance + CV metrics.
+
+        Example:
+          nat model train --snapshot baseline_30d --type elasticnet
+          nat model train --type lightgbm --output-dir models/
+        """))
+    mt.add_argument('--snapshot', default='baseline_30d', help='Dataset snapshot name')
+    mt.add_argument('--type', default='elasticnet', help='Model type (elasticnet/lightgbm)')
+    mt.add_argument('--output-dir', default='./models', help='Model output directory')
     mt.set_defaults(func=cmd_model_train)
     mg = msub.add_parser('train-gmm', help='Train GMM classifier')
     mg.add_argument('--auto', action='store_true', help='Auto BIC selection')
-    mg.add_argument('--data', default=str(DATA_DEFAULT))
+    mg.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     mg.set_defaults(func=cmd_model_train_gmm)
     ml = msub.add_parser('list', help='List models')
-    ml.add_argument('--model-dir', default='./models')
+    ml.add_argument('--model-dir', default='./models', help='Model directory')
     ml.set_defaults(func=cmd_model_list)
     ms = msub.add_parser('score', help='Score data')
-    ms.add_argument('--model', default='models/latest.pkl')
-    ms.add_argument('--data', default=str(DATA_DEFAULT))
-    ms.add_argument('--save', action='store_true')
-    ms.add_argument('--output', default='./predictions.parquet')
+    ms.add_argument('--model', default='models/latest.pkl', help='Model file path')
+    ms.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    ms.add_argument('--save', action='store_true', help='Save predictions to file')
+    ms.add_argument('--output', default='./predictions.parquet', help='Predictions output path')
     ms.set_defaults(func=cmd_model_score)
     mv = msub.add_parser('serve', help='Model serving API')
-    mv.add_argument('--port', type=int, default=8000)
-    mv.add_argument('--host', default='0.0.0.0')
-    mv.add_argument('--cache-size', type=int, default=5)
+    mv.add_argument('--port', type=int, default=8000, help='Server port (default: 8000)')
+    mv.add_argument('--host', default='0.0.0.0', help='Server host (default: 0.0.0.0)')
+    mv.add_argument('--cache-size', type=int, default=5, help='Model cache size')
     mv.add_argument('--dev', action='store_true', help='Hot-reload mode')
     mv.add_argument('--best', action='store_true', help='Serve best model')
-    mv.add_argument('--metric', default='sharpe_ratio')
+    mv.add_argument('--metric', default='sharpe_ratio', help='Metric to select best model')
     mv.set_defaults(func=cmd_model_serve)
 
     # ── cluster ──
@@ -2105,41 +2789,80 @@ def build_parser():
     cl_p.set_defaults(func=lambda a: cl_p.print_help())
     csub = cl_p.add_subparsers(dest='subcmd')
     ca = csub.add_parser('analyze', help='Analyze cluster quality')
-    ca.add_argument('--symbol', default='BTC')
-    ca.add_argument('--data', default=str(DATA_DEFAULT))
-    ca.add_argument('--hours', type=int, default=24)
+    ca.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    ca.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    ca.add_argument('--hours', type=int, default=24, help='Hours of data to analyze')
     ca.set_defaults(func=cmd_cluster_analyze)
     cg = csub.add_parser('gmm', help='Analyze with GMM')
-    cg.add_argument('--symbol', default='BTC')
-    cg.add_argument('--data', default=str(DATA_DEFAULT))
+    cg.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    cg.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     cg.set_defaults(func=cmd_cluster_gmm)
     call = csub.add_parser('all', help='Analyze all symbols')
-    call.add_argument('--data', default=str(DATA_DEFAULT))
+    call.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     call.set_defaults(func=cmd_cluster_all)
     csub.add_parser('quality', help='Q3 predictive quality test').set_defaults(func=cmd_cluster_quality)
     ce = csub.add_parser('explore', help='Exploratory clustering (PCA/UMAP/t-SNE)')
-    ce.add_argument('--symbol', default='BTC')
-    ce.add_argument('--data', default=str(DATA_DEFAULT))
-    ce.add_argument('--subset', default=None, help='Feature subset')
-    ce.add_argument('--method', default='gmm', choices=['gmm', 'kmeans', 'hdbscan', 'dbscan'])
+    ce.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    ce.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    ce.add_argument('--subset', default=None, help='Feature subset (entropy, orderflow, etc.)')
+    ce.add_argument('--method', default='gmm', choices=['gmm', 'kmeans', 'hdbscan', 'dbscan'], help='Clustering algorithm')
     ce.set_defaults(func=cmd_cluster_explore)
-    ch = csub.add_parser('hmm-fit', help='Fit HMM on feature data (Baum-Welch)')
-    ch.add_argument('--symbol', default='BTC')
-    ch.add_argument('--data', default=str(DATA_DEFAULT))
+    ch = csub.add_parser('hmm-fit', help='Fit HMM on feature data (Baum-Welch)',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Fits a Hidden Markov Model to PCA-reduced feature data using Baum-Welch EM,
+        initialized from GMM cluster assignments.
+
+        Mathematics:
+          E-step (forward-backward):
+            α_t(i) = P(o_1..o_t, s_t=i)     forward probabilities
+            β_t(i) = P(o_{t+1}..o_T | s_t=i) backward probabilities
+            γ_t(i) = P(s_t=i | O, λ)         state posteriors
+          M-step:
+            A_ij = Σ ξ_t(i,j) / Σ γ_t(i)    transition matrix update
+            μ_i = Σ γ_t(i)·o_t / Σ γ_t(i)   mean update
+          Model selection:
+            BIC = -2·ln(L) + k·ln(n)         Bayesian Information Criterion
+          Comparison:
+            ARI (Adjusted Rand Index) vs GMM labels
+            Smoothness ratio: HMM transitions / GMM transitions
+
+        Example:
+          nat cluster hmm-fit --symbol BTC --n-states 3 --timeframe 15min
+        """))
+    ch.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    ch.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     ch.add_argument('--n-states', type=int, default=3, help='Number of hidden states')
     ch.add_argument('--n-iter', type=int, default=100, help='Max EM iterations')
-    ch.add_argument('--covariance', default='full', choices=['full', 'diag', 'spherical', 'tied'])
-    ch.add_argument('--timeframe', default='15min')
-    ch.add_argument('--output', default='reports/hmm_fit.json')
+    ch.add_argument('--covariance', default='full', choices=['full', 'diag', 'spherical', 'tied'], help='Covariance type')
+    ch.add_argument('--timeframe', default='15min', help='Bar aggregation timeframe')
+    ch.add_argument('--output', default='reports/hmm_fit.json', help='Output JSON path')
     ch.set_defaults(func=cmd_cluster_hmm)
 
     # ── validate ──
     val_p = sub.add_parser('validate', help='Validation suites')
     val_p.set_defaults(func=lambda a: val_p.print_help())
     vsub = val_p.add_subparsers(dest='subcmd')
-    vs = vsub.add_parser('skeptical', help='20+ statistical tests before investment')
-    vs.add_argument('--data', default=str(DATA_DEFAULT))
-    vs.add_argument('--output', default='reports/skeptical_validation')
+    vs = vsub.add_parser('skeptical', help='20+ statistical tests before investment',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Comprehensive statistical validation suite (20+ tests) designed to catch
+        overfitting, data-snooping, and spurious signals before capital deployment.
+
+        Tests include:
+          Runs test:       H0: sequence is random (Wald-Wolfowitz)
+          Variance ratio:  VR(k) = Var(r_k) / (k·Var(r_1)),  H0: VR=1 (random walk)
+          Ljung-Box:       Q = n(n+2) Σ (ρ_k²/(n-k)),  H0: no autocorrelation
+          BDS test:        nonlinear dependence in residuals
+          Hurst exponent:  H via R/S analysis,  H>0.5 = trending, H<0.5 = mean-reverting
+          Deflated Sharpe: p-value adjusted for number of strategies tried
+          Permutation:     empirical p-value from n_trials random shuffles
+
+        Example:
+          nat validate skeptical --data data/features --output reports/skeptical
+        """))
+    vs.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    vs.add_argument('--output', default='reports/skeptical_validation', help='Output directory')
     vs.set_defaults(func=cmd_validate_skeptical)
 
     # ── experiment ──
@@ -2150,32 +2873,32 @@ def build_parser():
     el.add_argument('--stage', help='Filter by stage')
     el.set_defaults(func=cmd_experiment_list)
     eg = esub.add_parser('get', help='Get experiment details')
-    eg.add_argument('--id', required=True)
+    eg.add_argument('--id', required=True, help='Experiment ID')
     eg.set_defaults(func=cmd_experiment_get)
     ec = esub.add_parser('compare', help='Compare experiments')
-    ec.add_argument('--ids', required=True)
+    ec.add_argument('--ids', required=True, help='Space-separated experiment IDs')
     ec.set_defaults(func=cmd_experiment_compare)
     eb = esub.add_parser('best', help='Find best')
-    eb.add_argument('--metric', default='sharpe_ratio')
+    eb.add_argument('--metric', default='sharpe_ratio', help='Metric to rank by')
     eb.set_defaults(func=cmd_experiment_best)
     ew = esub.add_parser('workflow', help='Full ML workflow')
-    ew.add_argument('--snapshot', default='baseline_30d')
-    ew.add_argument('--type', default='elasticnet')
-    ew.add_argument('--data', default=str(DATA_DEFAULT))
-    ew.add_argument('--entry', type=float, default=0.001)
-    ew.add_argument('--exit', type=float, default=0.0)
-    ew.add_argument('--predictions', default='./predictions.parquet')
-    ew.add_argument('--output', default='./backtest_results.json')
+    ew.add_argument('--snapshot', default='baseline_30d', help='Dataset snapshot name')
+    ew.add_argument('--type', default='elasticnet', help='Model type (elasticnet/lightgbm)')
+    ew.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    ew.add_argument('--entry', type=float, default=0.001, help='Entry signal threshold')
+    ew.add_argument('--exit', type=float, default=0.0, help='Exit signal threshold')
+    ew.add_argument('--predictions', default='./predictions.parquet', help='Predictions parquet path')
+    ew.add_argument('--output', default='./backtest_results.json', help='Output results JSON')
     ew.set_defaults(func=cmd_experiment_workflow)
     esn = esub.add_parser('snapshot', help='Create dataset snapshot')
     esn.add_argument('--name', required=True, help='Snapshot name')
     esn.add_argument('--description', help='Snapshot description')
-    esn.add_argument('--data', default=str(DATA_DEFAULT))
+    esn.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     esn.set_defaults(func=cmd_experiment_snapshot)
 
     # ── pipeline ──
     pipe_p = sub.add_parser('pipeline', help='Automated pipeline')
-    pipe_p.add_argument('--config', default=str(PIPE_CFG))
+    pipe_p.add_argument('--config', default=str(PIPE_CFG), help='Pipeline config TOML')
     pipe_p.set_defaults(func=lambda a: pipe_p.print_help())
     psub = pipe_p.add_subparsers(dest='subcmd')
     psub.add_parser('start', help='Start pipeline').set_defaults(func=cmd_pipeline_start)
@@ -2184,22 +2907,39 @@ def build_parser():
     psub.add_parser('stop', help='Stop pipeline').set_defaults(func=cmd_pipeline_stop)
     psub.add_parser('status', help='Show state').set_defaults(func=cmd_pipeline_status)
     pd = psub.add_parser('dashboard', help='Pipeline dashboard')
-    pd.add_argument('--port', type=int, default=8050)
+    pd.add_argument('--port', type=int, default=8050, help='Dashboard port (default: 8050)')
     pd.set_defaults(func=cmd_pipeline_dashboard)
 
     # ── signal ──
     sig_p = sub.add_parser('signal', help='Signal testing')
     sig_p.set_defaults(func=lambda a: sig_p.print_help())
     ssub = sig_p.add_subparsers(dest='subcmd')
-    st = ssub.add_parser('test', help='Signal existence test')
-    st.add_argument('--symbol', default='BTC')
-    st.add_argument('--horizon', type=int, default=3000)
-    st.add_argument('--spread-bps', type=float, default=1.0)
-    st.add_argument('--remove-leaky', action='store_true')
+    st = ssub.add_parser('test', help='Signal existence test',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Tests whether individual features carry predictive information about
+        future returns using Information Coefficient (IC) analysis.
+
+        Mathematics:
+          Forward return:  r_t(h) = (mid_{t+h} - mid_t) / mid_t
+          IC:              Spearman rank correlation ρ(feature, r_t(h))
+          Significance:    z = IC · √n,  p < 0.05 ⟹ |z| > 1.96
+          Cost filter:     |IC| > spread_bps / (10000 · σ_r)
+
+        Output: per-feature IC at the specified horizon, sorted by |IC|.
+        Features passing both significance and cost filters are flagged.
+
+        Example:
+          nat signal test --symbol BTC --horizon 3000 --spread-bps 1.0
+        """))
+    st.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    st.add_argument('--horizon', type=int, default=3000, help='Forward horizon in ticks (1 tick=100ms)')
+    st.add_argument('--spread-bps', type=float, default=1.0, help='Spread cost in basis points')
+    st.add_argument('--remove-leaky', action='store_true', help='Remove forward-looking features')
     st.set_defaults(func=cmd_signal_test)
     sta = ssub.add_parser('test-all', help='Full symbol sweep')
-    sta.add_argument('--horizon', type=int, default=3000)
-    sta.add_argument('--spread-bps', type=float, default=1.0)
+    sta.add_argument('--horizon', type=int, default=3000, help='Forward horizon in ticks (1 tick=100ms)')
+    sta.add_argument('--spread-bps', type=float, default=1.0, help='Spread cost in basis points')
     sta.set_defaults(func=cmd_signal_test_all)
 
     # ── eamm ──
@@ -2207,19 +2947,34 @@ def build_parser():
     eamm_p.set_defaults(func=lambda a: eamm_p.print_help())
     easub = eamm_p.add_subparsers(dest='subcmd')
     er = easub.add_parser('run', help='Full EAMM pipeline')
-    er.add_argument('--symbol', default='BTC')
-    er.add_argument('--horizon', type=int, default=3000)
-    er.add_argument('--mode', default='regression')
+    er.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    er.add_argument('--horizon', type=int, default=3000, help='Forward horizon in ticks')
+    er.add_argument('--mode', default='regression', help='Pipeline mode (default: regression)')
     er.set_defaults(func=cmd_eamm_run)
     erg = easub.add_parser('regime', help='Regime analysis')
-    erg.add_argument('--symbol', default='BTC')
-    erg.add_argument('--horizon', type=int, default=3000)
+    erg.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    erg.add_argument('--horizon', type=int, default=3000, help='Forward horizon in ticks')
     erg.set_defaults(func=cmd_eamm_regime)
-    ebt = easub.add_parser('backtest', help='Stateful backtest')
-    ebt.add_argument('--symbol', default='BTC')
-    ebt.add_argument('--horizon', type=int, default=3000)
-    ebt.add_argument('--gamma', type=float, default=0.1)
-    ebt.add_argument('--q-max', type=float, default=1.0)
+    ebt = easub.add_parser('backtest', help='Stateful backtest',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Avellaneda-Stoikov entropy-aware market making backtest with
+        inventory penalty and regime-dependent spread adjustment.
+
+        Mathematics:
+          Optimal spread:  δ = γ·σ² + (2/γ)·ln(1 + γ/κ)
+          Inventory penalty: P&L_adj = P&L_raw - γ·q²
+          Reservation price: r = s - q·γ·σ²
+          Where: γ = risk aversion, σ² = mid-price variance,
+                 κ = order arrival intensity, q = inventory
+
+        Example:
+          nat eamm backtest --symbol BTC --gamma 0.1 --q-max 1.0
+        """))
+    ebt.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    ebt.add_argument('--horizon', type=int, default=3000, help='Forward horizon in ticks')
+    ebt.add_argument('--gamma', type=float, default=0.1, help='Risk aversion parameter')
+    ebt.add_argument('--q-max', type=float, default=1.0, help='Maximum inventory')
     ebt.set_defaults(func=cmd_eamm_backtest)
 
     # ── api ──
@@ -2238,12 +2993,77 @@ def build_parser():
     xsub.add_parser('stop', help='Stop ingestor').set_defaults(func=cmd_exp_stop)
     xsub.add_parser('status', help='Health + data stats').set_defaults(func=cmd_exp_status)
     xc = xsub.add_parser('check', help='Daily validation')
-    xc.add_argument('--hours', type=int, default=24)
+    xc.add_argument('--hours', type=int, default=24, help='Hours of data to validate')
     xc.set_defaults(func=cmd_exp_check)
     xsub.add_parser('midweek', help='Full validation').set_defaults(func=cmd_exp_midweek)
     xsub.add_parser('analyze', help='End-of-experiment').set_defaults(func=cmd_exp_analyze)
     xsub.add_parser('dashboard', help='Show dashboard URL').set_defaults(func=cmd_exp_dashboard)
     xsub.add_parser('tunnel', help='Cloudflare tunnel').set_defaults(func=cmd_exp_tunnel)
+
+    # ── algorithm ──
+    alg_p = sub.add_parser('algorithm', help='Microstructure algorithm evaluation')
+    alg_p.set_defaults(func=lambda a: alg_p.print_help())
+    algsub = alg_p.add_subparsers(dest='subcmd')
+    alge = algsub.add_parser('evaluate', help='Run IC/drift evaluation',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Evaluates microstructure algorithms by computing Information Coefficient (IC)
+        at multiple forward horizons, with optional regime stratification.
+
+        Mathematics:
+          IC at horizon h:  IC_h = Spearman ρ(alg_feature_t, r_t(h))
+          Horizons:         h ∈ {1, 5, 10, 50, 100} ticks (100ms each)
+          Regime-gated IC:  IC computed only where ent_book_shape < P30
+                            (low-entropy = structured book = cleaner signal)
+          Significance:     z = IC · √n,  reject H0 if |z| > 1.96
+
+        Algorithms: kalman_imbalance, regime_gated, multi_level_imb
+
+        Example:
+          nat algorithm evaluate --all --symbol BTC
+          nat algorithm evaluate --algorithm kalman_imbalance --json-report report.json
+        """))
+    alge.add_argument('--algorithm', default=None, help='Algorithm name (default: all)')
+    alge.add_argument('--all', action='store_true', help='Evaluate all registered algorithms')
+    alge.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    alge.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    alge.add_argument('--json-report', default=None, help='Output JSON report path')
+    alge.set_defaults(func=cmd_algorithm_evaluate)
+    algsub.add_parser('list', help='List registered algorithms and features').set_defaults(func=cmd_algorithm_list)
+
+    # ── discovery ──
+    disc_p = sub.add_parser('discovery', help='Alpha discovery orchestrator')
+    disc_p.set_defaults(func=lambda a: disc_p.print_help())
+    dcsub = disc_p.add_subparsers(dest='subcmd')
+    dcsub.add_parser('start', help='Launch discovery orchestrator').set_defaults(func=cmd_discovery_start)
+    dcsub.add_parser('once', help='Run single sweep').set_defaults(func=cmd_discovery_once)
+    dcsub.add_parser('status', help='Current state').set_defaults(func=cmd_discovery_status)
+    dcsub.add_parser('stop', help='Stop orchestrator').set_defaults(func=cmd_discovery_stop)
+
+    # ── health ──
+    sub.add_parser('health', help='Comprehensive system health check (all components)').set_defaults(func=cmd_health)
+
+    # ── config ──
+    cfg_p = sub.add_parser('config', help='Configuration inspection')
+    cfg_p.set_defaults(func=cmd_config_show)
+    cfgsub = cfg_p.add_subparsers(dest='subcmd')
+    cfgsub.add_parser('show', help='Full config dump (all TOML files merged)').set_defaults(func=cmd_config_show)
+    cfg_get = cfgsub.add_parser('get', help='Get specific config value (file.section.key)')
+    cfg_get.add_argument('key', help='Config key in dot notation (e.g., agent.agent.ic_threshold)')
+    cfg_get.set_defaults(func=cmd_config_get)
+    cfgsub.add_parser('validate', help='Check all config files for syntax errors').set_defaults(func=cmd_config_validate)
+
+    # ── reports ──
+    rpt_p = sub.add_parser('reports', help='Report management')
+    rpt_p.set_defaults(func=cmd_reports)
+    rptsub = rpt_p.add_subparsers(dest='subcmd')
+    rptsub.add_parser('latest', help='Most recent report per category').set_defaults(func=cmd_reports_latest)
+    rpt_show = rptsub.add_parser('show', help='Print report content')
+    rpt_show.add_argument('path', help='Report file path')
+    rpt_show.set_defaults(func=cmd_reports_show)
+
+    # ── commands (for AI agent discovery) ──
+    sub.add_parser('commands', help='List all commands with descriptions').set_defaults(func=cmd_commands)
 
     # ── docker ──
     dk_p = sub.add_parser('docker', help='Docker operations')
@@ -2262,7 +3082,7 @@ def build_parser():
     smsub = sm_p.add_subparsers(dest='subcmd')
     smo = smsub.add_parser('offline', help='Analyze existing data (no ingestion)')
     smo.add_argument('--data', type=str, default=None, help='Data directory')
-    smo.add_argument('--skip-cluster', action='store_true')
+    smo.add_argument('--skip-cluster', action='store_true', help='Skip clustering phase')
     smo.set_defaults(func=cmd_15m_offline)
     smv = smsub.add_parser('viz', help='Visualize latest experiment')
     smv.add_argument('--data', type=str, default=None, help='Data directory (default: latest)')
@@ -2274,7 +3094,27 @@ def build_parser():
     smsub.add_parser('test', help='Run unit tests').set_defaults(func=cmd_15m_test)
 
     # ── Spannung ──────────────────────────────────────────────────────────────
-    spn_p = sub.add_parser('spannung', help='Spannung signal grid search')
+    spn_p = sub.add_parser('spannung', help='Spannung signal grid search',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Exhaustive grid search over (feature × horizon) pairs computing IC, t-stat,
+        and cost-adjusted edge for scalping signal discovery.
+
+        Mathematics:
+          IC grid:       IC(f, h) = Spearman ρ(f_t, r_t(h))  for all (f, h) pairs
+          t-statistic:   t = IC · √n
+          Edge:          edge = |IC| × σ_r × √(h / dt)
+          Cost filter:   edge > spread_bps / 10000
+
+        Subcommands:
+          backtest    Cost-aware backtest with regime gating on top signals
+          horizon     Longer-horizon sweep (30s to 15min aggregated bars)
+          spectral    PSD, cross-coherence, ACF, and frequency-band IC
+          regime      Systematic regime condition search (quintile × Pareto)
+
+        Example:
+          nat spannung --symbol BTC --top 20 --horizons 10 50 100 300
+        """))
     spn_p.add_argument('--data', type=str, default=None, help='Data dir (auto-detects latest)')
     spn_p.add_argument('--symbol', type=str, default='all', help='Symbol or "all" (default: all)')
     spn_p.add_argument('--horizons', type=int, nargs='+', default=None,
@@ -2310,14 +3150,33 @@ def build_parser():
     agsub = ag_p.add_subparsers(dest='subcmd')
     agsub.add_parser('start', help='Launch agent daemon').set_defaults(func=cmd_agent_start)
     agsub.add_parser('stop', help='Graceful shutdown (SIGTERM)').set_defaults(func=cmd_agent_stop)
-    agsub.add_parser('once', help='Run single cycle (testing)').set_defaults(func=cmd_agent_once)
+    ag_once = agsub.add_parser('once', help='Run single cycle (testing)',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Runs one autonomous research cycle: generate → execute → validate.
+
+        5-Gate Protocol (per hypothesis):
+          G1  Discovery:   |IC| ≥ 0.10 at any horizon, and dIC ≥ 0.05
+                           (delta IC = regime-gated IC minus baseline IC)
+          G2  Temporal:    IC stable across 3+ time sub-periods
+          G3  Symbol:      IC replicates on ≥ 2 of {BTC, ETH, SOL}
+          G4  Incremental: dIC ≥ 0.05 over existing best signal
+          G5  Cost:        |IC| × σ > spread_bps (signal exceeds trading cost)
+
+        FDR control: Benjamini-Hochberg at q = 0.05 across all tested hypotheses.
+        Promoted signals are added to the registry for production use.
+
+        Example:
+          nat agent once
+        """))
+    ag_once.set_defaults(func=cmd_agent_once)
     agsub.add_parser('status', help='Current state & stats').set_defaults(func=cmd_agent_status)
     agsub.add_parser('queue', help='Queued hypotheses by priority').set_defaults(func=cmd_agent_queue)
     agsub.add_parser('registry', help='Validated signals').set_defaults(func=cmd_agent_registry)
     agsub.add_parser('graveyard', help='Failed hypotheses').set_defaults(func=cmd_agent_graveyard)
     agsub.add_parser('report', help='Full summary report').set_defaults(func=cmd_agent_report)
     dash_p = agsub.add_parser('dashboard', help='Launch web dashboard (port 8060)')
-    dash_p.add_argument('--port', type=int, default=8060)
+    dash_p.add_argument('--port', type=int, default=8060, help='Dashboard port (default: 8060)')
     dash_p.set_defaults(func=cmd_agent_dashboard)
 
     # ── mf-agent ──
@@ -2370,14 +3229,27 @@ def main():
 
     if args.command is None or args.command == 'help':
         cmd_help()
-        return
+        sys.exit(0)
 
     if hasattr(args, 'func'):
-        print()
-        args.func(args)
-        print()
+        try:
+            if not _json_mode(args):
+                print()
+            result = args.func(args)
+            if not _json_mode(args):
+                print()
+            sys.exit(result if isinstance(result, int) else 0)
+        except KeyboardInterrupt:
+            sys.exit(130)
+        except Exception as e:
+            if _json_mode(args):
+                print(_json.dumps({"error": str(e)}))
+            else:
+                print(f"\n  {R}Error:{W} {e}")
+            sys.exit(1)
     else:
         parser.print_help()
+        sys.exit(0)
 
 
 if __name__ == "__main__":
