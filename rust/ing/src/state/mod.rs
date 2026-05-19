@@ -10,6 +10,7 @@ pub use trade_buffer::{TradeBuffer, Trade};
 pub use context::MarketContext;
 pub use ring_buffer::RingBuffer;
 
+use crate::algorithms::{self, MicrostructureAlgorithm};
 use crate::config::FeaturesConfig;
 use crate::features::{Features, FeatureComputer, RegimeBuffer, RegimeConfig, GmmClassificationFeatures, CrossSymbolState};
 use crate::ml::regime::RegimeClassifier;
@@ -41,11 +42,22 @@ pub struct MarketState {
     minute_sell_volume: f64,
     /// Last price seen this minute
     minute_last_price: Option<f64>,
+    /// Pluggable microstructure algorithms (compute alg_features each tick)
+    algorithms: Vec<Box<dyn MicrostructureAlgorithm>>,
 }
 
 impl MarketState {
     /// Create a new market state
     pub fn new(symbol: &str, config: &FeaturesConfig) -> Self {
+        Self::new_with_algorithms(symbol, config, Vec::new())
+    }
+
+    /// Create a new market state with pluggable algorithms
+    pub fn new_with_algorithms(
+        symbol: &str,
+        config: &FeaturesConfig,
+        algorithms: Vec<Box<dyn MicrostructureAlgorithm>>,
+    ) -> Self {
         // Load GMM classifier if model path is provided
         let regime_classifier = config.gmm_model_path.as_ref().and_then(|path| {
             match RegimeClassifier::load(Path::new(path)) {
@@ -81,6 +93,7 @@ impl MarketState {
             minute_buy_volume: 0.0,
             minute_sell_volume: 0.0,
             minute_last_price: None,
+            algorithms,
         }
     }
 
@@ -159,8 +172,9 @@ impl MarketState {
         // Keep minute_last_price for next bar's close reference
     }
 
-    /// Compute features from current state
-    pub fn compute_features(&mut self) -> Option<Features> {
+    /// Compute features from current state.
+    /// Returns (base_features, algorithm_values).
+    pub fn compute_features(&mut self) -> Option<(Features, Vec<f64>)> {
         if !self.initialized {
             return None;
         }
@@ -203,7 +217,10 @@ impl MarketState {
             features.regime = Some(regime_features);
         }
 
-        Some(features)
+        // Run microstructure algorithms
+        let alg_values = algorithms::run_all(&mut self.algorithms, &features);
+
+        Some((features, alg_values))
     }
 
     /// Get regime buffer for external access (e.g., monitoring)

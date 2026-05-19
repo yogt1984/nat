@@ -136,8 +136,20 @@ async fn main() -> Result<()> {
     // Create channels for feature vectors
     let (feature_tx, feature_rx) = mpsc::channel::<FeatureVector>(10_000);
 
-    // Initialize Parquet writer
-    let writer = ParquetWriter::new(&config.output, config.data_dir())?;
+    // Initialize algorithms (dummy impls for now, real logic in Python)
+    let alg_feature_names = {
+        let probe = ing::algorithms::create_algorithms(&config.algorithms.enabled);
+        ing::algorithms::all_alg_feature_names(&probe)
+    };
+    if !alg_feature_names.is_empty() {
+        info!(algorithms = ?config.algorithms.enabled, n_alg_features = alg_feature_names.len(),
+              "Algorithm features enabled");
+    }
+
+    // Initialize Parquet writer (with algorithm columns)
+    let writer = ParquetWriter::new_with_alg_features(
+        &config.output, config.data_dir(), alg_feature_names,
+    )?;
     let writer_handle = tokio::spawn(run_writer(writer, feature_rx));
 
     // Initialize market state for each symbol
@@ -199,7 +211,8 @@ async fn run_symbol_ingestor(
 ) -> Result<()> {
     info!(%symbol, "Starting ingestor");
 
-    let mut state = MarketState::new(&symbol, &config.features);
+    let algorithms = ing::algorithms::create_algorithms(&config.algorithms.enabled);
+    let mut state = MarketState::new_with_algorithms(&symbol, &config.features, algorithms);
     state.set_cross_symbol_state(cross_symbol_state);
     let mut client = HyperliquidClient::new(&config.websocket, &symbol);
     let mut sequence_id: u64 = 0;
@@ -348,7 +361,7 @@ async fn run_symbol_ingestor(
                     );
                 }
 
-                if let Some(features) = state.compute_features() {
+                if let Some((features, alg_values)) = state.compute_features() {
                     sequence_id += 1;
                     let timestamp_ms = chrono::Utc::now().timestamp_millis() as u64;
 
@@ -413,6 +426,7 @@ async fn run_symbol_ingestor(
                         symbol: symbol.clone(),
                         sequence_id,
                         features,
+                        alg_values,
                     };
 
                     if feature_tx.send(feature_vector).await.is_err() {

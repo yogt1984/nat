@@ -15,7 +15,6 @@ use tracing::info;
 use crate::config::OutputConfig;
 use crate::features::Features;
 use crate::FeatureVector;
-use super::schema::create_schema;
 
 /// Parquet writer with buffering and file rotation
 pub struct ParquetWriter {
@@ -28,6 +27,8 @@ pub struct ParquetWriter {
     rows_written: usize,
     file_opened_at: Option<std::time::Instant>,
     last_progress_pct: usize,
+    /// Algorithm feature names for extended schema
+    alg_feature_names: Vec<&'static str>,
 }
 
 /// Buffer for accumulating features before writing
@@ -54,7 +55,9 @@ impl FeatureBuffer {
         self.timestamps.push(fv.timestamp_ns);
         self.symbols.push(fv.symbol.clone());
         self.sequence_ids.push(fv.sequence_id);
-        self.features.push(fv.features.to_vec());
+        let mut row = fv.features.to_vec();
+        row.extend_from_slice(&fv.alg_values);
+        self.features.push(row);
     }
 
     fn len(&self) -> usize {
@@ -72,8 +75,8 @@ impl FeatureBuffer {
         self.features.clear();
     }
 
-    fn to_record_batch(&self) -> Result<RecordBatch> {
-        let schema = create_schema();
+    fn to_record_batch(&self, alg_feature_names: &[&str]) -> Result<RecordBatch> {
+        let schema = super::schema::create_schema_with_alg_features(alg_feature_names);
 
         // Build arrays
         let mut columns: Vec<ArrayRef> = Vec::new();
@@ -122,6 +125,15 @@ impl FeatureBuffer {
 impl ParquetWriter {
     /// Create a new Parquet writer
     pub fn new(config: &OutputConfig, general_data_dir: &str) -> Result<Self> {
+        Self::new_with_alg_features(config, general_data_dir, Vec::new())
+    }
+
+    /// Create a new Parquet writer with algorithm feature columns
+    pub fn new_with_alg_features(
+        config: &OutputConfig,
+        general_data_dir: &str,
+        alg_feature_names: Vec<&'static str>,
+    ) -> Result<Self> {
         let data_dir = config.data_dir.as_deref()
             .unwrap_or(general_data_dir);
 
@@ -138,6 +150,7 @@ impl ParquetWriter {
             rows_written: 0,
             file_opened_at: None,
             last_progress_pct: 0,
+            alg_feature_names,
         })
     }
 
@@ -186,7 +199,7 @@ impl ParquetWriter {
             return Ok(());
         }
 
-        let batch = self.buffer.to_record_batch()?;
+        let batch = self.buffer.to_record_batch(&self.alg_feature_names)?;
 
         if let Some(writer) = &mut self.current_file {
             writer.write(&batch)?;
@@ -232,7 +245,7 @@ impl ParquetWriter {
 
         // Create writer
         let file = File::create(&file_path)?;
-        let schema = create_schema();
+        let schema = super::schema::create_schema_with_alg_features(&self.alg_feature_names);
 
         let compression = match self.config.compression.as_str() {
             "zstd" => Compression::ZSTD(Default::default()),

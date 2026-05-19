@@ -46,6 +46,11 @@ compression = "zstd"
 # File rotation interval: 1h, 1d
 rotate_interval = "1h"
 
+[algorithms]
+# Microstructure algorithms (dummy impls, real logic in Python)
+# enabled = ["regime_gated", "kalman_imbalance", "multi_level_imb"]
+enabled = []
+
 [redis]
 url = "redis://127.0.0.1:6379"
 # channel_prefix = "nat"

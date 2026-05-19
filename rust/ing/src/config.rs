@@ -18,6 +18,8 @@ pub struct Config {
     pub dashboard: DashboardConfig,
     #[serde(default)]
     pub redis: RedisTomlConfig,
+    #[serde(default)]
+    pub algorithms: AlgorithmsConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -115,6 +117,18 @@ impl Default for RedisTomlConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct AlgorithmsConfig {
+    #[serde(default)]
+    pub enabled: Vec<String>,
+}
+
+impl Default for AlgorithmsConfig {
+    fn default() -> Self {
+        Self { enabled: Vec::new() }
+    }
+}
+
 // Default values
 fn default_log_level() -> String { "info".to_string() }
 fn default_ws_url() -> String { "wss://api.hyperliquid.xyz/ws".to_string() }
@@ -208,6 +222,7 @@ impl Default for Config {
             metrics: MetricsConfig::default(),
             dashboard: DashboardConfig::default(),
             redis: RedisTomlConfig::default(),
+            algorithms: AlgorithmsConfig::default(),
         }
     }
 }

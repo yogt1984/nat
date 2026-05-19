@@ -437,3 +437,51 @@ def _compute_metrics(
         cost_model=cost_model,
         total_costs_pct=total_costs,
     )
+
+
+def run_algorithm_backtest(
+    df: pl.DataFrame,
+    algorithm,
+    entry_condition,
+    exit_condition,
+    cost_model: CostModel,
+    initial_capital: float = 10000.0,
+    direction: str = "long",
+    **strategy_kwargs,
+) -> BacktestResult:
+    """Run backtest with algorithm's alg_features augmenting the DataFrame.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        Feature data (must include algorithm's required_columns + raw_midprice)
+    algorithm : MicrostructureAlgorithm
+        Algorithm instance (from scripts/algorithms/)
+    entry_condition : Callable[[pl.DataFrame], pl.Series]
+        Entry condition operating on the augmented DataFrame
+    exit_condition : Callable[[pl.DataFrame], pl.Series]
+        Exit condition operating on the augmented DataFrame
+    cost_model : CostModel
+        Transaction cost model
+    """
+    import pandas as pd
+
+    # Run algorithm in batch over pandas, then join back to polars
+    pdf = df.to_pandas()
+    alg_df = algorithm.run_batch(pdf)
+
+    # Convert alg_features to polars and hstack
+    alg_pl = pl.from_pandas(alg_df)
+    augmented = pl.concat([df, alg_pl], how="horizontal")
+
+    strategy = Strategy(
+        name=f"alg_{algorithm.name()}",
+        entry_condition=entry_condition,
+        exit_condition=exit_condition,
+        direction=direction,
+        required_features=algorithm.feature_names,
+        description=f"Algorithm backtest: {algorithm.name()}",
+        **strategy_kwargs,
+    )
+
+    return run_backtest(augmented, strategy, cost_model, initial_capital)

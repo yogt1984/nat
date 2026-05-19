@@ -4,6 +4,7 @@
 //! and hypothesis testing capabilities.
 
 pub mod alerts;
+pub mod algorithms;
 pub mod config;
 pub mod dashboard;
 pub mod error;
@@ -26,4 +27,6 @@ pub struct FeatureVector {
     pub symbol: String,
     pub sequence_id: u64,
     pub features: features::Features,
+    /// Algorithm-derived features (appended after base features in parquet)
+    pub alg_values: Vec<f64>,
 }

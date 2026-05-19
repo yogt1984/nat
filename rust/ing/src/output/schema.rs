@@ -7,15 +7,25 @@ use crate::features::Features;
 
 /// Create the Arrow schema for feature output
 pub fn create_schema() -> Arc<Schema> {
+    create_schema_with_alg_features(&[])
+}
+
+/// Create schema with additional algorithm-derived feature columns
+pub fn create_schema_with_alg_features(alg_names: &[&str]) -> Arc<Schema> {
     let mut fields = vec![
         Field::new("timestamp_ns", DataType::Int64, false),
         Field::new("symbol", DataType::Utf8, false),
         Field::new("sequence_id", DataType::UInt64, false),
     ];
 
-    // Add feature fields (all features including optional ones)
+    // Base + optional features (209 fixed columns)
     for name in Features::names_all() {
         fields.push(Field::new(name, DataType::Float64, false));
+    }
+
+    // Algorithm-derived features (dynamic, configured at runtime)
+    for name in alg_names {
+        fields.push(Field::new(*name, DataType::Float64, false));
     }
 
     Arc::new(Schema::new(fields))
