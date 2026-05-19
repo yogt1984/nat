@@ -1074,6 +1074,105 @@ def cmd_validate_skeptical(args):
     _py(f"scripts/skeptical_validation.py --data {_data(args)} --output {output}")
 
 
+# ── Alpha pipeline orchestrator ─────────────────────────────────────────────
+
+def cmd_alpha_pipeline_start(args):
+    cfg = getattr(args, 'config', 'config/alpha.toml')
+    _banner("Alpha Pipeline: Start")
+    _py(f"scripts/alpha/alpha_pipeline.py --config {cfg} start")
+
+def cmd_alpha_pipeline_resume(args):
+    cfg = getattr(args, 'config', 'config/alpha.toml')
+    extra = " --force-gate" if getattr(args, 'force_gate', False) else ""
+    _py(f"scripts/alpha/alpha_pipeline.py --config {cfg} resume{extra}")
+
+def cmd_alpha_pipeline_status(args):
+    cfg = getattr(args, 'config', 'config/alpha.toml')
+    _py(f"scripts/alpha/alpha_pipeline.py --config {cfg} status")
+
+def cmd_alpha_pipeline_gates(args):
+    cfg = getattr(args, 'config', 'config/alpha.toml')
+    _py(f"scripts/alpha/alpha_pipeline.py --config {cfg} gates")
+
+def cmd_alpha_pipeline_run_step(args):
+    cfg = getattr(args, 'config', 'config/alpha.toml')
+    _py(f"scripts/alpha/alpha_pipeline.py --config {cfg} run-step {args.step}")
+
+
+# ── Audit commands ──────────────────────────────────────────────────────────
+
+def cmd_audit_aggregate(args):
+    _banner("Audit: Aggregate Walk-Forward Results")
+    _py(f"scripts/audit_aggregate.py {args.audit_dir}")
+
+def cmd_audit_sweep(args):
+    _banner("Audit: Parameter Sweep")
+    cmd = f"scripts/audit_sweep.py --data-dir {_data(args)}"
+    symbols = getattr(args, 'symbols', None)
+    if symbols:
+        cmd += " --symbols " + " ".join(symbols)
+    timeframes = getattr(args, 'timeframes', None)
+    if timeframes:
+        cmd += " --timeframes " + " ".join(timeframes)
+    if getattr(args, 'verbose', False):
+        cmd += " -v"
+    _py(cmd)
+
+
+# ── Funding reversion backtest ──────────────────────────────────────────────
+
+def cmd_backtest_funding(args):
+    _banner("Backtest: Funding Rate Reversion")
+    _py("scripts/backtest_funding_reversion.py")
+
+
+# ── Kalman research commands ───────────────────────────────────────────────
+
+def cmd_kalman_analysis(args):
+    _banner(f"Kalman IC Analysis: {_sym(args)}")
+    cmd = f"scripts/kalman/analysis.py --data-dir {_data(args)} --symbol {_sym(args)}"
+    if getattr(args, 'all_symbols', False):
+        cmd += " --all-symbols"
+    report = getattr(args, 'json_report', None)
+    if report:
+        cmd += f" --json-report {report}"
+    _py(cmd)
+
+def cmd_kalman_drift(args):
+    _banner(f"Kalman Drift Analysis: {_sym(args)}")
+    cmd = f"scripts/kalman/drift_analysis.py --data-dir {_data(args)} --symbol {_sym(args)}"
+    if getattr(args, 'all_symbols', False):
+        cmd += " --all-symbols"
+    report = getattr(args, 'json_report', None)
+    if report:
+        cmd += f" --json-report {report}"
+    latency = getattr(args, 'latency_ticks', None)
+    if latency:
+        cmd += f" --latency-ticks {latency}"
+    _py(cmd)
+
+
+# ── Skeptical regression test ──────────────────────────────────────────────
+
+def cmd_validate_regression(args):
+    _banner(f"Skeptical Regression Test: {_sym(args)}")
+    cmd = (f"scripts/skeptical_regression_test.py --data-dir {_data(args)} "
+           f"--symbol {_sym(args)} --horizon {getattr(args, 'horizon', 18000)}")
+    report = getattr(args, 'json_report', None)
+    if report:
+        cmd += f" --json-report {report}"
+    start = getattr(args, 'start_date', None)
+    if start:
+        cmd += f" --start-date {start}"
+    end = getattr(args, 'end_date', None)
+    if end:
+        cmd += f" --end-date {end}"
+    n_perm = getattr(args, 'n_permutations', None)
+    if n_perm:
+        cmd += f" --n-permutations {n_perm}"
+    _py(cmd)
+
+
 # ── Experiment tracking commands ─────────────────────────────────────────────
 
 def cmd_experiment_list(args):
@@ -2274,12 +2373,22 @@ def cmd_help(args=None):
     nat alpha portfolio        Multi-symbol portfolio assembly
     nat alpha paper            Paper trading simulation
     nat alpha deploy           Deployment readiness check
+    nat alpha pipeline-start   Run full 9-step pipeline (orchestrated with gates)
+    nat alpha pipeline-resume  Resume from last phase (--force-gate to skip failures)
+    nat alpha pipeline-status  Show pipeline state and gate verdicts
+    nat alpha pipeline-gates   Detailed gate metrics report
+    nat alpha pipeline-step N  Run single step (1-9)
 
   {BOLD}Algorithm Research{W}
     Evaluate microstructure algorithms (Kalman filter, regime-gated imbalance,
     multi-level book depth). IC at horizons [1,5,10,50,100] with regime gating.
     nat algorithm evaluate     IC/drift evaluation (--algorithm, --all, --symbol)
     nat algorithm list         Registered algorithms and their alg_features
+
+  {BOLD}Kalman Research{W}
+    OU Kalman filter analysis: dx = theta(mu - x)dt + sigma dW.
+    nat kalman analysis        Phase 1: Kalman filter IC at multiple horizons
+    nat kalman drift           Phase 2: Signal drift + latency cost analysis
 
   {BOLD}Backtest{W}
     Event-driven backtesting. Sharpe=(mu/sigma)*sqrt(252), MaxDD, profit factor.
@@ -2290,6 +2399,7 @@ def cmd_help(args=None):
     nat backtest ml-quantile   Quantile thresholds (--entry-q, --exit-q)
     nat backtest ml-tracked    ML + experiment tracking
     nat backtest list          Available strategies
+    nat backtest funding       Funding rate reversion backtest
 
   {BOLD}Model{W}
     ElasticNet (L1+L2 regularization) and LightGBM (gradient boosted trees).
@@ -2311,6 +2421,7 @@ def cmd_help(args=None):
   {BOLD}Validation{W}
     Statistical tests to guard against overfitting before capital deployment.
     nat validate skeptical     20+ tests: runs, variance ratio, Ljung-Box, BDS, Hurst
+    nat validate regression    10-test regression signal battery (--horizon, --n-permutations)
 
   {BOLD}EAMM (Market Making){W}
     Avellaneda-Stoikov framework with entropy-aware spread and inventory penalty.
@@ -2339,6 +2450,11 @@ def cmd_help(args=None):
     nat discovery once         Single sweep cycle
     nat discovery status       Current state
     nat discovery stop         Stop orchestrator
+
+  {BOLD}Audit{W}
+    Backtest result aggregation and systematic parameter sweeps.
+    nat audit aggregate <dir>  Aggregate walk-forward backtest JSONs
+    nat audit sweep            Parameter sweep across symbols/timeframes
 
   {BOLD}Experiment Tracking{W}
     nat experiment list        List experiments (--stage filter)
@@ -2593,6 +2709,24 @@ def build_parser():
     adp.add_argument('--paper-report', default='reports/alpha_paper.json', help='Paper trading report JSON')
     adp.add_argument('--account-value', type=float, default=10000.0, help='Account value in USD')
     adp.set_defaults(func=cmd_alpha_deploy)
+    # Alpha pipeline orchestrator (runs all 9 steps with quality gates)
+    apl_start = asub.add_parser('pipeline-start', help='Start fresh alpha pipeline run (all 9 steps)')
+    apl_start.add_argument('--config', default='config/alpha.toml', help='Alpha config TOML')
+    apl_start.set_defaults(func=cmd_alpha_pipeline_start)
+    apl_resume = asub.add_parser('pipeline-resume', help='Resume alpha pipeline from last phase')
+    apl_resume.add_argument('--config', default='config/alpha.toml', help='Alpha config TOML')
+    apl_resume.add_argument('--force-gate', action='store_true', help='Continue past GATE_FAILED')
+    apl_resume.set_defaults(func=cmd_alpha_pipeline_resume)
+    apl_status = asub.add_parser('pipeline-status', help='Alpha pipeline state + gate verdicts')
+    apl_status.add_argument('--config', default='config/alpha.toml', help='Alpha config TOML')
+    apl_status.set_defaults(func=cmd_alpha_pipeline_status)
+    apl_gates = asub.add_parser('pipeline-gates', help='Detailed gate report with metrics')
+    apl_gates.add_argument('--config', default='config/alpha.toml', help='Alpha config TOML')
+    apl_gates.set_defaults(func=cmd_alpha_pipeline_gates)
+    apl_step = asub.add_parser('pipeline-step', help='Run single alpha pipeline step (1-9)')
+    apl_step.add_argument('step', type=int, help='Step number (1-9)')
+    apl_step.add_argument('--config', default='config/alpha.toml', help='Alpha config TOML')
+    apl_step.set_defaults(func=cmd_alpha_pipeline_run_step)
 
     # ── visualize ──
     viz_p = sub.add_parser('visualize', help='Visualization suite')
@@ -2735,6 +2869,7 @@ def build_parser():
     bmlt.add_argument('--output', default='./backtest_results.json', help='Output results JSON')
     bmlt.set_defaults(func=cmd_backtest_ml_tracked)
     btsub.add_parser('list', help='List strategies').set_defaults(func=cmd_backtest_list)
+    btsub.add_parser('funding', help='Funding rate reversion backtest').set_defaults(func=cmd_backtest_funding)
 
     # ── model ──
     model_p = sub.add_parser('model', help='Model training & serving')
@@ -2864,6 +2999,15 @@ def build_parser():
     vs.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     vs.add_argument('--output', default='reports/skeptical_validation', help='Output directory')
     vs.set_defaults(func=cmd_validate_skeptical)
+    vr = vsub.add_parser('regression', help='Skeptical regression signal test battery (10 tests)')
+    vr.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    vr.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    vr.add_argument('--horizon', type=int, default=18000, help='Forward horizon in ticks (default: 18000)')
+    vr.add_argument('--json-report', default=None, help='Output JSON report path')
+    vr.add_argument('--start-date', default=None, help='Start date filter (YYYY-MM-DD)')
+    vr.add_argument('--end-date', default=None, help='End date filter (YYYY-MM-DD)')
+    vr.add_argument('--n-permutations', type=int, default=200, help='Permutation test iterations')
+    vr.set_defaults(func=cmd_validate_regression)
 
     # ── experiment ──
     exp_p = sub.add_parser('experiment', help='Experiment tracking')
@@ -3030,6 +3174,64 @@ def build_parser():
     alge.add_argument('--json-report', default=None, help='Output JSON report path')
     alge.set_defaults(func=cmd_algorithm_evaluate)
     algsub.add_parser('list', help='List registered algorithms and features').set_defaults(func=cmd_algorithm_list)
+
+    # ── kalman ──
+    kal_p = sub.add_parser('kalman', help='Kalman filter research (OU filter IC + drift analysis)')
+    kal_p.set_defaults(func=lambda a: kal_p.print_help())
+    kalsub = kal_p.add_subparsers(dest='subcmd')
+    ka = kalsub.add_parser('analysis', help='Phase 1: Kalman filter IC analysis',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Evaluates OU Kalman filter on raw features. Computes IC at multiple
+        horizons with regime gating (ent_book_shape < P30).
+
+        Mathematics:
+          OU process:  dx = θ(μ - x)dt + σ dW
+          Kalman predict:  x̂⁻ = e^(-θΔt)·x̂,  P⁻ = e^(-2θΔt)·P + Q
+          Kalman update:   K = P⁻/(P⁻ + R),  x̂ = x̂⁻ + K·(z - x̂⁻)
+
+        Example:
+          nat kalman analysis --symbol BTC --all-symbols
+        """))
+    ka.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    ka.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    ka.add_argument('--all-symbols', action='store_true', help='Run on all symbols')
+    ka.add_argument('--json-report', default=None, help='Output JSON report path')
+    ka.set_defaults(func=cmd_kalman_analysis)
+    kd = kalsub.add_parser('drift', help='Phase 2: Drift analysis (latency-aware)',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Analyzes signal drift and decay after Kalman filtering. Tests whether
+        filtered signals remain predictive after realistic execution latency.
+
+        Mathematics:
+          Drift IC:      IC(t+lag) for lag ∈ {0, 1, 2, 5, 10} ticks
+          Decay rate:    IC(lag) / IC(0) — measures signal half-life
+          Latency cost:  IC loss from N ticks of execution delay
+
+        Example:
+          nat kalman drift --symbol BTC --latency-ticks 2
+        """))
+    kd.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    kd.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    kd.add_argument('--all-symbols', action='store_true', help='Run on all symbols')
+    kd.add_argument('--json-report', default=None, help='Output JSON report path')
+    kd.add_argument('--latency-ticks', type=int, default=2, help='Execution latency in ticks (default: 2)')
+    kd.set_defaults(func=cmd_kalman_drift)
+
+    # ── audit ──
+    aud_p = sub.add_parser('audit', help='Backtest audit and parameter sweep tools')
+    aud_p.set_defaults(func=lambda a: aud_p.print_help())
+    audsub = aud_p.add_subparsers(dest='subcmd')
+    agg = audsub.add_parser('aggregate', help='Aggregate walk-forward backtest results')
+    agg.add_argument('audit_dir', help='Directory containing walk_forward_*.json files')
+    agg.set_defaults(func=cmd_audit_aggregate)
+    asw = audsub.add_parser('sweep', help='Systematic parameter sweep across symbols/timeframes')
+    asw.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    asw.add_argument('--symbols', nargs='+', default=None, help='Symbols to sweep (default: BTC ETH SOL)')
+    asw.add_argument('--timeframes', nargs='+', default=None, help='Timeframes (default: 5min 15min 1h)')
+    asw.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
+    asw.set_defaults(func=cmd_audit_sweep)
 
     # ── discovery ──
     disc_p = sub.add_parser('discovery', help='Alpha discovery orchestrator')
