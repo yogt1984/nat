@@ -182,10 +182,9 @@ def main():
     parser.add_argument("--json-report", default=None)
     args = parser.parse_args()
 
-    # Import algorithms to trigger registration
-    from algorithms.kalman_imbalance import KalmanImbalance  # noqa: F401
-    from algorithms.regime_gated import RegimeGatedImbalance  # noqa: F401
-    from algorithms.multi_level_imb import MultiLevelImbalance  # noqa: F401
+    # Auto-discover all algorithms
+    from algorithms.autodiscover import discover_all
+    discover_all()
     from algorithms.registry import list_algorithms, get_algorithm
     from algorithms.runner import AlgorithmRunner
 

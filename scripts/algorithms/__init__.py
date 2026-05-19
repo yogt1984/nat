@@ -6,9 +6,14 @@
 from .base import AlgorithmFeature, MicrostructureAlgorithm
 from .registry import register, get_algorithm, list_algorithms
 from .runner import AlgorithmRunner, AlgorithmResult
+from .autodiscover import discover_all
+
+# Auto-register all algorithm modules on package import
+discover_all()
 
 __all__ = [
     "AlgorithmFeature", "MicrostructureAlgorithm",
     "register", "get_algorithm", "list_algorithms",
     "AlgorithmRunner", "AlgorithmResult",
+    "discover_all",
 ]

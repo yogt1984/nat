@@ -1828,10 +1828,8 @@ def cmd_algorithm_evaluate(args):
 def cmd_algorithm_list(args):
     """List registered algorithms."""
     sys.path.insert(0, str(ROOT / "scripts"))
-    # Import concrete algorithms to trigger @register
-    from algorithms.kalman_imbalance import KalmanImbalance  # noqa: F401
-    from algorithms.regime_gated import RegimeGatedImbalance  # noqa: F401
-    from algorithms.multi_level_imb import MultiLevelImbalance  # noqa: F401
+    from algorithms.autodiscover import discover_all
+    discover_all()
     from algorithms.registry import list_algorithms
     from algorithms import get_algorithm
     algs = list_algorithms()
@@ -1857,6 +1855,95 @@ def cmd_algorithm_list(args):
         for f in feats:
             print(f"      - {f.name}  (warmup={f.warmup})  {f.description}")
     print()
+
+
+def cmd_algorithm_config(args):
+    """Show algorithm configuration from TOML."""
+    config_path = ROOT / "config" / "algorithms.toml"
+    if not config_path.exists():
+        print(f"  {R}Not found:{W} {config_path}")
+        return 1
+
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib
+
+    with open(config_path, "rb") as f:
+        cfg = tomllib.load(f)
+
+    if _json_mode(args):
+        _output(cfg, args)
+        return
+
+    section = getattr(args, 'section', None)
+    if section:
+        if section in cfg:
+            print(f"\n  {BOLD}[{section}]{W}\n")
+            for k, v in cfg[section].items():
+                print(f"    {k} = {v}")
+            print()
+        else:
+            print(f"  {R}Section not found:{W} {section}")
+            print(f"  Available: {', '.join(cfg.keys())}")
+        return
+
+    for sect_name, sect_data in cfg.items():
+        if isinstance(sect_data, dict):
+            print(f"\n  {BOLD}[{sect_name}]{W}")
+            for k, v in sect_data.items():
+                if isinstance(v, dict):
+                    print(f"    [{sect_name}.{k}]")
+                    for kk, vv in v.items():
+                        print(f"      {kk} = {vv}")
+                else:
+                    print(f"    {k} = {v}")
+    print()
+
+
+def cmd_backtest_algorithm(args):
+    """Run backtest using algorithm features as signals."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from algorithms.autodiscover import discover_all
+    discover_all()
+    from backtest.algorithm_strategy import run_algorithm_backtest
+
+    alg_name = args.algorithm
+    feature = getattr(args, 'feature', None)
+    entry = getattr(args, 'entry_threshold', 0.3)
+    exit_ = getattr(args, 'exit_threshold', -0.1)
+
+    _banner(f"Algorithm backtest: {alg_name}")
+
+    result = run_algorithm_backtest(
+        algorithm_name=alg_name,
+        data_dir=str(_data(args)),
+        symbol=_sym(args),
+        feature_col=feature,
+        entry_threshold=entry,
+        exit_threshold=exit_,
+    )
+
+    if _json_mode(args):
+        _output(result, args)
+        return
+
+    if "error" in result:
+        print(f"  {R}Error:{W} {result['error']}")
+        return 1
+
+    print(f"  Algorithm:   {result['algorithm']}")
+    print(f"  Feature:     {result['feature']}")
+    print(f"  Symbol:      {result['symbol']}")
+    print(f"  Ticks:       {result['n_ticks']:,}")
+    print(f"  Trades:      {result['n_trades']:,}")
+    print(f"  Total ret:   {result['total_return_bps']:+.2f} bps")
+    print(f"  Sharpe:      {result['sharpe']:+.3f}")
+    print(f"  Max DD:      {result['max_drawdown_bps']:.2f} bps")
+    print(f"  Win rate:    {result['win_rate']:.1%}")
+    print(f"  Profit fac:  {result['profit_factor']:.3f}")
+    print(f"  Avg/trade:   {result['avg_return_per_trade_bps']:+.4f} bps")
+    print(f"  Total cost:  {result['cost_bps']:.2f} bps")
 
 
 # ── Discovery orchestrator ──────────────────────────────────────────────────
@@ -2380,10 +2467,12 @@ def cmd_help(args=None):
     nat alpha pipeline-step N  Run single step (1-9)
 
   {BOLD}Algorithm Research{W}
-    Evaluate microstructure algorithms (Kalman filter, regime-gated imbalance,
-    multi-level book depth). IC at horizons [1,5,10,50,100] with regime gating.
+    18 microstructure algorithms: OFI, Hawkes, jump detection, VPIN regime,
+    spread decomposition, entropy-gated momentum, switching OU, SPRT entry,
+    online ridge, and more. IC at horizons [1,5,10,50,100] with regime gating.
     nat algorithm evaluate     IC/drift evaluation (--algorithm, --all, --symbol)
     nat algorithm list         Registered algorithms and their alg_features
+    nat algorithm config       Show algorithm configuration (TOML parameters)
 
   {BOLD}Kalman Research{W}
     OU Kalman filter analysis: dx = theta(mu - x)dt + sigma dW.
@@ -2400,6 +2489,7 @@ def cmd_help(args=None):
     nat backtest ml-tracked    ML + experiment tracking
     nat backtest list          Available strategies
     nat backtest funding       Funding rate reversion backtest
+    nat backtest algorithm     Backtest algorithm features as signals (--algorithm)
 
   {BOLD}Model{W}
     ElasticNet (L1+L2 regularization) and LightGBM (gradient boosted trees).
@@ -2870,6 +2960,29 @@ def build_parser():
     bmlt.set_defaults(func=cmd_backtest_ml_tracked)
     btsub.add_parser('list', help='List strategies').set_defaults(func=cmd_backtest_list)
     btsub.add_parser('funding', help='Funding rate reversion backtest').set_defaults(func=cmd_backtest_funding)
+    balg = btsub.add_parser('algorithm', help='Backtest using algorithm features as signals',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Runs a registered algorithm on historical data, then backtests the
+        resulting signal with configurable entry/exit thresholds and cost model.
+
+        The algorithm feature is used as a continuous signal:
+          Enter long  when signal > entry_threshold
+          Enter short when signal < -entry_threshold
+          Exit when |signal| < |exit_threshold| or sign flips
+
+        Cost model: (maker_fee + taker_fee) / 2 per position change.
+
+        Example:
+          nat backtest algorithm --algorithm weighted_ofi --symbol BTC
+          nat backtest algorithm --algorithm hawkes_intensity --feature alg_bid_ask_hawkes_imbalance
+        """))
+    balg.add_argument('--algorithm', required=True, help='Algorithm name')
+    balg.add_argument('--feature', default=None, help='Feature column for signal (default: first)')
+    balg.add_argument('--entry-threshold', type=float, default=0.3, help='Entry threshold (default: 0.3)')
+    balg.add_argument('--exit-threshold', type=float, default=-0.1, help='Exit threshold (default: -0.1)')
+    balg.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    balg.set_defaults(func=cmd_backtest_algorithm)
 
     # ── model ──
     model_p = sub.add_parser('model', help='Model training & serving')
@@ -3161,7 +3274,7 @@ def build_parser():
                             (low-entropy = structured book = cleaner signal)
           Significance:     z = IC · √n,  reject H0 if |z| > 1.96
 
-        Algorithms: kalman_imbalance, regime_gated, multi_level_imb
+        Algorithms: 18 registered (use 'nat algorithm list' to see all)
 
         Example:
           nat algorithm evaluate --all --symbol BTC
@@ -3174,6 +3287,9 @@ def build_parser():
     alge.add_argument('--json-report', default=None, help='Output JSON report path')
     alge.set_defaults(func=cmd_algorithm_evaluate)
     algsub.add_parser('list', help='List registered algorithms and features').set_defaults(func=cmd_algorithm_list)
+    algc = algsub.add_parser('config', help='Show algorithm configuration (from algorithms.toml)')
+    algc.add_argument('section', nargs='?', default=None, help='Specific algorithm section')
+    algc.set_defaults(func=cmd_algorithm_config)
 
     # ── kalman ──
     kal_p = sub.add_parser('kalman', help='Kalman filter research (OU filter IC + drift analysis)')

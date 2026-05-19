@@ -256,6 +256,46 @@ under load.
 absent. See [`FEATURES.md`](FEATURES.md) for the full manifest with formulas and
 Parquet column names.
 
+## Microstructure Algorithm Library
+
+NAT includes 18 configurable microstructure algorithms that compute 59 derived
+features from the base ingestor feature vector. Each algorithm implements
+the `MicrostructureAlgorithm` interface with tick-by-tick `step()` and
+vectorized `run_batch()` methods. Parameters are configurable via
+`config/algorithms.toml`.
+
+```bash
+nat algorithm list                     # show all 18 algorithms and their features
+nat algorithm evaluate --all           # IC/drift evaluation on all algorithms
+nat algorithm evaluate --algorithm hawkes_intensity --symbol BTC
+nat algorithm config                   # show TOML configuration
+nat backtest algorithm --algorithm weighted_ofi --symbol BTC
+```
+
+| # | Algorithm | Features | Reference |
+|---|-----------|----------|-----------|
+| 1 | `kalman_imbalance` | 4 | Kalman OU filter on L1 imbalance |
+| 2 | `regime_gated` | 3 | Entropy percentile gating — Bandt & Pompe (2002) |
+| 3 | `multi_level_imb` | 3 | Weighted L1/L5/L10 composite |
+| 4 | `weighted_ofi` | 3 | Depth-decay weighted OFI — Cont, Kukanov & Stoikov (2014) |
+| 5 | `trade_through` | 3 | Queue depletion probability — Cont & de Larrard (2013) |
+| 6 | `propagator` | 3 | Transient impact with power-law kernel — Bouchaud et al. (2004) |
+| 7 | `hawkes_intensity` | 4 | Self-exciting trade arrival — Bacry, Mastromatteo & Muzy (2015) |
+| 8 | `jump_detector` | 4 | Lee-Mykland nonparametric jump test — Lee & Mykland (2008) |
+| 9 | `bipower_jump` | 4 | BV jump decomposition — Barndorff-Nielsen & Shephard (2004) |
+| 10 | `vpin_regime` | 3 | VPIN-triggered regime switch — Easley, López de Prado & O'Hara (2012) |
+| 11 | `spread_decomp` | 3 | Adverse selection decomposition — Hendershott, Jones & Menkveld (2011) |
+| 12 | `entropy_momentum` | 3 | Entropy-gated momentum (novel) |
+| 13 | `surprise_signal` | 3 | Entropy regime transition detection |
+| 14 | `funding_reversion` | 3 | Funding rate mean-reversion (crypto-specific) |
+| 15 | `oi_divergence` | 3 | Open interest vs price divergence |
+| 16 | `switching_ou` | 4 | Two-regime OU with Bayesian filtering — Elliott et al. (2005), Hamilton (1989) |
+| 17 | `optimal_entry` | 3 | SPRT on Kalman innovation — Wald (1947), Shiryaev (1978) |
+| 18 | `online_ridge` | 3 | Online ridge regression meta-algorithm — Hoerl & Kennard (1970) |
+
+Evaluation computes Spearman IC at horizons {1, 5, 10, 50, 100} ticks with
+regime-gated IC (ent_book_shape < P30) and post-fill drift analysis.
+
 ## NAT Analysis Tools
 
 The agent orchestrates these tools autonomously. They can also be used
@@ -328,6 +368,7 @@ make test_agent                         # agent tests (cache + dashboard + monit
 | `config/ing.toml` | Ingestor: WebSocket URL, symbols, emission interval, output format |
 | `config/agent.toml` | Agent: cycle interval, experiment budget, 5-gate thresholds (IC, dIC, cost, FDR q), decay monitoring, promotion criteria |
 | `config/pipeline.toml` | Pipeline orchestration: ingestion duration, analysis thresholds |
+| `config/algorithms.toml` | Algorithm parameters: per-algorithm constructor kwargs (decay rates, windows, thresholds) |
 
 Environment: `RUST_LOG`, `REDIS_URL`, `ING_DASHBOARD_ENABLED`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
 
@@ -359,11 +400,19 @@ scripts/
       cross_asset.py          Lead-lag prober (BTC/ETH/SOL)
       recycler.py             Graveyard re-evaluator
   agent_dashboard.py        Agent web dashboard (stdlib HTTP, port 8060, IC heatmap)
+  algorithms/                   Microstructure algorithm library (18 algorithms, 59 features)
+    base.py                       MicrostructureAlgorithm ABC, AlgorithmFeature
+    registry.py                   @register decorator, get_algorithm(), list_algorithms()
+    runner.py                     AlgorithmRunner (parquet + dataframe modes)
+    evaluate.py                   IC/drift evaluation harness
+    autodiscover.py               importlib-based auto-registration
+    tests/                        Parametrized smoke tests (195 tests)
   spannung_regime_screener.py   Quintile regime IC screening
   spannung_spectral.py          Frequency-domain analysis
   scalping_profiler.py          Walk-forward feature profiler
   cluster_pipeline/             Unsupervised regime discovery (15 modules)
   backtest/                     Walk-forward backtesting engine
+    algorithm_strategy.py         Algorithm-to-backtest bridge
   eamm/                         Entropy-adaptive market making (prototype)
   pipeline_runner.py            Pipeline state machine
 
@@ -371,6 +420,7 @@ config/
   ing.toml                Ingestor configuration
   agent.toml              Agent daemon configuration
   pipeline.toml           Pipeline orchestration
+  algorithms.toml         Algorithm parameters (18 sections)
 
 data/
   features/               Parquet output (YYYY-MM-DD/*.parquet)

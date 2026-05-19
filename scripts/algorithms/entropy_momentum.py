@@ -1,0 +1,136 @@
+"""
+Entropy-Gated Momentum Algorithm
+
+Gates momentum signals by entropy percentile. Low entropy = high predictability;
+momentum signals are more reliable when the market is in a low-entropy regime.
+
+Reference:
+  Bentes & Menezes (2012) — entropy-based approaches to financial time series
+  Novel combination of permutation entropy with trend momentum features.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+from .base import AlgorithmFeature, MicrostructureAlgorithm
+from .registry import register
+
+
+@register
+class EntropyMomentum(MicrostructureAlgorithm):
+    """Entropy-gated momentum: stronger signal when entropy is low."""
+
+    def __init__(self, low_entropy_pct: float = 30.0, momentum_window: int = 300):
+        self._low_entropy_pct = low_entropy_pct
+        self._momentum_window = momentum_window
+        self._entropy_buffer: list[float] = []
+
+    def name(self) -> str:
+        return "entropy_momentum"
+
+    def alg_features(self) -> list[AlgorithmFeature]:
+        return [
+            AlgorithmFeature("alg_entropy_gated_momentum", warmup=100,
+                             description="Momentum when entropy < P30, else 0"),
+            AlgorithmFeature("alg_entropy_trend_interaction", warmup=100,
+                             description="(1 - entropy) * momentum — continuous interaction"),
+            AlgorithmFeature("alg_predictability_score", warmup=100,
+                             description="Rolling fraction of time in low-entropy regime"),
+        ]
+
+    def required_columns(self) -> list[str]:
+        return ["ent_book_shape", "trend_momentum_60", "trend_momentum_300"]
+
+    def step(self, tick: dict[str, float]) -> dict[str, float]:
+        ent = tick.get("ent_book_shape", np.nan)
+        mom60 = tick.get("trend_momentum_60", np.nan)
+        mom300 = tick.get("trend_momentum_300", np.nan)
+
+        if not all(np.isfinite(x) for x in [ent, mom60, mom300]):
+            return {f.name: np.nan for f in self.alg_features()}
+
+        self._entropy_buffer.append(ent)
+        if len(self._entropy_buffer) > self._momentum_window:
+            self._entropy_buffer.pop(0)
+
+        if len(self._entropy_buffer) < 50:
+            return {f.name: np.nan for f in self.alg_features()}
+
+        # Composite momentum (blend short + long)
+        momentum = 0.6 * mom60 + 0.4 * mom300
+
+        # Entropy gate
+        threshold = np.percentile(self._entropy_buffer, self._low_entropy_pct)
+        low_entropy = ent < threshold
+
+        gated_momentum = momentum if low_entropy else 0.0
+
+        # Continuous interaction: weight momentum by (1 - normalized_entropy)
+        ent_min = min(self._entropy_buffer)
+        ent_max = max(self._entropy_buffer)
+        ent_range = ent_max - ent_min
+        if ent_range > 1e-12:
+            ent_norm = (ent - ent_min) / ent_range
+        else:
+            ent_norm = 0.5
+        interaction = (1 - ent_norm) * momentum
+
+        # Predictability score: fraction of recent window in low-entropy regime
+        arr = np.array(self._entropy_buffer)
+        predictability = float(np.mean(arr < threshold))
+
+        return {
+            "alg_entropy_gated_momentum": gated_momentum,
+            "alg_entropy_trend_interaction": interaction,
+            "alg_predictability_score": predictability,
+        }
+
+    def reset(self) -> None:
+        self._entropy_buffer.clear()
+
+    def run_batch(self, df: "pd.DataFrame") -> "pd.DataFrame":
+        """Vectorized override."""
+        import pandas as pd
+
+        ent = df["ent_book_shape"].values.astype(np.float64)
+        mom60 = df["trend_momentum_60"].values.astype(np.float64)
+        mom300 = df["trend_momentum_300"].values.astype(np.float64)
+
+        momentum = 0.6 * mom60 + 0.4 * mom300
+
+        ent_s = pd.Series(ent)
+        rolling_thresh = ent_s.rolling(
+            self._momentum_window, min_periods=50
+        ).quantile(self._low_entropy_pct / 100.0).values
+
+        low_entropy = ent < rolling_thresh
+        gated = np.where(low_entropy, momentum, 0.0)
+        gated[np.isnan(rolling_thresh)] = np.nan
+
+        # Continuous interaction via rolling min-max normalization
+        rolling_min = ent_s.rolling(self._momentum_window, min_periods=50).min().values
+        rolling_max = ent_s.rolling(self._momentum_window, min_periods=50).max().values
+        ent_range = rolling_max - rolling_min
+        ent_norm = np.where(ent_range > 1e-12,
+                            (ent - rolling_min) / ent_range,
+                            0.5)
+        interaction = (1 - ent_norm) * momentum
+        interaction[np.isnan(rolling_min)] = np.nan
+
+        # Predictability: rolling mean of low-entropy indicator
+        predictability = pd.Series(low_entropy.astype(np.float64)).rolling(
+            self._momentum_window, min_periods=50
+        ).mean().values.copy()
+        predictability[np.isnan(rolling_thresh)] = np.nan
+
+        result = pd.DataFrame({
+            "alg_entropy_gated_momentum": gated,
+            "alg_entropy_trend_interaction": interaction,
+            "alg_predictability_score": predictability,
+        }, index=df.index)
+
+        warmup = self.warmup
+        if warmup > 0 and warmup < len(df):
+            result.iloc[:warmup] = np.nan
+        return result
