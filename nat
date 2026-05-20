@@ -273,6 +273,9 @@ def cmd_profile_scalp(args):
         cmd += f" --top {top}"
     if getattr(args, 'forward_test', False):
         cmd += " --forward-test"
+    tf = getattr(args, 'timeframe', None)
+    if tf:
+        cmd += f" --timeframe {tf}"
     _py(cmd)
 
 
@@ -2638,6 +2641,7 @@ def build_parser():
     ps.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     ps.add_argument('--top', type=int, default=None, help='Show top N features')
     ps.add_argument('--forward-test', action='store_true', help='Run forward test')
+    ps.add_argument('--timeframe', default=None, help='Bar timeframe (e.g. 5min, 15min)')
     ps.set_defaults(func=cmd_profile_scalp)
     sub.add_parser('report', help='Generate experiment report').set_defaults(func=cmd_report)
     sub.add_parser('dashboard', help='Start dashboard').set_defaults(func=cmd_dashboard)
