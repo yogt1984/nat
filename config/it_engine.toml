@@ -1,0 +1,23 @@
+[it_engine]
+buffer_size = 6000          # 10min at 100ms (100ms × 6000 = 600s)
+compute_interval_s = 5      # recompute IT metrics every 5s
+ksg_k = 5                   # KSG nearest neighbors
+horizons = [10, 50, 500]    # tick-level forward horizons
+bar_horizons = ["5min", "25min", "50min"]  # MF bar horizons
+max_features_greedy = 10    # greedy forward selection limit
+te_top_n = 20               # compute transfer entropy for top-N features
+te_lag = 1                  # TE source lags
+te_order = 1                # TE target AR order
+symbols = ["BTC", "ETH", "SOL"]
+
+# Entropy features used as conditioning variable Z in CMI(f; r | Z)
+entropy_conditioning = [
+    "ent_tick_5s",
+    "ent_book_shape_std",
+    "ent_perm_8_std",
+]
+
+[it_engine.costs]
+binance_vip9_rt_bps = 1.61
+binance_vip0_rt_bps = 3.50
+hyperliquid_rt_bps = 7.00

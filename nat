@@ -1480,6 +1480,42 @@ def cmd_meta_agent_report(args):
     _py(f"{META_AGENT_SCRIPT} report")
 
 
+# ── IT Engine commands ──────────────────────────────────────────────────────
+
+IT_ENGINE_SCRIPT = "scripts/it_engine/daemon.py"
+
+def cmd_it_engine_start(args):
+    sym = _sym(args)
+    _banner(f"Starting IT Engine for {sym}")
+    cmd = f"-m scripts.it_engine.daemon start --symbol {sym}"
+    if getattr(args, 'offline', False):
+        cmd += " --offline"
+    data = getattr(args, 'data_dir', None)
+    if data:
+        cmd += f" --data-dir {data}"
+    if getattr(args, 'dry_run', False):
+        cmd += " --dry-run"
+    if getattr(args, 'verbose', False):
+        cmd += " -v"
+    _py(cmd)
+
+def cmd_it_engine_stop(args):
+    sym = _sym(args)
+    import signal as sig
+    r = _sh(f"pgrep -f 'it_engine.daemon start.*{sym}'")
+    if r.returncode == 0 and r.stdout.strip():
+        pid = int(r.stdout.strip().split("\n")[0])
+        os.kill(pid, sig.SIGTERM)
+        _p("✓", G, f"Sent SIGTERM to IT engine (pid {pid})")
+    else:
+        _p("–", Y, "No running IT engine found")
+
+def cmd_it_engine_status(args):
+    sym = _sym(args)
+    top = getattr(args, 'top', 10)
+    _py(f"-m scripts.it_engine.daemon status --symbol {sym} --top {top}")
+
+
 # ── Signal commands ──────────────────────────────────────────────────────────
 
 def cmd_signal_test(args):
@@ -2535,6 +2571,7 @@ def cmd_help(args=None):
     nat mf-agent <cmd>         Medium-frequency agent (same subcommands)
     nat macro-agent <cmd>      Macro agent (same subcommands)
     nat meta-agent <cmd>       Meta-agent: portfolio, correlation, budget
+    nat it-engine <cmd>        IT alpha discovery (MI, CMI, TE, greedy selection)
 
   {BOLD}Discovery{W}
     Continuous sweep of (symbol, horizon) combos, pipelines winners through
@@ -4067,6 +4104,27 @@ def build_parser():
     mesub.add_parser('correlation', help='Cross-agent correlation matrix').set_defaults(func=cmd_meta_agent_correlation)
     mesub.add_parser('budget', help='Agent budget allocation').set_defaults(func=cmd_meta_agent_budget)
     mesub.add_parser('report', help='Full orchestrator report').set_defaults(func=cmd_meta_agent_report)
+
+    # ── it-engine ──
+    it_p = sub.add_parser('it-engine',
+        help='Information-theoretic alpha discovery engine',
+        description='Continuous IT-based feature analysis and alpha discovery.')
+    it_p.set_defaults(func=cmd_it_engine_status)
+    itsub = it_p.add_subparsers(dest='subcmd')
+    it_start = itsub.add_parser('start', help='Start IT engine')
+    it_start.add_argument('--symbol', '-s', default='BTC', help='Symbol (default: BTC)')
+    it_start.add_argument('--offline', action='store_true', help='Run on parquet files')
+    it_start.add_argument('--data-dir', default='data/features', help='Parquet data dir')
+    it_start.add_argument('--dry-run', action='store_true', help='Run 1 cycle and exit')
+    it_start.add_argument('-v', '--verbose', action='store_true')
+    it_start.set_defaults(func=cmd_it_engine_start)
+    it_stop = itsub.add_parser('stop', help='Stop IT engine')
+    it_stop.add_argument('--symbol', '-s', default='BTC')
+    it_stop.set_defaults(func=cmd_it_engine_stop)
+    it_status = itsub.add_parser('status', help='Show IT engine status')
+    it_status.add_argument('--symbol', '-s', default='BTC')
+    it_status.add_argument('--top', type=int, default=10, help='Top N features')
+    it_status.set_defaults(func=cmd_it_engine_status)
 
     return p
 
