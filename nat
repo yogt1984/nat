@@ -2602,9 +2602,331 @@ def cmd_help(args=None):
 
 # ── Argument Parser ──────────────────────────────────────────────────────────
 
+def cmd_math(args=None):
+    """Print mathematical glossary for all metrics used across NAT."""
+    print(textwrap.dedent(f"""\
+    {BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{W}
+    {BOLD}NAT MATHEMATICAL REFERENCE{W}
+    {BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{W}
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}CORE METRICS{W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+    {BOLD}IC (Information Coefficient){W}
+
+      Definition:
+        IC = ρ_Spearman( signal[t],  fwd_return[t → t+k] )
+
+      where:
+        fwd_return[t → t+k] = ( midprice[t+k] − midprice[t] ) / midprice[t]
+
+      Spearman (rank) correlation is used instead of Pearson because:
+        • Robust to outliers (extreme price moves don't dominate)
+        • Captures monotonic nonlinear relationships
+        • Makes no distributional assumptions on signal or returns
+
+      Interpretation:
+        IC ∈ [−1, +1].  Sign indicates direction of predictive relationship.
+        |IC| = 0.02–0.05   Weak but possibly tradeable at long horizons
+        |IC| = 0.05–0.10   Moderate (typical microstructure signals)
+        |IC| = 0.10–0.25   Strong (lead-lag, MF liquidity signals)
+        |IC| > 0.30        Suspiciously high — check for autocorrelation
+                           artifacts, lookahead bias, or level effects
+
+      Used by: nat signal test, nat profile scalp, nat algorithm evaluate,
+               nat mf-agent, nat macro-agent, nat spannung
+
+    {BOLD}dIC (Delta IC — Regime Gate Improvement){W}
+
+      Definition:
+        dIC = IC_gated − IC_ungated
+
+      where IC_gated is the Spearman IC computed only on observations where
+      a regime condition holds (e.g., ent_tick_1m < P30), and IC_ungated
+      is the IC on the full sample.
+
+      Purpose: verifies that the regime gate adds predictive value beyond
+      what the raw signal already provides.
+
+      Gate threshold: dIC ≥ 0.03 (default). If dIC < 0.03, the gate is
+      cosmetic — the signal is strong everywhere, not just in the regime.
+
+      Used by: nat mf-agent (Gate 0), nat macro-agent (Gate 0)
+
+    {BOLD}IC p-value{W}
+
+      Under H₀ (no predictive power):
+        IC ~ N(0, 1/√n)    where n = number of observations
+
+      Test statistic:
+        z = |IC| × √n
+
+      P-value (two-sided):
+        p = erfc( z / √2 )
+
+      Example:
+        n=200 bars, IC=0.08:  z = 0.08 × √200 = 1.13,  p ≈ 0.26   (weak)
+        n=3000 bars, IC=0.08: z = 0.08 × √3000 = 4.38, p ≈ 1e-5   (strong)
+
+      Same IC can be significant or not — sample size is critical.
+
+      Used by: FDR control in nat mf-agent, nat macro-agent, nat agent
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}SIGNAL QUALITY METRICS{W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+    {BOLD}Quintile Spread (bps){W}
+
+      Procedure:
+        1. Sort all bars by signal value into 5 equal-sized buckets Q1–Q5
+        2. Compute mean forward return per quintile
+        3. Q5−Q1 = mean(fwd_return | Q5) − mean(fwd_return | Q1)
+
+      Interpretation:
+        Q5−Q1 > 0 means high signal → higher returns (long signal)
+        Q5−Q1 < 0 means high signal → lower returns (short signal)
+        Units: basis points (1 bps = 0.01%)
+
+      Quintile monotonicity: if Q1 < Q2 < Q3 < Q4 < Q5 (or reverse),
+      the signal has a clean linear relationship with returns.
+      Non-monotonic quintiles suggest a nonlinear or unstable signal.
+
+      Used by: nat profile scalp, nat spannung regime
+
+    {BOLD}Gross Edge (bps){W}
+
+      Definition:
+        gross_edge = |quintile_spread| / 2
+
+      Approximate per-trade edge assuming you take positions only in the
+      extreme quintile (long Q5 or short Q1). The division by 2 accounts
+      for the midpoint baseline.
+
+    {BOLD}Net Edge (bps){W}
+
+      Definition:
+        net_edge = gross_edge − fee_round_trip
+
+      What remains after paying exchange fees to enter and exit.
+        net_edge > 0  →  strategy is profitable at this venue
+        net_edge < 0  →  fees exceed the signal's edge
+
+      Reference fee schedules:
+        Hyperliquid taker:   7.0 bps round-trip
+        Binance VIP0:        3.5 bps round-trip
+        Binance VIP9:        1.61 bps round-trip
+
+    {BOLD}IC×σ Product{W}
+
+      Definition:
+        IC×σ = IC(h) × σ_return(h)
+
+      where h is the forward horizon, IC(h) is the Spearman correlation
+      at that horizon, and σ_return(h) is the standard deviation of
+      h-bar forward returns in basis points.
+
+      This product measures the achievable directional edge in bps.
+      If IC decays as 1/√h and σ grows as √h, the product is constant
+      — meaning the market is informationally efficient at that timescale.
+
+      NAT finding: IC×σ ≈ 0.8 bps at microstructure frequencies (100ms–10min)
+      regardless of signal, horizon, or conditioning. The MF liquidity signal
+      breaks this ceiling: IC×σ ≈ 4.7 bps at 50min bars.
+
+      Used by: analysis in TASKS_19_05_26.md (Phase 3)
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}PORTFOLIO & BACKTEST METRICS{W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+    {BOLD}Sharpe Ratio (annualized){W}
+
+      Definition:
+        daily_pnl[d] = mean( per_trade_return − 2 × fee_one_way )
+                        for all trades on day d
+        Sharpe = ( mean(daily_pnl) / std(daily_pnl) ) × √252
+
+      Interpretation:
+        Sharpe < 0.5   Not worth trading
+        Sharpe 0.5–1.0 Marginal
+        Sharpe 1.0–2.0 Good
+        Sharpe 2.0–3.0 Very good
+        Sharpe > 3.0   Excellent (verify not overfitted)
+
+      Caveat: Sharpe estimated from N < 30 days is unreliable.
+      Bootstrap confidence intervals are essential for small samples.
+
+      Used by: nat backtest, nat alpha validate, walk-forward analysis
+
+    {BOLD}Information Ratio (IR){W}
+
+      Definition:
+        IR = mean(IC across dates) / std(IC across dates)
+
+      Measures IC consistency over time. A high IC that fluctuates wildly
+      between positive and negative is worse than a moderate IC that is
+      always positive.
+
+      Annualized: IR_ann = IR × √(observations_per_year)
+
+      Used by: nat profile scalp (ic_ir field)
+
+    {BOLD}Daily Win Rate (DWR){W}
+
+      Definition:
+        DWR = count(days with net_pnl > 0) / count(all trading days)
+
+      A DWR > 50% provides psychological sustainability for live trading.
+      High Sharpe with low DWR means large wins offset many small losses
+      — correct but harder to execute with discipline.
+
+    {BOLD}Hit Rate (trade-level win rate){W}
+
+      Definition:
+        HR = count(trades with return > fee) / count(all trades)
+
+      Can be well below 50% and still profitable if winning trades are
+      larger than losing trades (positive skew / fat right tail).
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}STATISTICAL CONTROLS{W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+    {BOLD}FDR Control (Benjamini-Hochberg){W}
+
+      Problem: testing m hypotheses simultaneously inflates false positives.
+      At α=0.05 with m=91 hypotheses, expect ~4.5 false discoveries by chance.
+
+      Procedure:
+        1. Collect p-values from IC gates: p₁, p₂, ..., pₘ
+        2. Sort ascending: p₍₁₎ ≤ p₍₂₎ ≤ ... ≤ p₍ₘ₎
+        3. Find largest k such that  p₍ₖ₎ ≤ (k/m) × q    where q = 0.05
+        4. Reject all hypotheses with p > p₍ₖ₎
+
+      Guarantee: E[FDP] ≤ q, where FDP = false discoveries / total discoveries.
+
+      Applied after each agent cycle to retract signals that passed gates
+      but don't survive multiple-testing correction.
+
+      Used by: nat agent, nat mf-agent, nat macro-agent
+
+    {BOLD}Bootstrap Confidence Intervals{W}
+
+      Procedure:
+        1. From N observed daily PnLs, draw N samples with replacement
+        2. Compute statistic (Sharpe, mean PnL) on the resample
+        3. Repeat 10,000 times
+        4. Report percentiles [5%, 50%, 95%] as the 90% CI
+
+      If 5th percentile of bootstrapped Sharpe > 0, the strategy is
+      profitable with 95% confidence. If P(Sharpe > 2) > 90%, the
+      strategy is reliably good, not a fluke.
+
+      Used by: robustness analysis (reports/best__mf_liquidity_signal.md)
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}AGENT-SPECIFIC METRICS{W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+    {BOLD}max_corr (Correlation Dedup Gate){W}
+
+      Definition:
+        corr = ρ_Spearman( signal_candidate[t],  signal_existing[t] )
+
+      Computed on regime-gated values (only where the gate condition holds).
+      If |corr| > max_corr (default: 0.70), the candidate is redundant
+      with an existing registered signal and gets rejected.
+
+      Purpose: prevents the registry from filling with N variants of the
+      same underlying signal (e.g., 10 imbalance features that are all
+      r > 0.9 with each other).
+
+      Used by: Gate 3 in all agents
+
+    {BOLD}IC Decay Monitoring{W}
+
+      For each registered signal, each agent cycle computes:
+        rolling_IC = Spearman(signal, fwd_return) on latest 2 dates
+
+      Decay detection rule:
+        threshold = expected_ic × ic_decay_ratio         (default: 0.5)
+
+        If rolling_IC < threshold for consecutive_days_limit
+        consecutive cycles (default: 14) → status = "retired"
+
+        If rolling_IC recovers above threshold at any point →
+        decay counter resets to 0
+
+      IC history: last 30 observations retained per signal for trending.
+
+      Used by: MONITOR phase in nat mf-agent, nat macro-agent, nat agent
+
+    {BOLD}Adaptive IC Threshold{W}
+
+      Definition:
+        adaptive_min_ic = max( floor_ic,  median(registry_ICs) × 0.8 )
+
+      As the registry accumulates stronger signals, the bar rises for new
+      candidates. A signal with IC=0.09 might pass when the registry is
+      empty, but gets rejected when the median registered IC is 0.15
+      (adaptive threshold = 0.12).
+
+      floor_ic = 0.08 (MF agent), 0.07 (macro agent), 0.10 (micro agent)
+
+      Used by: pre_execute() hook in all agents
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}FEATURE CATEGORIES (209 base features at 100ms){W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+      raw_*         (10)   Midprice, spread, depth, order counts
+      imbalance_*   (8)    Qty/orders/notional at L1/L5/L10
+      flow_*        (12)   Trade count, volume, aggressor ratio (1s/5s/30s)
+      vol_*         (9)    Returns vol, Parkinson, spread std, z-score
+      ent_*         (24)   Permutation, tick, volume-weighted entropy
+      ctx_*         (12)   Funding rate, OI, premium, volume_24h
+      trend_*       (15)   Momentum, R², Hurst, MA crossover
+      illiq_*       (12)   Kyle lambda, Amihud, Hasbrouck, Roll
+      toxic_*       (10)   VPIN, adverse selection, realized spread
+      derived_*     (15)   Regime interactions, composite indicators
+      micro_*       (var)  Queue position, trade-through, Kalman
+      whale_*       (var)  Net flow, concentration (optional)
+      liquidation_* (var)  Cascade risk (optional)
+
+      At 5min bar aggregation: ~602 columns (mean/std/last/slope per feature)
+      After variance filtering: ~429 usable features
+
+      See FEATURES.md for the complete manifest with formulas and references.
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}NOTATION CONVENTIONS{W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+      bps       Basis points. 1 bps = 0.01% = 1e-4
+      RT        Round-trip (entry + exit fee combined)
+      P30       30th percentile of the empirical distribution
+      OOS       Out-of-sample
+      IC@10t    IC at 10-tick forward horizon (= 1 second at 100ms)
+      IC@50min  IC at 50-minute forward horizon (= 10 bars at 5min)
+      fwd_ret_k Forward return over k bars
+      Q5−Q1     Quintile spread (top minus bottom quintile)
+      H₀        Null hypothesis (signal has no predictive power)
+      ρ         Spearman rank correlation coefficient
+      σ         Standard deviation
+      FDP       False discovery proportion
+      FDR       False discovery rate (E[FDP])
+      BH        Benjamini-Hochberg procedure
+      DWR       Daily win rate
+      TW        Training window (number of lookback dates)
+    """))
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog='nat', description='NAT research terminal', add_help=False)
     p.add_argument('--json', action='store_true', help='Output as JSON (for programmatic use)')
+    p.add_argument('--math', action='store_true', help='Print mathematical glossary for all metrics')
     sub = p.add_subparsers(dest='command')
 
     # ── Top-level commands ──
@@ -3754,6 +4076,10 @@ def build_parser():
 def main():
     parser = build_parser()
     args = parser.parse_args()
+
+    if getattr(args, 'math', False):
+        cmd_math()
+        sys.exit(0)
 
     if args.command is None or args.command == 'help':
         cmd_help()
