@@ -12,7 +12,7 @@
 ```
 
 NAT is an autonomous research agent that discovers tradeable alpha signals from
-Hyperliquid perpetual futures microstructure. A Rust ingestor computes 191
+Hyperliquid perpetual futures microstructure. A Rust ingestor computes 209
 order book features at 100ms resolution; an autonomous Python agent generates
 hypotheses, tests them through a 5-gate replication protocol with FDR control,
 and registers validated signals — without human intervention.
@@ -46,20 +46,22 @@ NAT is an autonomous microstructure alpha discovery agent that operates as a hyp
               |                      |                      |
               +----------------------+----------------------+
                                      |
-                                     v
-                    +--------------------------------+
-                    |        NAT AGENT DAEMON        |
-                    |                                |
-                    |  5 Generators --> Priority Q    |
-                    |  Runner: 5-gate replication     |
-                    |  Registry: validated signals    |
-                    +----------------+---------------+
-                                     |
-                              +------+------+
-                              |             |
-                              v             v
-                        Registry       Graveyard
-                    (trade-ready)    (failed claims)
+              +----------------------+----------------------+
+              |                                             |
+              v                                             v
+     +----------------------------+          +----------------------------+
+     |     NAT AGENT DAEMON       |          |    IT ENGINE               |
+     |                            |          |                            |
+     | 6 Generators --> Priority Q|<---------|  KSG MI, CMI, TE          |
+     | Runner: 5-gate replication |  IT      |  Greedy feature selection  |
+     | Registry: validated signals|  hypoths |  Cost gate: I_min(k)      |
+     +-------------+--------------+          +----------------------------+
+                   |
+            +------+------+
+            |             |
+            v             v
+      Registry       Graveyard
+  (trade-ready)    (failed claims)
 ```
 
 ## The Agent
@@ -217,6 +219,51 @@ Generator budget allocation uses a Beta-prior multi-armed bandit
 This steers generation toward productive generators without abandoning
 exploration.
 
+## Information-Theoretic Alpha Discovery Engine
+
+The IT Engine (`scripts/it_engine/`) provides continuous, principled
+information-theoretic analysis of all 209 features against forward returns
+at multiple horizons. It replaces ad-hoc IC scanning with rigorous mutual
+information estimation, proper entropy conditioning, and cost-aware feature
+selection.
+
+```bash
+nat it-engine start --symbol BTC               # live mode (Redis pub/sub)
+nat it-engine start --symbol BTC --offline      # offline mode (parquet files)
+nat it-engine start --symbol BTC --dry-run      # single cycle and exit
+nat it-engine status --symbol BTC               # show MI rankings, greedy selection
+nat it-engine stop --symbol BTC                 # graceful shutdown
+```
+
+### Core Estimators
+
+| Estimator | Formula | Purpose |
+|-----------|---------|---------|
+| **KSG MI** | Kraskov-Stögbauer-Grassberger k-NN (k=5) | I(f; r) — mutual information between feature and returns |
+| **Conditional MI** | I(f; r \| H) via KSG in joint/marginal spaces | Proper IT formulation of entropy gating |
+| **Interaction Info** | II(f;r;H) = I(f;r\|H) - I(f;r) | Positive → synergy (gating helps), Negative → redundancy |
+| **Linear TE** | TE = 0.5 × log(σ²_reduced / σ²_full) | Causal information flow (Sherman-Morrison compatible) |
+| **Cost threshold** | I_min = -0.5 × log₂(1 - (fee/σ_r)²) | Minimum MI (bits) to overcome transaction costs |
+
+References: Kraskov, Stögbauer & Grassberger (2004), Schreiber (2000), Cover & Thomas (2006).
+
+### Greedy Feature Selection
+
+Forward stepwise selection by conditional MI gain — a tractable alternative
+to full Partial Information Decomposition (NP-hard for >3 variables):
+
+1. **Start**: f* = argmax_f I(f; r_k) across all features and horizons
+2. **Step**: f_next = argmax_f I(f; r_k | S) — largest conditional MI gain given selected set S
+3. **Stop**: when marginal gain < I_min(k) or max features reached
+
+Output: ordered feature set with cumulative MI and cost viability flag.
+
+### Agent Integration
+
+The `it_discovery` generator reads IT engine state and creates hypotheses
+for features with cost-viable MI and positive interaction information
+(synergistic with entropy gating). Priority = CMI × (1 + II).
+
 ## Data Ingestion Layer
 
 The Rust ingestor (`ing`) subscribes to Hyperliquid L2 WebSocket and computes
@@ -359,6 +406,7 @@ pytest scripts/tests/                   # Python tests
 make validate                           # live API validation
 make test_pipeline                      # pipeline state machine
 make test_agent                         # agent tests (cache + dashboard + monitor, 129 tests)
+pytest scripts/tests/test_it_estimators.py   # IT engine estimator tests (17 tests)
 ```
 
 ## Configuration
@@ -369,6 +417,7 @@ make test_agent                         # agent tests (cache + dashboard + monit
 | `config/agent.toml` | Agent: cycle interval, experiment budget, 5-gate thresholds (IC, dIC, cost, FDR q), decay monitoring, promotion criteria |
 | `config/pipeline.toml` | Pipeline orchestration: ingestion duration, analysis thresholds |
 | `config/algorithms.toml` | Algorithm parameters: per-algorithm constructor kwargs (decay rates, windows, thresholds) |
+| `config/it_engine.toml` | IT engine: buffer size, KSG k, horizons, entropy conditioning, cost thresholds |
 
 Environment: `RUST_LOG`, `REDIS_URL`, `ING_DASHBOARD_ENABLED`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
 
@@ -393,12 +442,13 @@ scripts/
     manifest.py             Data availability scanner
     runner.py               5-gate experiment executor (IC, cost, temporal, symbol, correlation)
     cache.py                Computation cache (SHA-256 keys, TTL-based, corruption-resilient)
-    generators/             5 hypothesis generators
+    generators/             6 hypothesis generators
       systematic.py           Exhaustive feature x gate x threshold search
       spectral.py             PSD/OU anomaly detector
       regime.py               HMM transition detector
       cross_asset.py          Lead-lag prober (BTC/ETH/SOL)
       recycler.py             Graveyard re-evaluator
+      it_discovery.py         IT engine-driven hypotheses (MI, CMI, II)
   agent_dashboard.py        Agent web dashboard (stdlib HTTP, port 8060, IC heatmap)
   algorithms/                   Microstructure algorithm library (18 algorithms, 59 features)
     base.py                       MicrostructureAlgorithm ABC, AlgorithmFeature
@@ -414,6 +464,12 @@ scripts/
   backtest/                     Walk-forward backtesting engine
     algorithm_strategy.py         Algorithm-to-backtest bridge
   eamm/                         Entropy-adaptive market making (prototype)
+  it_engine/                IT alpha discovery engine
+    daemon.py                 Main loop: Redis/parquet → MI/CMI/TE → greedy selection
+    estimators.py             KSG MI, conditional MI, interaction info, linear TE
+    state.py                  ITState dataclass + JSON persistence
+    feature_selector.py       Greedy forward selection by conditional MI gain
+    config.py                 TOML config loader
   pipeline_runner.py            Pipeline state machine
 
 config/
@@ -421,6 +477,7 @@ config/
   agent.toml              Agent daemon configuration
   pipeline.toml           Pipeline orchestration
   algorithms.toml         Algorithm parameters (18 sections)
+  it_engine.toml          IT engine: buffer size, KSG k, horizons, cost thresholds
 
 data/
   features/               Parquet output (YYYY-MM-DD/*.parquet)
@@ -550,3 +607,6 @@ make docker_down        # stop
 17. Shannon, C.E. (1948). A mathematical theory of communication. *Bell System Technical Journal*, 27(3), 379-423.
 18. Thompson, W.R. (1933). On the likelihood that one unknown probability exceeds another. *Biometrika*, 25(3-4), 285-294.
 19. White, H. (2000). A reality check for data snooping. *Econometrica*, 68(5), 1097-1126.
+20. Kraskov, A., Stögbauer, H. & Grassberger, P. (2004). Estimating mutual information. *Physical Review E*, 69(6), 066138.
+21. Schreiber, T. (2000). Measuring information transfer. *Physical Review Letters*, 85(2), 461-464.
+22. Cover, T.M. & Thomas, J.A. (2006). *Elements of Information Theory*. 2nd ed. Wiley.
