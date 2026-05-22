@@ -1,0 +1,700 @@
+{
+  "title": "IT Multi-Day Bar Analysis \u2014 BTC",
+  "generated": "2026-05-22T08:34:58.650648+00:00",
+  "symbol": "BTC",
+  "fee_model": "binance_vip9",
+  "fee_bps_rt": 1.61,
+  "horizons": {
+    "10min": {
+      "n_valid": 1853,
+      "sigma_r_bps": 14.19,
+      "i_min_bits": 0.009347,
+      "n_features_tested": 306,
+      "n_cost_viable": 306,
+      "top_mi": [
+        {
+          "feature": "illiq_kyle_ratio_last",
+          "mi": 0.594129,
+          "cmi": -0.848254,
+          "ii": -1.442383,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "raw_spread_bps_last",
+          "mi": 0.593634,
+          "cmi": -0.613238,
+          "ii": -1.206873,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_tick_1s_last",
+          "mi": 0.590214,
+          "cmi": -0.39366,
+          "ii": -0.983874,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "raw_spread_last",
+          "mi": 0.580338,
+          "cmi": -0.650139,
+          "ii": -1.230476,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_vol_tick_1s_last",
+          "mi": 0.578579,
+          "cmi": -0.36361,
+          "ii": -0.942188,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "toxic_vpin_roc_std",
+          "mi": 0.577036,
+          "cmi": -0.497871,
+          "ii": -1.074907,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "illiq_amihud_ratio_last",
+          "mi": 0.576228,
+          "cmi": -0.748762,
+          "ii": -1.324989,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "vol_spread_mean_1m_last",
+          "mi": 0.575123,
+          "cmi": -0.633533,
+          "ii": -1.208656,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_permutation_returns_8_last",
+          "mi": 0.563742,
+          "cmi": -0.403376,
+          "ii": -0.967118,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "imbalance_pressure_bid_last",
+          "mi": 0.558305,
+          "cmi": -0.074679,
+          "ii": -0.632984,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "toxic_vpin_10_std",
+          "mi": 0.552669,
+          "cmi": -0.394355,
+          "ii": -0.947023,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "sequence_id_std",
+          "mi": 0.548432,
+          "cmi": -0.020049,
+          "ii": -0.568481,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "imbalance_pressure_ask_last",
+          "mi": 0.54583,
+          "cmi": -0.138025,
+          "ii": -0.683854,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "toxic_vpin_50_std",
+          "mi": 0.544771,
+          "cmi": -0.248739,
+          "ii": -0.793511,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "derived_toxic_chop_score_last",
+          "mi": 0.538376,
+          "cmi": -0.318526,
+          "ii": -0.856902,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "illiq_kyle_ratio_std",
+          "mi": 0.535829,
+          "cmi": -0.452552,
+          "ii": -0.988381,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_permutation_returns_16_last",
+          "mi": 0.533903,
+          "cmi": -0.39608,
+          "ii": -0.929982,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_vol_tick_15s_last",
+          "mi": 0.533892,
+          "cmi": -0.367756,
+          "ii": -0.901648,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_spread_dispersion_last",
+          "mi": 0.533371,
+          "cmi": -0.410283,
+          "ii": -0.943654,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "flow_volume_1s_last",
+          "mi": 0.53159,
+          "cmi": -0.468567,
+          "ii": -1.000156,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "flow_volume_30s_last",
+          "mi": 0.528543,
+          "cmi": -0.785535,
+          "ii": -1.314078,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "derived_entropy_trend_zscore_last",
+          "mi": 0.527831,
+          "cmi": -0.322621,
+          "ii": -0.850452,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "derived_entropy_trend_interaction_last",
+          "mi": 0.52759,
+          "cmi": -0.314547,
+          "ii": -0.842137,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "raw_midprice_last",
+          "mi": 0.525995,
+          "cmi": -0.167055,
+          "ii": -0.69305,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "trend_ema_long_last",
+          "mi": 0.522407,
+          "cmi": -0.17818,
+          "ii": -0.700587,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "flow_vwap_5s_last",
+          "mi": 0.520109,
+          "cmi": -0.174553,
+          "ii": -0.694662,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "flow_volume_5s_std",
+          "mi": 0.520037,
+          "cmi": -0.3808,
+          "ii": -0.900837,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "trend_monotonicity_60_last",
+          "mi": 0.517728,
+          "cmi": -0.304677,
+          "ii": -0.822405,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "raw_bid_depth_5_last",
+          "mi": 0.517619,
+          "cmi": -0.420565,
+          "ii": -0.938184,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "flow_volume_30s_std",
+          "mi": 0.516772,
+          "cmi": -0.413345,
+          "ii": -0.930117,
+          "cost_viable": "True"
+        }
+      ],
+      "greedy_selected": [
+        {
+          "name": "raw_spread_bps_last",
+          "mi": 0.6061591422929311,
+          "cmi_gain": 0.6061591422929311,
+          "cumulative_mi": 0.6061591422929311,
+          "cost_viable": "True"
+        }
+      ]
+    },
+    "25min": {
+      "n_valid": 1808,
+      "sigma_r_bps": 19.62,
+      "i_min_bits": 0.004871,
+      "n_features_tested": 306,
+      "n_cost_viable": 305,
+      "top_mi": [
+        {
+          "feature": "toxic_vpin_roc_std",
+          "mi": 0.604014,
+          "cmi": -0.515926,
+          "ii": -1.119939,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "illiq_kyle_ratio_last",
+          "mi": 0.590958,
+          "cmi": -1.425001,
+          "ii": -2.01596,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_permutation_returns_8_last",
+          "mi": 0.587409,
+          "cmi": -0.506684,
+          "ii": -1.094093,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "imbalance_pressure_bid_last",
+          "mi": 0.586032,
+          "cmi": -0.106182,
+          "ii": -0.692215,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_tick_1s_last",
+          "mi": 0.573763,
+          "cmi": -0.499039,
+          "ii": -1.072802,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "raw_spread_bps_last",
+          "mi": 0.5689,
+          "cmi": -0.67809,
+          "ii": -1.24699,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "illiq_amihud_ratio_last",
+          "mi": 0.56123,
+          "cmi": -1.193432,
+          "ii": -1.754662,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "toxic_vpin_10_std",
+          "mi": 0.560188,
+          "cmi": -0.435164,
+          "ii": -0.995352,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "imbalance_pressure_ask_last",
+          "mi": 0.560076,
+          "cmi": -0.167165,
+          "ii": -0.727241,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "toxic_vpin_50_std",
+          "mi": 0.559712,
+          "cmi": -0.311531,
+          "ii": -0.871243,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_spread_dispersion_last",
+          "mi": 0.558646,
+          "cmi": -0.476838,
+          "ii": -1.035485,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ctx_open_interest_std",
+          "mi": 0.553714,
+          "cmi": -0.503348,
+          "ii": -1.057062,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_permutation_returns_16_last",
+          "mi": 0.552914,
+          "cmi": -0.489203,
+          "ii": -1.042116,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_vol_tick_1s_last",
+          "mi": 0.54614,
+          "cmi": -0.491955,
+          "ii": -1.038095,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "derived_entropy_trend_interaction_last",
+          "mi": 0.545766,
+          "cmi": -0.405016,
+          "ii": -0.950782,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "trend_monotonicity_60_last",
+          "mi": 0.542264,
+          "cmi": -0.388122,
+          "ii": -0.930386,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "raw_spread_last",
+          "mi": 0.540838,
+          "cmi": -0.709458,
+          "ii": -1.250296,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "raw_midprice_last",
+          "mi": 0.539907,
+          "cmi": -0.247183,
+          "ii": -0.78709,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "flow_volume_30s_last",
+          "mi": 0.538921,
+          "cmi": -1.201687,
+          "ii": -1.740608,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "trend_ema_long_last",
+          "mi": 0.535472,
+          "cmi": -0.247061,
+          "ii": -0.782533,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "trend_ema_short_last",
+          "mi": 0.535346,
+          "cmi": -0.931044,
+          "ii": -1.46639,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "derived_entropy_trend_zscore_last",
+          "mi": 0.534614,
+          "cmi": -0.404267,
+          "ii": -0.938881,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "flow_vwap_5s_last",
+          "mi": 0.533695,
+          "cmi": -0.243089,
+          "ii": -0.776784,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "derived_toxic_chop_score_last",
+          "mi": 0.533429,
+          "cmi": -0.369928,
+          "ii": -0.903357,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "vol_spread_mean_1m_last",
+          "mi": 0.530753,
+          "cmi": -0.731253,
+          "ii": -1.262006,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "flow_volume_1s_last",
+          "mi": 0.530212,
+          "cmi": -0.554978,
+          "ii": -1.08519,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "illiq_kyle_ratio_std",
+          "mi": 0.53011,
+          "cmi": -0.753795,
+          "ii": -1.283905,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "raw_microprice_last",
+          "mi": 0.529703,
+          "cmi": -0.885347,
+          "ii": -1.41505,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "derived_illiquidity_trend_std",
+          "mi": 0.529334,
+          "cmi": -0.517143,
+          "ii": -1.046478,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "illiq_kyle_500_last",
+          "mi": 0.527939,
+          "cmi": -0.540848,
+          "ii": -1.068788,
+          "cost_viable": "True"
+        }
+      ],
+      "greedy_selected": [
+        {
+          "name": "imbalance_pressure_bid_last",
+          "mi": 0.5926510856300148,
+          "cmi_gain": 0.5926510856300148,
+          "cumulative_mi": 0.5926510856300148,
+          "cost_viable": "True"
+        },
+        {
+          "name": "raw_bid_depth_10_std",
+          "mi": 0.47173084667905807,
+          "cmi_gain": 4.660731285804991,
+          "cumulative_mi": 5.2533823714350065,
+          "cost_viable": "True"
+        }
+      ]
+    },
+    "50min": {
+      "n_valid": 1733,
+      "sigma_r_bps": 27.43,
+      "i_min_bits": 0.002489,
+      "n_features_tested": 306,
+      "n_cost_viable": 306,
+      "top_mi": [
+        {
+          "feature": "trend_ema_long_last",
+          "mi": 0.682221,
+          "cmi": -0.110298,
+          "ii": -0.79252,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "flow_vwap_5s_last",
+          "mi": 0.680853,
+          "cmi": -0.129426,
+          "ii": -0.810279,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "raw_midprice_last",
+          "mi": 0.676665,
+          "cmi": -0.103165,
+          "ii": -0.77983,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "raw_microprice_last",
+          "mi": 0.67171,
+          "cmi": -1.245157,
+          "ii": -1.916867,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "trend_ema_short_last",
+          "mi": 0.663839,
+          "cmi": -1.296248,
+          "ii": -1.960087,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_permutation_returns_8_last",
+          "mi": 0.612718,
+          "cmi": -0.504515,
+          "ii": -1.117233,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "imbalance_pressure_ask_last",
+          "mi": 0.601513,
+          "cmi": -0.109598,
+          "ii": -0.711111,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "flow_avg_trade_size_30s_last",
+          "mi": 0.586127,
+          "cmi": -0.501047,
+          "ii": -1.087174,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "toxic_vpin_roc_std",
+          "mi": 0.586094,
+          "cmi": -0.579093,
+          "ii": -1.165187,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_tick_1s_last",
+          "mi": 0.584561,
+          "cmi": -0.550288,
+          "ii": -1.134849,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "toxic_vpin_10_std",
+          "mi": 0.579387,
+          "cmi": -0.426389,
+          "ii": -1.005776,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "imbalance_pressure_bid_last",
+          "mi": 0.576924,
+          "cmi": -0.069017,
+          "ii": -0.645942,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "derived_entropy_trend_zscore_last",
+          "mi": 0.574109,
+          "cmi": -0.384675,
+          "ii": -0.958783,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "imbalance_notional_l5_last",
+          "mi": 0.572279,
+          "cmi": -0.43689,
+          "ii": -1.009169,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "flow_aggressor_ratio_5s_last",
+          "mi": 0.571755,
+          "cmi": -0.499095,
+          "ii": -1.07085,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "trend_monotonicity_60_last",
+          "mi": 0.571329,
+          "cmi": -0.334399,
+          "ii": -0.905728,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "derived_entropy_trend_interaction_last",
+          "mi": 0.567961,
+          "cmi": -0.40746,
+          "ii": -0.975421,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "derived_informed_trend_score_last",
+          "mi": 0.566871,
+          "cmi": -0.675743,
+          "ii": -1.242614,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "derived_toxic_chop_score_last",
+          "mi": 0.565444,
+          "cmi": -0.358959,
+          "ii": -0.924402,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "imbalance_qty_l5_last",
+          "mi": 0.56003,
+          "cmi": -0.407103,
+          "ii": -0.967133,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "toxic_vpin_50_std",
+          "mi": 0.559523,
+          "cmi": -0.251661,
+          "ii": -0.811184,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "illiq_kyle_ratio_last",
+          "mi": 0.559523,
+          "cmi": -2.021029,
+          "ii": -2.580552,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "imbalance_depth_weighted_last",
+          "mi": 0.559389,
+          "cmi": -0.619061,
+          "ii": -1.178449,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_spread_dispersion_last",
+          "mi": 0.55872,
+          "cmi": -0.495433,
+          "ii": -1.054153,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_book_shape_last",
+          "mi": 0.558332,
+          "cmi": -0.567747,
+          "ii": -1.12608,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "flow_volume_30s_last",
+          "mi": 0.557799,
+          "cmi": -1.733779,
+          "ii": -2.291577,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ctx_open_interest_std",
+          "mi": 0.557405,
+          "cmi": -0.553187,
+          "ii": -1.110592,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "derived_informed_trend_score_std",
+          "mi": 0.556966,
+          "cmi": -0.436454,
+          "ii": -0.993419,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "imbalance_orders_l5_last",
+          "mi": 0.556292,
+          "cmi": -0.280419,
+          "ii": -0.836711,
+          "cost_viable": "True"
+        },
+        {
+          "feature": "ent_vol_tick_10s_last",
+          "mi": 0.555328,
+          "cmi": -0.507414,
+          "ii": -1.062742,
+          "cost_viable": "True"
+        }
+      ],
+      "greedy_selected": [
+        {
+          "name": "flow_vwap_5s_last",
+          "mi": 0.6794798280979489,
+          "cmi_gain": 0.6794798280979489,
+          "cumulative_mi": 0.6794798280979489,
+          "cost_viable": "True"
+        }
+      ]
+    }
+  }
+}
