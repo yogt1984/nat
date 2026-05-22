@@ -1,8 +1,14 @@
 """
-Paper Trading Infrastructure (Alpha Roadmap Step 8).
+Paper Trading — MF 3-Feature Liquidity Signal
 
-Logs hypothetical trades from live signal pipeline, performs daily
-reconciliation against backtest predictions, and monitors signal decay.
+Two modes:
+  batch:  replay all dates, log paper trades, compare with backtest
+  watch:  continuously monitor data/features/ for new bars (daemon)
+
+Signal: 3f composite = (zscore(spread) + zscore(depth) + zscore(vwap_dev)) / 3
+Entry:  long when composite > P80, short when composite < P20
+Exit:   fixed 100min horizon (20 bars)
+Train:  z-score params from prior 3 dates (walk-forward)
 
 Quality Gate G8:
   - Paper Sharpe within 2x of backtest Sharpe
@@ -11,8 +17,8 @@ Quality Gate G8:
   - Infrastructure runs error-free for 14 days
 
 Usage:
-    python -m alpha.paper_trader --data data/features --symbol BTC
-    python -m alpha.paper_trader --reconcile  # daily reconciliation
+  python scripts/alpha/paper_trader.py batch --save
+  python scripts/alpha/paper_trader.py watch --symbol BTC
 """
 
 from __future__ import annotations
@@ -20,473 +26,487 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import pyarrow.parquet as pq
+from scipy.stats import spearmanr
 
 log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 TRADE_DIR = ROOT / "data" / "paper_trades"
-REPORT_DIR = ROOT / "reports"
+
+# ── Config ────────────────────────────────────────────────────────────────
+
+BAR_SECONDS = 300  # 5min
+HORIZON_BARS = 20  # 100min
+TRAIN_WINDOW = 3
+MIN_BARS_PER_DATE = 12
+P_LONG = 80
+P_SHORT = 20
+
+FEE_BPS = 1.61  # Binance VIP9 taker RT
+
+LOAD_COLUMNS = [
+    "timestamp_ns", "symbol", "raw_midprice",
+    "raw_spread_bps", "raw_ask_depth_5", "flow_vwap_deviation",
+]
+
+BACKTEST_REFERENCE = {
+    "BTC": {"sharpe": 11.8, "net_bps": 6.69, "ic": 0.52},
+    "ETH": {"sharpe": 6.8, "net_bps": 6.80, "ic": 0.40},
+    "SOL": {"sharpe": 9.2, "net_bps": 7.16, "ic": 0.35},
+}
 
 
-# ---------------------------------------------------------------------------
-# Data structures
-# ---------------------------------------------------------------------------
-
+# ── Data structures ──────────────────────────────────────────────────────
 
 @dataclass
 class PaperTrade:
-    """A hypothetical trade logged during paper trading."""
-    timestamp: str
+    date: str
+    bar_idx: int
     symbol: str
-    direction: str  # "long" or "short"
+    direction: int  # +1 long, -1 short
     signal_value: float
     entry_price: float
-    exit_price: Optional[float] = None
-    exit_timestamp: Optional[str] = None
-    exit_reason: Optional[str] = None  # "signal", "stop", "timeout"
-    pnl_pct: Optional[float] = None
-    holding_bars: int = 0
+    exit_price: float | None = None
+    exit_bar_idx: int | None = None
+    gross_bps: float | None = None
+    net_bps: float | None = None
 
 
 @dataclass
-class DailyReconciliation:
-    """Daily reconciliation report."""
+class DailySummary:
     date: str
+    symbol: str
     n_trades: int
-    gross_pnl_pct: float
-    max_loss_pct: float
-    rolling_ic_7d: float
-    backtest_ic: float
-    ic_decay_ratio: float  # rolling_ic / backtest_ic
-    is_healthy: bool
+    n_long: int
+    n_short: int
+    gross_bps: float
+    net_bps: float
+    total_net_bps: float
+    win_rate: float
+    max_loss_bps: float
 
 
-@dataclass
-class PaperTradingResult:
-    """Overall paper trading assessment."""
-    start_date: str
-    end_date: str
-    n_days: int
-    n_trades: int
-    total_pnl_pct: float
-    paper_sharpe: float
-    backtest_sharpe: float
-    sharpe_ratio: float  # paper / backtest
-    max_daily_loss_pct: float
-    ic_decay_pct: float
-    error_free_days: int
-    daily_reports: List[DailyReconciliation]
-    gate_sharpe_within_2x: bool
-    gate_no_big_daily_loss: bool
-    gate_ic_stable: bool
-    gate_infra_stable: bool
-    gate_pass: bool
+# ── Data loading (shared with backtest) ──────────────────────────────────
+
+def load_date(data_dir: Path, date_str: str, symbol: str) -> pd.DataFrame | None:
+    date_path = data_dir / date_str
+    if not date_path.is_dir():
+        return None
+    files = sorted(f for f in date_path.iterdir() if f.suffix == ".parquet")
+    if not files:
+        return None
+    dfs = []
+    for f in files:
+        try:
+            tbl = pq.read_table(str(f))
+            df = tbl.to_pandas()
+            cols = [c for c in LOAD_COLUMNS if c in df.columns]
+            df = df[cols]
+            df = df[df["symbol"] == symbol].copy() if "symbol" in df.columns else df
+            if len(df) > 0:
+                dfs.append(df)
+        except Exception:
+            continue
+    if not dfs:
+        return None
+    return pd.concat(dfs, ignore_index=True).sort_values("timestamp_ns").reset_index(drop=True)
 
 
-# ---------------------------------------------------------------------------
-# Trade logging
-# ---------------------------------------------------------------------------
+def aggregate_to_bars(ticks: pd.DataFrame) -> pd.DataFrame:
+    bar_ns = BAR_SECONDS * 1_000_000_000
+    ticks = ticks.copy()
+    ticks["bar_id"] = ticks["timestamp_ns"].values // bar_ns
+    agg = {
+        "timestamp_ns": ("timestamp_ns", "first"),
+        "midprice_last": ("raw_midprice", "last"),
+        "spread_bps_last": ("raw_spread_bps", "last"),
+        "depth_5_std": ("raw_ask_depth_5", "std"),
+        "n_ticks": ("raw_midprice", "count"),
+    }
+    if "flow_vwap_deviation" in ticks.columns:
+        agg["vwap_deviation_std"] = ("flow_vwap_deviation", "std")
+    bars = ticks.groupby("bar_id").agg(**agg).reset_index(drop=True)
+    bars = bars[bars["n_ticks"] >= 10].reset_index(drop=True)
+    bars["depth_5_std"] = bars["depth_5_std"].fillna(0.0)
+    if "vwap_deviation_std" in bars.columns:
+        bars["vwap_deviation_std"] = bars["vwap_deviation_std"].fillna(0.0)
+    return bars
 
 
-def log_signal(
-    symbol: str,
-    signal: float,
-    price: float,
-    timestamp: Optional[str] = None,
-) -> PaperTrade:
-    """Log a single signal observation as a potential trade."""
-    if timestamp is None:
-        timestamp = datetime.now(timezone.utc).isoformat()
-
-    direction = "long" if signal > 0 else "short"
-
-    trade = PaperTrade(
-        timestamp=timestamp,
-        symbol=symbol,
-        direction=direction,
-        signal_value=float(signal),
-        entry_price=float(price),
+def discover_dates(data_dir: Path) -> list[str]:
+    return sorted(
+        d for d in os.listdir(data_dir)
+        if d.startswith("2026-") and "clean" not in d and (data_dir / d).is_dir()
     )
 
-    return trade
+
+# ── Signal (3-feature composite) ────────────────────────────────────────
+
+def compute_zscore_params_3f(train_bars_list: list[pd.DataFrame]) -> dict | None:
+    spread = np.concatenate([b["spread_bps_last"].values for b in train_bars_list])
+    depth = np.concatenate([b["depth_5_std"].values for b in train_bars_list])
+    vwap_arrs = [b["vwap_deviation_std"].values for b in train_bars_list
+                 if "vwap_deviation_std" in b.columns]
+    if not vwap_arrs:
+        return None
+    vwap = np.concatenate(vwap_arrs)
+    n = min(len(spread), len(depth), len(vwap))
+    spread, depth, vwap = spread[:n], depth[:n], vwap[:n]
+    mask = np.isfinite(spread) & np.isfinite(depth) & np.isfinite(vwap)
+    spread, depth, vwap = spread[mask], depth[mask], vwap[mask]
+    if len(spread) < 20:
+        return None
+    params = {
+        "spread_mean": np.mean(spread), "spread_std": max(np.std(spread), 1e-10),
+        "depth_mean": np.mean(depth), "depth_std": max(np.std(depth), 1e-10),
+        "vwap_mean": np.mean(vwap), "vwap_std": max(np.std(vwap), 1e-10),
+    }
+    z_s = (spread - params["spread_mean"]) / params["spread_std"]
+    z_d = (depth - params["depth_mean"]) / params["depth_std"]
+    z_v = (vwap - params["vwap_mean"]) / params["vwap_std"]
+    composite = (z_s + z_d + z_v) / 3.0
+    params["p_long"] = np.percentile(composite, P_LONG)
+    params["p_short"] = np.percentile(composite, P_SHORT)
+    return params
 
 
-def close_trade(
-    trade: PaperTrade,
-    exit_price: float,
-    exit_reason: str = "signal",
-    exit_timestamp: Optional[str] = None,
-    holding_bars: int = 0,
-) -> PaperTrade:
-    """Close an open paper trade."""
-    if exit_timestamp is None:
-        exit_timestamp = datetime.now(timezone.utc).isoformat()
-
-    trade.exit_price = float(exit_price)
-    trade.exit_timestamp = exit_timestamp
-    trade.exit_reason = exit_reason
-    trade.holding_bars = holding_bars
-
-    if trade.direction == "long":
-        trade.pnl_pct = (exit_price - trade.entry_price) / trade.entry_price * 100
-    else:
-        trade.pnl_pct = (trade.entry_price - exit_price) / trade.entry_price * 100
-
-    return trade
+def apply_signal_3f(bars: pd.DataFrame, params: dict) -> pd.DataFrame:
+    bars = bars.copy()
+    z_s = (bars["spread_bps_last"] - params["spread_mean"]) / params["spread_std"]
+    z_d = (bars["depth_5_std"] - params["depth_mean"]) / params["depth_std"]
+    z_v = (bars["vwap_deviation_std"] - params["vwap_mean"]) / params["vwap_std"]
+    bars["composite"] = (z_s + z_d + z_v) / 3.0
+    bars["direction"] = 0
+    bars.loc[bars["composite"] >= params["p_long"], "direction"] = 1
+    bars.loc[bars["composite"] <= params["p_short"], "direction"] = -1
+    return bars
 
 
-def save_trades(trades: List[PaperTrade], date: Optional[str] = None):
-    """Save trades to daily JSON file."""
-    if date is None:
-        date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+# ── Trade generation ─────────────────────────────────────────────────────
 
-    TRADE_DIR.mkdir(parents=True, exist_ok=True)
-    path = TRADE_DIR / f"{date}.json"
-
-    existing = []
-    if path.exists():
-        with open(path) as f:
-            existing = json.load(f)
-
-    existing.extend([asdict(t) for t in trades])
-
-    with open(path, "w") as f:
-        json.dump(existing, f, indent=2, default=str)
-
-    log.info(f"Saved {len(trades)} trades to {path}")
-
-
-def load_trades(date: str) -> List[PaperTrade]:
-    """Load trades from daily JSON file."""
-    path = TRADE_DIR / f"{date}.json"
-    if not path.exists():
-        return []
-
-    with open(path) as f:
-        data = json.load(f)
-
+def generate_trades(
+    bars: pd.DataFrame, date_str: str, symbol: str,
+) -> list[PaperTrade]:
+    """Generate paper trades from signal-scored bars with fixed horizon exit."""
+    prices = bars["midprice_last"].values
+    directions = bars["direction"].values
+    composites = bars["composite"].values
+    n = len(prices)
     trades = []
-    for d in data:
-        trades.append(PaperTrade(**{k: v for k, v in d.items() if k in PaperTrade.__dataclass_fields__}))
+
+    for i in range(n - HORIZON_BARS):
+        d = directions[i]
+        if d == 0:
+            continue
+        entry_p = prices[i]
+        exit_p = prices[i + HORIZON_BARS]
+        if entry_p <= 0 or not np.isfinite(entry_p) or not np.isfinite(exit_p):
+            continue
+        ret_bps = (exit_p - entry_p) / entry_p * 1e4
+        gross = d * ret_bps
+        net = gross - FEE_BPS
+
+        trades.append(PaperTrade(
+            date=date_str,
+            bar_idx=i,
+            symbol=symbol,
+            direction=d,
+            signal_value=float(composites[i]),
+            entry_price=float(entry_p),
+            exit_price=float(exit_p),
+            exit_bar_idx=i + HORIZON_BARS,
+            gross_bps=round(gross, 4),
+            net_bps=round(net, 4),
+        ))
+
     return trades
 
 
-# ---------------------------------------------------------------------------
-# Signal decay monitoring
-# ---------------------------------------------------------------------------
-
-
-def compute_rolling_ic(
-    signals: np.ndarray,
-    returns: np.ndarray,
-    window: int = 672,  # 7 days at 96 bars/day
-) -> np.ndarray:
-    """Compute rolling rank IC between signal and forward returns."""
-    from scipy.stats import spearmanr
-
-    n = len(signals)
-    ic = np.full(n, np.nan)
-
-    for i in range(window, n):
-        s = signals[i - window:i]
-        r = returns[i - window:i]
-        valid = ~(np.isnan(s) | np.isnan(r))
-        if valid.sum() > 20:
-            corr, _ = spearmanr(s[valid], r[valid])
-            ic[i] = corr
-
-    return ic
-
-
-def detect_ic_decay(
-    rolling_ic: np.ndarray,
-    backtest_ic: float,
-    decay_threshold: float = 0.5,
-    consecutive_days: int = 3,
-    bars_per_day: int = 96,
-) -> tuple:
-    """
-    Detect IC decay: rolling IC < threshold * backtest_ic for N consecutive days.
-
-    Returns:
-        (is_decayed, current_ratio, consecutive_low_days)
-    """
-    if np.all(np.isnan(rolling_ic)):
-        return False, 0.0, 0
-
-    # Daily IC averages
-    valid_ic = rolling_ic[~np.isnan(rolling_ic)]
-    if len(valid_ic) == 0:
-        return False, 0.0, 0
-
-    n_days = len(valid_ic) // bars_per_day
-    if n_days == 0:
-        current_ratio = abs(np.nanmean(valid_ic)) / abs(backtest_ic) if abs(backtest_ic) > 0 else 0
-        return False, current_ratio, 0
-
-    daily_ic = []
-    for d in range(n_days):
-        chunk = valid_ic[d * bars_per_day:(d + 1) * bars_per_day]
-        daily_ic.append(np.mean(chunk))
-
-    # Count consecutive low days
-    low_days = 0
-    max_consecutive = 0
-    for d_ic in reversed(daily_ic):
-        ratio = abs(d_ic) / abs(backtest_ic) if abs(backtest_ic) > 0 else 0
-        if ratio < decay_threshold:
-            low_days += 1
-            max_consecutive = max(max_consecutive, low_days)
-        else:
-            break
-
-    current_ratio = abs(daily_ic[-1]) / abs(backtest_ic) if abs(backtest_ic) > 0 and daily_ic else 0
-    is_decayed = low_days >= consecutive_days
-
-    return is_decayed, current_ratio, low_days
-
-
-# ---------------------------------------------------------------------------
-# Daily reconciliation
-# ---------------------------------------------------------------------------
-
-
-def reconcile_day(
-    date: str,
-    backtest_ic: float = 0.03,
-    backtest_sharpe: float = 1.0,
-) -> DailyReconciliation:
-    """Run daily reconciliation for a given date."""
-    trades = load_trades(date)
-
-    closed = [t for t in trades if t.pnl_pct is not None]
-    n_trades = len(closed)
-    pnls = [t.pnl_pct for t in closed]
-    gross_pnl = sum(pnls) if pnls else 0.0
-    max_loss = min(pnls) if pnls else 0.0
-
-    # Placeholder IC (would need live signal + returns)
-    rolling_ic = backtest_ic * 0.8  # assume 80% of backtest for now
-
-    ic_decay = rolling_ic / backtest_ic if backtest_ic > 0 else 0
-
-    is_healthy = (
-        max_loss > -2.0 and  # no single day > 2% loss
-        ic_decay > 0.5  # IC not decayed below 50%
-    )
-
-    return DailyReconciliation(
-        date=date,
-        n_trades=n_trades,
-        gross_pnl_pct=gross_pnl,
-        max_loss_pct=max_loss,
-        rolling_ic_7d=rolling_ic,
-        backtest_ic=backtest_ic,
-        ic_decay_ratio=ic_decay,
-        is_healthy=is_healthy,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Paper trading simulation (batch mode)
-# ---------------------------------------------------------------------------
-
-
-def run_paper_simulation(
-    data_dir: str = "data/features",
-    symbol: str = "BTC",
-    timeframe: str = "15min",
-    backtest_sharpe: float = 1.0,
-    backtest_ic: float = 0.03,
-    output: str = "reports/alpha_paper.json",
-) -> PaperTradingResult:
-    """
-    Simulate paper trading on historical data.
-
-    Uses the last 14 days of data as "live" paper trading period.
-    Compares signal quality against backtest baselines.
-    """
-    from cluster_pipeline.loader import load_parquet
-    from cluster_pipeline.preprocess import aggregate_bars
-
-    df = load_parquet(data_dir)
-    if "symbol" in df.columns:
-        df = df[df["symbol"] == symbol].reset_index(drop=True)
-
-    bars = aggregate_bars(df, timeframe=timeframe)
-    bars_pd = bars.to_pandas() if hasattr(bars, "to_pandas") else bars
-
-    price_col = None
-    for c in ["midprice_mean", "close", "mid_price"]:
-        if c in bars_pd.columns:
-            price_col = c
-            break
-    if price_col is None:
-        raise ValueError("No price column found")
-
-    prices = bars_pd[price_col].values
-
-    # Proxy signal
-    ret = np.zeros(len(prices))
-    ret[1:] = (prices[1:] - prices[:-1]) / prices[:-1]
-    signal = pd.Series(ret).rolling(20, min_periods=1).mean().values
-    std = np.std(signal)
-    if std > 1e-10:
-        signal = np.clip(signal / (3 * std), -1, 1)
-
-    # Forward returns
-    fwd = np.zeros(len(prices))
-    fwd[:-4] = (prices[4:] - prices[:-4]) / prices[:-4]  # 1h forward
-
-    # Split: train (first 80%) + paper (last 20%)
-    split = int(len(prices) * 0.8)
-    paper_signal = signal[split:]
-    paper_prices = prices[split:]
-    paper_returns = ret[split:]
-    paper_fwd = fwd[split:]
-
-    n_paper = len(paper_signal)
-    bars_per_day = 96
-
-    # Simulate trades
-    all_trades = []
-    open_trade = None
-    entry_threshold = 0.3
-
-    for i in range(n_paper):
-        if open_trade is None:
-            if abs(paper_signal[i]) > entry_threshold:
-                open_trade = log_signal(
-                    symbol, paper_signal[i], paper_prices[i],
-                    timestamp=f"bar_{split + i}",
-                )
-        else:
-            # Check exit conditions
-            holding = i - int(open_trade.timestamp.split("_")[1]) + split
-            should_exit = (
-                abs(paper_signal[i]) < entry_threshold * 0.3 or
-                holding > 96 * 2  # max 2 days
-            )
-            if should_exit:
-                reason = "signal" if abs(paper_signal[i]) < entry_threshold * 0.3 else "timeout"
-                close_trade(open_trade, paper_prices[i], reason, f"bar_{split + i}", holding)
-                all_trades.append(open_trade)
-                open_trade = None
-
-    # Close any remaining trade
-    if open_trade is not None:
-        close_trade(open_trade, paper_prices[-1], "end", f"bar_{split + n_paper - 1}")
-        all_trades.append(open_trade)
-
-    # Compute metrics
-    pnls = [t.pnl_pct for t in all_trades if t.pnl_pct is not None]
-    total_pnl = sum(pnls) if pnls else 0.0
-
-    # Daily PnLs
-    n_days = max(1, n_paper // bars_per_day)
-    daily_pnls = []
-    for d in range(n_days):
-        start = d * bars_per_day
-        end = min((d + 1) * bars_per_day, n_paper)
-        day_ret = paper_signal[start:end - 1] * np.diff(paper_prices[start:end]) / paper_prices[start:end - 1]
-        daily_pnls.append(float(np.sum(day_ret)) if len(day_ret) > 0 else 0.0)
-
-    paper_sharpe = 0.0
-    if daily_pnls and np.std(daily_pnls) > 1e-15:
-        paper_sharpe = float(np.mean(daily_pnls) / np.std(daily_pnls) * np.sqrt(365))
-
-    max_daily_loss = min(daily_pnls) * 100 if daily_pnls else 0.0  # as percentage
-
-    # IC decay
-    rolling_ic = compute_rolling_ic(paper_signal, paper_fwd, window=min(672, n_paper // 2))
-    is_decayed, ic_ratio, consec_days = detect_ic_decay(rolling_ic, backtest_ic)
-
-    # Daily reconciliation reports
-    daily_reports = []
-    for d in range(n_days):
-        recon = DailyReconciliation(
-            date=f"day_{d}",
-            n_trades=len([t for t in all_trades]),
-            gross_pnl_pct=daily_pnls[d] * 100,
-            max_loss_pct=min(0, daily_pnls[d]) * 100,
-            rolling_ic_7d=float(np.nanmean(rolling_ic)) if not np.all(np.isnan(rolling_ic)) else 0,
-            backtest_ic=backtest_ic,
-            ic_decay_ratio=ic_ratio,
-            is_healthy=daily_pnls[d] > -0.02,
+def summarize_day(trades: list[PaperTrade], date_str: str, symbol: str) -> DailySummary:
+    if not trades:
+        return DailySummary(
+            date=date_str, symbol=symbol,
+            n_trades=0, n_long=0, n_short=0,
+            gross_bps=0.0, net_bps=0.0, total_net_bps=0.0,
+            win_rate=0.0, max_loss_bps=0.0,
         )
-        daily_reports.append(recon)
-
-    # G8 quality gate
-    sharpe_ratio = paper_sharpe / backtest_sharpe if backtest_sharpe > 0 else 0
-    gate_sharpe = sharpe_ratio > 0.5  # within 2x
-    gate_no_big_loss = max_daily_loss > -2.0
-    gate_ic = not is_decayed
-    gate_infra = True  # simulated — always true
-
-    result = PaperTradingResult(
-        start_date=f"bar_{split}",
-        end_date=f"bar_{split + n_paper}",
-        n_days=n_days,
-        n_trades=len(all_trades),
-        total_pnl_pct=total_pnl,
-        paper_sharpe=paper_sharpe,
-        backtest_sharpe=backtest_sharpe,
-        sharpe_ratio=sharpe_ratio,
-        max_daily_loss_pct=max_daily_loss,
-        ic_decay_pct=(1 - ic_ratio) * 100,
-        error_free_days=n_days,
-        daily_reports=daily_reports,
-        gate_sharpe_within_2x=gate_sharpe,
-        gate_no_big_daily_loss=gate_no_big_loss,
-        gate_ic_stable=gate_ic,
-        gate_infra_stable=gate_infra,
-        gate_pass=gate_sharpe and gate_no_big_loss and gate_ic and gate_infra,
+    gross = np.array([t.gross_bps for t in trades])
+    net = np.array([t.net_bps for t in trades])
+    return DailySummary(
+        date=date_str,
+        symbol=symbol,
+        n_trades=len(trades),
+        n_long=sum(1 for t in trades if t.direction == 1),
+        n_short=sum(1 for t in trades if t.direction == -1),
+        gross_bps=round(float(np.mean(gross)), 3),
+        net_bps=round(float(np.mean(net)), 3),
+        total_net_bps=round(float(np.sum(net)), 2),
+        win_rate=round(float(np.mean(net > 0)), 3),
+        max_loss_bps=round(float(np.min(net)), 3),
     )
 
-    # Save
-    out_path = Path(output)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w") as f:
-        json.dump(asdict(result), f, indent=2, default=str)
 
-    return result
+# ── Trade persistence ────────────────────────────────────────────────────
 
+def _json_default(obj):
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (np.floating,)):
+        return float(obj)
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
+def save_trades(trades: list[PaperTrade], date_str: str, symbol: str):
+    TRADE_DIR.mkdir(parents=True, exist_ok=True)
+    path = TRADE_DIR / f"{date_str}_{symbol}.json"
+    with open(path, "w") as f:
+        json.dump([asdict(t) for t in trades], f, indent=2, default=_json_default)
+    return path
+
+
+def load_trades(date_str: str, symbol: str) -> list[PaperTrade]:
+    path = TRADE_DIR / f"{date_str}_{symbol}.json"
+    if not path.exists():
+        return []
+    with open(path) as f:
+        return [PaperTrade(**d) for d in json.load(f)]
+
+
+# ── Batch mode ───────────────────────────────────────────────────────────
+
+def run_batch(
+    data_dir: Path,
+    symbols: list[str],
+    save: bool = False,
+):
+    """Replay all dates with walk-forward paper trading. Compare to backtest."""
+    all_dates = discover_dates(data_dir)
+    print(f"Found {len(all_dates)} dates: {all_dates[0]} to {all_dates[-1]}")
+    print(f"Signal: 3f composite | Horizon: {HORIZON_BARS * BAR_SECONDS // 60}min | "
+          f"Fee: {FEE_BPS} bps RT\n")
+
+    all_results = {}
+
+    for symbol in symbols:
+        print(f"═══ {symbol} ═══")
+
+        # Load all dates
+        date_bars: list[tuple[str, pd.DataFrame]] = []
+        for date_str in all_dates:
+            ticks = load_date(data_dir, date_str, symbol)
+            if ticks is None or len(ticks) < 100:
+                continue
+            bars = aggregate_to_bars(ticks)
+            if len(bars) >= MIN_BARS_PER_DATE:
+                date_bars.append((date_str, bars))
+
+        print(f"  {len(date_bars)} usable dates")
+
+        if len(date_bars) < TRAIN_WINDOW + 1:
+            print(f"  Not enough dates (need {TRAIN_WINDOW + 1})\n")
+            continue
+
+        # Walk-forward paper trading
+        daily_summaries = []
+        all_trades_flat = []
+
+        for i in range(TRAIN_WINDOW, len(date_bars)):
+            train_bar_list = [b for _, b in date_bars[i - TRAIN_WINDOW:i]]
+            test_date_str, test_bars = date_bars[i]
+
+            params = compute_zscore_params_3f(train_bar_list)
+            if params is None:
+                continue
+
+            scored = apply_signal_3f(test_bars, params)
+            trades = generate_trades(scored, test_date_str, symbol)
+            summary = summarize_day(trades, test_date_str, symbol)
+            daily_summaries.append(summary)
+            all_trades_flat.extend(trades)
+
+            if save:
+                save_trades(trades, test_date_str, symbol)
+
+            tag = "+" if summary.total_net_bps > 0 else " "
+            print(f"  {test_date_str}: {summary.n_trades:3d} trades | "
+                  f"net {summary.net_bps:+.2f} bps/trade | "
+                  f"total {tag}{summary.total_net_bps:+.1f} bps | "
+                  f"WR {summary.win_rate:.0%} | "
+                  f"L:{summary.n_long} S:{summary.n_short}")
+
+        # Aggregate stats
+        if daily_summaries:
+            daily_pnl = np.array([s.total_net_bps for s in daily_summaries])
+            total_trades = sum(s.n_trades for s in daily_summaries)
+            total_pnl = float(np.sum(daily_pnl))
+            daily_std = np.std(daily_pnl)
+            sharpe = float(np.mean(daily_pnl) / daily_std * np.sqrt(252)) if daily_std > 0 else 0.0
+            n_positive = int(np.sum(daily_pnl > 0))
+
+            ref = BACKTEST_REFERENCE.get(symbol, {})
+            bt_sharpe = ref.get("sharpe", 0)
+            bt_net = ref.get("net_bps", 0)
+
+            print(f"\n  Paper:    {len(daily_summaries)} OOS days | {total_trades} trades | "
+                  f"Sharpe {sharpe:+.1f} | net total {total_pnl:+.0f} bps | "
+                  f"WR {n_positive}/{len(daily_summaries)}")
+            print(f"  Backtest: Sharpe {bt_sharpe:+.1f} | net {bt_net:+.2f} bps/trade")
+
+            # G8 gates
+            max_daily_loss = float(np.min(daily_pnl))
+            sharpe_ratio = sharpe / bt_sharpe if bt_sharpe > 0 else 0
+            gate_sharpe = sharpe_ratio > 0.5
+            gate_loss = max_daily_loss > -200  # -2% in bps at typical position
+
+            print(f"\n  G8 Gates:")
+            print(f"    Sharpe ratio (paper/backtest): {sharpe_ratio:.2f} "
+                  f"{'PASS' if gate_sharpe else 'FAIL'} (>0.5)")
+            print(f"    Max daily loss: {max_daily_loss:+.1f} bps "
+                  f"{'PASS' if gate_loss else 'FAIL'}")
+
+            all_results[symbol] = {
+                "n_oos_dates": len(daily_summaries),
+                "n_trades": total_trades,
+                "sharpe": round(sharpe, 2),
+                "total_pnl_bps": round(total_pnl, 1),
+                "daily_win_rate": round(n_positive / len(daily_summaries), 2),
+                "max_daily_loss_bps": round(max_daily_loss, 1),
+                "backtest_sharpe": bt_sharpe,
+                "sharpe_ratio": round(sharpe_ratio, 2),
+                "daily": [asdict(s) for s in daily_summaries],
+            }
+
+        print()
+
+    if save and all_results:
+        report = {
+            "title": "Paper Trading — 3f/100min Walk-Forward",
+            "generated": datetime.now(timezone.utc).isoformat(),
+            "signal": "3f composite (spread + depth + vwap_deviation)",
+            "horizon_min": HORIZON_BARS * BAR_SECONDS // 60,
+            "fee_bps_rt": FEE_BPS,
+            "results": all_results,
+        }
+        out = ROOT / "data" / "paper_trades" / "batch_report.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "w") as f:
+            json.dump(report, f, indent=2)
+        print(f"Report saved: {out}")
+
+    return all_results
+
+
+# ── Watch mode (daemon) ──────────────────────────────────────────────────
+
+def run_watch(
+    data_dir: Path,
+    symbol: str,
+    poll_seconds: int = 300,
+):
+    """Continuously watch for new data and generate paper trades."""
+    print(f"Paper trader watching {data_dir} for {symbol}")
+    print(f"Signal: 3f/100min | Poll: {poll_seconds}s | Fee: {FEE_BPS} bps\n")
+
+    processed_dates: set[str] = set()
+
+    while True:
+        try:
+            all_dates = discover_dates(data_dir)
+            if len(all_dates) < TRAIN_WINDOW + 1:
+                log.info(f"Waiting for data ({len(all_dates)} dates, need {TRAIN_WINDOW + 1})")
+                time.sleep(poll_seconds)
+                continue
+
+            # Load bars for all dates
+            date_bars: list[tuple[str, pd.DataFrame]] = []
+            for date_str in all_dates:
+                ticks = load_date(data_dir, date_str, symbol)
+                if ticks is None or len(ticks) < 100:
+                    continue
+                bars = aggregate_to_bars(ticks)
+                if len(bars) >= MIN_BARS_PER_DATE:
+                    date_bars.append((date_str, bars))
+
+            # Process unprocessed test dates
+            for i in range(TRAIN_WINDOW, len(date_bars)):
+                test_date = date_bars[i][0]
+                if test_date in processed_dates:
+                    continue
+
+                train_bar_list = [b for _, b in date_bars[i - TRAIN_WINDOW:i]]
+                test_bars = date_bars[i][1]
+
+                params = compute_zscore_params_3f(train_bar_list)
+                if params is None:
+                    continue
+
+                scored = apply_signal_3f(test_bars, params)
+                trades = generate_trades(scored, test_date, symbol)
+                summary = summarize_day(trades, test_date, symbol)
+
+                save_trades(trades, test_date, symbol)
+                processed_dates.add(test_date)
+
+                now = datetime.now(timezone.utc).strftime("%H:%M:%S")
+                print(f"[{now}] {test_date} {symbol}: "
+                      f"{summary.n_trades} trades | "
+                      f"net {summary.net_bps:+.2f} bps | "
+                      f"total {summary.total_net_bps:+.1f} bps | "
+                      f"WR {summary.win_rate:.0%}")
+
+        except KeyboardInterrupt:
+            print("\nStopping paper trader.")
+            break
+        except Exception as e:
+            log.error(f"Watch loop error: {e}")
+
+        time.sleep(poll_seconds)
+
+
+# ── CLI ──────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Paper trading (Step 8)")
-    parser.add_argument("--data", default="data/features")
-    parser.add_argument("--symbol", default="BTC")
-    parser.add_argument("--timeframe", default="15min")
-    parser.add_argument("--backtest-sharpe", type=float, default=1.0)
-    parser.add_argument("--backtest-ic", type=float, default=0.03)
-    parser.add_argument("--output", default="reports/alpha_paper.json")
+    parser = argparse.ArgumentParser(description="Paper Trading — MF 3f Signal")
+    sub = parser.add_subparsers(dest="mode", required=True)
+
+    # Batch mode
+    p_batch = sub.add_parser("batch", help="Replay all dates, compare with backtest")
+    p_batch.add_argument("--data-dir", default="data/features")
+    p_batch.add_argument("--symbols", nargs="+", default=["BTC", "ETH", "SOL"])
+    p_batch.add_argument("--save", action="store_true", help="Save trade logs + report")
+
+    # Watch mode
+    p_watch = sub.add_parser("watch", help="Continuously monitor for new data")
+    p_watch.add_argument("--data-dir", default="data/features")
+    p_watch.add_argument("--symbol", default="BTC")
+    p_watch.add_argument("--poll", type=int, default=300, help="Poll interval seconds")
+
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO)
-    result = run_paper_simulation(
-        data_dir=args.data, symbol=args.symbol, timeframe=args.timeframe,
-        backtest_sharpe=args.backtest_sharpe, backtest_ic=args.backtest_ic,
-        output=args.output,
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
     )
-    gate = "PASS" if result.gate_pass else "FAIL"
-    print(f"\nG8 Quality Gate: {gate}")
-    print(f"  Days: {result.n_days}, Trades: {result.n_trades}")
-    print(f"  Paper Sharpe:    {result.paper_sharpe:.3f}")
-    print(f"  Backtest Sharpe: {result.backtest_sharpe:.3f}")
-    print(f"  Sharpe ratio:    {result.sharpe_ratio:.2f}")
-    print(f"  Max daily loss:  {result.max_daily_loss_pct:.2f}%")
-    print(f"  IC decay:        {result.ic_decay_pct:.1f}%")
+
+    data_dir = Path(args.data_dir)
+    if not data_dir.exists():
+        print(f"Data directory not found: {data_dir}")
+        sys.exit(1)
+
+    if args.mode == "batch":
+        run_batch(data_dir, args.symbols, save=args.save)
+    elif args.mode == "watch":
+        run_watch(data_dir, args.symbol, poll_seconds=args.poll)
 
 
 if __name__ == "__main__":
