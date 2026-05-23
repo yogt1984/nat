@@ -1229,3 +1229,34 @@ help:
 	@echo "  agent_watchdog_install  Install cron watchdog (auto-restart)"
 	@echo "  agent_watchdog_remove   Remove cron watchdog"
 	@echo ""
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo " ALGORITHM 1: MF 3-FEATURE LIQUIDITY SIGNAL"
+	@echo "───────────────────────────────────────────────────────────────────"
+	@echo "  test_alg1               Backtest + dry-run signal bridge"
+	@echo "  test_alg1_paper         Paper trader batch + watch mode"
+	@echo "  test_alg1_live          LIVE mode (requires HL_PRIVATE_KEY)"
+	@echo ""
+
+# =============================================================================
+# ALGORITHM 1: MF 3-FEATURE LIQUIDITY SIGNAL (100min)
+# =============================================================================
+
+test_alg1:
+	@echo "═══ ALG1: MF 3-Feature Liquidity Signal (100min) ═══"
+	@echo ""
+	@echo "Step 1: Backtest on latest data..."
+	$(PYTHON) scripts/analysis/mf_liquidity_backtest.py --features both --save
+	@echo ""
+	@echo "Step 2: Starting signal bridge (dry-run, Ctrl-C to stop)..."
+	$(PYTHON) scripts/execution/signal_bridge.py --mode dry-run --cycle 300
+
+test_alg1_paper:
+	@echo "═══ ALG1: Paper Trading Mode ═══"
+	$(PYTHON) scripts/alpha/paper_trader.py batch --save
+	@echo ""
+	@echo "Starting paper trader watch (Ctrl-C to stop)..."
+	$(PYTHON) scripts/alpha/paper_trader.py watch --symbol BTC --poll 300
+
+test_alg1_live:
+	@echo "═══ ALG1: LIVE MODE (requires HL_PRIVATE_KEY) ═══"
+	$(PYTHON) scripts/execution/signal_bridge.py --mode live --cycle 300
