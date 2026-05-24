@@ -18,7 +18,7 @@ pub fn create_schema_with_alg_features(alg_names: &[&str]) -> Arc<Schema> {
         Field::new("sequence_id", DataType::UInt64, false),
     ];
 
-    // Base + optional features (209 fixed columns)
+    // Base + optional features (217 fixed columns)
     for name in Features::names_all() {
         fields.push(Field::new(name, DataType::Float64, false));
     }

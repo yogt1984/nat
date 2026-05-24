@@ -340,7 +340,12 @@ mod tests {
             "to_vec should always return count_all() elements");
 
         // GMM slots should be NaN when not set
-        let gmm_start = Features::count_all() - GmmClassificationFeatures::count();
+        // GMM is followed by cross_symbol (3) and heatmap (8) in to_vec order
+        use crate::features::{CrossSymbolFeatures, HeatmapFeatures};
+        let gmm_start = Features::count_all()
+            - HeatmapFeatures::count()
+            - CrossSymbolFeatures::count()
+            - GmmClassificationFeatures::count();
         assert!(vec_without[gmm_start].is_nan(),
             "GMM features should be NaN when not set");
 

@@ -1,0 +1,727 @@
+\documentclass[11pt,a4paper]{article}
+
+% Packages (minimal texlive-base only)
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+\usepackage{booktabs}
+
+% Page setup
+\geometry{margin=2.5cm}
+
+\begin{document}
+
+% ============================================================
+% TITLE PAGE
+% ============================================================
+\begin{titlepage}
+\centering
+\vspace*{3cm}
+{\Huge\bfseries NAT\\[0.3cm]}
+{\LARGE Liquidity Heatmap and\\Cascade Probability Model\\[0.5cm]}
+{\Large Spatial Liquidation Density Estimation\\for Perpetual Futures Markets\\[0.3cm]}
+{\large \textit{Technical Report --- Revision 1}\\[2cm]}
+{\large Prepared by Yigit Onat\\[0.3cm]}
+{\large May 2026\\[3cm]}
+\vfill
+{\small CONFIDENTIAL --- For internal use only}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% ============================================================
+% ABSTRACT
+% ============================================================
+\section*{Abstract}
+\addcontentsline{toc}{section}{Abstract}
+
+We present a spatial liquidation density model for detecting cascade events in Hyperliquid perpetual futures markets. The model discretises the price axis into 200 bins relative to the current mid-price and maps observed liquidation prices into a density field. Eight physics-inspired scalar features are extracted from this heatmap at each 100ms tick, capturing cluster proximity, chain structure, absorption capacity, and directional asymmetry. A cascade probability estimator, implemented as an online logistic regression with delayed targets, consumes these features alongside interaction terms encoding the domino mechanism. We describe the mathematical formulation, the three-layer implementation architecture (Rust real-time features, Python online model, Python validation agent), and discuss the critical data availability constraint: the model operates on a sample of tracked wallet positions rather than the complete market liquidation landscape.
+
+\newpage
+
+% ============================================================
+% 1. INTRODUCTION
+% ============================================================
+\section{Introduction}
+
+\subsection{Motivation}
+
+In leveraged perpetual futures markets, liquidation cascades represent a significant source of both risk and opportunity. When price moves toward a cluster of liquidation prices, the resulting forced market orders push price further in the same direction, potentially triggering additional liquidations in a self-reinforcing feedback loop.
+
+The NAT platform already computes 13 liquidation risk features at four fixed price thresholds (1\%, 2\%, 5\%, 10\%), validated under Hypothesis H3 which confirmed cascade prediction lift $>2\times$ from cluster proximity alone. This work extends the fixed-threshold approach to a full spatial representation --- a \textit{liquidity heatmap} --- that captures the complete shape of the liquidation landscape.
+
+\subsection{Contributions}
+
+\begin{enumerate}
+    \item A real-time liquidity heatmap computed at 100ms resolution from tracked wallet positions, yielding 8 spatial features (Section~\ref{sec:heatmap}).
+    \item A cascade probability model based on online logistic regression with interaction terms encoding the domino mechanism (Section~\ref{sec:model}).
+    \item A formalisation of the cascade condition relating cluster spacing, mass, and price impact (Section~\ref{sec:physics}).
+    \item A 5-gate validation protocol for continuous model quality monitoring (Section~\ref{sec:validation}).
+    \item An honest assessment of data limitations --- the model observes a sample of positions, not the full market (Section~\ref{sec:limitations}).
+\end{enumerate}
+
+\subsection{Notation}
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+\textbf{Symbol} & \textbf{Type} & \textbf{Domain} & \textbf{Meaning} \\
+\midrule
+$t$ & index & $\mathbb{Z}_{\geq 0}$ & Snapshot timestamp (100ms resolution) \\
+$m_t$ & scalar & $(0, \infty)$ & Mid-price: $(P^{\text{bid}}_t + P^{\text{ask}}_t)/2$ \\
+$\delta$ & scalar & $(-R, R)$ & Log-return offset: $\delta = \ln(P / m_t)$ \\
+$k$ & integer & $\{0, \ldots, K{-}1\}$ & Bin index along $\delta$ axis \\
+$\Delta$ & scalar & $(0, R/K]$ & Bin width ($\Delta = 2R/K = 0.001$) \\
+$K$ & integer & $\mathbb{Z}_{>0}$ & Number of bins (default 200) \\
+$R$ & scalar & $(0, 1)$ & Half-range in log-return space (default 0.10) \\
+$V_i$ & scalar & $(0, \infty)$ & Notional value of position $i$ (USD) \\
+$\ell_i$ & scalar & $(0, \infty)$ & Liquidation price of position $i$ \\
+$H(t, k)$ & scalar & $[0, \infty)$ & Heatmap: USD liquidation mass in bin $k$ at time $t$ \\
+$D^{\text{bid}}(r)$ & scalar & $[0, \infty)$ & Bid-side book depth (USD) within $r$ of mid \\
+$\lambda^{\text{Kyle}}$ & scalar & $[0, \infty)$ & Kyle's price impact coefficient \\
+$\mathcal{I}$ & scalar & $[0, \infty)$ & Composite illiquidity score \\
+$\sigma(\cdot)$ & function & $\mathbb{R} \to (0,1)$ & Logistic sigmoid \\
+$\tau_{\text{cluster}}$ & scalar & $(0, \infty)$ & Cluster detection threshold (default \$1M) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ============================================================
+% 2. HEATMAP CONSTRUCTION
+% ============================================================
+\section{Liquidity Heatmap Construction}
+\label{sec:heatmap}
+
+\subsection{Price Axis Discretisation}
+
+The price axis is discretised into $K$ uniform bins in log-return space. Each bin $k$ has centre:
+
+\begin{equation}
+\delta_k = -R + \left(k + \tfrac{1}{2}\right)\Delta, \qquad k = 0, \ldots, K-1
+\end{equation}
+
+and covers the interval $\mathcal{B}_k = \left(-R + k\Delta,\; -R + (k+1)\Delta\right)$. The corresponding absolute price range at time $t$ is:
+
+\begin{equation}
+\mathcal{P}_k(t) = \left(m_t \cdot e^{-R + k\Delta},\; m_t \cdot e^{-R + (k+1)\Delta}\right)
+\end{equation}
+
+Using log-returns ensures bins are symmetric in percentage terms and independent of absolute price level. With $R = 0.10$ and $K = 200$, each bin spans 10 basis points --- sufficient resolution to distinguish clusters separated by 0.1\%.
+
+\textbf{Implementation:} \texttt{rust/ing/src/features/heatmap.rs}, function \texttt{build\_heatmap}. Bin assignment: $k = \lfloor (\ln(\ell_i / m_t) + R) / \Delta \rfloor$.
+
+\subsection{Heatmap Function}
+
+The liquidation USD density at bin $k$, time $t$ aggregates all tracked positions whose liquidation price falls within $\mathcal{P}_k(t)$:
+
+\begin{equation}
+\boxed{H(t, k) = \sum_{i=1}^{N_t} V_i \cdot \mathbf{1}\!\left[\ell_i \in \mathcal{P}_k(t)\right] \cdot \mathbf{1}\!\left[V_i \geq \tau_V\right]}
+\end{equation}
+
+where $V_i$ is the notional position value (USD), $\ell_i$ is the liquidation price, and $\tau_V = \$1{,}000$ filters dust positions.
+
+\textbf{Complexity:} $O(N_t)$ per tick --- each position maps to exactly one bin via a single division and floor operation. With typical $N_t \sim 100$--$1{,}000$ tracked positions, this is cheaper than the existing entropy features.
+
+\textbf{Relation to existing features:} The fixed-threshold liquidation features are recoverable as partial sums:
+
+\begin{equation}
+\texttt{risk\_above\_}r\% = \sum_{k:\, \delta_k \in (0,\, \ln(1+r/100)]} H(t,k)
+\end{equation}
+
+The heatmap generalises these 4 scalars to a 200-dimensional spatial profile.
+
+\subsection{Stateful Buffer}
+
+The \texttt{HeatmapBuffer} struct maintains temporal context for features that require historical snapshots:
+
+\begin{itemize}
+    \item \texttt{lag\_1min}: Heatmap snapshot from 600 ticks ago (for cluster velocity)
+    \item \texttt{lag\_5min}: Heatmap snapshot from 3{,}000 ticks ago (for temporal change)
+    \item \texttt{prev\_nearest\_dist}: Previous nearest cluster distance (for F6 finite difference)
+\end{itemize}
+
+Memory: $3 \times 200 \times 8$ bytes $= 4.8$ KB per symbol. Warmup period: 3{,}000 ticks (5 minutes).
+
+\textbf{Implementation:} \texttt{HeatmapBuffer::update\_and\_compute()} in \texttt{heatmap.rs}.
+
+% ============================================================
+% 3. SPATIAL FEATURE EXTRACTION
+% ============================================================
+\section{Spatial Feature Extraction}
+
+Eight scalar features are extracted from the heatmap at each snapshot. These are microstructure analogues of observables on a physical density field.
+
+\subsection{F1: Nearest Cluster Distance}
+
+\begin{equation}
+d_{\min}(t) = \min\left\{|\delta_k| : H(t,k) > \tau_{\text{cluster}}\right\}
+\end{equation}
+
+Units: log-return (dimensionless). Range: $[0, R]$. If no bin exceeds $\tau_{\text{cluster}}$, returns $R$ (boundary).
+
+\textbf{Interpretation:} How close is the nearest significant liquidation cluster to mid-price. Smaller values indicate higher immediate cascade risk.
+
+\textbf{Implementation:} \texttt{compute\_nearest\_cluster\_dist} in \texttt{heatmap.rs}. Complexity $O(K)$.
+
+\subsection{F2: Cluster Mass Ratio}
+
+Let $k^* = \arg\max_k H(t,k)$. The cluster mass ratio normalises peak density by expected density:
+
+\begin{equation}
+\text{CMR}(t) = \frac{H(t, k^*)}{\bar{H}(t)}, \qquad \bar{H}(t) = \frac{1}{K} \sum_{k=0}^{K-1} H(t, k)
+\end{equation}
+
+Range: $[1, N_t]$. Dimensionless. A value of 10 means the peak bin holds $10\times$ the average density.
+
+\textbf{Interpretation:} Concentration of liquidation fuel. Highly concentrated clusters generate larger forced orders when triggered.
+
+\subsection{F3: Cascade Chain Length}
+
+The cascade chain length counts the maximum number of \textit{consecutive} bins above a chain threshold $\tau_{\text{chain}} = \tau_{\text{cluster}} / 10$ within the critical $\pm 5\%$ window around mid:
+
+\begin{equation}
+L(t) = \max_{\text{runs}} \left|\left\{k : H(t,k) > \tau_{\text{chain}},\; |\delta_k| \leq 0.05\right\}\right|_{\text{consecutive}}
+\end{equation}
+
+Units: bins (multiply by $\Delta$ for log-return units). Range: $[0, 100]$.
+
+\textbf{Interpretation:} A long chain indicates that a cascade is \textit{geometrically feasible} --- consecutive price levels contain enough mass to propagate the domino effect (Brunnermeier \& Pedersen, 2009).
+
+\textbf{Implementation:} \texttt{compute\_cascade\_chain\_length}. Single left-to-right scan, $O(K)$.
+
+\subsection{F4: Asymmetric Cascade Potential}
+
+The directional imbalance of liquidation mass within the $\pm 5\%$ window:
+
+\begin{equation}
+\text{ACP}(t) = \frac{\displaystyle\sum_{k:\, 0 < \delta_k \leq 0.05} H(t,k) - \displaystyle\sum_{k:\, {-0.05} \leq \delta_k < 0} H(t,k)}{\displaystyle\sum_{k:\, |\delta_k| \leq 0.05} H(t,k) + \epsilon}
+\end{equation}
+
+where $\epsilon = 1$ USD prevents division by zero. Range: $(-1, +1)$.
+
+\textbf{Interpretation:}
+\begin{itemize}
+    \item $\text{ACP} > 0$: more short liquidations above mid $\Rightarrow$ short squeeze pressure
+    \item $\text{ACP} < 0$: more long liquidations below mid $\Rightarrow$ downward cascade pressure
+\end{itemize}
+
+\subsection{F5: Absorption Capacity}
+
+The ratio of order book depth to liquidation pressure within 2\% of mid, computed for both directions and taking the worst case:
+
+\begin{equation}
+A(t) = \min\!\left(\frac{D^{\text{bid}}(0.02)}{\displaystyle\sum_{k:\, {-0.02} \leq \delta_k < 0} H(t,k) + \epsilon},\; \frac{D^{\text{ask}}(0.02)}{\displaystyle\sum_{k:\, 0 < \delta_k \leq 0.02} H(t,k) + \epsilon}\right)
+\end{equation}
+
+Range: $(0, \infty)$, clamped to $[0, 100]$ in implementation.
+
+\textbf{Interpretation (Cont \& Wagalath, 2016):} When $A \gg 1$, the order book can absorb forced liquidation flow. When $A < 1$, liquidation volume exceeds available depth --- the necessary condition for price to gap through multiple levels, triggering the domino sequence.
+
+\textbf{Implementation:} \texttt{compute\_absorption\_capacity}. Uses \texttt{bid\_depth\_2pct} and \texttt{ask\_depth\_2pct} from the order book.
+
+\subsection{F6: Cluster Velocity}
+
+The rate of change of the nearest cluster distance, estimated via backward finite difference:
+
+\begin{equation}
+v(t) = \frac{d_{\min}(t) - d_{\min}(t - \tau)}{\tau}
+\end{equation}
+
+where $\tau = 600$ ticks (1 minute). Units: log-return per tick.
+
+\textbf{Interpretation:} Negative $v$ means the nearest cluster is approaching mid --- either because price is drifting toward the cluster, or because new positions are opening with liquidation prices closer to current price.
+
+\textbf{Note:} Returns 0.0 during warmup (first 600 ticks). The finite difference introduces a lag of $\tau/2 = 30$ seconds in expectation.
+
+\subsection{F7: Mass-Weighted Distance}
+
+The centre of liquidation gravity:
+
+\begin{equation}
+\bar{d}(t) = \frac{\displaystyle\sum_{k=0}^{K-1} |\delta_k| \cdot H(t,k)}{\displaystyle\sum_{k=0}^{K-1} H(t,k) + \epsilon}
+\end{equation}
+
+Range: $[0, R]$. Returns $R$ when no meaningful mass is present.
+
+\textbf{Interpretation:} Low $\bar{d}$ indicates liquidation mass concentrated near mid (high immediate risk). High $\bar{d}$ indicates mass distributed far from mid (lower immediate risk).
+
+\subsection{F8: Heatmap Entropy}
+
+The Shannon entropy of the normalised mass distribution:
+
+\begin{equation}
+S(t) = -\sum_{k=0}^{K-1} p_k(t) \ln p_k(t), \qquad p_k(t) = \frac{H(t,k)}{\displaystyle\sum_{j} H(t,j) + \epsilon}
+\end{equation}
+
+with the convention $0 \ln 0 = 0$. Range: $[0, \ln K]$.
+
+\textbf{Interpretation:} Low entropy indicates highly concentrated mass (one or two dominant clusters). This is orthogonal to the time-series entropy features in \texttt{features/entropy.rs}, which operate on trade arrival sequences rather than the spatial liquidation landscape.
+
+\subsection{Feature Summary}
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+\textbf{Feature} & \textbf{Parquet Column} & \textbf{Range} & \textbf{Unit} \\
+\midrule
+Nearest cluster distance & \texttt{hm\_nearest\_cluster\_dist} & $[0, 0.10]$ & log-return \\
+Cluster mass ratio & \texttt{hm\_cluster\_mass\_ratio} & $[1, \infty)$ & dimensionless \\
+Cascade chain length & \texttt{hm\_cascade\_chain\_length} & $[0, 100]$ & bins \\
+Asymmetric cascade potential & \texttt{hm\_asymmetric\_cascade\_pot} & $(-1, 1)$ & dimensionless \\
+Absorption capacity & \texttt{hm\_absorption\_capacity} & $[0, 100]$ & dimensionless \\
+Cluster velocity & \texttt{hm\_cluster\_velocity} & $(-\infty, \infty)$ & lr/tick \\
+Mass-weighted distance & \texttt{hm\_mass\_weighted\_distance} & $[0, 0.10]$ & log-return \\
+Heatmap entropy & \texttt{hm\_heatmap\_entropy} & $[0, \ln 200]$ & nats \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ============================================================
+% 4. CASCADE PHYSICS
+% ============================================================
+\section{Cascade Physics: The Domino Mechanism}
+\label{sec:physics}
+
+\subsection{Single-Cluster Price Impact}
+
+Consider a cluster of mass $M_A = H(t, k_A)$ at log-distance $\delta_A$ from mid. When price reaches $m_t e^{\delta_A}$, these positions are force-liquidated as market orders of total USD value $M_A$. Using Kyle's (1985) linear price impact model:
+
+\begin{equation}
+\Delta p_A = \lambda^{\text{Kyle}} \cdot \frac{M_A}{m_t}
+\end{equation}
+
+where $\lambda^{\text{Kyle}}$ is estimated from the most recent 100 trades (\texttt{illiq\_kyle\_100}).
+
+\subsection{Cascade Condition}
+
+A second cluster at distance $\delta_B > \delta_A$ is reached if and only if the price impact of cluster A's liquidation closes the gap:
+
+\begin{equation}
+\boxed{\delta_B - \delta_A < \frac{\lambda^{\text{Kyle}} \cdot M_A}{m_t}}
+\end{equation}
+
+If this condition holds, cluster B liquidates, generating additional impact, and the cascade propagates. The total cascade magnitude under the linear impact model is:
+
+\begin{equation}
+\Delta p_{\text{total}} \approx \lambda^{\text{Kyle}} \cdot \frac{1}{m_t} \sum_{j:\, \text{reached}} M_j
+\end{equation}
+
+\textbf{Key insight:} The cascade condition depends on (1) cluster \textit{spacing} ($\delta_B - \delta_A$, related to F3 chain length) and (2) cluster \textit{mass} ($M_A$, related to F2), mediated by market illiquidity ($\lambda^{\text{Kyle}}$).
+
+\subsection{Absorption Damping}
+
+The order book acts as a damper. During the cascade, each price increment must consume available depth before reaching the next cluster. The absorbed fraction is:
+
+\begin{equation}
+\eta = \min\!\left(1,\; \frac{D^{\text{bid}}(\delta_A)}{M_A}\right)
+\end{equation}
+
+The effective price impact reaching cluster B is $(1 - \eta) \cdot \Delta p_A$. The cascade is damped when $\eta \approx 1$, i.e., $D^{\text{bid}} \gg M_A$, consistent with $A \gg 1$ in F5.
+
+This is the Brunnermeier \& Pedersen (2009) liquidity spiral mechanism: thin markets amplify cascade magnitude because $\eta \to 0$.
+
+\subsection{Network Contagion Extension}
+
+For $N$ clusters at distances $\delta_1 < \delta_2 < \cdots < \delta_N$, the cascade is modelled as a directed contagion graph. Node $j$ is triggered iff:
+
+\begin{equation}
+\sum_{i < j,\, \text{triggered}} M_i \cdot \lambda^{\text{Kyle}} / m_t > \delta_j - \delta_1
+\end{equation}
+
+This maps to the Caccioli et al.\ (2014) fire-sale network model, with positions as overlapping portfolios and price levels as asset prices. The cascade chain length (F3) is the number of triggered nodes.
+
+% ============================================================
+% 5. CASCADE PROBABILITY MODEL
+% ============================================================
+\section{Cascade Probability Model}
+\label{sec:model}
+
+\subsection{Event Definition}
+
+A cascade event at time $t$ with horizon $T$ and thresholds $(X, Y)$:
+
+\begin{equation}
+y_t = \mathbf{1}\!\left[|\Delta p_{t \to t+T}| > X \;\wedge\; \text{LiqVol}_{t \to t+T} > Y\right]
+\end{equation}
+
+where $\Delta p_{t \to t+T} = \ln(m_{t+T}/m_t)$ is the log-return over horizon $T$, and $\text{LiqVol}$ is total USD liquidation volume. Default parameters: $X = 3\%$, $Y = \$500\text{K}$, $T = 3{,}000$ ticks (5 minutes). Base rate $\approx 5\%$.
+
+The conjunction separates true cascades (price move driven by forced liquidation flow) from ordinary large moves driven by news or sentiment.
+
+\textbf{Implementation note:} In practice, only the price threshold is used as a proxy, since per-tick liquidation volume is not directly observable from the tracked wallet sample.
+
+\subsection{Feature Vector}
+
+The model consumes an 11-dimensional feature vector: 8 heatmap features plus 3 interaction terms:
+
+\begin{equation}
+\mathbf{x}(t) = \left[d_{\min},\, \text{CMR},\, L,\, \text{ACP},\, A^{-1},\, v,\, \bar{d},\, S,\, L \cdot A^{-1},\, v \cdot \mathcal{I},\, \text{ACP} \cdot \text{sgn}(f)\right]^\top
+\end{equation}
+
+where $A^{-1} = 1/A$ (reciprocal absorption), $\mathcal{I}$ is the composite illiquidity score, and $f$ is the perpetual funding rate.
+
+\textbf{Interaction term rationale:}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Term} & \textbf{Interpretation} \\
+\midrule
+$L \cdot A^{-1}$ & Long chain $+$ insufficient damping $=$ fuel without absorber \\
+$v \cdot \mathcal{I}$ & Cluster approaching $+$ thin market $=$ amplified impact \\
+$\text{ACP} \cdot \text{sgn}(f)$ & Directional alignment of liquidation pressure and funding \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Online Logistic Regression}
+
+\begin{equation}
+P(\text{cascade} \mid \mathbf{x}(t)) = \sigma(\beta_0 + \boldsymbol{\beta}^\top \mathbf{x}(t)) = \frac{1}{1 + \exp(-\beta_0 - \boldsymbol{\beta}^\top \mathbf{x}(t))}
+\end{equation}
+
+Parameters $(\beta_0, \boldsymbol{\beta}) \in \mathbb{R}^{12}$ are estimated by online SGD with cross-entropy loss and $L_2$ regularisation:
+
+\begin{equation}
+\mathcal{L}(\boldsymbol{\beta}) = -\frac{1}{n}\sum_{t=1}^{n}\left[y_t \ln \hat{p}_t + (1-y_t)\ln(1-\hat{p}_t)\right] + \frac{\lambda}{2}\|\boldsymbol{\beta}\|^2
+\end{equation}
+
+with $\lambda = 10^{-3}$.
+
+\textbf{SGD update rule:} For each observation $(x_t, y_t)$:
+
+\begin{align}
+g_t &= \hat{p}_t - y_t \\
+\boldsymbol{\beta} &\leftarrow \boldsymbol{\beta} - \eta_t (g_t \mathbf{x}_t + \lambda \boldsymbol{\beta}) \\
+\beta_0 &\leftarrow \beta_0 - \eta_t g_t
+\end{align}
+
+with exponentially decaying learning rate $\eta_t = \eta_0 \cdot \gamma^t$, where $\eta_0 = 0.01$ and $\gamma = 0.9999$.
+
+\textbf{Feature normalisation:} Welford's online algorithm tracks running mean and variance per feature:
+
+\begin{align}
+\bar{x}_n &= \bar{x}_{n-1} + \frac{x_n - \bar{x}_{n-1}}{n} \\
+M_{2,n} &= M_{2,n-1} + (x_n - \bar{x}_{n-1})(x_n - \bar{x}_n) \\
+\hat{\sigma}_n &= \sqrt{M_{2,n} / (n-1)}
+\end{align}
+
+Normalised input: $\tilde{x} = (x - \bar{x}_n) / \hat{\sigma}_n$.
+
+\subsection{Delayed Target}
+
+The cascade label $y_t$ requires observing the future price at $t + T$. The model maintains a circular buffer of $(\mathbf{x}_t, m_t, t)$ tuples. When the buffer entry at time $t$ has aged $T$ ticks, the target is computed and the SGD update is applied retroactively:
+
+\begin{equation}
+y_t = \mathbf{1}\!\left[|\ln(m_{t+T} / m_t)| > X\right]
+\end{equation}
+
+This introduces a training lag of $T$ ticks but does not affect prediction: at inference time, $\hat{p}_t$ is computed immediately from $\mathbf{x}_t$ using the current $\boldsymbol{\beta}$.
+
+\textbf{Implementation:} \texttt{scripts/algorithms/cascade\_probability.py}, class \texttt{CascadeProbability}. Follows the \texttt{MicrostructureAlgorithm} interface with \texttt{step(tick)} for tick-by-tick processing and \texttt{run\_batch(df)} for parquet replay.
+
+\subsection{Model Choice Justification}
+
+Logistic regression is preferred over gradient-boosted trees or neural networks for three reasons:
+
+\begin{enumerate}
+    \item \textbf{Rarity:} Cascade events occur at $\sim 5\%$ base rate. Complex models overfit to noise with imbalanced, non-stationary targets.
+    \item \textbf{Online adaptation:} The leverage regime changes over time (e.g., post-airdrop periods vs.\ normal periods). Online SGD adapts continuously without catastrophic forgetting.
+    \item \textbf{Interpretability:} The coefficient vector $\boldsymbol{\beta}$ directly indicates which features drive cascade risk. A large positive $\beta$ for $L \cdot A^{-1}$ confirms the domino mechanism; a near-zero $\beta$ for entropy would indicate the spatial shape is less important than cluster proximity.
+\end{enumerate}
+
+% ============================================================
+% 6. VALIDATION PROTOCOL
+% ============================================================
+\section{Validation Protocol}
+\label{sec:validation}
+
+The cascade probability model must pass five quality gates before deployment, evaluated by the \texttt{CascadeAgent} on hourly cycles.
+
+\subsection{Gate G1: Discriminative Power}
+
+\textbf{Metric:} Area under the ROC curve (AUC) and top-decile lift.
+
+\begin{equation}
+\text{AUC} = P(\hat{p}_{t_+} > \hat{p}_{t_-} \mid y_{t_+} = 1,\, y_{t_-} = 0)
+\end{equation}
+
+\begin{equation}
+\text{lift}(q) = \frac{P(y = 1 \mid \hat{p} > q_{90})}{P(y = 1)}
+\end{equation}
+
+\textbf{Threshold:} AUC $> 0.65$ AND lift $> 2\times$.
+
+\subsection{Gate G2: Cost Awareness}
+
+Cascade regimes exhibit extreme bid-ask spreads (3--$10\times$ normal). The net signal value must survive execution costs:
+
+\begin{equation}
+\text{Net IC} = \text{IC}_{\text{gross}} - \frac{2 \bar{s}}{\sigma_r \sqrt{T}}
+\end{equation}
+
+where $\bar{s}$ is the 90th-percentile spread during cascade events.
+
+\textbf{Threshold:} Net IC $> 0.02$.
+
+\subsection{Gate G3: Temporal Stability}
+
+Walk-forward validation over 5 non-overlapping windows. Train fresh model per window, compute AUC.
+
+\textbf{Threshold:} Median AUC $> 0.60$ AND fewer than 20\% of windows below 0.55.
+
+\subsection{Gate G4: Cross-Symbol Consistency}
+
+Separate models for BTC, ETH, SOL. Compare $\boldsymbol{\beta}$ vectors via cosine similarity.
+
+\textbf{Threshold:} All symbols pass G1 AND pairwise $\cos(\boldsymbol{\beta}_i, \boldsymbol{\beta}_j) > 0.6$.
+
+\textbf{Rationale:} Consistent $\boldsymbol{\beta}$ across symbols indicates a shared mechanism, not symbol-specific noise.
+
+\subsection{Gate G5: Orthogonality}
+
+Regress cascade probability on the existing spread+depth composite signal:
+
+\begin{equation}
+\hat{p}_t = \gamma_0 + \gamma_1 \cdot \text{spread\_depth}_t + \varepsilon_t
+\end{equation}
+
+\textbf{Threshold:} $R^2 < 0.30$, confirming the cascade model adds information beyond the existing signal.
+
+\textbf{Implementation:} \texttt{scripts/agent/cascade\_daemon.py}. State persisted in \texttt{data/agent\_cascade/agent\_state.json}.
+
+% ============================================================
+% 7. DATA AVAILABILITY AND LIMITATIONS
+% ============================================================
+\section{Data Availability and Limitations}
+\label{sec:limitations}
+
+\subsection{The Observation Problem}
+
+The heatmap model assumes access to liquidation prices across the market. In practice, Hyperliquid's REST API (\texttt{get\_clearinghouse\_state(wallet)}) returns position data --- including liquidation price, entry price, size, and leverage --- only for \textit{specific wallet addresses}.
+
+There is no public endpoint that returns all open positions across all traders. The project discovers wallets by monitoring WebSocket trade messages (which expose maker/taker addresses) and polls them via the REST API at 60-second intervals.
+
+\textbf{Consequence:} The heatmap $H(t, k)$ represents a \textit{sample} of the liquidation landscape, not the population.
+
+\subsection{Sample Bias and Coverage}
+
+The wallet discovery mechanism introduces a bias toward recently active traders. Coverage depends on:
+
+\begin{itemize}
+    \item \textbf{Discovery rate:} proportional to trade volume and number of unique wallets observed
+    \item \textbf{Position diversity:} discovered wallets may cluster at similar leverage ratios
+    \item \textbf{Staleness:} positions are polled at 60s intervals, so rapid open/close cycles may be missed
+\end{itemize}
+
+Typical coverage: 50--500 wallets per symbol, representing an unknown fraction of total open interest.
+
+\subsection{What Still Works}
+
+Despite incomplete coverage, the model retains predictive value for three reasons:
+
+\begin{enumerate}
+    \item \textbf{Whale dominance:} Large positions (the ones most likely to cause cascades) are more likely to be discovered through trade flow and tend to dominate the market impact. The heatmap captures the heaviest tail of the distribution.
+    \item \textbf{Relative features:} Most heatmap features (F1, F2, F4, F7, F8) are normalised ratios or spatial summaries. They capture \textit{where} liquidation mass is concentrated, not how much total mass exists. The shape of the sample distribution approximates the shape of the population distribution.
+    \item \textbf{Empirical validation:} The existing H3 hypothesis, which uses the same position data source, achieved cascade lift $> 2\times$, confirming that the sample is informative.
+\end{enumerate}
+
+\subsection{What Breaks}
+
+Features that depend on \textit{absolute} values are unreliable:
+
+\begin{itemize}
+    \item \textbf{F5 (Absorption capacity):} Compares tracked mass against total book depth. Since tracked mass underestimates true mass, absorption capacity is systematically overestimated.
+    \item \textbf{F3 (Chain length):} May undercount chain links if untracked positions fill gaps between visible clusters.
+\end{itemize}
+
+\subsection{Mitigation Strategies}
+
+\begin{enumerate}
+    \item \textbf{Aggressive wallet discovery:} Monitor all trade messages, scrape leaderboard addresses, track wallets across sessions.
+    \item \textbf{OI-based scaling:} Scale heatmap mass by the ratio of total OI (known from \texttt{ctx\_open\_interest}) to tracked OI:
+    \begin{equation}
+    H_{\text{scaled}}(t, k) = H(t, k) \cdot \frac{\text{OI}_{\text{total}}}{\sum_k H(t,k)}
+    \end{equation}
+    This preserves the spatial shape while adjusting the absolute scale.
+    \item \textbf{Leverage distribution modelling:} Estimate the population liquidation distribution from the observed leverage distribution and total OI, without requiring individual position data.
+\end{enumerate}
+
+% ============================================================
+% 8. IMPLEMENTATION ARCHITECTURE
+% ============================================================
+\section{Implementation Architecture}
+
+\subsection{Three-Layer Design}
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+\textbf{Layer} & \textbf{Language} & \textbf{Rate} & \textbf{Outputs} \\
+\midrule
+Heatmap features & Rust & 100ms (per tick) & 8 \texttt{hm\_*} columns in Parquet \\
+Cascade model & Python & Batch on Parquet & \texttt{alg\_cascade\_prob}, direction, $\|\beta\|$ \\
+Validation agent & Python & Hourly cycle & 5-gate pass/fail report \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Rust Layer: Feature Computation}
+
+The heatmap module (\texttt{features/heatmap.rs}) follows the standard optional feature pattern:
+
+\begin{itemize}
+    \item \texttt{HeatmapFeatures} struct with \texttt{count()}, \texttt{names()}, \texttt{to\_vec()}
+    \item Added to \texttt{Features} as \texttt{heatmap: Option<HeatmapFeatures>}
+    \item NaN-padded when position data is unavailable
+    \item Schema auto-updates via \texttt{names\_all()} in \texttt{output/schema.rs}
+\end{itemize}
+
+Total feature count: $209 + 8 = 217$.
+
+The compute function reuses the same \texttt{\&[LiquidationPosition]} slice passed to \texttt{liquidation::compute()}, plus order book depth values for absorption capacity.
+
+\subsection{Python Layer: Online Model}
+
+\texttt{CascadeProbability} extends \texttt{MicrostructureAlgorithm} (the same base class used by \texttt{OnlineRidge}, \texttt{SpreadDecomp}, etc.). It implements:
+
+\begin{itemize}
+    \item \texttt{step(tick)} --- one-tick processing with online normalisation and prediction
+    \item \texttt{run\_batch(df)} --- sequential replay over Parquet data
+    \item \texttt{reset()} --- state reset for walk-forward evaluation
+\end{itemize}
+
+\subsection{Python Layer: Validation Agent}
+
+\texttt{CascadeAgent} runs hourly via \texttt{make cascade\_start} (tmux session). Each cycle:
+
+\begin{enumerate}
+    \item Loads latest Parquet data
+    \item Runs \texttt{CascadeProbability.run\_batch()} to generate predictions
+    \item Evaluates 5 quality gates
+    \item Persists gate results to \texttt{data/agent\_cascade/}
+\end{enumerate}
+
+Configuration: \texttt{config/agent.toml}, section \texttt{[agent\_cascade]}.
+
+% ============================================================
+% 9. RELATION TO EXISTING FEATURES
+% ============================================================
+\section{Relation to Existing Features}
+
+\subsection{Subsumed Features}
+
+The following existing features are special cases of heatmap quantities:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Existing Feature} & \textbf{Module} & \textbf{Subsumed By} \\
+\midrule
+\texttt{liquidation\_risk\_above\_\{1,2,5,10\}pct} & \texttt{liquidation.rs} & $H(t,k)$ partial sums \\
+\texttt{liquidation\_risk\_below\_\{1,2,5,10\}pct} & \texttt{liquidation.rs} & $H(t,k)$ partial sums \\
+\texttt{nearest\_cluster\_distance} & \texttt{liquidation.rs} & F1 at finer resolution \\
+\texttt{largest\_position\_at\_risk} & \texttt{liquidation.rs} & F2 (population-level) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+These features are retained as standalone inputs; the heatmap provides a higher-resolution generalisation.
+
+\subsection{Complementary Features}
+
+Features that capture orthogonal dimensions and serve as inputs to the cascade model:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Feature} & \textbf{Module} & \textbf{Relationship} \\
+\midrule
+\texttt{illiq\_kyle\_100} & \texttt{illiquidity.rs} & Mediates price impact ($\lambda$) \\
+\texttt{illiq\_composite} & \texttt{illiquidity.rs} & Enters interaction $v \cdot \mathcal{I}$ \\
+\texttt{illiq\_roll\_100} & \texttt{illiquidity.rs} & Bounds minimum cascade threshold \\
+\texttt{liquidation\_asymmetry} & \texttt{liquidation.rs} & Coarser version of F4 (ACP) \\
+\texttt{ctx\_funding\_rate} & \texttt{context.rs} & Enters interaction ACP $\cdot$ sgn($f$) \\
+\texttt{herfindahl\_index} & \texttt{concentration.rs} & Position concentration (who) \\
+\texttt{whale\_retail\_ratio} & \texttt{concentration.rs} & Source of large cluster mass \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ============================================================
+% 10. REFERENCES
+% ============================================================
+\section*{References}
+\addcontentsline{toc}{section}{References}
+
+\begin{enumerate}
+    \item Kyle, A.S. (1985). Continuous auctions and insider trading. \textit{Econometrica}, 53(6), 1315--1335.
+
+    \item Amihud, Y. (2002). Illiquidity and stock returns: cross-section and time-series effects. \textit{Journal of Financial Markets}, 5(1), 31--56.
+
+    \item Cont, R. \& Wagalath, L. (2016). Fire sales forensics: measuring endogenous risk. \textit{Mathematical Finance}, 26(4), 835--866.
+
+    \item Brunnermeier, M.K. \& Pedersen, L.H. (2009). Market liquidity and funding liquidity. \textit{Review of Financial Studies}, 22(6), 2201--2238.
+
+    \item Caccioli, F., Shrestha, M., Moore, C. \& Farmer, J.D. (2014). Stability analysis of financial contagion due to overlapping portfolios. \textit{Journal of Banking \& Finance}, 46, 233--245.
+
+    \item Hasbrouck, J. (2009). Trading costs and returns for US equities: estimating effective costs from daily data. \textit{Journal of Finance}, 64(3), 1445--1477.
+
+    \item Roll, R. (1984). A simple implicit measure of the effective bid-ask spread in an efficient market. \textit{Journal of Finance}, 39(4), 1127--1139.
+
+    \item Bandt, C. \& Pompe, B. (2002). Permutation entropy: a natural complexity measure for time series. \textit{Physical Review Letters}, 88(17), 174102.
+
+    \item Welford, B.P. (1962). Note on a method for calculating corrected sums of squares and products. \textit{Technometrics}, 4(3), 419--420.
+\end{enumerate}
+
+% ============================================================
+% APPENDIX
+% ============================================================
+\section*{Appendix: Updated Feature Count}
+\addcontentsline{toc}{section}{Appendix: Updated Feature Count}
+
+\begin{center}
+\begin{tabular}{lrl}
+\toprule
+\textbf{Category} & \textbf{Count} & \textbf{Status} \\
+\midrule
+Raw & 10 & Base \\
+Imbalance & 8 & Base \\
+Flow & 12 & Base \\
+Volatility & 9 & Base \\
+Entropy & 24 & Base \\
+Context & 12 & Base \\
+Trend & 15 & Base \\
+Illiquidity & 12 & Base \\
+Toxicity & 10 & Base \\
+Derived & 15 & Base \\
+Microstructure & 5 & Base \\
+Resilience & 3 & Base \\
+Hawkes & 3 & Base \\
+\midrule
+\textbf{Base subtotal} & \textbf{138} & \\
+\midrule
+Whale Flow & 12 & Optional \\
+Liquidation Risk & 13 & Optional \\
+Concentration & 15 & Optional \\
+Regime & 20 & Optional \\
+GMM Classification & 8 & Optional \\
+Cross-Symbol & 3 & Optional \\
+\textbf{Heatmap} & \textbf{8} & \textbf{Optional (new)} \\
+\midrule
+\textbf{Optional subtotal} & \textbf{79} & \\
+\midrule
+\textbf{Total features} & \textbf{217} & \\
+\midrule
+Algorithm-derived & 56+ & Streaming \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\end{document}
