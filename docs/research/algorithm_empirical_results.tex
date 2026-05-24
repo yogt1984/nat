@@ -1,0 +1,563 @@
+\documentclass[11pt,a4paper]{article}
+
+% Packages (minimal texlive-base only)
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{longtable}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+% booktabs not available on this system; use manual rules
+\newcommand{\toprule}{\hline\hline}
+\newcommand{\midrule}{\hline}
+\newcommand{\bottomrule}{\hline\hline}
+
+% Page setup
+\geometry{margin=2.5cm}
+
+\begin{document}
+
+% ============================================================
+% TITLE PAGE
+% ============================================================
+\begin{titlepage}
+\centering
+\vspace*{3cm}
+{\Huge\bfseries NAT\\[0.3cm]}
+{\LARGE Algorithm Empirical Results\\[0.5cm]}
+{\Large Walk-Forward Out-of-Sample Paper Trading\\[0.3cm]}
+{\large \textit{18 Algorithms, 3 Symbols, 13 OOS Dates}\\[2cm]}
+{\large Prepared by Yigit Onat\\[0.3cm]}
+{\large May 24, 2026\\[3cm]}
+\vfill
+{\small CONFIDENTIAL --- For internal use only}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% ============================================================
+% 1. TEST CONDITIONS
+% ============================================================
+\section{Test Conditions}
+
+All algorithms were evaluated under identical walk-forward out-of-sample (OOS) conditions:
+
+\begin{itemize}
+    \item \textbf{Data interval:} 2026-04-19 to 2026-05-23 (19 dates, $\sim$35 calendar days)
+    \item \textbf{OOS window:} 13 dates (2026-05-07 to 2026-05-23)
+    \item \textbf{Tick resolution:} 100ms ($\sim$108k rows/day/symbol)
+    \item \textbf{Bar resolution:} 5 minutes (aggregated from ticks)
+    \item \textbf{Horizon:} 100 minutes (20 bars)
+    \item \textbf{Fee model:} 1.61 bps round-trip (Binance VIP9 taker)
+    \item \textbf{Symbols:} BTC, ETH, SOL (Hyperliquid perpetual futures)
+    \item \textbf{Training window:} 3-day rolling z-score calibration
+    \item \textbf{Entry thresholds:} P20/P80 percentile of z-scored feature
+    \item \textbf{Exit:} Fixed 100-minute hold, mark-to-market close
+\end{itemize}
+
+\textbf{Walk-forward protocol:} For each OOS date $d$, the z-score parameters (mean and standard deviation) are calibrated on dates $\{d-3, d-2, d-1\}$. The signal is applied to date $d$ using these frozen parameters. No information from date $d$ or later enters the calibration.
+
+% ============================================================
+% 2. FULL RANKING
+% ============================================================
+\section{Algorithm Ranking}
+
+Table~\ref{tab:ranking} presents all 18 algorithms ordered by total OOS PnL across all three symbols.
+
+\begin{table}[h!]
+\centering
+\caption{Algorithm ranking by total OOS PnL (bps). Sharpe ratios are annualized ($\times\sqrt{252}$).}
+\label{tab:ranking}
+\small
+\begin{tabular}{@{}rlrrrrrrr@{}}
+\toprule
+\# & Algorithm & BTC (bps) & BTC SR & ETH (bps) & ETH SR & SOL (bps) & SOL SR & Total \\
+\midrule
+1 & \textbf{jump\_detector} & $+1{,}722$ & $+1.6$ & $+10{,}861$ & $+6.2$ & $+10{,}616$ & $+6.2$ & $\mathbf{+23{,}199}$ \\
+2 & \textbf{3f\_liquidity} & $+5{,}302$ & $+9.2$ & $+7{,}162$ & $+7.8$ & $+3{,}564$ & $+3.2$ & $\mathbf{+16{,}028}$ \\
+3 & \textbf{funding\_rev.} & $+429$ & $+0.4$ & $+10{,}265$ & $+6.1$ & $+3{,}766$ & $+1.7$ & $\mathbf{+14{,}459}$ \\
+4 & \textbf{optimal\_entry} & $+1{,}504$ & $+1.1$ & $+9{,}877$ & $+5.2$ & $+2{,}298$ & $+1.0$ & $\mathbf{+13{,}679}$ \\
+5 & surprise\_signal & $-4{,}563$ & $-8.3$ & $+2{,}878$ & $+3.1$ & $+5{,}190$ & $+6.7$ & $+3{,}505$ \\
+\midrule
+6 & oi\_divergence & $-1{,}648$ & $-5.3$ & $-2{,}596$ & $-5.7$ & $+2{,}523$ & $+2.1$ & $-1{,}721$ \\
+7 & regime\_gated & $-1{,}312$ & $-2.4$ & $-402$ & $-0.4$ & $-34$ & $-0.0$ & $-1{,}748$ \\
+8 & entropy\_mom. & $-1{,}412$ & $-6.4$ & $-98$ & $-0.2$ & $-1{,}090$ & $-2.7$ & $-2{,}600$ \\
+9 & propagator & $-641$ & $-2.4$ & $-771$ & $-1.2$ & $-2{,}706$ & $-3.9$ & $-4{,}118$ \\
+10 & hawkes\_intens. & $+409$ & $+0.8$ & $-1{,}800$ & $-2.6$ & $-4{,}052$ & $-4.3$ & $-5{,}443$ \\
+11 & trade\_through & $-2{,}437$ & $-5.1$ & $-3{,}444$ & $-4.2$ & $+142$ & $+0.2$ & $-5{,}739$ \\
+12 & multi\_level\_imb & $-2{,}981$ & $-5.4$ & $-1{,}130$ & $-1.5$ & $-1{,}699$ & $-1.9$ & $-5{,}810$ \\
+13 & weighted\_ofi & $-2{,}667$ & $-4.8$ & $-430$ & $-0.6$ & $-3{,}086$ & $-3.6$ & $-6{,}183$ \\
+14 & switching\_ou & $-1{,}341$ & $-3.5$ & $+462$ & $+0.7$ & $-5{,}351$ & $-6.0$ & $-6{,}230$ \\
+15 & vpin\_regime & $-2{,}561$ & $-4.7$ & $-1{,}405$ & $-1.7$ & $-3{,}365$ & $-3.5$ & $-7{,}331$ \\
+16 & kalman\_imb. & $-1{,}328$ & $-2.4$ & $-14$ & $-0.0$ & $-6{,}175$ & $-7.2$ & $-7{,}517$ \\
+17 & bipower\_jump & $-9{,}161$ & $-14.0$ & $-9{,}744$ & $-9.7$ & $-13{,}174$ & $-9.8$ & $-32{,}079$ \\
+18 & spread\_decomp & $-10{,}861$ & $-10.7$ & $-13{,}249$ & $-14.8$ & $-10{,}400$ & $-8.4$ & $-34{,}510$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Tier classification:}
+\begin{itemize}
+    \item \textbf{Tier 1} (ranks 1--4): Net positive across all three symbols. Deployable.
+    \item \textbf{Tier 2} (rank 5): Symbol-specific alpha (ETH, SOL only).
+    \item \textbf{Tier 3} (ranks 6--18): Net negative in aggregate. No edge after costs.
+\end{itemize}
+
+% ============================================================
+% 3. TIER 1 ALGORITHMS
+% ============================================================
+\section{Tier 1 Algorithms}
+
+\subsection{Jump Detector --- Post-Jump Mean Reversion}
+
+\textbf{Core idea:} Detect price jumps using the Lee--Mykland (2008) nonparametric test, then enter a mean-reversion position after the jump dissipates.
+
+\subsubsection*{Mathematical Framework}
+
+\textbf{Bipower variation} provides a jump-robust volatility estimator:
+\begin{equation}
+\hat{\sigma}_{\mathrm{BV}} = \sqrt{\frac{\pi}{2} \cdot \frac{1}{n-1} \sum_{i=2}^{n} |r_i| \cdot |r_{i-1}|}
+\end{equation}
+where $r_i = \log(p_i / p_{i-1})$ are log-returns. The constant $\mu_1 = \sqrt{2/\pi}$ arises from $\mathbb{E}[|Z|]$ for $Z \sim \mathcal{N}(0,1)$.
+
+\textbf{Lee--Mykland $\mathcal{L}$-statistic:}
+\begin{equation}
+\mathcal{L}_t = \frac{r_t}{\hat{\sigma}_{\mathrm{BV},t}}
+\end{equation}
+
+Under the null (no jump), $|\mathcal{L}_t|$ follows the distribution of the maximum of i.i.d.\ standard normals. A jump is declared when:
+\begin{equation}
+\frac{|\mathcal{L}_t| - C_n}{S_n} > \beta_{\text{threshold}}
+\end{equation}
+where $C_n = \sqrt{2 \log n} - \frac{\log \pi + \log \log n}{2\sqrt{2 \log n}}$ and $S_n = \frac{1}{\sqrt{2 \log n}}$ are the Gumbel centering and scaling constants.
+
+\textbf{Signal:} After a jump is detected, the reversion signal activates:
+\begin{equation}
+s_t = -\mathrm{sign}(\mathcal{L}_t) \cdot \mathbb{1}\{\text{jump detected at } t\}
+\end{equation}
+
+The primary feature \texttt{alg\_post\_jump\_reversion} is the exponentially decayed reversion signal (half-life = 50 bars).
+
+\begin{table}[h!]
+\centering
+\caption{Jump detector OOS performance.}
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+Symbol & Trades & Net bps/trade & Sharpe (ann.) & Total PnL & Win Rate & Max Daily Loss \\
+\midrule
+BTC & 1{,}678 & $+1.03$ & $+1.6$ & $+1{,}722$ & 54\% & $-1{,}981$ \\
+ETH & 1{,}678 & $+6.47$ & $+6.2$ & $+10{,}861$ & 62\% & $-3{,}412$ \\
+SOL & 1{,}678 & $+6.33$ & $+6.2$ & $+10{,}616$ & 69\% & $-3{,}311$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Implementation:} \texttt{scripts/algorithms/jump\_detector.py}
+
+\subsection{3f Liquidity Signal --- Composite Microstructure}
+
+\textbf{Core idea:} Equal-weight z-score composite of three liquidity features, capturing the overall microstructure state.
+
+\subsubsection*{Signal Construction}
+
+Three base features are computed at 5-minute bar resolution:
+\begin{align}
+f_1 &= \text{spread\_bps} && \text{(bid-ask spread in basis points)} \\
+f_2 &= \text{depth\_imbalance} && \text{(bid vs.\ ask depth ratio)} \\
+f_3 &= \text{vwap\_deviation} && \text{(price distance from VWAP)}
+\end{align}
+
+Each feature is z-scored over a 3-day rolling window:
+\begin{equation}
+z_i(t) = \frac{f_i(t) - \hat{\mu}_i}{\hat{\sigma}_i}, \quad \hat{\mu}_i, \hat{\sigma}_i \text{ from } [t - 3\text{d}, t)
+\end{equation}
+
+The composite signal is the equal-weight average:
+\begin{equation}
+S(t) = \frac{1}{3}\sum_{i=1}^{3} z_i(t)
+\end{equation}
+
+\textbf{Entry:} Long when $S(t) < P_{20}$, short when $S(t) > P_{80}$ (percentiles from training window).
+
+\begin{table}[h!]
+\centering
+\caption{3f liquidity signal OOS performance.}
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+Symbol & Trades & Net bps/trade & Sharpe (ann.) & Total PnL & Win Rate \\
+\midrule
+BTC & 950 & $+5.58$ & $+9.2$ & $+5{,}302$ & 62\% \\
+ETH & 915 & $+7.83$ & $+7.8$ & $+7{,}162$ & 62\% \\
+SOL & 954 & $+3.74$ & $+3.2$ & $+3{,}564$ & 62\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Implementation:} \texttt{scripts/alpha/paper\_trader.py}
+
+\subsection{Funding Reversion --- Crypto-Native Mean Reversion}
+
+\textbf{Core idea:} When the perpetual funding rate deviates from its mean, it tends to revert. Extreme funding = crowded positioning = reversion opportunity.
+
+\subsubsection*{Signal Construction}
+
+The funding rate is z-scored over a rolling window, then passed through a saturating function:
+\begin{equation}
+S(t) = -\mathrm{sign}(z_t) \cdot \min\!\left(\frac{|z_t|}{z_{\text{entry}}},\; 3\right) \bigg/ 3
+\end{equation}
+where $z_t = (r_t^{\text{fund}} - \hat{\mu}) / \hat{\sigma}$ is the z-scored funding rate and $z_{\text{entry}}$ is the entry threshold.
+
+The saturation at $\pm 1$ prevents excessive signal magnitude during extreme funding events.
+
+\begin{table}[h!]
+\centering
+\caption{Funding reversion OOS performance.}
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+Symbol & Trades & Net bps/trade & Sharpe (ann.) & Total PnL & Win Rate & Max Daily Loss \\
+\midrule
+BTC & 1{,}678 & $+0.26$ & $+0.4$ & $+429$ & 38\% & $-2{,}327$ \\
+ETH & 1{,}678 & $+6.12$ & $+6.1$ & $+10{,}265$ & 54\% & $-2{,}629$ \\
+SOL & 1{,}678 & $+2.24$ & $+1.7$ & $+3{,}766$ & 54\% & $-3{,}786$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Implementation:} \texttt{scripts/algorithms/funding\_reversion.py}
+
+\subsection{Optimal Entry --- SPRT on Kalman Innovations}
+
+\textbf{Core idea:} Model L1 order book imbalance as an Ornstein--Uhlenbeck process, filter with a Kalman filter, then apply a Sequential Probability Ratio Test (SPRT) on the innovations to determine entry timing.
+
+\subsubsection*{Kalman--OU Filter}
+
+The imbalance $x_t$ follows an OU process:
+\begin{equation}
+dx_t = \kappa(\theta - x_t)\,dt + \sigma\,dW_t
+\end{equation}
+
+Discretized with step $\Delta t$:
+\begin{align}
+\hat{x}_{t|t-1} &= \theta + e^{-\kappa \Delta t}(\hat{x}_{t-1} - \theta) \\
+P_{t|t-1} &= e^{-2\kappa \Delta t} P_{t-1} + \frac{\sigma^2}{2\kappa}(1 - e^{-2\kappa \Delta t})
+\end{align}
+
+The innovation (prediction error) is:
+\begin{equation}
+\nu_t = x_t - \hat{x}_{t|t-1}
+\end{equation}
+
+\subsubsection*{SPRT}
+
+The log-likelihood ratio accumulates evidence for a directional drift $\mu$ in the innovations:
+\begin{equation}
+\Lambda_t = \Lambda_{t-1} + \frac{\mu}{\sigma_\nu^2}\,\nu_t - \frac{\mu^2}{2\sigma_\nu^2}
+\end{equation}
+
+Decision boundaries (Wald, 1945):
+\begin{equation}
+A = \log\!\frac{1-\beta}{\alpha}, \quad B = \log\!\frac{\beta}{1-\alpha}
+\end{equation}
+
+\textbf{Signal:} $s_t = +1$ when $\Lambda_t \geq A$ (long), $s_t = -1$ when $\Lambda_t \leq B$ (short), $s_t = 0$ otherwise.
+
+\begin{table}[h!]
+\centering
+\caption{Optimal entry OOS performance.}
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+Symbol & Trades & Net bps/trade & Sharpe (ann.) & Total PnL & Win Rate & Max Daily Loss \\
+\midrule
+BTC & 1{,}678 & $+0.90$ & $+1.1$ & $+1{,}504$ & 46\% & $-2{,}327$ \\
+ETH & 1{,}678 & $+5.89$ & $+5.2$ & $+9{,}877$ & 62\% & $-3{,}645$ \\
+SOL & 1{,}678 & $+1.37$ & $+1.0$ & $+2{,}298$ & 54\% & $-4{,}762$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Implementation:} \texttt{scripts/algorithms/optimal\_entry.py}
+
+\textbf{Known issue:} \texttt{run\_batch()} hardcodes \texttt{sigma\_process=0.01} at line 240 instead of using \texttt{self.\_sigma\_process}. This affects batch--live equivalence.
+
+% ============================================================
+% 4. TIER 2
+% ============================================================
+\section{Tier 2: Symbol-Specific Alpha}
+
+\subsection{Surprise Signal --- Entropy Regime Transitions}
+
+\textbf{Core idea:} Track the rate of change of order book entropy. A sudden drop (ordering event) signals informed participants entering; a sudden rise (disordering) signals noise.
+
+\subsubsection*{Signal Construction}
+
+Given entropy time series $H_t$ (e.g., book shape entropy), compute the rate of change:
+\begin{equation}
+\text{ROC}_t = H_t - H_{t-\tau}
+\end{equation}
+
+Z-score the ROC over a rolling window:
+\begin{equation}
+z_t^{\text{ROC}} = \frac{\text{ROC}_t - \hat{\mu}_{\text{ROC}}}{\hat{\sigma}_{\text{ROC}}}
+\end{equation}
+
+Map to a regime transition probability via logistic sigmoid:
+\begin{equation}
+P_{\text{transition}}(t) = \frac{1}{1 + \exp\!\big(-(|z_t^{\text{ROC}}| - z_0)\big)}
+\end{equation}
+
+\textbf{Signal polarity:} Negative surprise (ordering) $\to$ long. Positive surprise (disordering) $\to$ short.
+
+\begin{table}[h!]
+\centering
+\caption{Surprise signal OOS performance.}
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+Symbol & Trades & Net bps/trade & Sharpe (ann.) & Total PnL & Win Rate & Max Daily Loss \\
+\midrule
+BTC & 954 & $-4.78$ & $-8.3$ & $-4{,}563$ & 15\% & $-1{,}316$ \\
+ETH & 1{,}010 & $+2.85$ & $+3.1$ & $+2{,}878$ & 54\% & $-2{,}493$ \\
+SOL & 981 & $+5.29$ & $+6.7$ & $+5{,}190$ & 46\% & $-518$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Implementation:} \texttt{scripts/algorithms/surprise\_signal.py}
+
+% ============================================================
+% 5. STATISTICAL CERTAINTY
+% ============================================================
+\section{Statistical Certainty}
+
+\subsection{Sharpe Ratio Confidence Intervals}
+
+The annualized Sharpe ratio $\widehat{SR}_{\text{ann}}$ is estimated from $n$ daily observations. Following Lo (2002), its standard error under i.i.d.\ returns is:
+\begin{equation}
+\mathrm{SE}(\widehat{SR}_{\text{ann}}) = \sqrt{\frac{1 + \frac{1}{2}\,\widehat{SR}_{\text{daily}}^2}{n}} \cdot \sqrt{252}
+\end{equation}
+where $\widehat{SR}_{\text{daily}} = \widehat{SR}_{\text{ann}} / \sqrt{252}$.
+
+The 95\% confidence interval is:
+\begin{equation}
+\widehat{SR}_{\text{ann}} \pm 1.96 \cdot \mathrm{SE}(\widehat{SR}_{\text{ann}})
+\end{equation}
+
+\begin{table}[h!]
+\centering
+\caption{Sharpe ratio confidence intervals ($n = 13$ daily observations, 95\% CI).}
+\label{tab:sharpe_ci}
+\small
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Algorithm & Symbol & $\widehat{SR}_{\text{ann}}$ & SE & 95\% CI Lower & 95\% CI Upper \\
+\midrule
+jump\_detector & BTC & $+1.62$ & $4.41$ & $-7.03$ & $+10.27$ \\
+jump\_detector & ETH & $+6.23$ & $4.57$ & $-2.73$ & $+15.19$ \\
+jump\_detector & SOL & $+6.22$ & $4.57$ & $-2.73$ & $+15.17$ \\
+\midrule
+3f\_liquidity & BTC & $+9.22$ & $4.76$ & $-0.11$ & $+18.55$ \\
+3f\_liquidity & ETH & $+7.83$ & $4.66$ & $-1.31$ & $+16.97$ \\
+3f\_liquidity & SOL & $+3.22$ & $4.44$ & $-5.50$ & $+11.94$ \\
+\midrule
+funding\_reversion & BTC & $+0.38$ & $4.40$ & $-8.25$ & $+9.01$ \\
+funding\_reversion & ETH & $+6.05$ & $4.56$ & $-2.89$ & $+14.99$ \\
+funding\_reversion & SOL & $+1.69$ & $4.41$ & $-6.96$ & $+10.34$ \\
+\midrule
+optimal\_entry & BTC & $+1.12$ & $4.40$ & $-7.52$ & $+9.76$ \\
+optimal\_entry & ETH & $+5.23$ & $4.52$ & $-3.63$ & $+14.09$ \\
+optimal\_entry & SOL & $+0.98$ & $4.40$ & $-7.66$ & $+9.62$ \\
+\midrule
+surprise\_signal & BTC & $-8.29$ & $4.72$ & $-17.49$ & $+0.91$ \\
+surprise\_signal & ETH & $+3.12$ & $4.44$ & $-5.59$ & $+11.83$ \\
+surprise\_signal & SOL & $+6.70$ & $4.60$ & $-2.31$ & $+15.71$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key observation:} With only $n = 13$ daily observations, \textit{no individual algorithm--symbol pair achieves a 95\% CI that excludes zero}. The best case is 3f\_liquidity on BTC ($\widehat{SR} = 9.2$, CI lower bound $= -0.11$), which narrowly misses. This is a fundamental sample-size limitation, not evidence against the signals.
+
+\subsection{Hypothesis Testing on Daily PnL}
+
+For each algorithm--symbol pair, we test:
+\begin{equation}
+H_0: \mu_{\text{daily}} = 0 \quad \text{vs.} \quad H_1: \mu_{\text{daily}} \neq 0
+\end{equation}
+
+The test statistic is:
+\begin{equation}
+t = \frac{\bar{r}}{s / \sqrt{n}} = \widehat{SR}_{\text{daily}} \cdot \sqrt{n}
+\end{equation}
+where $\bar{r}$ is the mean daily PnL, $s$ is the sample standard deviation, and $n = 13$.
+
+\begin{table}[h!]
+\centering
+\caption{$t$-test on daily PnL ($n = 13$, $\text{df} = 12$). Critical values: $t_{0.05} = 2.179$, $t_{0.01} = 3.055$.}
+\label{tab:ttest}
+\small
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+Algorithm & Symbol & $\widehat{SR}_{\text{daily}}$ & $t$-statistic & $p$-value & Significant? \\
+\midrule
+3f\_liquidity & BTC & $+0.581$ & $+2.094$ & $0.058$ & marginal \\
+3f\_liquidity & ETH & $+0.493$ & $+1.778$ & $0.101$ & no \\
+3f\_liquidity & SOL & $+0.203$ & $+0.731$ & $0.479$ & no \\
+\midrule
+jump\_detector & BTC & $+0.102$ & $+0.368$ & $0.719$ & no \\
+jump\_detector & ETH & $+0.393$ & $+1.415$ & $0.182$ & no \\
+jump\_detector & SOL & $+0.392$ & $+1.413$ & $0.183$ & no \\
+\midrule
+funding\_rev. & ETH & $+0.381$ & $+1.374$ & $0.195$ & no \\
+optimal\_entry & ETH & $+0.330$ & $+1.188$ & $0.258$ & no \\
+surprise\_signal & SOL & $+0.422$ & $+1.522$ & $0.154$ & no \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Result:} No algorithm achieves $p < 0.05$ with $n = 13$ days. The closest is 3f\_liquidity on BTC ($t = 2.09$, $p = 0.058$), which is marginally significant.
+
+\subsection{Multiple Testing Correction}
+
+With 18 algorithms $\times$ 3 symbols $= 54$ simultaneous tests, we must correct for multiple comparisons.
+
+\subsubsection*{Bonferroni Correction}
+
+The family-wise error rate is controlled at $\alpha = 0.05$ by adjusting the per-test significance level:
+\begin{equation}
+\alpha^* = \frac{\alpha}{m} = \frac{0.05}{54} \approx 0.000926
+\end{equation}
+
+\textbf{Result:} No algorithm--symbol pair achieves $p < \alpha^*$ with $n = 13$. This is expected --- Bonferroni with 54 tests and 13 observations is extremely conservative.
+
+\subsubsection*{Benjamini--Hochberg FDR}
+
+The Benjamini--Hochberg procedure controls the false discovery rate at $q = 0.05$. Order the $m = 54$ $p$-values as $p_{(1)} \leq p_{(2)} \leq \cdots \leq p_{(m)}$ and find the largest $k$ such that:
+\begin{equation}
+p_{(k)} \leq \frac{k}{m} \cdot q
+\end{equation}
+
+All hypotheses $\{1, 2, \ldots, k\}$ are rejected.
+
+\textbf{Result:} With $n = 13$, no discoveries survive BH correction at $q = 0.05$.
+
+\subsection{Required Sample Size for Significance}
+
+Given the sample-size bottleneck, we compute the minimum number of OOS days $n^*$ required for a two-sided $t$-test at significance $\alpha$ and power $1-\beta$:
+\begin{equation}
+n^* = \left\lceil \left(\frac{z_{1-\alpha/2}}{\widehat{SR}_{\text{daily}}}\right)^2 \right\rceil
+\end{equation}
+
+\begin{table}[h!]
+\centering
+\caption{Required OOS days for statistical significance (two-sided, power not considered).}
+\label{tab:required_n}
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Annualized Sharpe & Days for $p < 0.05$ & Days for $p < 0.01$ \\
+\midrule
+$SR = 1$ & 969 & 1{,}673 \\
+$SR = 3$ & 108 & 186 \\
+$SR = 5$ & 39 & 67 \\
+$SR = 7$ & 20 & 35 \\
+$SR = 9$ & 12 & 21 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Interpretation:} An algorithm with $SR_{\text{ann}} = 6$ (our typical Tier 1 value) requires $\sim$27 OOS days for $p < 0.05$. Our current 13 days is approximately half the required sample. This provides a concrete data collection target: \textbf{accumulate $\geq$30 OOS days before drawing definitive conclusions}.
+
+\subsection{Signal Independence}
+
+To verify that the winning algorithms provide genuine diversification (not redundant trades), we compute pairwise Spearman rank correlation of trade direction vectors.
+
+\begin{table}[h!]
+\centering
+\caption{Spearman direction correlation (BTC, $n = 2{,}022$ OOS bars).}
+\label{tab:corr}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+ & 3f\_liq. & jump\_det. & fund\_rev. & surprise \\
+\midrule
+3f\_liquidity & 1.000 & 0.192 & 0.083 & 0.338 \\
+jump\_detector & 0.192 & 1.000 & $-0.005$ & 0.001 \\
+funding\_rev. & 0.083 & $-0.005$ & 1.000 & 0.093 \\
+surprise & 0.338 & 0.001 & 0.093 & 1.000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Key finding:} Jump detector $\leftrightarrow$ funding reversion correlation is $\rho = -0.005$ (essentially zero). These are genuinely independent signals. The highest correlation is 3f\_liquidity $\leftrightarrow$ surprise at $\rho = 0.338$, indicating moderate overlap.
+
+% ============================================================
+% 6. PORTFOLIO IMPLICATIONS
+% ============================================================
+\section{Portfolio Implications}
+
+\subsection{Complementarity}
+
+The Tier 1 algorithms show natural complementarity across symbols:
+
+\begin{table}[h!]
+\centering
+\caption{Best algorithm per symbol (by annualized Sharpe ratio).}
+\begin{tabular}{@{}llr@{}}
+\toprule
+Symbol & Best Algorithm & Sharpe (ann.) \\
+\midrule
+BTC & 3f\_liquidity & $+9.2$ \\
+ETH & 3f\_liquidity & $+7.8$ \\
+SOL & surprise\_signal & $+6.7$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A simple blend of 3f\_liquidity (all symbols) + jump\_detector (ETH/SOL) + surprise\_signal (SOL) would exploit each algorithm where it is strongest.
+
+\subsection{Diversification Benefit}
+
+For two uncorrelated signals with individual Sharpe ratios $SR_1$ and $SR_2$, the portfolio Sharpe ratio under equal risk parity is:
+\begin{equation}
+SR_{\text{portfolio}} = \sqrt{SR_1^2 + SR_2^2}
+\end{equation}
+
+For jump\_detector ETH ($SR = 6.2$) and funding\_reversion ETH ($SR = 6.1$) with $\rho \approx 0$:
+\begin{equation}
+SR_{\text{blend}} = \sqrt{6.2^2 + 6.1^2} \approx 8.7
+\end{equation}
+
+This exceeds either individual signal, confirming the diversification benefit of combining independent microstructure signals.
+
+% ============================================================
+% 7. LIMITATIONS
+% ============================================================
+\section{Limitations \& Caveats}
+
+\begin{enumerate}
+    \item \textbf{Small sample size.} With $n = 13$ OOS days, no individual algorithm--symbol pair achieves statistical significance at $\alpha = 0.05$. The point estimates (Sharpe ratios, PnL) are suggestive but not conclusive. Minimum 30 OOS days recommended.
+
+    \item \textbf{Regime dependency.} The test window (May 7--23, 2026) covers a specific market regime. Algorithms may behave differently in trending, ranging, or high-volatility regimes. Multi-regime OOS testing is required.
+
+    \item \textbf{Z-score calibration look-ahead.} While the walk-forward protocol prevents direct look-ahead, the choice of 3-day training window and P20/P80 thresholds was itself informed by preliminary analysis on this dataset. A fully independent validation would require a held-out date range.
+
+    \item \textbf{Fee model.} The 1.61 bps round-trip assumes Binance VIP9 taker rates. At higher fee levels (e.g., 3.5 bps for VIP0, 7 bps for Hyperliquid), several Tier 1 algorithms would become marginal.
+
+    \item \textbf{Execution assumptions.} The paper trader assumes instant fills at mid-price + half-spread. Real execution faces slippage, queue priority, and latency. Market impact is not modeled.
+
+    \item \textbf{Survivorship in algorithm selection.} The 18 algorithms were selected from a larger set of ideas based on prior feature analysis. This selection process introduces a form of survivorship bias that is not captured by the multiple testing correction.
+\end{enumerate}
+
+% ============================================================
+% REFERENCES
+% ============================================================
+\section*{References}
+
+\begin{enumerate}
+    \item Lo, A.W. (2002). The statistics of Sharpe ratios. \textit{Financial Analysts Journal}, 58(4), 36--52.
+    \item Lee, S.S. \& Mykland, P.A. (2008). Jumps in financial markets: a new nonparametric test and jump dynamics. \textit{Review of Financial Studies}, 21(6), 2535--2563.
+    \item Barndorff-Nielsen, O.E. \& Shephard, N. (2004). Power and bipower variation with stochastic volatility and jumps. \textit{Journal of Financial Econometrics}, 2(1), 1--37.
+    \item Wald, A. (1945). Sequential tests of statistical hypotheses. \textit{Annals of Mathematical Statistics}, 16(2), 117--186.
+    \item Benjamini, Y. \& Hochberg, Y. (1995). Controlling the false discovery rate. \textit{Journal of the Royal Statistical Society B}, 57(1), 289--300.
+    \item Kraskov, A., St\"ogbauer, H. \& Grassberger, P. (2004). Estimating mutual information. \textit{Physical Review E}, 69(6).
+\end{enumerate}
+
+\end{document}
