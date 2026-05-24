@@ -1,6 +1,6 @@
 //! Feature Computation Module
 //!
-//! Extracts 209 features from Hyperliquid WebSocket market data across 19 categories.
+//! Extracts 217 features from Hyperliquid WebSocket market data across 20 categories.
 //! See `FEATURES.md` at the project root for the full feature manifest with formulas,
 //! interpretation, and paper references.
 //!
@@ -27,13 +27,14 @@
 //! | *Regime* | 20 | `regime_` | Optional (NaN if absent) | — |
 //! | *GMM* | 8 | `regime`/`prob_` | Optional (NaN if absent) | — |
 //! | *Cross-Symbol* | 3 | `cross_` | Optional (NaN if absent) | — |
+//! | *Heatmap* | 8 | `hm_` | Optional (NaN if absent) | Cont & Wagalath (2016) |
 //!
-//! Base features (138) are always computed. Optional features (71) require
+//! Base features (138) are always computed. Optional features (79) require
 //! additional data sources or warmup time and are NaN-padded when absent.
 //!
 //! # Data Contract
 //!
-//! `Features::to_vec()` always returns exactly `count_all()` = 209 elements.
+//! `Features::to_vec()` always returns exactly `count_all()` = 217 elements.
 //! `Features::names_all()` returns the corresponding column names.
 //! The Parquet schema is built from `names_all()` in `output/schema.rs`.
 
@@ -55,6 +56,7 @@ pub mod whale_flow;
 pub mod liquidation;
 pub mod concentration;
 pub mod regime;
+pub mod heatmap;
 
 pub use raw::RawFeatures;
 pub use imbalance::ImbalanceFeatures;
@@ -72,6 +74,7 @@ pub use hawkes::HawkesFeatures;
 pub use cross_symbol::{CrossSymbolFeatures, CrossSymbolState};
 pub use whale_flow::{WhaleFlowFeatures, WhaleFlowBuffer, WhaleFlowConfig, WhalePositionChange};
 pub use liquidation::{LiquidationRiskFeatures, LiquidationRiskConfig, LiquidationPosition};
+pub use heatmap::{HeatmapFeatures, HeatmapBuffer, HeatmapConfig};
 pub use concentration::{ConcentrationFeatures, ConcentrationBuffer, ConcentrationConfig, Position as ConcentrationPosition};
 pub use regime::{RegimeFeatures, RegimeBuffer, RegimeConfig, AbsorptionComputer, DivergenceComputer, ChurnComputer, RangeComputer};
 
@@ -115,6 +118,8 @@ pub struct Features {
     pub gmm_classification: Option<GmmClassificationFeatures>,
     /// Cross-symbol OBI divergence (5.4, requires multi-symbol shared state)
     pub cross_symbol: Option<CrossSymbolFeatures>,
+    /// Liquidity heatmap features (spatial liquidation density, cascade detection)
+    pub heatmap: Option<HeatmapFeatures>,
 }
 
 impl Features {
@@ -154,6 +159,7 @@ impl Features {
             + RegimeFeatures::count()
             + GmmClassificationFeatures::count()
             + CrossSymbolFeatures::count()
+            + HeatmapFeatures::count()
     }
 
     /// Convert to flat vector of f64 (fixed-length, NaN for missing optional features)
@@ -197,6 +203,10 @@ impl Features {
         match &self.cross_symbol {
             Some(cs) => v.extend(cs.to_vec()),
             None => v.extend(std::iter::repeat(f64::NAN).take(CrossSymbolFeatures::count())),
+        }
+        match &self.heatmap {
+            Some(hm) => v.extend(hm.to_vec()),
+            None => v.extend(std::iter::repeat(f64::NAN).take(HeatmapFeatures::count())),
         }
         v
     }
@@ -245,6 +255,7 @@ impl Features {
         names.extend(RegimeFeatures::names());
         names.extend(GmmClassificationFeatures::names());
         names.extend(CrossSymbolFeatures::names());
+        names.extend(HeatmapFeatures::names());
         names
     }
 
@@ -281,6 +292,12 @@ impl Features {
     /// Set cross-symbol features
     pub fn with_cross_symbol(mut self, cross_symbol: CrossSymbolFeatures) -> Self {
         self.cross_symbol = Some(cross_symbol);
+        self
+    }
+
+    /// Set heatmap features
+    pub fn with_heatmap(mut self, heatmap: HeatmapFeatures) -> Self {
+        self.heatmap = Some(heatmap);
         self
     }
 }
@@ -404,6 +421,7 @@ impl FeatureComputer {
             regime: None, // Computed separately via RegimeBuffer at minute intervals
             gmm_classification: None, // Computed when regime features are ready
             cross_symbol: None, // Computed separately via CrossSymbolState
+            heatmap: None, // Computed separately via HeatmapBuffer
         }
     }
 }

@@ -138,3 +138,21 @@ min_portfolio_signals = 2       # minimum signals for portfolio assembly
 [meta_agent.promotion]
 paper_sharpe_min = 1.5
 paper_days = 7
+
+# ─────────────────────────────────────────────────────────────
+# Cascade Validation Agent
+# Continuous 5-gate validation of the liquidity heatmap model
+# ─────────────────────────────────────────────────────────────
+
+[agent_cascade]
+cycle_interval_s = 3600
+min_auc = 0.65
+min_lift = 2.0
+min_net_ic = 0.02
+walk_forward_min_auc = 0.60
+walk_forward_fail_frac = 0.20
+cross_symbol_min_cosine = 0.6
+max_orthogonality_r2 = 0.30
+cascade_price_thresh = 0.03
+cascade_horizon_ticks = 3000
+symbols = ["BTC", "ETH", "SOL"]
