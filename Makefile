@@ -1034,6 +1034,30 @@ discovery_stop:
 	@-pkill -f 'discovery_orchestrator.py start' 2>/dev/null && echo "Stopped" || echo "Not running"
 
 # =============================================================================
+# CASCADE VALIDATION AGENT
+# =============================================================================
+
+cascade_start:
+	@echo "Starting Cascade Validation Agent..."
+	@-pkill -f 'cascade_daemon.py start' 2>/dev/null; sleep 1
+	@tmux kill-session -t nat-cascade 2>/dev/null || true
+	tmux new-session -d -s nat-cascade '$(PYTHON) scripts/agent/cascade_daemon.py start; read'
+	@echo "Cascade agent running in tmux session 'nat-cascade'"
+
+cascade_once:
+	$(PYTHON) scripts/agent/cascade_daemon.py once
+
+cascade_status:
+	@$(PYTHON) scripts/agent/cascade_daemon.py status
+
+cascade_stop:
+	@echo "Stopping Cascade Agent..."
+	@-pkill -f 'cascade_daemon.py start' 2>/dev/null && echo "Stopped" || echo "Not running"
+
+cascade_report:
+	@$(PYTHON) scripts/agent/cascade_daemon.py report
+
+# =============================================================================
 # HELP
 # =============================================================================
 
@@ -1235,6 +1259,7 @@ help:
 	@echo "  test_alg1               Backtest + dry-run signal bridge"
 	@echo "  test_alg1_paper         Paper trader batch + watch mode"
 	@echo "  test_alg1_live          LIVE mode (requires HL_PRIVATE_KEY)"
+	@echo "  test_oos30              30-day OOS validation (5 winning algos)"
 	@echo ""
 
 # =============================================================================
@@ -1260,3 +1285,21 @@ test_alg1_paper:
 test_alg1_live:
 	@echo "═══ ALG1: LIVE MODE (requires HL_PRIVATE_KEY) ═══"
 	$(PYTHON) scripts/execution/signal_bridge.py --mode live --cycle 300
+
+# =============================================================================
+# OOS30: 30-DAY OUT-OF-SAMPLE VALIDATION (5 WINNING ALGORITHMS)
+# =============================================================================
+
+test_oos30:
+	@echo "═══ OOS30: 30-Day Out-of-Sample Validation ═══"
+	@echo ""
+	@echo "Step 1/3: 3f liquidity signal..."
+	$(PYTHON) scripts/alpha/paper_trader.py batch --save
+	@echo ""
+	@echo "Step 2/3: Generic algorithms (jump_detector, funding_reversion, optimal_entry)..."
+	$(PYTHON) scripts/alpha/paper_trader_generic.py --algorithms jump_detector funding_reversion optimal_entry --save
+	@echo ""
+	@echo "Step 3/3: Surprise signal..."
+	$(PYTHON) scripts/alpha/paper_trader_surprise.py batch --save
+	@echo ""
+	@echo "Done. Reports saved to reports/"
