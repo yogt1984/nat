@@ -42,11 +42,11 @@ class SurpriseSignal(MicrostructureAlgorithm):
         ]
 
     def required_columns(self) -> list[str]:
-        return ["ent_book_shape", "ent_tick_entropy_5s"]
+        return ["ent_book_shape", "ent_tick_5s"]
 
     def step(self, tick: dict[str, float]) -> dict[str, float]:
         ent_shape = tick.get("ent_book_shape", np.nan)
-        ent_tick = tick.get("ent_tick_entropy_5s", np.nan)
+        ent_tick = tick.get("ent_tick_5s", np.nan)
 
         if not (np.isfinite(ent_shape) and np.isfinite(ent_tick)):
             return {f.name: np.nan for f in self.alg_features()}
@@ -102,7 +102,7 @@ class SurpriseSignal(MicrostructureAlgorithm):
         import pandas as pd
 
         ent_shape = df["ent_book_shape"].values.astype(np.float64)
-        ent_tick = df["ent_tick_entropy_5s"].values.astype(np.float64)
+        ent_tick = df["ent_tick_5s"].values.astype(np.float64)
 
         ent = 0.5 * ent_shape + 0.5 * ent_tick
         ent_s = pd.Series(ent)

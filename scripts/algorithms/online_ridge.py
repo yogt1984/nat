@@ -74,7 +74,7 @@ class OnlineRidge(MicrostructureAlgorithm):
 
         # Opportunistically include alg_* features
         for key, val in tick.items():
-            if key.startswith("alg_") and np.isfinite(val):
+            if key.startswith("alg_") and isinstance(val, (int, float)) and np.isfinite(val):
                 vals.append(val)
                 names.append(key)
 
@@ -169,7 +169,7 @@ class OnlineRidge(MicrostructureAlgorithm):
         confidences = np.full(n, np.nan)
         entropies = np.full(n, np.nan)
 
-        cols = list(df.columns)
+        cols = [c for c in df.columns if df[c].dtype.kind in ('f', 'i', 'u')]
         for i in range(n):
             tick = {col: float(df.iloc[i][col]) for col in cols}
             result = self.step(tick)
