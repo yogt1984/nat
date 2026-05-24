@@ -506,6 +506,7 @@ def main():
             "algorithms": master_results,
         }
         out = ROOT / "reports" / "algo_paper_trade_comparison.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
         with open(out, "w") as f:
             json.dump(report, f, indent=2, default=_json_default)
         print(f"Report saved: {out}")
