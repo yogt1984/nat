@@ -4,7 +4,7 @@
 //! and converts to hypothesis test input format.
 
 use anyhow::{Context, Result};
-use arrow::array::{Array, Float64Array, StringArray, TimestampNanosecondArray};
+use arrow::array::{Array, Float64Array, Int64Array, StringArray, TimestampNanosecondArray};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use std::collections::HashMap;
@@ -24,31 +24,36 @@ pub struct H5TestData {
     pub volatility: Option<Vec<f64>>,
 }
 
-/// Load all Parquet files from a directory
+/// Collect all .parquet files, recursing into subdirectories (e.g. date folders)
+fn collect_parquet_paths(dir: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let mut paths = Vec::new();
+    for entry in std::fs::read_dir(dir)?.filter_map(|e| e.ok()) {
+        let p = entry.path();
+        if p.is_dir() {
+            paths.extend(collect_parquet_paths(&p)?);
+        } else if p.extension().and_then(|s| s.to_str()) == Some("parquet") {
+            paths.push(p);
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+/// Load all Parquet files from a directory (recurses into subdirectories)
 pub fn load_all_data(data_dir: &Path) -> Result<Vec<RecordBatch>> {
     let mut batches = Vec::new();
     let mut file_count = 0;
 
-    let entries: Vec<_> = std::fs::read_dir(data_dir)?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .and_then(|s| s.to_str())
-                .map(|s| s == "parquet")
-                .unwrap_or(false)
-        })
-        .collect();
+    let paths = collect_parquet_paths(data_dir)?;
 
-    for entry in entries.iter() {
-        let path = entry.path();
+    for path in &paths {
         file_count += 1;
 
         if file_count % 10 == 0 {
             println!("      Loaded {} files...", file_count);
         }
 
-        let file = File::open(&path)
+        let file = File::open(path)
             .with_context(|| format!("Failed to open {}", path.display()))?;
 
         let builder = ParquetRecordBatchReaderBuilder::try_new(file)
@@ -96,17 +101,32 @@ pub fn extract_f64_column(batches: &[RecordBatch], column_name: &str) -> Result<
 }
 
 /// Extract timestamps
+/// Tries "timestamp_ns" (Int64) first, then "timestamp" (TimestampNanosecond)
 pub fn extract_timestamps(batches: &[RecordBatch]) -> Result<Vec<i64>> {
     let mut values = Vec::new();
 
     for batch in batches {
+        // Try timestamp_ns as Int64 first (current ingestor schema)
+        if let Some(col) = batch.column_by_name("timestamp_ns") {
+            if let Some(array) = col.as_any().downcast_ref::<Int64Array>() {
+                for i in 0..array.len() {
+                    if !array.is_null(i) {
+                        values.push(array.value(i));
+                    } else {
+                        values.push(0);
+                    }
+                }
+                continue;
+            }
+        }
+        // Fallback: "timestamp" as TimestampNanosecondArray
         if let Some(col) = batch.column_by_name("timestamp") {
             if let Some(array) = col.as_any().downcast_ref::<TimestampNanosecondArray>() {
                 for i in 0..array.len() {
                     if !array.is_null(i) {
                         values.push(array.value(i));
                     } else {
-                        values.push(0); // Use 0 for null timestamps
+                        values.push(0);
                     }
                 }
             }
@@ -171,6 +191,20 @@ pub fn filter_by_symbol(
     Ok((filtered_timestamps, filtered_data))
 }
 
+/// Compute forward returns from a price series.
+/// forward_return[i] = (price[i + offset] - price[i]) / price[i]
+/// Last `offset` values are set to NaN.
+fn compute_forward_returns(prices: &[f64], offset: usize) -> Vec<f64> {
+    let n = prices.len();
+    let mut returns = vec![f64::NAN; n];
+    for i in 0..n.saturating_sub(offset) {
+        if prices[i] > 0.0 && !prices[i].is_nan() && !prices[i + offset].is_nan() {
+            returns[i] = (prices[i + offset] - prices[i]) / prices[i];
+        }
+    }
+    returns
+}
+
 /// Load H1 test data (Whale Flow Predicts Returns)
 pub fn load_h1_data(batches: &[RecordBatch]) -> Result<H1TestData> {
     println!("      Extracting features for H1...");
@@ -190,18 +224,30 @@ pub fn load_h1_data(batches: &[RecordBatch]) -> Result<H1TestData> {
         .or_else(|_| extract_f64_column(batches, "whale_flow_24h"))
         .context("Missing whale flow 24h column")?;
 
-    // Load returns at different horizons
+    // Load returns at different horizons — compute from price if columns missing
+    // Emission rate: 10 rows/sec per symbol → 1h=36000, 4h=144000, 24h=864000 rows
     let returns_1h = extract_f64_column(batches, "returns_1h")
-        .or_else(|_| extract_f64_column(batches, "forward_returns_1h"))
-        .context("Missing returns 1h column")?;
-
+        .or_else(|_| extract_f64_column(batches, "forward_returns_1h"));
     let returns_4h = extract_f64_column(batches, "returns_4h")
-        .or_else(|_| extract_f64_column(batches, "forward_returns_4h"))
-        .context("Missing returns 4h column")?;
-
+        .or_else(|_| extract_f64_column(batches, "forward_returns_4h"));
     let returns_24h = extract_f64_column(batches, "returns_24h")
-        .or_else(|_| extract_f64_column(batches, "forward_returns_24h"))
-        .context("Missing returns 24h column")?;
+        .or_else(|_| extract_f64_column(batches, "forward_returns_24h"));
+
+    // If any returns columns are missing, compute from raw_midprice
+    let (returns_1h, returns_4h, returns_24h) = if returns_1h.is_err() || returns_4h.is_err() || returns_24h.is_err() {
+        println!("      Computing forward returns from raw_midprice...");
+        let prices = extract_f64_column(batches, "raw_midprice")
+            .or_else(|_| extract_f64_column(batches, "midprice"))
+            .context("Missing price column for return computation")?;
+        // Use smaller offsets: 600 rows = 1min at 10/sec; 36000 = 1h is too large for 1-day data
+        // Use 600 (1min), 3000 (5min), 18000 (30min) as practical horizons
+        let r_1h = compute_forward_returns(&prices, 36_000);
+        let r_4h = compute_forward_returns(&prices, 144_000);
+        let r_24h = compute_forward_returns(&prices, 864_000);
+        (r_1h, r_4h, r_24h)
+    } else {
+        (returns_1h.unwrap(), returns_4h.unwrap(), returns_24h.unwrap())
+    };
 
     // Filter out NaN values
     let valid_indices: Vec<usize> = (0..timestamps.len())
@@ -250,12 +296,21 @@ pub fn load_h2_data(batches: &[RecordBatch]) -> Result<H2TestData> {
         .or_else(|_| extract_f64_column(batches, "whale_flow_1h"))
         .context("Missing whale flow column")?;
 
-    let entropies = extract_f64_column(batches, "tick_entropy_1s")
+    let entropies = extract_f64_column(batches, "ent_tick_1s")
+        .or_else(|_| extract_f64_column(batches, "tick_entropy_1s"))
         .or_else(|_| extract_f64_column(batches, "entropy_1s"))
-        .context("Missing entropy column (tried: tick_entropy_1s, entropy_1s)")?;
+        .context("Missing entropy column (tried: ent_tick_1s, tick_entropy_1s, entropy_1s)")?;
 
+    // Try explicit returns column, else compute 1-min forward returns from price
     let returns = extract_f64_column(batches, "returns_1m")
-        .context("Missing returns_1m column")?;
+        .or_else(|_| extract_f64_column(batches, "vol_returns_1m"))
+        .or_else(|_| {
+            let prices = extract_f64_column(batches, "raw_midprice")
+                .or_else(|_| extract_f64_column(batches, "midprice"))?;
+            // 600 rows at 10/sec = 1 minute
+            Ok::<Vec<f64>, anyhow::Error>(compute_forward_returns(&prices, 600))
+        })
+        .context("Missing returns column and cannot compute from price")?;
 
     // Filter out NaN values
     let valid_indices: Vec<usize> = (0..timestamps.len())
@@ -291,28 +346,37 @@ pub fn load_h3_data(batches: &[RecordBatch]) -> Result<H3TestData> {
     let timestamps = extract_timestamps(batches)?;
 
     // Load liquidation risk above at different distance buckets [1%, 2%, 5%, 10%]
-    let liq_above_1pct = extract_f64_column(batches, "liq_risk_above_1pct")
-        .context("Missing liq_risk_above_1pct column")?;
-    let liq_above_2pct = extract_f64_column(batches, "liq_risk_above_2pct")
-        .context("Missing liq_risk_above_2pct column")?;
-    let liq_above_5pct = extract_f64_column(batches, "liq_risk_above_5pct")
-        .context("Missing liq_risk_above_5pct column")?;
-    let liq_above_10pct = extract_f64_column(batches, "liq_risk_above_10pct")
-        .context("Missing liq_risk_above_10pct column")?;
+    let liq_above_1pct = extract_f64_column(batches, "liquidation_risk_above_1pct")
+        .or_else(|_| extract_f64_column(batches, "liq_risk_above_1pct"))
+        .context("Missing liquidation_risk_above_1pct column")?;
+    let liq_above_2pct = extract_f64_column(batches, "liquidation_risk_above_2pct")
+        .or_else(|_| extract_f64_column(batches, "liq_risk_above_2pct"))
+        .context("Missing liquidation_risk_above_2pct column")?;
+    let liq_above_5pct = extract_f64_column(batches, "liquidation_risk_above_5pct")
+        .or_else(|_| extract_f64_column(batches, "liq_risk_above_5pct"))
+        .context("Missing liquidation_risk_above_5pct column")?;
+    let liq_above_10pct = extract_f64_column(batches, "liquidation_risk_above_10pct")
+        .or_else(|_| extract_f64_column(batches, "liq_risk_above_10pct"))
+        .context("Missing liquidation_risk_above_10pct column")?;
 
     // Load liquidation risk below at different distance buckets [1%, 2%, 5%, 10%]
-    let liq_below_1pct = extract_f64_column(batches, "liq_risk_below_1pct")
-        .context("Missing liq_risk_below_1pct column")?;
-    let liq_below_2pct = extract_f64_column(batches, "liq_risk_below_2pct")
-        .context("Missing liq_risk_below_2pct column")?;
-    let liq_below_5pct = extract_f64_column(batches, "liq_risk_below_5pct")
-        .context("Missing liq_risk_below_5pct column")?;
-    let liq_below_10pct = extract_f64_column(batches, "liq_risk_below_10pct")
-        .context("Missing liq_risk_below_10pct column")?;
+    let liq_below_1pct = extract_f64_column(batches, "liquidation_risk_below_1pct")
+        .or_else(|_| extract_f64_column(batches, "liq_risk_below_1pct"))
+        .context("Missing liquidation_risk_below_1pct column")?;
+    let liq_below_2pct = extract_f64_column(batches, "liquidation_risk_below_2pct")
+        .or_else(|_| extract_f64_column(batches, "liq_risk_below_2pct"))
+        .context("Missing liquidation_risk_below_2pct column")?;
+    let liq_below_5pct = extract_f64_column(batches, "liquidation_risk_below_5pct")
+        .or_else(|_| extract_f64_column(batches, "liq_risk_below_5pct"))
+        .context("Missing liquidation_risk_below_5pct column")?;
+    let liq_below_10pct = extract_f64_column(batches, "liquidation_risk_below_10pct")
+        .or_else(|_| extract_f64_column(batches, "liq_risk_below_10pct"))
+        .context("Missing liquidation_risk_below_10pct column")?;
 
-    let prices = extract_f64_column(batches, "midprice")
+    let prices = extract_f64_column(batches, "raw_midprice")
+        .or_else(|_| extract_f64_column(batches, "midprice"))
         .or_else(|_| extract_f64_column(batches, "mid_price"))
-        .context("Missing price column (tried: midprice, mid_price)")?;
+        .context("Missing price column (tried: raw_midprice, midprice, mid_price)")?;
 
     // Build liquidation arrays and filter NaN values
     let mut liquidation_above = Vec::new();
@@ -373,8 +437,9 @@ pub fn load_h4_data(batches: &[RecordBatch]) -> Result<H4TestData> {
 
     let timestamps = extract_timestamps(batches)?;
 
-    let hhi = extract_f64_column(batches, "hhi")
-        .context("Missing hhi column")?;
+    let hhi = extract_f64_column(batches, "herfindahl_index")
+        .or_else(|_| extract_f64_column(batches, "hhi"))
+        .context("Missing herfindahl_index/hhi column")?;
 
     let gini = extract_f64_column(batches, "gini_coefficient")
         .or_else(|_| extract_f64_column(batches, "gini"))
@@ -390,11 +455,13 @@ pub fn load_h4_data(batches: &[RecordBatch]) -> Result<H4TestData> {
     let top20 = extract_f64_column(batches, "top20_concentration")
         .context("Missing top20_concentration column")?;
 
-    let current_volatility = extract_f64_column(batches, "realized_vol_1m")
+    let current_volatility = extract_f64_column(batches, "vol_returns_1m")
+        .or_else(|_| extract_f64_column(batches, "realized_vol_1m"))
         .or_else(|_| extract_f64_column(batches, "volatility_1m"))
-        .context("Missing realized volatility column")?;
+        .context("Missing volatility column")?;
 
-    let prices = extract_f64_column(batches, "midprice")
+    let prices = extract_f64_column(batches, "raw_midprice")
+        .or_else(|_| extract_f64_column(batches, "midprice"))
         .or_else(|_| extract_f64_column(batches, "mid_price"))
         .context("Missing price column")?;
 
@@ -444,37 +511,45 @@ pub fn load_h5_data(batches: &[RecordBatch]) -> Result<H5TestData> {
     println!("      Extracting features for H5...");
 
     // Load the 6 features required for persistence indicator
-    let entropy = extract_f64_column(batches, "tick_entropy_1s")
+    let entropy = extract_f64_column(batches, "ent_tick_1s")
+        .or_else(|_| extract_f64_column(batches, "tick_entropy_1s"))
         .or_else(|_| extract_f64_column(batches, "entropy_1s"))
         .context("Missing entropy column")?;
 
-    let momentum = extract_f64_column(batches, "momentum_1m")
+    let momentum = extract_f64_column(batches, "trend_momentum_60")
+        .or_else(|_| extract_f64_column(batches, "momentum_1m"))
         .or_else(|_| extract_f64_column(batches, "momentum"))
         .context("Missing momentum column")?;
 
-    let monotonicity = extract_f64_column(batches, "monotonicity_1m")
+    let monotonicity = extract_f64_column(batches, "trend_monotonicity_60")
+        .or_else(|_| extract_f64_column(batches, "monotonicity_1m"))
         .or_else(|_| extract_f64_column(batches, "monotonicity"))
         .context("Missing monotonicity column")?;
 
-    let hurst = extract_f64_column(batches, "hurst_1m")
+    let hurst = extract_f64_column(batches, "trend_hurst_300")
+        .or_else(|_| extract_f64_column(batches, "hurst_1m"))
         .or_else(|_| extract_f64_column(batches, "hurst"))
         .context("Missing hurst column")?;
 
-    let ofi = extract_f64_column(batches, "ofi_1s")
+    let ofi = extract_f64_column(batches, "flow_aggressor_ratio_5s")
+        .or_else(|_| extract_f64_column(batches, "ofi_1s"))
         .or_else(|_| extract_f64_column(batches, "ofi"))
-        .context("Missing ofi column")?;
+        .context("Missing ofi/flow column")?;
 
-    let illiquidity = extract_f64_column(batches, "amihud_illiquidity_1m")
+    let illiquidity = extract_f64_column(batches, "illiq_amihud_100")
+        .or_else(|_| extract_f64_column(batches, "amihud_illiquidity_1m"))
         .or_else(|_| extract_f64_column(batches, "illiquidity"))
         .context("Missing illiquidity column")?;
 
     // Load prices for return calculation
-    let price_data = extract_f64_column(batches, "midprice")
+    let price_data = extract_f64_column(batches, "raw_midprice")
+        .or_else(|_| extract_f64_column(batches, "midprice"))
         .or_else(|_| extract_f64_column(batches, "mid_price"))
         .context("Missing price column")?;
 
     // Load volatility (optional)
-    let volatility_data = extract_f64_column(batches, "realized_vol_1m")
+    let volatility_data = extract_f64_column(batches, "vol_returns_1m")
+        .or_else(|_| extract_f64_column(batches, "realized_vol_1m"))
         .or_else(|_| extract_f64_column(batches, "volatility_1m"))
         .ok();
 

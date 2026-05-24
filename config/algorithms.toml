@@ -97,3 +97,20 @@ lambda_reg = 1.0             # L2 regularization
 learning_rate = 0.01         # step size for online update
 max_features = 20            # cap on input features
 update_interval = 10         # ticks between coefficient updates
+
+# ── Group I: Pattern Convolver ──────────────────────────────────
+
+[convolver]
+kernel_path = "models/convolver_kernels"
+candle_ticks = 600            # 60s candles (600 × 100ms)
+window_width = 20             # W: candles in scoring window
+atr_period = 14               # N_atr
+range_lookback = 20           # N for event detection (discovery only)
+volume_multiplier = 1.5       # breakout volume filter (discovery only)
+trap_confirmation_lag = 3     # K (discovery only)
+trap_atr_threshold = 1.0     # alpha (discovery only)
+evr_threshold = 0.80         # SVD truncation
+ic_threshold = 0.03          # minimum |IC| for retention
+fdr_q = 0.05                 # BH-FDR significance level
+train_ratio = 0.60           # walk-forward split
+min_events = 100             # minimum n_e for stable SVD

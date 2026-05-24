@@ -239,10 +239,11 @@ fn count_parquet_files(data_dir: &Path) -> Result<usize> {
     let mut count = 0;
     if let Ok(entries) = std::fs::read_dir(data_dir) {
         for entry in entries.flatten() {
-            if let Some(ext) = entry.path().extension() {
-                if ext == "parquet" {
-                    count += 1;
-                }
+            let path = entry.path();
+            if path.is_dir() {
+                count += count_parquet_files(&path)?;
+            } else if path.extension().and_then(|s| s.to_str()) == Some("parquet") {
+                count += 1;
             }
         }
     }
