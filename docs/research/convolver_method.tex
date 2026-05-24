@@ -1,0 +1,1107 @@
+\documentclass[11pt,a4paper]{article}
+
+% ============================================================
+% Packages (core only — texlive-latex-base + texlive-base)
+% ============================================================
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{array}
+
+% ============================================================
+% Theorem environments
+% ============================================================
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{remark}{Remark}[section]
+\newtheorem{proposition}{Proposition}[section]
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}{Lemma}[section]
+
+% ============================================================
+% Notation macros
+% ============================================================
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Xmat}{\mathbf{X}}
+\newcommand{\Umat}{\mathbf{U}}
+\newcommand{\Smat}{\boldsymbol{\Sigma}}
+\newcommand{\Vmat}{\mathbf{V}}
+\newcommand{\bvec}[1]{\mathbf{#1}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\inner}[2]{\langle #1,\, #2 \rangle}
+\newcommand{\corr}{\operatorname{corr}}
+\newcommand{\med}{\operatorname{median}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\rank}{\operatorname{rank}}
+\newcommand{\coloneqq}{:=}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+% Algorithmic environment (inline, no package needed)
+\newcounter{algline}
+\newenvironment{pseudocode}[1]{%
+  \medskip\noindent\textbf{Algorithm:} #1\par\smallskip
+  \setcounter{algline}{0}%
+  \begin{list}{}{%
+    \setlength{\topsep}{0pt}%
+    \setlength{\itemsep}{1pt}%
+    \setlength{\parsep}{0pt}%
+    \setlength{\leftmargin}{2em}%
+  }%
+}{\end{list}\medskip}
+\newcommand{\aline}[1]{\item \stepcounter{algline}\textbf{\thealgline.}\ #1}
+\newcommand{\aindent}[1]{\item \hspace{1.5em}#1}
+
+% ============================================================
+\begin{document}
+
+\title{\textbf{Event-Aligned SVD for Data-Driven\\[4pt] Pattern Kernel Discovery}\\
+       \large Mathematical Specification for the NAT Convolver Pipeline}
+\author{NAT Quantitative Research Platform}
+\date{May 2026}
+\maketitle
+
+\begin{abstract}
+We present a complete mathematical specification for a data-driven pattern detection
+system applied to OHLCV candle data from Hyperliquid perpetual futures. The core pipeline
+defines market events analytically (breakouts, turtle-soup false breakouts, bull/bear
+traps), extracts aligned windows of candle data around those events, applies Singular
+Value Decomposition to discover characteristic multi-candle shapes, filters the
+discovered components by forward-return Information Coefficient, and deploys the
+surviving kernels as a real-time convolver. The approach combines the interpretability of
+analytical event definitions with the statistical efficiency of data-driven basis
+discovery, with three explicit safeguards against overfitting. The document is
+self-contained: a reader familiar with linear algebra and basic time-series statistics
+should be able to implement the full pipeline from this specification.
+\end{abstract}
+
+\tableofcontents
+\bigskip
+
+% ============================================================
+\section{Notation Table}
+% ============================================================
+
+\begin{center}
+\begin{tabular}{lll}
+\hline
+\textbf{Symbol} & \textbf{Type / Range} & \textbf{Meaning} \\
+\hline
+$t$               & $t \in \N$                    & Discrete candle time index \\
+$O_t, H_t, L_t, C_t$ & $\R_{>0}$              & Open, High, Low, Close prices at bar $t$ \\
+$V_t$             & $\R_{\geq 0}$                 & Traded volume at bar $t$ \\
+$b_t$             & $\R$                          & Candle body: $C_t - O_t$ \\
+$u_t$             & $\R_{\geq 0}$                 & Upper wick \\
+$l_t$             & $\R_{\geq 0}$                 & Lower wick \\
+$v_t$             & $\R_{\geq 0}$                 & Volume channel (to be normalised) \\
+$W$               & $W \in \N$                    & Window width in candles \\
+$N$               & $N \in \N$                    & Lookback for event detection \\
+$K$               & $K \in \N$                    & Confirmation lag (trap events) \\
+$\alpha$          & $\alpha > 0$                  & ATR multiplier for trap threshold \\
+$t_e$             & $t_e \in \N$                  & Detection time of event $e$ \\
+$n_e$             & $n_e \in \N$                  & Number of events of type $e$ \\
+$\mathcal{E}$     & set                           & Set of event types (6 elements) \\
+$\mathcal{C}$     & $\{b, u, l, v\}$              & Set of signal channels \\
+$\tau$            & $\tau \in \{0,\ldots,W-1\}$   & Within-window time index \\
+$\bar{\tau}$      & $\bar{\tau} \in [0,1]$        & Normalised window coordinate $\tau/(W-1)$ \\
+$\tilde{x}^{(c)}_i(\tau)$ & $\R$               & Normalised channel $c$, event $i$, lag $\tau$ \\
+$\Xmat^{(e,c)}$   & $\R^{n_e \times W}$           & Event-aligned data matrix \\
+$\Umat, \Smat, \Vmat$ & ---                       & SVD factors of $\Xmat^{(e,c)}$ \\
+$\sigma_k$        & $\R_{\geq 0}$                 & $k$-th singular value \\
+$\bvec{v}_k$      & $\R^W$                        & $k$-th right singular vector (basis shape) \\
+$\bvec{u}_k$      & $\R^{n_e}$                    & $k$-th left singular vector (event loadings) \\
+$\mathrm{EVR}_k$  & $[0,1]$                       & Explained variance ratio of component $k$ \\
+$\mathrm{SI}$     & $\R_{\geq 0}$                 & Stereotypy index $\sigma_1/\sigma_2$ \\
+$\mathrm{IC}_k$   & $[-1,1]$                      & Information Coefficient for component $k$ \\
+$r_i^{(H)}$       & $\R$                          & Forward log-return at horizon $H$, event $i$ \\
+$H$               & $H \in \N$                    & Forward-return horizon in candles \\
+$s^{(e,c)}_j(t)$  & $[-1,1]$                      & Cosine-similarity score, channel $c$, event $e$ \\
+$S^{(e)}(t)$      & $\R$                          & Multi-channel aggregated score for event $e$ \\
+$w_c$             & $w_c \geq 0$, $\sum w_c = 1$  & Channel weight for $c \in \mathcal{C}$ \\
+$\mathrm{ATR}_t$  & $\R_{>0}$                     & Average True Range at time $t$ \\
+$\phi_i$          & $[0,1] \to \R$                & Analytical basis function $i$ \\
+$a$               & $a \in [3,8]$                 & Exponential decay parameter \\
+\hline
+\end{tabular}
+\end{center}
+
+% ============================================================
+\section{Introduction and Motivation}
+\label{sec:intro}
+% ============================================================
+
+\subsection{The Core Problem}
+
+Classical technical analysis assigns fixed shapes to named patterns. A ``head and
+shoulders'' has a specific geometry; a ``hammer'' has a long lower wick and a small body.
+These shapes are hand-designed by practitioners and carry two fundamental limitations:
+(1) the true shape of a pattern in a given market may differ from the textbook version,
+and (2) there is no principled mechanism for deciding \emph{which} shape variation
+actually predicts future returns as opposed to merely being visually recognisable.
+
+The convolver pipeline described in this document addresses both limitations. Events are
+defined \emph{analytically} by price action conditions (Section~\ref{sec:events}), which
+is unambiguous and replicable. The shapes associated with those events are then
+\emph{discovered from data} via Singular Value Decomposition (Section~\ref{sec:svd}).
+Only the discovered shapes that survive an Information Coefficient gate
+(Section~\ref{sec:ic}) are retained for deployment. The result is a kernel library that
+is both data-driven and statistically validated.
+
+\subsection{Analogues in Other Disciplines}
+
+The methodology is a direct analogue of two well-established signal processing paradigms.
+
+\paragraph{Event-Related Potentials (ERP) in neuroscience.}
+An ERP is computed by locking EEG recordings to a stimulus event and averaging across
+trials. The average converges to the signal phase-locked to the event, while random
+neural noise cancels. Our event-aligned matrix $\Xmat^{(e,c)}$ plays exactly this role:
+each row is one ``trial'' (one occurrence of the event), and SVD generalises averaging by
+retaining not just the mean shape but the full low-dimensional subspace of shape
+variation. The left singular vector $\bvec{u}_1$ encodes trial-to-trial amplitude
+variation; the right singular vector $\bvec{v}_1$ encodes the dominant waveform shape.
+
+\paragraph{Matched filtering in radar and seismology.}
+A matched filter maximises the signal-to-noise ratio for detecting a known template
+$\bvec{k}$ in a noisy signal $\bvec{x}(t)$ by computing the cross-correlation
+$s(t) = \bvec{k}^\top \bvec{x}(t)$. The SVD right singular vectors $\bvec{v}_k$ serve
+as data-driven templates, and the online scoring step (Section~\ref{sec:online}) is
+exactly a matched filter bank --- one filter per surviving component.
+
+\subsection{Key Insight: Shape Discovery Before Return Fitting}
+
+The critical anti-overfitting property of this approach is the ordering of operations:
+\begin{enumerate}
+    \item SVD discovers basis functions using only the \emph{event-aligned price data}.
+          It has no access to forward returns.
+    \item IC filtering checks which of these already-discovered shapes correlate with
+          forward returns.
+\end{enumerate}
+We are not fitting shapes to returns. We are asking whether naturally occurring shape
+variation --- variation the market itself exhibits around analytically-defined events ---
+is predictive. This ordering ensures that the discovered kernels are interpretable
+geometric objects, not overfit regression artefacts.
+
+% ============================================================
+\section{Candlestick Decomposition into Signal Channels}
+\label{sec:channels}
+% ============================================================
+
+\subsection{OHLCV Decomposition}
+
+A single OHLCV candle at time $t$ is the tuple $(O_t, H_t, L_t, C_t, V_t)$ satisfying
+\begin{equation}
+    L_t \leq \min(O_t, C_t) \leq \max(O_t, C_t) \leq H_t, \quad V_t \geq 0.
+    \label{eq:ohlcv_constraint}
+\end{equation}
+We decompose each candle into four \emph{signal channels}.
+
+\begin{definition}[Signal Channels]
+\label{def:channels}
+For a candle at time $t$, define:
+\begin{align}
+    b_t &:= C_t - O_t
+          \label{eq:body} \\
+    u_t &:= H_t - \max(C_t,\, O_t)
+          \label{eq:upper_wick} \\
+    l_t &:= \min(C_t,\, O_t) - L_t
+          \label{eq:lower_wick} \\
+    v_t &:= V_t
+          \label{eq:volume_channel}
+\end{align}
+\end{definition}
+
+\begin{remark}
+By \eqref{eq:ohlcv_constraint}, $u_t \geq 0$ and $l_t \geq 0$ always. The body $b_t$
+is signed: $b_t > 0$ for a bull candle (close above open), $b_t < 0$ for a bear candle.
+The decomposition is invertible: given $(b_t, u_t, l_t, O_t)$ one recovers
+$(O_t, H_t, L_t, C_t)$ exactly. The channel set is $\mathcal{C} = \{b, u, l, v\}$.
+\end{remark}
+
+\subsection{Window Extraction}
+
+\begin{definition}[Event Window]
+\label{def:window}
+For an event detected at time $t_e$ and window width $W \in \N$, the \emph{event window}
+of channel $c \in \mathcal{C}$ is the vector
+\begin{equation}
+    \bvec{x}^{(c)}(t_e) :=
+    \bigl(x^{(c)}_{t_e - W + 1},\;
+          x^{(c)}_{t_e - W + 2},\;
+          \ldots,\;
+          x^{(c)}_{t_e}\bigr)^\top
+    \in \R^W,
+    \label{eq:window_vector}
+\end{equation}
+where $x^{(c)}_t \in \{b_t, u_t, l_t, v_t\}$ for $c \in \{b, u, l, v\}$ respectively.
+The window uses $W - 1$ \emph{pre-event} candles plus the event candle itself. The
+within-window time index is $\tau \in \{0, 1, \ldots, W-1\}$, with $\tau = W-1$
+corresponding to $t_e$.
+\end{definition}
+
+\subsection{Per-Window Normalisation}
+\label{sec:normalisation}
+
+Raw price levels are not comparable across events separated in time or across asset
+regimes. We apply a \emph{shape-preserving} normalisation that removes level and scale
+but retains geometry.
+
+\begin{definition}[ATR Normalisation]
+\label{def:normalisation}
+Let $\mathrm{ATR}_t$ be the $N_{\mathrm{atr}}$-period Average True Range at time $t$:
+\begin{equation}
+    \mathrm{ATR}_t :=
+    \frac{1}{N_{\mathrm{atr}}}
+    \sum_{j=0}^{N_{\mathrm{atr}}-1}
+    \max\!\bigl(H_{t-j} - L_{t-j},\;
+                |H_{t-j} - C_{t-j-1}|,\;
+                |L_{t-j} - C_{t-j-1}|\bigr).
+    \label{eq:atr}
+\end{equation}
+The normalised window for event $i$ with event time $t_e^{(i)}$ is
+\begin{equation}
+    \tilde{x}^{(c)}_i(\tau) :=
+    \frac{x^{(c)}_{t_e^{(i)} - W + 1 + \tau} - \mu^{(c)}_i}
+         {\mathrm{ATR}_{t_e^{(i)}}},
+    \quad \tau = 0, 1, \ldots, W-1,
+    \label{eq:normalised_window}
+\end{equation}
+where $\mu^{(c)}_i := \frac{1}{W}\sum_{\tau=0}^{W-1} x^{(c)}_{t_e^{(i)}-W+1+\tau}$
+is the within-window mean of channel $c$ for event $i$.
+\end{definition}
+
+\begin{remark}
+For the unsigned channels ($u$, $l$, $v$), the sample standard deviation may be used
+instead of $\mathrm{ATR}$ as the denominator if preferred, with the caveat that
+near-zero standard deviations require a floor: $\max(\hat{\sigma}_i, \epsilon)$ for
+small $\epsilon > 0$. We recommend $\mathrm{ATR}$ because it is a global scale estimate
+robust to within-window outliers and consistent across channels.
+\end{remark}
+
+% ============================================================
+\section{Analytical Event Definitions}
+\label{sec:events}
+% ============================================================
+
+We define six event types in $\mathcal{E}$. Let $N$ be the lookback period in candles
+and let $\mathrm{ATR}_t$ be as in \eqref{eq:atr}.
+
+\subsection{Breakout Events}
+
+\begin{definition}[Breakout, Bull]
+\label{def:breakout_bull}
+A \emph{bull breakout} occurs at time $t$ if and only if
+\begin{equation}
+    C_t > \max_{j=1}^{N} H_{t-j}
+    \quad \text{and} \quad
+    V_t > 1.5 \cdot \med\!\bigl(V_{t-N}, \ldots, V_{t-1}\bigr).
+    \label{eq:breakout_bull}
+\end{equation}
+\end{definition}
+
+\begin{definition}[Breakout, Bear]
+\label{def:breakout_bear}
+A \emph{bear breakout} occurs at time $t$ if and only if
+\begin{equation}
+    C_t < \min_{j=1}^{N} L_{t-j}
+    \quad \text{and} \quad
+    V_t > 1.5 \cdot \med\!\bigl(V_{t-N}, \ldots, V_{t-1}\bigr).
+    \label{eq:breakout_bear}
+\end{equation}
+\end{definition}
+
+The volume condition filters genuine momentum moves from slow price drift: a real
+breakout typically registers at least $1.5\times$ the recent median volume. The
+$N$-period range maximum $\max_{j=1}^{N} H_{t-j}$ is equivalent to the upper Donchian
+channel (excluding the current bar). Both can be computed in $O(1)$ amortised time per
+bar using a monotone deque.
+
+\subsection{Turtle Soup Events (False Range Break)}
+
+\emph{Turtle Soup} refers to a pattern described by Raschke and Connors (1995): price
+transiently penetrates a $N$-period extreme, then closes back inside the prior range
+within the same bar, suggesting that the breakout attracted stop-loss orders that were
+absorbed by a larger counterparty.
+
+\begin{definition}[Turtle Soup, Bull]
+\label{def:ts_bull}
+A \emph{bull turtle soup} (fake breakdown, anticipates long) occurs at time $t$ if and
+only if
+\begin{equation}
+    L_t < \min_{j=1}^{N} L_{t-j}
+    \quad \text{and} \quad
+    C_t > \min_{j=1}^{N} L_{t-j}.
+    \label{eq:ts_bull}
+\end{equation}
+\end{definition}
+
+\begin{definition}[Turtle Soup, Bear]
+\label{def:ts_bear}
+A \emph{bear turtle soup} (fake breakout, anticipates short) occurs at time $t$ if and
+only if
+\begin{equation}
+    H_t > \max_{j=1}^{N} H_{t-j}
+    \quad \text{and} \quad
+    C_t < \max_{j=1}^{N} H_{t-j}.
+    \label{eq:ts_bear}
+\end{equation}
+\end{definition}
+
+In both cases the condition asserts that the candle's extreme pierced the historical
+range but the close reverted. The lower wick channel $l_t$ is expected to be especially
+large for Definition~\ref{def:ts_bull} (the spike and reversal shows as a long lower
+wick), providing a signal-rich feature for SVD.
+
+\subsection{Trap Events (Confirmed False Breakout)}
+
+A trap event requires two-bar confirmation: the breakout must occur at time $t$, and
+the close at time $t + K$ must have reversed.
+
+\begin{definition}[Bull Trap]
+\label{def:bull_trap}
+A \emph{bull trap} is a pair $(t, t+K)$ satisfying:
+\begin{itemize}
+    \item[(i)] Condition \eqref{eq:breakout_bull} holds at time $t$.
+    \item[(ii)] $C_{t+K} < C_t - \alpha \cdot \mathrm{ATR}_t$.
+\end{itemize}
+The event window is centred on the breakout candle at time $t$.
+\end{definition}
+
+\begin{definition}[Bear Trap]
+\label{def:bear_trap}
+A \emph{bear trap} is a pair $(t, t+K)$ satisfying:
+\begin{itemize}
+    \item[(i)] Condition \eqref{eq:breakout_bear} holds at time $t$.
+    \item[(ii)] $C_{t+K} > C_t + \alpha \cdot \mathrm{ATR}_t$.
+\end{itemize}
+\end{definition}
+
+\begin{remark}[Look-ahead bias]
+\label{rem:lookahead}
+Trap events (Definitions~\ref{def:bull_trap}--\ref{def:bear_trap}) use information from
+$t+K$ to label the event at $t$. They are therefore \emph{only valid for offline kernel
+discovery}. The aligned window is extracted at $t$ (pre-event candles plus the breakout
+candle), and the confirmation at $t+K$ is used solely to partition events into ``trap''
+versus ``genuine breakout'' classes. Deploying the kernel in real time introduces no
+look-ahead, because the kernel is applied to the current window at bar $t$.
+\end{remark}
+
+\paragraph{Parameter table.}
+The event definitions involve the following configurable parameters:
+\begin{center}
+\begin{tabular}{llll}
+\hline
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Default} & \textbf{Valid Range} \\
+\hline
+Range lookback           & $N$                   & 20 bars   & $[10, 60]$ \\
+Volume multiplier        & $1.5$                 & 1.5       & $[1.2, 2.5]$ \\
+ATR period               & $N_{\mathrm{atr}}$    & 14 bars   & $[7, 28]$ \\
+Trap confirmation lag    & $K$                   & 3 bars    & $[1, 10]$ \\
+ATR reversal threshold   & $\alpha$              & 1.0       & $[0.5, 2.0]$ \\
+\hline
+\end{tabular}
+\end{center}
+
+% ============================================================
+\section{Event-Aligned Matrix Construction}
+\label{sec:matrix}
+% ============================================================
+
+\begin{definition}[Event-Aligned Matrix]
+\label{def:event_matrix}
+Let $\mathcal{T}_e = \{t_e^{(1)}, t_e^{(2)}, \ldots, t_e^{(n_e)}\}$ be the ordered
+set of detection times for event type $e \in \mathcal{E}$. For channel $c \in
+\mathcal{C}$, the \emph{event-aligned matrix} is
+\begin{equation}
+    \Xmat^{(e,c)} :=
+    \begin{pmatrix}
+        \tilde{x}^{(c)}_1(0) & \tilde{x}^{(c)}_1(1) & \cdots & \tilde{x}^{(c)}_1(W-1) \\
+        \tilde{x}^{(c)}_2(0) & \tilde{x}^{(c)}_2(1) & \cdots & \tilde{x}^{(c)}_2(W-1) \\
+        \vdots & \vdots & \ddots & \vdots \\
+        \tilde{x}^{(c)}_{n_e}(0) & \tilde{x}^{(c)}_{n_e}(1) & \cdots &
+        \tilde{x}^{(c)}_{n_e}(W-1)
+    \end{pmatrix}
+    \in \R^{n_e \times W},
+    \label{eq:event_matrix}
+\end{equation}
+where $\tilde{x}^{(c)}_i(\tau)$ is given by \eqref{eq:normalised_window}.
+\end{definition}
+
+Each row of $\Xmat^{(e,c)}$ is one normalised event window. Each column corresponds to a
+relative time offset $\tau$ within the window. The matrix has the within-window mean
+removed by construction \eqref{eq:normalised_window}.
+
+\paragraph{Optional column-wise centring.}
+Some authors additionally remove the across-event mean at each time step:
+\begin{equation}
+    \hat{X}^{(e,c)}_{i,\tau} \leftarrow
+    \tilde{x}^{(c)}_{i,\tau} -
+    \frac{1}{n_e} \sum_{i'=1}^{n_e} \tilde{x}^{(c)}_{i',\tau}.
+    \label{eq:column_centre}
+\end{equation}
+Without \eqref{eq:column_centre}: the first right singular vector $\bvec{v}_1$
+approximates the mean shape (preferred when the average pattern is itself informative).
+With \eqref{eq:column_centre}: all components capture deviations from the mean pattern.
+We adopt the convention of \emph{not} applying \eqref{eq:column_centre} as the default.
+
+\paragraph{Minimum event count.}
+We require
+\begin{equation}
+    n_e \geq n_{\min} = 100
+    \label{eq:min_events}
+\end{equation}
+before proceeding to decomposition. Below this threshold the singular vectors are
+unreliable estimators of the population shapes.
+
+% ============================================================
+\section{SVD Decomposition: Basis Discovery}
+\label{sec:svd}
+% ============================================================
+
+\subsection{The Decomposition}
+
+\begin{definition}[Thin SVD]
+\label{def:svd}
+For $\Xmat := \Xmat^{(e,c)} \in \R^{n_e \times W}$ with $n_e \geq W$, the
+\emph{thin} (economy) Singular Value Decomposition is
+\begin{equation}
+    \Xmat = \Umat \, \Smat \, \Vmat^\top,
+    \label{eq:svd}
+\end{equation}
+where
+\begin{align}
+    \Umat &\in \R^{n_e \times W}, \quad \Umat^\top \Umat = \mathbf{I}_W, \\
+    \Smat &= \diag(\sigma_1, \sigma_2, \ldots, \sigma_W),
+             \quad \sigma_1 \geq \sigma_2 \geq \cdots \geq \sigma_W \geq 0, \\
+    \Vmat &\in \R^{W \times W}, \quad \Vmat^\top \Vmat = \mathbf{I}_W.
+\end{align}
+For $n_e < W$ the decomposition has rank $n_e$; in practice $n_e \gg W$ is guaranteed by
+\eqref{eq:min_events}.
+\end{definition}
+
+The columns $\bvec{v}_k = \Vmat_{:,k} \in \R^W$ are the \emph{discovered basis
+functions} (shapes), ordered from dominant to residual. The columns $\bvec{u}_k =
+\Umat_{:,k} \in \R^{n_e}$ give the \emph{per-event loading} on basis function $k$: the
+scalar $u_{ik} = U_{ik}$ measures how strongly event $i$ projects onto shape $k$.
+
+\subsection{Interpretive Quantities}
+
+\begin{definition}[Explained Variance Ratio]
+\label{def:evr}
+The fraction of total squared variation explained by component $k$ is
+\begin{equation}
+    \mathrm{EVR}_k :=
+    \frac{\sigma_k^2}{\displaystyle\sum_{j=1}^{W} \sigma_j^2}
+    = \frac{\sigma_k^2}{\norm{\Xmat}_F^2},
+    \label{eq:evr}
+\end{equation}
+where $\norm{\cdot}_F$ denotes the Frobenius norm and the identity
+$\norm{\Xmat}_F^2 = \sum_j \sigma_j^2$ follows from the unitary invariance of the
+Frobenius norm.
+\end{definition}
+
+\begin{definition}[Stereotypy Index]
+\label{def:stereotypy}
+The \emph{stereotypy index} of an event class $(e, c)$ is
+\begin{equation}
+    \mathrm{SI}^{(e,c)} := \frac{\sigma_1}{\sigma_2}
+    \label{eq:stereotypy}
+\end{equation}
+(with the convention $\mathrm{SI} = \infty$ when $\sigma_2 = 0$). A high stereotypy
+index ($\mathrm{SI} \gg 1$) indicates that a single dominant shape accounts for most of
+the variation: the event is \emph{stereotyped}. An index near 1 indicates a broad,
+multi-modal distribution of shapes. We recommend requiring $\mathrm{SI} \geq 1.5$ before
+retaining components beyond $k = 1$.
+\end{definition}
+
+\subsection{Truncation Rule}
+
+We retain the top $K^{(e,c)}$ components where the cumulative explained variance first
+exceeds threshold $\rho^* = 0.80$:
+\begin{equation}
+    K^{(e,c)} :=
+    \min\!\left\{
+        K \in \{1, \ldots, W\} \,:\,
+        \sum_{k=1}^{K} \mathrm{EVR}_k \geq \rho^*
+    \right\}, \quad \rho^* = 0.80.
+    \label{eq:truncation}
+\end{equation}
+
+The retained columns of $\Vmat$ form the \emph{candidate kernel set}
+$\mathcal{K}^{(e,c)}_{\mathrm{cand}} = \{\bvec{v}_1, \ldots, \bvec{v}_{K^{(e,c)}}\}$
+before IC filtering.
+
+\subsection{Reconstruction Error}
+
+The best rank-$K$ approximation to $\Xmat$ in Frobenius norm is $\Umat_K \Smat_K
+\Vmat_K^\top$, where subscript $K$ denotes the leading $K$ factors. The relative
+reconstruction error is
+\begin{equation}
+    \epsilon_K :=
+    \frac{\norm{\Xmat - \Umat_K \Smat_K \Vmat_K^\top}_F}
+         {\norm{\Xmat}_F}
+    = \sqrt{1 - \sum_{k=1}^{K} \mathrm{EVR}_k}.
+    \label{eq:recon_error}
+\end{equation}
+By the Eckart--Young--Mirsky theorem, no rank-$K$ matrix provides a smaller
+Frobenius-norm approximation to $\Xmat$.
+
+% ============================================================
+\section{Predictive Filtering: The IC Gate}
+\label{sec:ic}
+% ============================================================
+
+\subsection{Forward Returns}
+
+\begin{definition}[Forward Log-Return]
+\label{def:forward_return}
+For event $i$ at time $t_e^{(i)}$ and forward horizon $H$ candles, the forward
+log-return is
+\begin{equation}
+    r_i^{(H)} := \ln\!\frac{C_{t_e^{(i)}+H}}{C_{t_e^{(i)}}}.
+    \label{eq:forward_return}
+\end{equation}
+This is the continuously compounded return from the event close to the close $H$ bars
+later. The return begins strictly after the event window ends, so there is no overlap
+between the information used by SVD and the return being predicted.
+\end{definition}
+
+\subsection{Information Coefficient}
+
+\begin{definition}[Information Coefficient, IC]
+\label{def:ic}
+For SVD component $k$ of event type $(e, c)$, the Information Coefficient at horizon
+$H$ is
+\begin{equation}
+    \mathrm{IC}_k^{(e,c,H)}
+    := \corr\!\bigl(\bvec{u}_k,\; \bvec{r}^{(H)}\bigr)
+    = \frac{
+        \displaystyle\sum_{i=1}^{n_e}
+        \bigl(u_{ik} - \bar{u}_k\bigr)
+        \bigl(r_i^{(H)} - \bar{r}^{(H)}\bigr)
+      }{
+        \sqrt{
+          \displaystyle\sum_{i=1}^{n_e}\bigl(u_{ik}-\bar{u}_k\bigr)^2
+          \cdot
+          \sum_{i=1}^{n_e}\bigl(r_i^{(H)}-\bar{r}^{(H)}\bigr)^2
+        }
+      },
+    \label{eq:ic}
+\end{equation}
+where $\bar{u}_k = n_e^{-1}\sum_i u_{ik}$ and
+$\bar{r}^{(H)} = n_e^{-1}\sum_i r_i^{(H)}$.
+\end{definition}
+
+Component $k$ is \emph{retained} in the final kernel library if and only if
+\begin{equation}
+    \bigl|\mathrm{IC}_k^{(e,c,H)}\bigr| \geq \delta_{\mathrm{IC}},
+    \qquad \delta_{\mathrm{IC}} = 0.03.
+    \label{eq:ic_gate}
+\end{equation}
+
+\begin{remark}[Why this is not overfitting]
+The loadings $\bvec{u}_k = \Umat_{:,k}$ are determined entirely by the price-action
+matrix $\Xmat^{(e,c)}$. The SVD objective minimises reconstruction error with no
+knowledge of $\bvec{r}^{(H)}$. The IC computation is therefore a \emph{test} on the SVD
+output, not a training step. This is analogous to computing the correlation between a
+PCA projection and an external label: the projection was not fitted to the label.
+\end{remark}
+
+\subsection{Multiple Comparison Correction}
+
+Across all combinations $(e, c, k, H) \in \mathcal{E} \times \mathcal{C} \times
+\{1,\ldots,K_{\max}\} \times \mathcal{H}$ (where $\mathcal{H}$ is the set of tested
+horizons), the IC tests constitute a family of hypotheses. We apply
+Benjamini--Hochberg FDR control at level $q = 0.05$:
+\begin{enumerate}
+    \item For each test, compute the two-sided $p$-value under the null
+          $H_0\colon \mathrm{IC} = 0$ using the $t$-statistic
+          \begin{equation}
+              t_k = \mathrm{IC}_k
+                    \sqrt{\frac{n_e - 2}{1 - \mathrm{IC}_k^2}},
+              \quad t_k \sim t_{n_e-2} \text{ under } H_0.
+              \label{eq:ic_tstat}
+          \end{equation}
+    \item Order $p$-values: $p_{(1)} \leq p_{(2)} \leq \cdots \leq p_{(m)}$ for $m$
+          total tests.
+    \item Reject $H_0$ for all tests with index $j \leq j^*$, where
+          $j^* := \max\{j : p_{(j)} \leq jq/m\}$.
+\end{enumerate}
+Only tests that survive BH-FDR correction \emph{and} satisfy \eqref{eq:ic_gate} are
+retained.
+
+% ============================================================
+\section{Kernel Construction from Discovered Components}
+\label{sec:kernels}
+% ============================================================
+
+\subsection{Kernel Library}
+
+\begin{definition}[Kernel Library]
+\label{def:kernel_library}
+After IC filtering, the \emph{kernel library} is the set
+\begin{equation}
+    \mathcal{K} :=
+    \bigl\{\bvec{k}^{(e,c)}_j \in \R^W \,:\,
+    e \in \mathcal{E},\; c \in \mathcal{C},\; j \text{ survives IC gate}\bigr\},
+    \label{eq:kernel_library}
+\end{equation}
+where $\bvec{k}^{(e,c)}_j := \bvec{v}^{(e,c)}_j$ is the $j$-th right singular vector
+of $\Xmat^{(e,c)}$ (Definition~\ref{def:svd}).
+\end{definition}
+
+\begin{proposition}[Kernel Properties]
+\label{prop:kernel_properties}
+Every kernel $\bvec{k} \in \mathcal{K}$ satisfies:
+\begin{itemize}
+    \item[(i)] \textbf{Unit norm:} $\norm{\bvec{k}}_2 = 1$ (right singular vectors are
+               orthonormal).
+    \item[(ii)] \textbf{Orthogonality within class:} for fixed $(e, c)$, $\inner{
+                \bvec{k}^{(e,c)}_j}{\bvec{k}^{(e,c)}_{j'}} = 0$ for $j \neq j'$.
+    \item[(iii)] \textbf{Mean-subtracted:} kernels carry no level information by
+                 construction of normalisation \eqref{eq:normalised_window}.
+\end{itemize}
+\end{proposition}
+
+\begin{proof}
+Properties (i) and (ii) follow directly from the orthonormality of $\Vmat$ in the SVD
+\eqref{eq:svd}: $\Vmat^\top \Vmat = \mathbf{I}$. Property (iii) follows because the
+per-window mean $\mu^{(c)}_i$ is subtracted in \eqref{eq:normalised_window} before
+forming $\Xmat^{(e,c)}$.
+\end{proof}
+
+\subsection{Directional Association}
+
+Each retained kernel $\bvec{k}^{(e,c)}_j$ carries a signed IC. We record the predicted
+trading direction:
+\begin{equation}
+    d^{(e,c)}_j := \operatorname{sign}\!\bigl(\mathrm{IC}_j^{(e,c,H^*)}\bigr),
+    \label{eq:direction}
+\end{equation}
+where $H^*$ is the primary forecast horizon. In production, $d^{(e,c)}_j \cdot S^{(e)}(t)$
+is the signed signal: positive means long, negative means short.
+
+% ============================================================
+\section{Online Convolution Scoring}
+\label{sec:online}
+% ============================================================
+
+\subsection{Per-Channel Score}
+
+At production time $t$, the current window for channel $c$ is the normalised vector
+\begin{equation}
+    \bvec{x}^{(c)}_t :=
+    \bigl(\tilde{x}^{(c)}_{t-W+1}, \ldots, \tilde{x}^{(c)}_t\bigr)^\top \in \R^W,
+    \label{eq:live_window}
+\end{equation}
+normalised identically to \eqref{eq:normalised_window} using $\mathrm{ATR}_t$ at the
+current bar. For kernel $\bvec{k}^{(e,c)}_j \in \mathcal{K}$, the \emph{cosine
+similarity score} is
+\begin{equation}
+    s^{(e,c)}_j(t) :=
+    \frac{\inner{\bvec{x}^{(c)}_t}{\bvec{k}^{(e,c)}_j}}
+         {\norm{\bvec{x}^{(c)}_t}_2 \cdot \norm{\bvec{k}^{(e,c)}_j}_2}
+    = \frac{\inner{\bvec{x}^{(c)}_t}{\bvec{k}^{(e,c)}_j}}
+           {\norm{\bvec{x}^{(c)}_t}_2},
+    \label{eq:cosine_score}
+\end{equation}
+where the simplification uses $\norm{\bvec{k}}_2 = 1$ from
+Proposition~\ref{prop:kernel_properties}. The score satisfies $s \in [-1, 1]$ by the
+Cauchy--Schwarz inequality, with $s = 1$ iff the current window is an exact positive
+scalar multiple of the kernel.
+
+The inner product $\inner{\bvec{x}}{\bvec{k}} = \sum_{\tau=0}^{W-1} x(\tau) k(\tau)$
+is computed in $O(W)$ time per kernel per bar. This is the zero-lag output of a
+cross-correlation filter; the term ``convolver'' refers to the sliding evaluation of this
+inner product as new bars arrive.
+
+\subsection{Multi-Channel Aggregation}
+
+For event type $e$ and component $j$, the multi-channel score is
+\begin{equation}
+    S^{(e)}_j(t) :=
+    \sum_{c \in \mathcal{C}} w_c \cdot s^{(e,c)}_j(t),
+    \quad \sum_{c \in \mathcal{C}} w_c = 1, \quad w_c \geq 0.
+    \label{eq:multichannel_score}
+\end{equation}
+Equal-weight default: $w_c = 0.25$ for all $c \in \{b, u, l, v\}$. IC-weighted
+alternative:
+\begin{equation}
+    w_c \propto \bigl|\mathrm{IC}^{(e,c,H^*)}_j\bigr|,
+    \quad w_c \leftarrow w_c \,/\, \textstyle\sum_{c'} w_{c'}.
+    \label{eq:ic_weights}
+\end{equation}
+
+\subsection{Composite Event Score}
+
+Aggregating across all surviving components $j$ of event type $e$:
+\begin{equation}
+    S^{(e)}(t) :=
+    \sum_{\{j\,:\,\bvec{k}^{(e,\cdot)}_j \in \mathcal{K}\}}
+    \mathrm{IC}_j \cdot S^{(e)}_j(t),
+    \label{eq:composite_score}
+\end{equation}
+where the IC weight ensures that components with higher predictive power contribute more
+to the composite. The composite score $S^{(e)}(t) \in \R$ is the final feature output
+for event type $e$ at time $t$, suitable for ingestion into the NAT feature pipeline.
+
+% ============================================================
+\section{Statistical Validation Framework}
+\label{sec:validation}
+% ============================================================
+
+\subsection{Walk-Forward Validation}
+
+\begin{pseudocode}{Walk-Forward Kernel Discovery and Validation}
+\aline{Inputs: OHLCV dataset $\mathcal{D}$, split $\rho_{\mathrm{train}} = 0.60$, horizon $H$.}
+\aline{Set $T_{\mathrm{train}} := \lfloor \rho_{\mathrm{train}} T \rfloor$.}
+\aline{\textbf{Discovery phase} on $t \leq T_{\mathrm{train}}$:}
+\aindent{For each $(e, c) \in \mathcal{E} \times \mathcal{C}$:}
+\aindent{\quad Detect events $\mathcal{T}_e$; build $\Xmat^{(e,c)}$; compute SVD.}
+\aindent{\quad Truncate to $K^{(e,c)}$ components via \eqref{eq:truncation}.}
+\aindent{\quad Compute IC \eqref{eq:ic} using in-sample returns; apply gate \eqref{eq:ic_gate}.}
+\aline{Apply BH-FDR correction across all tests.}
+\aline{\textbf{Validation phase} on $t \in (T_{\mathrm{train}}, T - H]$:}
+\aindent{For each out-of-sample event: score window with $\mathcal{K}$; record $S^{(e)}$ and $r^{(H)}$.}
+\aline{Compute out-of-sample IC for each surviving kernel.}
+\aline{Report: in-sample IC, out-of-sample IC, IC decay ratio \eqref{eq:ic_decay}.}
+\end{pseudocode}
+
+\paragraph{IC Decay Ratio.}
+A kernel is considered robust if
+\begin{equation}
+    \rho_{\mathrm{decay}} :=
+    \frac{\mathrm{IC}^{\mathrm{OOS}}_k}{\mathrm{IC}^{\mathrm{IS}}_k} \geq 0.5.
+    \label{eq:ic_decay}
+\end{equation}
+A ratio below 0.5 indicates in-sample overfitting.
+
+\subsection{Kernel Stability Across Rolling Windows}
+
+To test whether discovered shapes are stable over time (rather than artefacts of a
+specific regime), we perform a rolling re-discovery.
+
+\begin{definition}[Rolling SVD Stability]
+\label{def:rolling_stability}
+For rolling windows $\mathcal{D}_1, \mathcal{D}_2, \ldots, \mathcal{D}_M$ of length
+$T_{\mathrm{roll}}$ with stride $\Delta$, let $\bvec{v}^{(m)}_1$ be the first right
+singular vector of $\Xmat^{(e,c)}$ computed on $\mathcal{D}_m$. The \emph{stability
+score} between consecutive windows is
+\begin{equation}
+    \rho_m :=
+    \bigl|\inner{\bvec{v}^{(m)}_1}{\bvec{v}^{(m+1)}_1}\bigr|
+    = \bigl|\cos\angle(\bvec{v}^{(m)}_1, \bvec{v}^{(m+1)}_1)\bigr|.
+    \label{eq:rolling_stability}
+\end{equation}
+The absolute value is taken because SVD is unique only up to sign. The overall stability
+is $\bar{\rho} = (M-1)^{-1}\sum_{m=1}^{M-1} \rho_m$. We require $\bar{\rho} \geq 0.70$.
+\end{definition}
+
+\subsection{Minimum Event Count Justification}
+
+Recall condition \eqref{eq:min_events}: $n_e \geq 100$. Under a spiked covariance model,
+the variance of the estimated right singular vector $\hat{\bvec{v}}_k$ is of order
+$O(\sigma^2 W / (n_e \cdot \sigma_k^2))$. For typical values ($W = 20$,
+$\sigma^2 / \sigma_k^2 \approx 10$), we need $n_e \gtrsim 50$ to achieve $O(10\%)$
+estimation error, and $n_e = 100$ provides a comfortable margin.
+
+\subsection{Sensitivity Analysis}
+
+Re-run the full pipeline at parameter perturbations $\{N \pm 5,\; K \pm 1,\;
+\alpha \pm 0.25\}$ and verify:
+\begin{itemize}
+    \item[(i)] Surviving kernels at base parameters also survive at $\geq 3/4$ of
+               perturbed configurations.
+    \item[(ii)] IC values are stable: $\Delta\mathrm{IC} < 0.01$ across perturbations.
+\end{itemize}
+
+% ============================================================
+\section{Integration with the Existing Feature Pipeline}
+\label{sec:integration}
+% ============================================================
+
+\subsection{Feature Augmentation}
+
+The NAT ingestor produces 209 features per 100\,ms emission. The convolver scores
+$S^{(e)}(t)$ for $e \in \mathcal{E}$ form $|\mathcal{E}| = 6$ additional scalar
+features. Including per-component scores, the maximum expansion is $6 \times 4 \times
+K_{\max}$ features before IC filtering; in practice the gate reduces this substantially.
+
+The convolver features operate at candle granularity (e.g.\ 1-minute or 5-minute bars),
+whereas the base 209 features operate at 100\,ms. Alignment is achieved by repeating the
+candle-level score for all sub-candle emissions belonging to that bar.
+
+\subsection{Expected Decorrelation}
+
+The convolver captures multi-candle \emph{shape} over a $W$-bar window. The existing
+imbalance cluster (\texttt{imbalance\_qty\_l1}, \texttt{imbalance\_qty\_l5}, etc.)
+captures instantaneous order flow at the quote level. These are structurally distinct:
+imbalance features are point-in-time, $\sim$100\,ms resolution, order book state;
+convolver features are window-averaged, $W$-candle resolution, price geometry. We expect
+Pearson correlation $|r(\text{convolver},\, \text{imbalance})| < 0.3$ in typical
+conditions, providing genuine diversification in the alpha stack.
+
+\subsection{Regime Gating}
+
+The existing entropy features (\texttt{ent\_permutation\_entropy},
+\texttt{ent\_approximate\_entropy}) measure the regularity of the price process. In
+low-entropy regimes the price process is more deterministic and event patterns are more
+stereotyped (higher $\mathrm{SI}^{(e,c)}$). We recommend the regime gate:
+\begin{equation}
+    S^{(e)}_{\mathrm{gated}}(t) :=
+    S^{(e)}(t) \cdot
+    \mathbf{1}\!\bigl[\mathrm{PermEnt}_t < \eta_{\mathrm{thresh}}\bigr],
+    \label{eq:regime_gate}
+\end{equation}
+where $\eta_{\mathrm{thresh}} \in (0,1)$ is calibrated on the training period.
+This suppresses convolver signals during high-entropy (random-walk-like) regimes where
+pattern-based predictions are unreliable.
+
+% ============================================================
+\section{Basis Function Initialisation: Analytical Warm-Start}
+\label{sec:warmstart}
+% ============================================================
+
+\subsection{Motivation}
+
+The SVD discovers basis functions purely from data. As a diagnostic and optional
+initialisation, we define an analytical basis dictionary against which data-driven shapes
+can be compared. This serves two purposes:
+\begin{enumerate}
+    \item \textbf{Interpretability}: if $\bvec{v}_1$ has high cosine similarity to a
+          known basis function, the event shape admits a classical description.
+    \item \textbf{Warm-start}: when data is limited ($n_e < n_{\min}$), analytical bases
+          can substitute for SVD-derived ones, at the cost of reduced adaptivity.
+\end{enumerate}
+
+\subsection{Analytical Basis Dictionary}
+
+Let $\bar{\tau} = \tau / (W - 1) \in [0, 1]$ be the normalised within-window coordinate,
+with $\bar{\tau} = 0$ at the start of the window and $\bar{\tau} = 1$ at the event
+candle.
+
+\paragraph{Polynomial family (low-frequency trend shapes).}
+\begin{align}
+    \phi_{q1}(\bar{\tau}) &= \bar{\tau}^2
+        \label{eq:phi_q1} \\
+    \phi_{q2}(\bar{\tau}) &= \bigl(\bar{\tau} - \tfrac{1}{2}\bigr)^2
+        \label{eq:phi_q2} \\
+    \phi_{q3}(\bar{\tau}) &= (1 - \bar{\tau})^2
+        \label{eq:phi_q3}
+\end{align}
+These capture convex and concave acceleration patterns: $\phi_{q1}$ is convex-up
+(acceleration toward the event), $\phi_{q3}$ is convex-down (deceleration into the
+event), and $\phi_{q2}$ is a U-shape (dip then recovery, or vice versa).
+
+\paragraph{Cubic family (S-curves and reversal structures).}
+\begin{align}
+    \phi_{c1}(\bar{\tau}) &= \bar{\tau}^3
+        \label{eq:phi_c1} \\
+    \phi_{c2}(\bar{\tau}) &= \bigl(\bar{\tau} - \tfrac{1}{2}\bigr)^3
+        \label{eq:phi_c2} \\
+    \phi_{c3}(\bar{\tau}) &= (1 - \bar{\tau})^3
+        \label{eq:phi_c3} \\
+    \phi_{s1}(\bar{\tau}) &= 3\bar{\tau}^2 - 2\bar{\tau}^3
+        \label{eq:phi_s1}
+\end{align}
+The smoothstep $\phi_{s1}$ (Hermite easing function) satisfies $\phi_{s1}(0) = 0$,
+$\phi_{s1}(1) = 1$, $\phi_{s1}'(0) = \phi_{s1}'(1) = 0$, making it a natural model for
+a gradual acceleration-then-deceleration run-up into a breakout.
+
+\paragraph{Exponential family (spike and impulse shapes).}
+For $a \in [3, 8]$:
+\begin{align}
+    \phi_{e1}(\bar{\tau};\, a) &= e^{-a\bar{\tau}}
+        \label{eq:phi_e1} \\
+    \phi_{e2}(\bar{\tau};\, a) &= e^{-a(1-\bar{\tau})}
+        \label{eq:phi_e2} \\
+    \phi_{b1}(\bar{\tau};\, a) &= \exp\!\bigl(-a(\bar{\tau} - \tfrac{1}{2})^2\bigr)
+        \label{eq:phi_b1}
+\end{align}
+$\phi_{e1}$ models a sharp spike at $\bar{\tau}=0$ decaying to the event; $\phi_{e2}$
+models a ramp-up climaxing at the event; $\phi_{b1}$ models a Gaussian bump centred at
+the window midpoint (useful for detecting the volume bulge that accompanies a breakout).
+
+\subsection{General Parametric Kernel}
+
+A general kernel from this dictionary is the normalised linear combination:
+\begin{equation}
+    k(\bar{\tau};\, \boldsymbol{\theta}) :=
+    \frac{\displaystyle\sum_{i} \theta_i \phi_i(\bar{\tau})}
+         {\displaystyle\left\|\sum_{i} \theta_i \phi_i\right\|_2},
+    \quad \boldsymbol{\theta} \in \R^{|\Phi|},
+    \label{eq:analytical_kernel}
+\end{equation}
+where $\Phi = \{\phi_{q1}, \phi_{q2}, \phi_{q3}, \phi_{c1}, \phi_{c2}, \phi_{c3},
+\phi_{s1}, \phi_{e1}, \phi_{e2}, \phi_{b1}\}$ is the full basis set (10 elements).
+
+\subsection{Alignment Diagnostic}
+
+For each SVD-discovered basis vector $\bvec{v}^{(e,c)}_k$ and each analytical basis
+$\phi_i$ (discretised to the $W$-point grid), the alignment is
+\begin{equation}
+    \rho_{k,i}^{(e,c)} :=
+    \bigl|\inner{\bvec{v}^{(e,c)}_k}{\hat{\boldsymbol{\phi}}_i}\bigr|,
+    \label{eq:alignment}
+\end{equation}
+where $\hat{\boldsymbol{\phi}}_i = \boldsymbol{\phi}_i / \norm{\boldsymbol{\phi}_i}_2$
+is the normalised discrete version of $\phi_i$. Values of $\rho > 0.85$ indicate strong
+alignment (the data-driven shape is interpretable as the corresponding analytical form).
+Values of $\rho < 0.5$ indicate the market produces a shape not captured by the
+analytical dictionary --- the regime where data-driven discovery adds the most value.
+
+% ============================================================
+\section{Computational Complexity}
+\label{sec:complexity}
+% ============================================================
+
+\subsection{Offline Discovery Phase}
+
+\begin{center}
+\begin{tabular}{llll}
+\hline
+\textbf{Step} & \textbf{Operation} & \textbf{Complexity} & \textbf{Notes} \\
+\hline
+Event detection & Sliding max/min over $N$ bars & $O(T)$ per type
+                & Monotone deque \\
+Window extraction & Copy $n_e \times W$ values & $O(n_e W)$
+                & Single pass \\
+Normalisation & Per-window mean and ATR & $O(n_e W)$ & \\
+SVD (thin) & LAPACK \texttt{dgesdd} & $O(n_e W^2)$
+                & $n_e \gg W$ assumed \\
+IC computation & Correlation of length $n_e$ & $O(n_e)$
+                & Per component \\
+BH-FDR & Sort $m$ $p$-values & $O(m \log m)$
+                & $m \ll n_e$ typically \\
+\hline
+\end{tabular}
+\end{center}
+
+The dominant step is SVD: $O(n_e W^2)$ per $(e,c)$ pair, giving total offline complexity
+$O(|\mathcal{E}| \cdot |\mathcal{C}| \cdot n_e W^2)$. For typical values
+($|\mathcal{E}|=6$, $|\mathcal{C}|=4$, $n_e = 500$, $W = 20$), this is approximately
+$6 \times 4 \times 500 \times 400 = 4.8 \times 10^6$ floating-point operations ---
+sub-second on any modern CPU.
+
+\subsection{Online Scoring Phase}
+
+For each new candle, the convolver evaluates:
+\begin{equation}
+    \text{Cost per candle} = O\!\bigl(|\mathcal{K}| \cdot W\bigr),
+    \label{eq:online_complexity}
+\end{equation}
+where $|\mathcal{K}|$ is the number of retained kernels (typically $\leq 20$ after IC
+filtering) and $W$ is the window width. For $|\mathcal{K}| = 20$ and $W = 20$, this is
+400 multiply-accumulate operations per candle, well within real-time constraints at any
+candle frequency.
+
+\subsection{Memory Requirements}
+
+The kernel library requires $|\mathcal{K}| \times W$ floats. For $|\mathcal{K}| = 20$
+and $W = 20$ with 64-bit floats: $20 \times 20 \times 8 = 3.2$\,KB. The event-aligned
+matrices require $|\mathcal{E}| \times |\mathcal{C}| \times n_e \times W$ floats during
+discovery: $6 \times 4 \times 500 \times 20 \times 8 = 1.92$\,MB.
+
+% ============================================================
+\section{Summary: Pipeline Overview}
+\label{sec:summary}
+% ============================================================
+
+The complete pipeline from raw OHLCV data to deployed convolver features:
+
+\begin{enumerate}
+    \item \textbf{Candle decomposition} (Section~\ref{sec:channels}): map each
+          $(O_t, H_t, L_t, C_t, V_t)$ to channels $(b_t, u_t, l_t, v_t)$ via
+          \eqref{eq:body}--\eqref{eq:volume_channel}, then normalise via
+          \eqref{eq:normalised_window}.
+
+    \item \textbf{Event detection} (Section~\ref{sec:events}): apply analytical
+          conditions \eqref{eq:breakout_bull}--\eqref{eq:bear_trap} to label each bar as
+          belonging to one of $|\mathcal{E}| = 6$ event types.
+
+    \item \textbf{Matrix assembly} (Section~\ref{sec:matrix}): for each $(e, c)$ pair,
+          stack normalised $W$-bar windows into $\Xmat^{(e,c)} \in \R^{n_e \times W}$
+          \eqref{eq:event_matrix}.
+
+    \item \textbf{SVD basis discovery} (Section~\ref{sec:svd}): factorise each matrix
+          via \eqref{eq:svd}; truncate to the top $K^{(e,c)}$ components explaining
+          $\geq 80\%$ of variance \eqref{eq:truncation}.
+
+    \item \textbf{IC gate} (Section~\ref{sec:ic}): correlate per-event SVD loadings
+          $\bvec{u}_k$ with forward returns $\bvec{r}^{(H)}$ via \eqref{eq:ic}; apply
+          BH-FDR and $|\mathrm{IC}| \geq 0.03$ threshold \eqref{eq:ic_gate}.
+
+    \item \textbf{Kernel library} (Section~\ref{sec:kernels}): surviving right singular
+          vectors form $\mathcal{K}$ \eqref{eq:kernel_library}.
+
+    \item \textbf{Online scoring} (Section~\ref{sec:online}): at each bar, evaluate
+          cosine similarities \eqref{eq:cosine_score}, aggregate across channels
+          \eqref{eq:multichannel_score}, weight by IC \eqref{eq:composite_score}.
+
+    \item \textbf{Validation} (Section~\ref{sec:validation}): walk-forward OOS IC,
+          rolling stability $\bar{\rho} \geq 0.70$ \eqref{eq:rolling_stability}, IC
+          decay ratio $\geq 0.50$ \eqref{eq:ic_decay}.
+
+    \item \textbf{Integration} (Section~\ref{sec:integration}): append convolver scores
+          to NAT feature vector; apply regime gate \eqref{eq:regime_gate}.
+\end{enumerate}
+
+\paragraph{Anti-overfitting guarantees.}
+The pipeline provides three independent layers of protection against spurious discoveries:
+\begin{itemize}
+    \item[(i)] SVD is return-blind: shapes are discovered without access to forward
+               returns.
+    \item[(ii)] BH-FDR controls the expected fraction of false discoveries at $q = 5\%$
+               across all tested $(e, c, k, H)$ combinations.
+    \item[(iii)] Walk-forward OOS validation tests generalisability to unseen data
+                 (Sections~\ref{sec:validation}).
+\end{itemize}
+
+% ============================================================
+\section*{References}
+% ============================================================
+
+\begin{enumerate}
+    \item Eckart, C.\ \& Young, G.\ (1936). The approximation of one matrix by another of
+          lower rank. \textit{Psychometrika}, 1(3), 211--218. [Eckart--Young--Mirsky
+          theorem, \eqref{eq:recon_error}]
+
+    \item Golub, G.H.\ \& Van Loan, C.F.\ (2013). \textit{Matrix Computations}, 4th ed.
+          Johns Hopkins University Press. [SVD algorithms, Section~\ref{sec:svd}]
+
+    \item Raschke, L.B.\ \& Connors, L.A.\ (1995). \textit{Street Smarts: High
+          Probability Short-Term Trading Strategies.} M.\ Gordon Publishing. [Turtle Soup
+          pattern, Definitions~\ref{def:ts_bull}--\ref{def:ts_bear}]
+
+    \item Donchian, R.D.\ (1960). Trend-following methods in commodity price analysis.
+          \textit{Commodity Yearbook.} [$N$-period channel breakout,
+          Definitions~\ref{def:breakout_bull}--\ref{def:breakout_bear}]
+
+    \item Wilder, J.W.\ (1978). \textit{New Concepts in Technical Trading Systems.} Trend
+          Research. [Average True Range, \eqref{eq:atr}]
+
+    \item Benjamini, Y.\ \& Hochberg, Y.\ (1995). Controlling the false discovery rate:
+          a practical and powerful approach to multiple testing. \textit{Journal of the
+          Royal Statistical Society, Series B}, 57(1), 289--300. [BH-FDR,
+          Section~\ref{sec:ic}]
+
+    \item Turin, G.L.\ (1960). An introduction to matched filters. \textit{IRE
+          Transactions on Information Theory}, 6(3), 311--329. [Matched filter analogy,
+          Section~\ref{sec:intro}]
+
+    \item Gatheral, J.\ \& Oomen, R.\ (2010). Zero-intelligence realized variance
+          estimation. \textit{Finance and Stochastics}, 14, 249--283. [ATR as
+          microstructure volatility proxy]
+
+    \item Jolliffe, I.T.\ (2002). \textit{Principal Component Analysis}, 2nd ed.\
+          Springer. [PCA/SVD relationship, explained variance ratio,
+          Section~\ref{sec:svd}]
+
+    \item Bandt, C.\ \& Pompe, B.\ (2002). Permutation entropy: a natural complexity
+          measure for time series. \textit{Physical Review Letters}, 88(17), 174102.
+          [Entropy features used in regime gate, Section~\ref{sec:integration}]
+\end{enumerate}
+
+\end{document}

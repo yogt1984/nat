@@ -1,0 +1,1851 @@
+\documentclass[11pt,a4paper]{article}
+
+% Packages (minimal texlive-base only)
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+
+% Page setup
+\geometry{margin=2.5cm}
+
+\begin{document}
+
+% ============================================================
+% TITLE PAGE
+% ============================================================
+\begin{titlepage}
+\centering
+\vspace*{3cm}
+{\Huge\bfseries NAT\\[0.3cm]}
+{\LARGE Quantitative Research Platform\\[0.5cm]}
+{\Large Mathematical Foundations, Algorithms \&\\Autonomous Agent Architecture\\[0.3cm]}
+{\large \textit{Self-Study Reference --- Revision 1}\\[2cm]}
+{\large Prepared by Yigit Onat\\[0.3cm]}
+{\large May 23, 2026\\[3cm]}
+\vfill
+{\small CONFIDENTIAL --- For internal use only}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% ============================================================
+% PART I: INFORMATION THEORY
+% ============================================================
+\section{Information Theory}
+
+Information theory provides the mathematical framework for quantifying uncertainty, dependence, and information flow in the feature space. NAT uses it both for feature computation (entropy features) and for feature selection (mutual information, transfer entropy).
+
+\subsection{Shannon Entropy}
+
+The fundamental measure of uncertainty in a discrete random variable $X$ with probability mass function $p(x)$:
+
+\begin{equation}
+H(X) = -\sum_{x \in \mathcal{X}} p(x) \log p(x)
+\end{equation}
+
+\textbf{Properties:}
+\begin{itemize}
+    \item $H(X) \geq 0$, with equality iff $X$ is deterministic
+    \item $H(X) \leq \log |\mathcal{X}|$, with equality iff $X$ is uniform
+    \item Concave in $p$
+\end{itemize}
+
+\textbf{Implementation:} \texttt{rust/ing/src/features/entropy.rs}. NAT computes distribution entropy by binning continuous values (spreads, volumes, book shape) into $N$ bins, computing empirical $\hat{p}_i = n_i / n$, and normalizing by $\log N$ to yield $H_{\text{norm}} \in [0, 1]$.
+
+\textbf{Features:} \texttt{spread\_dispersion}, \texttt{volume\_dispersion}, \texttt{book\_shape}, \texttt{trade\_size\_dispersion}.
+
+\subsection{Permutation Entropy}
+
+Introduced by Bandt \& Pompe (2002), permutation entropy captures the complexity of a time series through its ordinal pattern structure. Given an embedding dimension $m$ and delay $\tau$, each subsequence $(x_t, x_{t+\tau}, \ldots, x_{t+(m-1)\tau})$ maps to one of $m!$ possible ordinal patterns $\pi$.
+
+\begin{equation}
+H_{\text{PE}}(m, \tau) = -\sum_{\pi \in S_m} p(\pi) \log p(\pi)
+\end{equation}
+
+where $S_m$ is the symmetric group of order $m$ and $p(\pi)$ is the relative frequency of pattern $\pi$.
+
+\textbf{Normalized:} $h_{\text{PE}} = H_{\text{PE}} / \log(m!)$, giving $h_{\text{PE}} \in [0, 1]$.
+
+\textbf{Implementation:} NAT uses $m = 3$ (yielding $3! = 6$ possible patterns) with windows of 8, 16, and 32 ticks. Features: \texttt{permutation\_returns\_8/16/32}, \texttt{permutation\_imbalance\_16}.
+
+\textbf{Interpretation:}
+\begin{itemize}
+    \item $h_{\text{PE}} \approx 1$: all ordinal patterns equally likely $\Rightarrow$ random, unpredictable
+    \item $h_{\text{PE}} \ll 1$: few patterns dominate $\Rightarrow$ structured, predictable
+\end{itemize}
+
+\textbf{Reference:} Bandt, C. \& Pompe, B. (2002). Permutation entropy: a natural complexity measure for time series. \textit{Physical Review Letters}, 88(17).
+
+\subsection{Tick Direction Entropy}
+
+A domain-specific entropy measuring the predictability of trade direction. Each trade is classified as $\{$up, down, neutral$\}$ using the tick rule (comparison with previous trade price), yielding a trinomial distribution.
+
+\begin{equation}
+H_{\text{tick}}(w) = -\sum_{d \in \{u, d, n\}} p_d(w) \log p_d(w)
+\end{equation}
+
+where $w$ is the time window and $p_d(w)$ is the fraction of ticks in direction $d$ within window $w$.
+
+\textbf{Range:} $[0, \log 3] \approx [0, 1.099]$.
+
+\textbf{Implementation:} Computed at 7 timescales: 1s, 5s, 10s, 15s, 30s, 1m, 15m. Volume-weighted variants weight each tick by trade size.
+
+\textbf{Features:} \texttt{tick\_entropy\_1s} through \texttt{tick\_entropy\_15m}, \texttt{volume\_tick\_entropy\_1s} through \texttt{volume\_tick\_entropy\_15m} (14 features total).
+
+\subsection{Mutual Information (KSG Estimator)}
+
+Mutual information quantifies the total (linear + nonlinear) statistical dependence between two random variables:
+
+\begin{equation}
+I(X; Y) = H(X) + H(Y) - H(X, Y)
+\end{equation}
+
+Equivalently, $I(X; Y) = D_{\text{KL}}(p_{XY} \| p_X p_Y)$, the Kullback-Leibler divergence between the joint and product of marginals.
+
+\textbf{KSG Algorithm 1} (Kraskov, St\"ogbauer, Grassberger, 2004): A $k$-nearest-neighbor estimator that avoids explicit density estimation. For each sample $(x_i, y_i)$:
+
+\begin{enumerate}
+    \item Find the $k$-th nearest neighbor in the joint space using Chebyshev (max-norm) distance: $\epsilon(i) = \|z_i - z_i^{(k)}\|_\infty$
+    \item Count $n_x(i)$: number of points with $\|x_j - x_i\|_\infty < \epsilon(i)$
+    \item Count $n_y(i)$: number of points with $\|y_j - y_i\|_\infty < \epsilon(i)$
+\end{enumerate}
+
+\begin{equation}
+\hat{I}_{\text{KSG}}(X; Y) = \psi(k) - \frac{1}{N}\sum_{i=1}^{N}\left[\psi(n_x(i) + 1) + \psi(n_y(i) + 1)\right] + \psi(N)
+\end{equation}
+
+where $\psi(\cdot)$ is the digamma function.
+
+\textbf{Properties:}
+\begin{itemize}
+    \item Bias-corrected: $\hat{I} \geq 0$ by construction
+    \item Nonparametric: no distributional assumptions
+    \item Consistent: converges as $N \to \infty$
+    \item Sensitive to $k$: NAT uses $k = 5$ (default)
+\end{itemize}
+
+\textbf{Implementation:} \texttt{scripts/it\_engine/estimators.py}. Used for alpha discovery and feature selection.
+
+\textbf{Reference:} Kraskov, A., St\"ogbauer, H. \& Grassberger, P. (2004). Estimating mutual information. \textit{Physical Review E}, 69(6).
+
+\subsection{Conditional Mutual Information}
+
+CMI measures the dependence between $X$ and $Y$ given knowledge of $Z$:
+
+\begin{equation}
+I(X; Y | Z) = H(X, Z) + H(Y, Z) - H(X, Y, Z) - H(Z)
+\end{equation}
+
+Each entropy term is estimated via the KSG $k$-NN approach in the appropriate joint space.
+
+\textbf{Usage in NAT:} Measures \textit{marginal} information content --- does feature $X$ tell us something about returns $Y$ that the existing feature set $Z$ does not already capture?
+
+\textbf{Implementation:} \texttt{scripts/it\_engine/estimators.py}, used by the greedy feature selector.
+
+\subsection{Interaction Information}
+
+A three-variable generalization that distinguishes synergy from redundancy:
+
+\begin{equation}
+\text{II}(X; Y; Z) = I(X; Y | Z) - I(X; Y)
+\end{equation}
+
+\textbf{Interpretation:}
+\begin{itemize}
+    \item $\text{II} > 0$: \textbf{Synergy} --- $X$ and $Y$ together tell more about $Z$ than separately
+    \item $\text{II} < 0$: \textbf{Redundancy} --- $X$ and $Y$ share overlapping information about $Z$
+    \item $\text{II} = 0$: Independence of the interaction
+\end{itemize}
+
+\textbf{Implementation:} \texttt{scripts/it\_engine/estimators.py}. Used to detect feature combinations that are more powerful together than individually.
+
+\subsection{Transfer Entropy}
+
+Transfer entropy (Schreiber, 2000) measures directed information flow from a source process $X$ to a target process $Y$:
+
+\begin{equation}
+\text{TE}_{X \to Y}(p, q) = I(Y_{t+1}; X_t^{(q)} | Y_t^{(p)})
+\end{equation}
+
+where $X_t^{(q)} = (X_t, X_{t-1}, \ldots, X_{t-q+1})$ and $Y_t^{(p)} = (Y_t, Y_{t-1}, \ldots, Y_{t-p+1})$.
+
+\textbf{NAT implementation:} Linear (autoregressive) approximation:
+
+\begin{equation}
+\text{TE}_{\text{linear}} = \frac{1}{2} \log \frac{\text{Var}(\varepsilon_{\text{reduced}})}{\text{Var}(\varepsilon_{\text{full}})}
+\end{equation}
+
+where $\varepsilon_{\text{reduced}}$ are residuals from $Y_{t+1} = f(Y_t^{(p)})$ and $\varepsilon_{\text{full}}$ from $Y_{t+1} = g(Y_t^{(p)}, X_t^{(q)})$.
+
+\textbf{Usage:} Detect causal information flow from features to returns. A feature with high $\text{TE}_{X \to \text{returns}}$ carries predictive, not just correlational, information.
+
+\textbf{Reference:} Schreiber, T. (2000). Measuring information transfer. \textit{Physical Review Letters}, 85(2).
+
+\subsection{Information Cost Function}
+
+A trading-specific threshold: a feature is only viable if its information content exceeds the cost of acting on it.
+
+\begin{equation}
+I_{\min}(\text{fee}, \sigma_r) = \frac{1}{2} \log\left(1 + \frac{\text{fee}^2}{\sigma_r^2}\right)
+\end{equation}
+
+where $\text{fee}$ is the round-trip transaction cost (in return units) and $\sigma_r$ is the return volatility.
+
+\textbf{Implementation:} \texttt{scripts/it\_engine/estimators.py}. Config in \texttt{config/it\_engine.toml} with exchange-specific fee schedules (e.g., Binance VIP tiers).
+
+\textbf{Gate rule:} Feature passes cost gate iff $I(X; \text{returns}) > I_{\min}$.
+
+\subsection{Kullback-Leibler Divergence}
+
+The directed divergence (information gain) from distribution $Q$ to $P$:
+
+\begin{equation}
+D_{\text{KL}}(P \| Q) = \sum_{x} P(x) \log \frac{P(x)}{Q(x)}
+\end{equation}
+
+\textbf{Properties:}
+\begin{itemize}
+    \item $D_{\text{KL}} \geq 0$ (Gibbs' inequality), with equality iff $P = Q$
+    \item Not symmetric: $D_{\text{KL}}(P \| Q) \neq D_{\text{KL}}(Q \| P)$ in general
+    \item Connection to MI: $I(X; Y) = D_{\text{KL}}(p_{XY} \| p_X p_Y)$
+\end{itemize}
+
+Used implicitly throughout the information-theoretic framework.
+
+% ============================================================
+% PART II: STOCHASTIC PROCESSES & FILTERING
+% ============================================================
+\newpage
+\section{Stochastic Processes \& State-Space Filtering}
+
+\subsection{Ornstein-Uhlenbeck Process}
+
+The OU process is the continuous-time analog of a discrete AR(1) --- a mean-reverting diffusion:
+
+\begin{equation}
+dx_t = -\theta(x_t - \mu)\,dt + \sigma\,dW_t
+\end{equation}
+
+\textbf{Parameters:}
+\begin{itemize}
+    \item $\theta > 0$: mean-reversion speed (half-life $= \ln 2 / \theta$)
+    \item $\mu$: long-run mean
+    \item $\sigma$: volatility of innovations
+\end{itemize}
+
+\textbf{Discrete-time transition} (exact, for time step $\Delta t$):
+\begin{align}
+x_{t+1} &= \mu + e^{-\theta \Delta t}(x_t - \mu) + \eta_t \\
+\eta_t &\sim \mathcal{N}\left(0, \frac{\sigma^2}{2\theta}(1 - e^{-2\theta \Delta t})\right)
+\end{align}
+
+\textbf{Usage in NAT:} Models order book imbalance as mean-reverting around zero. Default $\theta \approx 0.1$ (half-life 5--7 seconds at 100ms emission).
+
+\subsection{Kalman Filter}
+
+The optimal linear state estimator for the linear Gaussian state-space model:
+
+\textbf{State equation:}
+\begin{equation}
+x_{t+1} = F x_t + w_t, \quad w_t \sim \mathcal{N}(0, Q)
+\end{equation}
+
+\textbf{Observation equation:}
+\begin{equation}
+z_t = H x_t + v_t, \quad v_t \sim \mathcal{N}(0, R)
+\end{equation}
+
+\textbf{Prediction step:}
+\begin{align}
+\hat{x}_{t|t-1} &= F \hat{x}_{t-1|t-1} \\
+P_{t|t-1} &= F P_{t-1|t-1} F^\top + Q
+\end{align}
+
+\textbf{Update step:}
+\begin{align}
+\nu_t &= z_t - H \hat{x}_{t|t-1} \quad \text{(innovation)} \\
+S_t &= H P_{t|t-1} H^\top + R \quad \text{(innovation covariance)} \\
+K_t &= P_{t|t-1} H^\top S_t^{-1} \quad \text{(Kalman gain)} \\
+\hat{x}_{t|t} &= \hat{x}_{t|t-1} + K_t \nu_t \\
+P_{t|t} &= (I - K_t H) P_{t|t-1}
+\end{align}
+
+\textbf{OU-specific parameterization} (NAT):
+\begin{align}
+F &= e^{-\theta \Delta t}, \quad H = 1 \\
+Q &= \frac{\sigma^2}{2\theta}(1 - F^2), \quad R = \sigma_{\text{obs}}^2
+\end{align}
+
+\textbf{Implementation:} \texttt{scripts/algorithms/kalman\_imbalance.py}, \texttt{scripts/kalman/ou\_filter.py}.
+
+\textbf{Output features:}
+\begin{center}
+\begin{tabular}{l p{8cm}}
+\hline
+\textbf{Feature} & \textbf{Definition} \\
+\hline
+\texttt{alg\_kalman\_filtered\_imb} & $\hat{x}_{t|t}$ --- filtered slow imbalance \\
+\texttt{alg\_kalman\_uncertainty} & $P_{t|t}$ --- posterior variance \\
+\texttt{alg\_kalman\_innovation} & $\nu_t = z_t - \hat{x}_{t|t-1}$ \\
+\texttt{alg\_kalman\_signal\_strength} & $\hat{x}_{t|t} / \sqrt{P_{t|t}}$ --- signal-to-noise \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Regime-Switching Kalman Filter (Hamilton Filter)}
+
+Two parallel Kalman filters, each modeling a different market regime:
+
+\begin{itemize}
+    \item \textbf{Regime 0 (fast):} $\theta_0 = 0.5$ --- rapid mean-reversion, range-bound market
+    \item \textbf{Regime 1 (slow):} $\theta_1 = 0.05$ --- slow reversion, trending market
+\end{itemize}
+
+\textbf{Transition matrix:}
+\begin{equation}
+\Pi = \begin{pmatrix} 1 - \rho & \rho \\ \rho & 1 - \rho \end{pmatrix}, \quad \rho = 0.01 \text{ per tick}
+\end{equation}
+
+\textbf{Bayesian posterior update} (Hamilton, 1989):
+\begin{enumerate}
+    \item Predict regime probabilities: $\tilde{\pi}_t = \Pi^\top \pi_{t-1}$
+    \item Compute likelihoods: $f_k(z_t) = \mathcal{N}(z_t; H\hat{x}_{t|t-1}^{(k)}, S_t^{(k)})$ for $k \in \{0, 1\}$
+    \item Update: $\pi_t^{(k)} = \frac{f_k(z_t) \cdot \tilde{\pi}_t^{(k)}}{\sum_j f_j(z_t) \cdot \tilde{\pi}_t^{(j)}}$
+\end{enumerate}
+
+\textbf{Output:} Probability-weighted state estimate: $\hat{x}_t = \pi_t^{(0)} \hat{x}_t^{(0)} + \pi_t^{(1)} \hat{x}_t^{(1)}$.
+
+\textbf{Implementation:} \texttt{scripts/algorithms/switching\_ou.py}.
+
+\textbf{Reference:} Hamilton, J.D. (1989). A new approach to the economic analysis of nonstationary time series. \textit{Econometrica}, 57(2).
+
+\subsection{Hawkes Self-Exciting Process}
+
+A point process where past events increase the probability of future events (clustering):
+
+\begin{equation}
+\lambda(t) = \mu + \sum_{t_i < t} \alpha \, e^{-\beta(t - t_i)}
+\end{equation}
+
+\textbf{Parameters:}
+\begin{itemize}
+    \item $\mu > 0$: baseline intensity (events per second)
+    \item $\alpha > 0$: excitation magnitude per event
+    \item $\beta > 0$: excitation decay rate
+    \item $\alpha / \beta$: branching ratio (if $> 1$, process is explosive)
+\end{itemize}
+
+\textbf{Recursive computation} (efficient online update):
+\begin{align}
+A(t) &= e^{-\beta(t - t_{\text{prev}})} \cdot A(t_{\text{prev}}) + N(t) \\
+\lambda(t) &= \mu + \alpha \cdot A(t)
+\end{align}
+
+where $N(t)$ is the number of events at time $t$ and $A(t)$ is the accumulated excitation state.
+
+\textbf{Excitement fraction:}
+\begin{equation}
+\varphi(t) = \frac{\alpha \cdot A(t)}{\lambda(t)} = \frac{\lambda(t) - \mu}{\lambda(t)} \in [0, 1)
+\end{equation}
+
+Measures what fraction of current intensity is due to self-excitation vs.\ baseline.
+
+\textbf{NAT parameterization:} $\alpha = 0.5$/sec, $\beta = 1.0$/sec (calibrated for HFT-scale trade arrival). Branching ratio $= \alpha/\beta = 0.5$ (subcritical, stable).
+
+\textbf{Bid/Ask decomposition:} Separate excitation states $A^{\text{bid}}$, $A^{\text{ask}}$ using imbalance as a pressure proxy:
+\begin{equation}
+\text{HI}(t) = \frac{\lambda^{\text{ask}}(t) - \lambda^{\text{bid}}(t)}{\lambda^{\text{ask}}(t) + \lambda^{\text{bid}}(t) + \varepsilon}
+\end{equation}
+
+\textbf{Implementation:} \texttt{rust/ing/src/features/hawkes.rs} (feature), \texttt{scripts/algorithms/hawkes\_intensity.py} (algorithm with bid/ask decomposition).
+
+\textbf{Reference:} Bacry, E., Mastromatteo, I. \& Muzy, J.-F. (2015). Hawkes processes in finance. \textit{Market Microstructure and Liquidity}, 1(1).
+
+\subsection{Sequential Probability Ratio Test (SPRT)}
+
+Wald's (1947) optimal sequential hypothesis test. Given observations $\nu_1, \nu_2, \ldots$ (Kalman innovations in NAT):
+
+\textbf{Hypotheses:}
+\begin{align}
+H_0 &: \nu_t \sim \mathcal{N}(0, \hat{\sigma}^2) \quad \text{(no drift)} \\
+H_1 &: \nu_t \sim \mathcal{N}(\mu, \hat{\sigma}^2) \quad \text{(drift $\mu$ detected)}
+\end{align}
+
+\textbf{Log-likelihood ratio increment:}
+\begin{equation}
+\Lambda_t = \frac{\mu}{\hat{\sigma}^2} \nu_t - \frac{\mu^2}{2\hat{\sigma}^2}
+\end{equation}
+
+\textbf{Cumulative statistic:}
+\begin{equation}
+S_n = \sum_{t=1}^{n} \Lambda_t
+\end{equation}
+
+\textbf{Decision boundaries:}
+\begin{align}
+A &= \log\frac{1 - \beta}{\alpha} \quad \text{(accept $H_1$ if $S_n \geq A$)} \\
+B &= \log\frac{\beta}{1 - \alpha} \quad \text{(accept $H_0$ if $S_n \leq B$)}
+\end{align}
+
+\textbf{NAT defaults:} $\alpha = 0.05$ (Type I), $\beta = 0.20$ (Type II), $\mu = 0.001$. This gives $A \approx 2.77$, $B \approx -1.55$.
+
+\textbf{Integration with Kalman:} The Kalman filter pre-whitens the imbalance signal to produce i.i.d.\ innovations $\nu_t$, which the SPRT then tests for drift. The innovation variance is tracked with an EMA: $\hat{\sigma}^2(t) = \alpha_{\text{ema}} \nu_t^2 + (1 - \alpha_{\text{ema}}) \hat{\sigma}^2(t-1)$.
+
+\textbf{Implementation:} \texttt{scripts/algorithms/optimal\_entry.py}.
+
+\textbf{Reference:} Wald, A. (1947). \textit{Sequential Analysis}. John Wiley \& Sons.
+
+% ============================================================
+% PART III: VOLATILITY ESTIMATION & JUMP DETECTION
+% ============================================================
+\newpage
+\section{Volatility Estimation \& Jump Detection}
+
+\subsection{Realized Volatility}
+
+The simplest nonparametric volatility estimator from tick-level returns $r_i = \log(p_i / p_{i-1})$:
+
+\begin{equation}
+\text{RV}_N = \sum_{i=1}^{N} r_i^2
+\end{equation}
+
+NAT reports the annualized standard deviation: $\hat{\sigma} = \sqrt{\text{RV}_N / N}$.
+
+\textbf{Windows:} 60 ticks ($\approx$ 1 min), 300 ticks ($\approx$ 5 min). Features: \texttt{vol\_returns\_1m}, \texttt{vol\_returns\_5m}.
+
+\subsection{Parkinson Volatility (1980)}
+
+Uses the high-low range within a window, which is more efficient than close-to-close:
+
+\begin{equation}
+\hat{\sigma}_P = \frac{\log(H/L)}{\sqrt{4 \ln 2}}
+\end{equation}
+
+\textbf{Efficiency:} $\approx 5.2\times$ more efficient than close-to-close (uses more information from the price path). Feature: \texttt{vol\_parkinson\_5m}.
+
+\textbf{Reference:} Parkinson, M. (1980). The extreme value method for estimating the variance of the rate of return. \textit{The Journal of Business}, 53(1).
+
+\subsection{Garman-Klass Volatility (1980)}
+
+Uses OHLC data for maximum efficiency:
+
+\begin{equation}
+\hat{\sigma}_{GK}^2 = 0.5 \left(\log \frac{H}{L}\right)^2 - (2\ln 2 - 1)\left(\log \frac{C}{O}\right)^2
+\end{equation}
+
+\textbf{Efficiency:} $\approx 7.4\times$ close-to-close, $\approx 1.2\times$ Parkinson. Feature: \texttt{vol\_garman\_klass\_5m}.
+
+\textbf{Reference:} Garman, M.B. \& Klass, M.J. (1980). On the estimation of security price volatilities from historical data. \textit{The Journal of Business}, 53(1).
+
+\subsection{Bipower Variation (BNS 2004)}
+
+Separates continuous volatility from jumps:
+
+\begin{equation}
+\text{BV}_N = \frac{\pi}{2} \cdot \frac{N}{N-1} \sum_{i=2}^{N} |r_i| \cdot |r_{i-1}|
+\end{equation}
+
+\textbf{Key property:} Under mild conditions, $\text{BV}_N \xrightarrow{p} \int_0^T \sigma_t^2 \, dt$ (integrated variance), regardless of jumps. The realized variance $\text{RV}$ converges to integrated variance $+$ jump variation.
+
+\textbf{Jump decomposition:}
+\begin{align}
+\text{JV} &= \max(\text{RV} - \text{BV}, 0) \\
+\text{JR} &= \frac{\text{JV}}{\text{RV} + \varepsilon} \in [0, 1] \\
+\hat{\sigma}_c &= \sqrt{\max(\text{BV}, 0)} \quad \text{(continuous volatility proxy)}
+\end{align}
+
+\textbf{Implementation:} \texttt{scripts/algorithms/bipower\_jump.py}. Features: \texttt{alg\_bipower\_variation}, \texttt{alg\_jump\_variation}, \texttt{alg\_jump\_ratio}, \texttt{alg\_continuous\_vol}.
+
+\textbf{Reference:} Barndorff-Nielsen, O.E. \& Shephard, N. (2004). Power and bipower variation with stochastic volatility and jumps. \textit{Journal of Financial Econometrics}, 2(1).
+
+\subsection{Lee-Mykland Jump Detection (2008)}
+
+A nonparametric jump test using bipower-estimated local volatility:
+
+\begin{equation}
+L(t) = \frac{|r_t|}{\hat{\sigma}_{\text{BV}}(t)}
+\end{equation}
+
+where $\hat{\sigma}_{\text{BV}}(t) = \sqrt{\frac{\pi}{2} \cdot \frac{1}{W-1} \sum_{i=1}^{W-1} |r_{t-i}| \cdot |r_{t-i-1}|}$ is the local bipower volatility over a rolling window of $W$ ticks.
+
+\textbf{Decision:} Jump detected if $L(t) > c$ (default $c = 3.0$).
+
+\textbf{Post-jump reversion:}
+\begin{equation}
+\text{REV}(t) = -\frac{\log(p_t / p_J)}{r_J}
+\end{equation}
+
+where $p_J$ and $r_J$ are the price and return at the last detected jump.
+
+\textbf{Implementation:} \texttt{scripts/algorithms/jump\_detector.py}. Features: \texttt{alg\_jump\_statistic}, \texttt{alg\_jump\_detected}, \texttt{alg\_jump\_magnitude}, \texttt{alg\_post\_jump\_reversion}.
+
+\textbf{Reference:} Lee, S.S. \& Mykland, P.A. (2008). Jumps in financial markets: a new nonparametric test and jump dynamics. \textit{The Review of Financial Studies}, 21(6).
+
+% ============================================================
+% PART IV: MARKET MICROSTRUCTURE
+% ============================================================
+\newpage
+\section{Market Microstructure Theory}
+
+\subsection{Kyle's Lambda (1985)}
+
+Measures price impact per unit of signed order flow. In Kyle's model, an informed trader's order moves the price linearly:
+
+\begin{equation}
+\Delta p = \lambda \cdot \text{SignedVolume} + \varepsilon
+\end{equation}
+
+$\lambda$ is estimated via OLS regression of price changes on signed trade volumes within a rolling window.
+
+\textbf{Interpretation:} Higher $\lambda$ = less liquid, more information per trade.
+
+\textbf{Implementation:} \texttt{rust/ing/src/features/illiquidity.rs}. Windows: 100 and 500 trades. Features: \texttt{illiq\_kyle\_100}, \texttt{illiq\_kyle\_500}, \texttt{illiq\_kyle\_ratio}.
+
+\textbf{Reference:} Kyle, A.S. (1985). Continuous auctions and insider trading. \textit{Econometrica}, 53(6).
+
+\subsection{Amihud Illiquidity (2002)}
+
+A simpler price impact measure:
+
+\begin{equation}
+\text{ILLIQ} = \frac{1}{N} \sum_{i=1}^{N} \frac{|r_i|}{V_i}
+\end{equation}
+
+\textbf{Interpretation:} Average absolute return per unit volume. Higher = less liquid.
+
+\textbf{Implementation:} \texttt{rust/ing/src/features/illiquidity.rs}. Features: \texttt{illiq\_amihud\_100}, \texttt{illiq\_amihud\_500}.
+
+\textbf{Reference:} Amihud, Y. (2002). Illiquidity and stock returns: cross-section and time-series effects. \textit{Journal of Financial Markets}, 5(1).
+
+\subsection{VPIN (Volume-Synchronized Probability of Informed Trading)}
+
+Easley, L\'opez de Prado \& O'Hara (2012). Estimates the probability that a trade is information-driven, using volume buckets instead of time buckets:
+
+\begin{equation}
+\text{VPIN} = \frac{\sum_{\tau=1}^{n} |V_\tau^B - V_\tau^S|}{\sum_{\tau=1}^{n} (V_\tau^B + V_\tau^S)}
+\end{equation}
+
+where $V_\tau^B$ and $V_\tau^S$ are buy and sell volumes in volume bucket $\tau$, and $n$ is the number of buckets.
+
+\textbf{Range:} $[0, 1]$. Higher = more toxic (informed) flow.
+
+\textbf{Implementation:} \texttt{rust/ing/src/features/toxicity.rs}. Bucket sizes: 10 and 50. Features: \texttt{toxic\_vpin\_10}, \texttt{toxic\_vpin\_50}, \texttt{toxic\_vpin\_roc}.
+
+\textbf{Reference:} Easley, D., L\'opez de Prado, M.M. \& O'Hara, M. (2012). Flow toxicity and liquidity in a high-frequency world. \textit{The Review of Financial Studies}, 25(5).
+
+\subsection{Bouchaud Propagator Model (2004)}
+
+Decomposes price impact into transient and permanent components:
+
+\textbf{Transient impact} (power-law decay):
+\begin{equation}
+\text{TI}(t) = \frac{1}{W} \sum_{\tau=0}^{W-1} \varepsilon_{t-\tau} \cdot G(W - \tau), \quad G(\tau) = \tau^{-\alpha}
+\end{equation}
+
+where $\varepsilon_t = \text{sign}(\text{aggressor}) \times \text{volume}$ and $\alpha = 0.5$ (Bouchaud's empirical exponent).
+
+\textbf{Permanent impact:} EMA of window log-returns (long-memory drift).
+
+\textbf{Impact decay ratio:}
+\begin{equation}
+\text{IDR}(t) = \frac{|\text{TI}(t)|}{|\text{PI}(t)| + \varepsilon}
+\end{equation}
+
+\textbf{Implementation:} \texttt{scripts/algorithms/propagator.py}. Features: \texttt{alg\_transient\_impact}, \texttt{alg\_permanent\_impact}, \texttt{alg\_impact\_decay\_ratio}.
+
+\textbf{Reference:} Bouchaud, J.-P., Gefen, Y., Potters, M. \& Wyart, M. (2004). Fluctuations and response in financial markets. \textit{Quantitative Finance}, 4(2).
+
+\subsection{Huang-Stoll Spread Decomposition (1997)}
+
+Decomposes the bid-ask spread into adverse selection and order processing components:
+
+\begin{align}
+\text{Effective Spread} &= 2 |p_{\text{trade}} - m_t| \\
+\text{Realized Spread} &= 2 \cdot d \cdot (p_{\text{trade}} - m_{t+\Delta}) \\
+\text{Adverse Selection} &= \text{Effective} - \text{Realized}
+\end{align}
+
+where $d = +1$ for buyer-initiated and $-1$ for seller-initiated trades, and $m_t$ is the midprice.
+
+\textbf{Interpretation:} Adverse selection component measures the permanent information content of a trade. High adverse selection $\Rightarrow$ informed trading.
+
+\textbf{Implementation:} \texttt{scripts/algorithms/spread\_decomp.py}. Features: \texttt{alg\_adverse\_component}, \texttt{alg\_adverse\_trend}, \texttt{alg\_spread\_regime}.
+
+\textbf{Reference:} Huang, R.D. \& Stoll, H.R. (1997). The components of the bid-ask spread. \textit{The Review of Financial Studies}, 10(4).
+
+\subsection{Hasbrouck's Lambda (2009)}
+
+Measures permanent price impact via the information share of trades:
+
+\begin{equation}
+\lambda_H = \frac{\text{Var}(\text{permanent component})}{\text{Var}(\text{total price change})}
+\end{equation}
+
+Estimated from a VAR model of trade prices and signed order flow.
+
+\textbf{Implementation:} \texttt{rust/ing/src/features/illiquidity.rs}. Features: \texttt{illiq\_hasbrouck\_100}, \texttt{illiq\_hasbrouck\_500}.
+
+\textbf{Reference:} Hasbrouck, J. (2009). Trading costs and returns for U.S.\ equities: estimating effective costs from daily data. \textit{The Journal of Finance}, 64(3).
+
+% ============================================================
+% PART V: CONCENTRATION & INEQUALITY
+% ============================================================
+\newpage
+\section{Concentration \& Inequality Metrics}
+
+\subsection{Herfindahl-Hirschman Index (HHI)}
+
+\begin{equation}
+\text{HHI} = \sum_{i=1}^{N} s_i^2
+\end{equation}
+
+where $s_i = \text{OI}_i / \text{OI}_{\text{total}}$ is the market share of position $i$.
+
+\textbf{Range:} $[1/N, 1]$. $\text{HHI} = 1$ for monopoly, $1/N$ for perfectly distributed. Feature: \texttt{conc\_herfindahl\_index}.
+
+\subsection{Gini Coefficient}
+
+\begin{equation}
+G = \frac{\sum_{i=1}^{N} \sum_{j=1}^{N} |x_i - x_j|}{2N \sum_{i=1}^{N} x_i}
+\end{equation}
+
+\textbf{Range:} $[0, 1]$. $G = 0$ for perfect equality, $G = 1$ for perfect inequality. Feature: \texttt{conc\_gini\_coefficient}.
+
+\subsection{Theil Index}
+
+An entropy-based inequality measure:
+
+\begin{equation}
+T = \frac{1}{N} \sum_{i=1}^{N} \frac{x_i}{\bar{x}} \log\left(\frac{x_i}{\bar{x}}\right)
+\end{equation}
+
+\textbf{Connection to entropy:} $T = \log N - H(\mathbf{s})$, where $H(\mathbf{s})$ is the Shannon entropy of the share distribution. Maximum concentration $\Rightarrow$ $T = \log N$; perfect equality $\Rightarrow$ $T = 0$.
+
+Feature: \texttt{conc\_theil\_index}.
+
+\textbf{Implementation:} All in \texttt{rust/ing/src/features/concentration.rs}.
+
+% ============================================================
+% PART VI: STATISTICAL TESTING
+% ============================================================
+\newpage
+\section{Statistical Hypothesis Testing}
+
+\subsection{Correlation Testing}
+
+\textbf{Pearson:}
+\begin{equation}
+r_{xy} = \frac{\sum (x_i - \bar{x})(y_i - \bar{y})}{\sqrt{\sum (x_i - \bar{x})^2 \sum (y_i - \bar{y})^2}}
+\end{equation}
+
+\textbf{Spearman:} Pearson correlation on rank-transformed data. Captures monotonic (not just linear) relationships.
+
+\textbf{T-statistic for significance:}
+\begin{equation}
+t = r \sqrt{\frac{N - 2}{1 - r^2}}, \quad \text{df} = N - 2
+\end{equation}
+
+\textbf{Implementation:} \texttt{rust/ing/src/hypothesis/stats.rs}.
+
+\subsection{Walk-Forward Validation}
+
+Prevents lookahead bias by splitting data chronologically:
+
+\begin{center}
+\begin{tabular}{l l}
+\hline
+\textbf{Parameter} & \textbf{Value} \\
+\hline
+Folds & 5 (expanding window) \\
+Train/Test split & 70\%/30\% \\
+Success criterion & OOS correlation $>$ threshold $\times$ IS correlation \\
+OOS/IS ratio threshold & 0.5 \\
+\hline
+\end{tabular}
+\end{center}
+
+\textbf{Overfitting detection:} If OOS/IS ratio $< 0.5$ across folds, the signal is likely overfit.
+
+\subsection{Multiple Testing Correction}
+
+\textbf{Bonferroni:}
+\begin{equation}
+\alpha_{\text{corrected}} = \frac{\alpha}{m}
+\end{equation}
+
+Controls family-wise error rate (FWER). Conservative: rejects too few when $m$ is large.
+
+\textbf{Benjamini-Hochberg (1995):}
+\begin{enumerate}
+    \item Order $p$-values: $p_{(1)} \leq p_{(2)} \leq \cdots \leq p_{(m)}$
+    \item Find largest $k$ such that $p_{(k)} \leq \frac{k}{m} q$
+    \item Reject $H_{(1)}, \ldots, H_{(k)}$
+\end{enumerate}
+
+Controls false discovery rate (FDR) at level $q$. NAT uses $q = 0.05$.
+
+\textbf{Implementation:} Agent 5-gate protocol uses BH at end of each hypothesis cycle. Config: \texttt{config/agent.toml}.
+
+% ============================================================
+% PART VII: ONLINE LEARNING
+% ============================================================
+\newpage
+\section{Online Learning Algorithms}
+
+\subsection{Online Ridge Regression}
+
+Streaming linear regression with $L_2$ regularization, using Sherman-Morrison rank-1 updates to avoid matrix inversion at each step.
+
+\textbf{Model:} $\hat{y} = \mathbf{w}^\top \mathbf{x}$, with $\mathbf{w} \in \mathbb{R}^d$.
+
+\textbf{Initialization:}
+\begin{align}
+P_0 &= \frac{1}{\lambda} I_d \quad \text{(inverse regularized covariance)} \\
+\mathbf{w}_0 &= \mathbf{0}
+\end{align}
+
+\textbf{Per-tick update} (Sherman-Morrison):
+\begin{align}
+P_{t+1} &= P_t - \frac{P_t \mathbf{x}_t \mathbf{x}_t^\top P_t}{1 + \mathbf{x}_t^\top P_t \mathbf{x}_t} \\
+\mathbf{w}_{t+1} &= \mathbf{w}_t + \eta \cdot (y_t - \mathbf{w}_t^\top \mathbf{x}_t) \cdot P_{t+1} \mathbf{x}_t
+\end{align}
+
+\textbf{Complexity:} $O(d^2)$ per tick (vs.\ $O(d^3)$ for batch inversion).
+
+\textbf{Confidence:}
+\begin{equation}
+c_t = \frac{1}{1 + \mathbf{x}_t^\top P_t \mathbf{x}_t} \in (0, 1]
+\end{equation}
+
+High confidence when the input is well-represented by the inverse covariance.
+
+\textbf{Feature importance entropy:}
+\begin{equation}
+H_w = -\sum_{j=1}^{d} p_j \log p_j, \quad p_j = \frac{|w_j|}{\sum_k |w_k|}
+\end{equation}
+
+High $H_w$ = weights spread evenly (no dominant feature). Low $H_w$ = model relies on few features.
+
+\textbf{Implementation:} \texttt{scripts/algorithms/online\_ridge.py}. Default: $\lambda = 1.0$, $\eta = 0.01$, update interval = 10 ticks.
+
+\textbf{Reference:} Rakhlin, A. \& Sridharan, K. (2013). Online learning with predictable sequences. \textit{COLT}.
+
+% ============================================================
+% PART VIII: REGIME DETECTION
+% ============================================================
+\newpage
+\section{Regime Detection \& Classification}
+
+\subsection{Gaussian Mixture Model (GMM)}
+
+Offline-trained probabilistic classifier. The density of observation $\mathbf{x}$ is:
+
+\begin{equation}
+p(\mathbf{x}) = \sum_{k=1}^{K} \pi_k \, \mathcal{N}(\mathbf{x}; \boldsymbol{\mu}_k, \boldsymbol{\Sigma}_k)
+\end{equation}
+
+\textbf{NAT parameterization:} $K = 5$ components, 5D feature space:
+\begin{enumerate}
+    \item Kyle's lambda (illiquidity)
+    \item VPIN (toxicity)
+    \item Absorption z-score (accumulation/distribution)
+    \item Hurst exponent (trending vs.\ mean-reverting)
+    \item Whale net flow (institutional positioning)
+\end{enumerate}
+
+\textbf{Regime labels:} Accumulation, Markup, Distribution, Markdown, Ranging (Wyckoff theory).
+
+\textbf{Training:} sklearn \texttt{GaussianMixture} on historical data with \texttt{StandardScaler}. \textbf{Inference:} Rust implementation in \texttt{rust/ing/src/ml/regime.rs} for online scoring.
+
+\subsection{Absorption Ratio}
+
+Measures volume absorption relative to price movement:
+
+\begin{equation}
+\text{AR}(w) = \frac{\sum_{t \in w} V_t}{|\Delta p_w| + \varepsilon}
+\end{equation}
+
+High AR = volume being absorbed without moving price (accumulation/distribution). Reported as z-score vs.\ rolling history.
+
+\textbf{Implementation:} \texttt{rust/ing/src/features/regime/absorption.rs}.
+
+\subsection{Regime Composite Score}
+
+Weighted combination of regime indicators:
+
+\begin{equation}
+\text{RC} = 0.35 \cdot \text{absorption} + 0.30 \cdot \text{divergence} + 0.15 \cdot \text{churn} + 0.20 \cdot \text{range\_position}
+\end{equation}
+
+\textbf{Implementation:} \texttt{rust/ing/src/features/regime/composite.rs}.
+
+% ============================================================
+% PART IX: TREND & TIME SERIES
+% ============================================================
+\newpage
+\section{Trend \& Time Series Analysis}
+
+\subsection{Hurst Exponent}
+
+Measures long-range dependence via rescaled range (R/S) analysis:
+
+\begin{equation}
+\frac{R(n)}{S(n)} \sim C \cdot n^H \quad \text{as } n \to \infty
+\end{equation}
+
+\textbf{Interpretation:}
+\begin{center}
+\begin{tabular}{l l}
+\hline
+$H > 0.5$ & Trending (persistent) \\
+$H = 0.5$ & Random walk \\
+$H < 0.5$ & Mean-reverting (anti-persistent) \\
+\hline
+\end{tabular}
+\end{center}
+
+\textbf{Implementation:} \texttt{rust/ing/src/features/trend.rs}. Windows: 300, 600 ticks. Features: \texttt{trend\_hurst\_300}, \texttt{trend\_hurst\_600}.
+
+\textbf{Reference:} Mandelbrot, B.B. (1971). When can price be arbitraged efficiently? A limit to the validity of the random walk and martingale models. \textit{The Review of Economics and Statistics}.
+
+\subsection{Momentum (Linear Regression Slope)}
+
+\begin{equation}
+\hat{\beta} = \frac{\sum_{i=1}^{N} (t_i - \bar{t})(p_i - \bar{p})}{\sum_{i=1}^{N} (t_i - \bar{t})^2}
+\end{equation}
+
+\textbf{R-squared:}
+\begin{equation}
+R^2 = 1 - \frac{\sum (p_i - \hat{p}_i)^2}{\sum (p_i - \bar{p})^2}
+\end{equation}
+
+High $R^2$ with positive slope = strong uptrend. High $R^2$ with negative slope = strong downtrend.
+
+\textbf{Implementation:} \texttt{rust/ing/src/features/trend.rs}. Windows: 60, 300, 600 ticks.
+
+\subsection{EMA Crossover}
+
+Short-term EMA crossing long-term EMA as a trend signal:
+
+\begin{equation}
+\text{EMA}_\alpha(t) = \alpha \cdot x_t + (1 - \alpha) \cdot \text{EMA}_\alpha(t-1), \quad \alpha = \frac{2}{N+1}
+\end{equation}
+
+\textbf{Crossover signal:} $\text{EMA}_{10} - \text{EMA}_{50}$. Positive = bullish, negative = bearish.
+
+\textbf{Implementation:} \texttt{rust/ing/src/features/trend.rs}. Features: \texttt{ma\_crossover}, \texttt{ma\_crossover\_norm}.
+
+% ============================================================
+% PART X: ALGORITHMS INVENTORY
+% ============================================================
+\newpage
+\section{Complete Algorithm Inventory}
+
+\subsection{Implemented Streaming Algorithms (26)}
+
+All algorithms implement the \texttt{MicrostructureAlgorithm} ABC from \texttt{scripts/algorithms/base.py}, with a \texttt{step()} method called at each tick (100ms).
+
+\begin{center}
+\begin{longtable}{c l l c}
+\hline
+\textbf{\#} & \textbf{Algorithm} & \textbf{Mathematical Basis} & \textbf{Features} \\
+\hline
+\endhead
+1 & Kalman Imbalance & OU Kalman filter & 4 \\
+2 & Multi-Level Imbalance & Weighted depth composite & 3 \\
+3 & Regime-Gated Imbalance & Percentile gating & 3 \\
+4 & Online Ridge & Sherman-Morrison updates & 3 \\
+5 & Jump Detector & Lee-Mykland (2008) & 4 \\
+6 & Bipower Jump & BNS (2004) decomposition & 4 \\
+7 & VPIN Regime & Toxicity gating & 3 \\
+8 & Switching OU & Hamilton filter + dual Kalman & 4 \\
+9 & Entropy Momentum & Conditional momentum & 3 \\
+10 & OI Divergence & Price-OI confirmation & 3 \\
+11 & Surprise Signal & Entropy transition detection & 3 \\
+12 & Optimal Entry & SPRT + Kalman & 3 \\
+13 & Propagator & Bouchaud impact model & 3 \\
+14 & Spread Decomposition & Huang-Stoll (1997) & 3 \\
+15 & Weighted OFI & Depth-decay kernel & 3 \\
+16 & Trade-Through & Queue depletion model & 3 \\
+17 & Hawkes Intensity & Self-exciting process & 4 \\
+18 & Funding Reversion & Mean-reversion on funding & 3 \\
+\hline
+\end{longtable}
+\end{center}
+
+\subsection{Algorithms Not Yet Implemented (High-Value Candidates)}
+
+\begin{center}
+\begin{longtable}{l p{5cm} p{5cm}}
+\hline
+\textbf{Algorithm} & \textbf{Mathematical Basis} & \textbf{Value Proposition} \\
+\hline
+\endhead
+FIR Filter & $y[n] = \sum_{k=0}^{M} b_k x[n-k]$ & Linear-phase frequency-domain feature extraction \\
+IIR Filter & $y[n] = \sum_{k=0}^{M} b_k x[n-k] - \sum_{k=1}^{N} a_k y[n-k]$ & Efficient recursive filtering with fewer coefficients \\
+Butterworth & Maximally flat magnitude response & Clean low/high/band-pass of feature signals \\
+Online PCA & Rank-1 covariance updates & Streaming dimensionality reduction \\
+Full HMM & Forward-backward, Baum-Welch EM & Multi-step regime forecasting \\
+Two-Scales RV & Zhang et al.\ (2005) & Microstructure noise correction \\
+Realized GARCH & Conditional volatility & Volatility forecasting \\
+Mixture of Experts & Exponential weights algorithm & Regime-adaptive feature combination \\
+Particle Filter & Sequential Monte Carlo & Nonlinear/non-Gaussian state estimation \\
+Wavelet Transform & Multi-resolution analysis & Time-frequency decomposition \\
+\hline
+\end{longtable}
+\end{center}
+
+% ============================================================
+% PART XI: AUTONOMOUS AGENT ARCHITECTURE
+% ============================================================
+\newpage
+\section{Autonomous Feature Engineering Agent}
+
+\subsection{Current Agent Architecture}
+
+NAT's existing agent framework (\texttt{scripts/agent/daemon.py}) implements a 5-gate hypothesis testing protocol:
+
+\begin{verbatim}
+MANIFEST -> GENERATE -> EXECUTE -> FDR -> MONITOR -> SLEEP
+\end{verbatim}
+
+\textbf{5-gate protocol per hypothesis:}
+\begin{enumerate}
+    \item \textbf{Discovery gate:} IC $>$ threshold, $\Delta$IC significant
+    \item \textbf{Cost gate:} MI $> I_{\min}(\text{fee}, \sigma_r)$
+    \item \textbf{Temporal replication:} Signal persists across time windows
+    \item \textbf{Symbol replication:} Signal generalizes across assets
+    \item \textbf{Correlation dedup:} Not redundant with existing features ($\rho < 0.7$)
+\end{enumerate}
+
+FDR control (Benjamini-Hochberg, $q = 0.05$) at end of each cycle.
+
+\subsection{Proposed Extension: Feature Factory Agent}
+
+\subsubsection{Generator Operations (Feature Algebra)}
+
+Define a typed algebra of feature transformations:
+
+\begin{center}
+\begin{tabular}{l l l}
+\hline
+\textbf{Operation} & \textbf{Definition} & \textbf{Type} \\
+\hline
+\texttt{diff}$(f, n)$ & $\Delta^n f_t = f_t - f_{t-n}$ & $\mathbb{R} \to \mathbb{R}$ \\
+\texttt{zscore}$(f, w)$ & $(f_t - \bar{f}_w) / \sigma_{f,w}$ & $\mathbb{R} \to \mathbb{R}$ \\
+\texttt{ema}$(f, \alpha)$ & $\alpha f_t + (1-\alpha) \text{ema}_{t-1}$ & $\mathbb{R} \to \mathbb{R}$ \\
+\texttt{kalman}$(f, \theta)$ & OU Kalman filter with speed $\theta$ & $\mathbb{R} \to \mathbb{R}^4$ \\
+\texttt{fir}$(f, \mathbf{b})$ & $\sum_{k=0}^{M} b_k f_{t-k}$ & $\mathbb{R} \to \mathbb{R}$ \\
+\texttt{iir}$(f, \mathbf{a}, \mathbf{b})$ & $\sum b_k f_{t-k} - \sum a_k g_{t-k}$ & $\mathbb{R} \to \mathbb{R}$ \\
+\texttt{rank}$(f, w)$ & Percentile rank in window $w$ & $\mathbb{R} \to [0,1]$ \\
+\texttt{sign}$(f)$ & $\text{sgn}(f_t)$ & $\mathbb{R} \to \{-1,0,1\}$ \\
+\texttt{interact}$(f_1, f_2)$ & $f_{1,t} \cdot f_{2,t}$ & $\mathbb{R}^2 \to \mathbb{R}$ \\
+\texttt{ratio}$(f_1, f_2)$ & $f_{1,t} / (|f_{2,t}| + \varepsilon)$ & $\mathbb{R}^2 \to \mathbb{R}$ \\
+\texttt{residual}$(f_1, f_2)$ & $f_{1,t} - \hat{\beta} f_{2,t}$ & $\mathbb{R}^2 \to \mathbb{R}$ \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsubsection{Evaluation Metrics}
+
+For each candidate feature $f$, compute against forward returns $r_{t+h}$ at horizons $h \in \{1\text{s}, 5\text{s}, 15\text{s}, 1\text{m}, 5\text{m}\}$:
+
+\begin{center}
+\begin{tabular}{l l l}
+\hline
+\textbf{Metric} & \textbf{Definition} & \textbf{Threshold} \\
+\hline
+IC & $\text{Spearman}(f_t, r_{t+h})$ & $|$IC$| > 0.02$ \\
+ICIR & $\text{mean(IC}_w) / \text{std(IC}_w)$ across windows & ICIR $> 0.5$ \\
+MI & $\hat{I}_{\text{KSG}}(f; r_{t+h})$ & MI $> I_{\min}$ \\
+Marginal MI & $I(f; r | \mathbf{z}_{\text{existing}})$ via CMI & $> 0$ \\
+Turnover & $\text{autocorr}(f_t, 1)$ & $> 0.8$ (low churn) \\
+Max corr & $\max_j |\rho(f, z_j)|$ & $< 0.7$ (novelty) \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsubsection{Selection Protocol (Extended 5-Gate)}
+
+\begin{enumerate}
+    \item \textbf{IC significance:} $t$-test on IC, $p < 0.01$
+    \item \textbf{Cost viability:} $\text{MI} > I_{\min}(\text{fee}, \sigma_r)$
+    \item \textbf{Temporal stability:} ICIR $> 0.5$ across $\geq 3$ non-overlapping windows
+    \item \textbf{Novelty:} Max correlation with existing feature set $< 0.7$
+    \item \textbf{FDR control:} Benjamini-Hochberg at $q = 0.05$ across batch
+\end{enumerate}
+
+\subsubsection{Evolution Step (Missing Piece)}
+
+The gap between the current generate-test-prune system and full autonomy is the \textbf{evolution step}:
+
+\begin{description}
+    \item[Crossover:] Given two surviving features $f_A = \text{kalman}(\text{imbalance}, 0.1)$ and $f_B = \text{ema}(\text{entropy}, 0.05)$, generate: $f_{AB} = \text{kalman}(\text{imbalance} \times \text{entropy}, 0.1)$
+    \item[Mutation:] Perturb parameters of survivors: $\theta \to \theta \cdot (1 + \mathcal{N}(0, 0.1))$, $w \to w + \text{Uniform}(-5, 5)$
+    \item[Population management:] Keep top-$N$ by ICIR. Kill bottom quartile. Fill with crossover + mutation + fresh generation.
+    \item[Fitness landscape:] Track which operation types and parameter ranges produce survivors $\Rightarrow$ bias future generation toward productive regions.
+\end{description}
+
+\subsubsection{Architecture}
+
+\begin{verbatim}
++-----------------------------------------------------------+
+|                  FEATURE FACTORY AGENT                     |
+|                                                            |
+|  GENERATE --> COMPUTE --> EVALUATE --> SELECT --> EVOLVE    |
+|      ^                                              |      |
+|      |           Population (DAG-encoded features)  |      |
+|      +----------------------------------------------+      |
+|                                                            |
+|  States: GENERATE | COMPUTE | EVALUATE | SELECT |          |
+|           EVOLVE | SLEEP                                   |
++-----------------------------------------------------------+
+\end{verbatim}
+
+Features are encoded as serializable DAGs (directed acyclic graphs) of operations, enabling reconstruction from raw inputs without storing computed values.
+
+\subsubsection{Progression: Semi-Autonomous to Autonomous}
+
+\begin{center}
+\begin{tabular}{l p{4cm} p{5cm}}
+\hline
+\textbf{Phase} & \textbf{Human Role} & \textbf{Agent Role} \\
+\hline
+Phase 1 (Semi) & Define operation set, review survivors, approve promotions & Generate, evaluate, rank, report \\
+Phase 2 (Guided) & Set meta-parameters, monitor population health & Generate, evaluate, select, evolve within bounds \\
+Phase 3 (Auto) & Monitor dashboards, intervene on anomalies & Full loop: generate, evaluate, select, evolve, deploy \\
+\hline
+\end{tabular}
+\end{center}
+
+% ============================================================
+% PART XII: SIGNAL PROCESSING (TO IMPLEMENT)
+% ============================================================
+\newpage
+\section{Signal Processing: FIR, IIR \& Advanced Filtering}
+
+This section covers the mathematical foundations for filters not yet implemented in NAT but identified as high-value additions for the Feature Factory Agent.
+
+\subsection{Finite Impulse Response (FIR) Filters}
+
+A causal FIR filter of order $M$:
+
+\begin{equation}
+y[n] = \sum_{k=0}^{M} b_k \, x[n-k]
+\end{equation}
+
+\textbf{Properties:}
+\begin{itemize}
+    \item Always stable (no feedback)
+    \item Can achieve exact linear phase (symmetric coefficients)
+    \item Requires more coefficients than IIR for sharp transitions
+\end{itemize}
+
+\textbf{Transfer function} ($z$-transform):
+\begin{equation}
+H(z) = \sum_{k=0}^{M} b_k z^{-k}
+\end{equation}
+
+\textbf{Design methods:}
+\begin{itemize}
+    \item \textbf{Window method:} Truncate ideal impulse response, apply window (Hamming, Blackman, Kaiser)
+    \item \textbf{Parks-McClellan:} Optimal equiripple design (minimax criterion)
+    \item \textbf{Least-squares:} Minimize $\int |H(e^{j\omega}) - H_d(e^{j\omega})|^2 d\omega$
+\end{itemize}
+
+\textbf{Application to NAT:} Low-pass filtering of noisy features (e.g., imbalance, flow intensity) to extract slow-moving components. Band-pass to isolate specific frequency bands of interest.
+
+\subsection{Infinite Impulse Response (IIR) Filters}
+
+A causal IIR filter:
+
+\begin{equation}
+y[n] = \sum_{k=0}^{M} b_k \, x[n-k] - \sum_{k=1}^{N} a_k \, y[n-k]
+\end{equation}
+
+\textbf{Transfer function:}
+\begin{equation}
+H(z) = \frac{\sum_{k=0}^{M} b_k z^{-k}}{1 + \sum_{k=1}^{N} a_k z^{-k}} = \frac{B(z)}{A(z)}
+\end{equation}
+
+\textbf{Stability condition:} All poles of $A(z)$ must lie inside the unit circle $|z| < 1$.
+
+\textbf{Properties:}
+\begin{itemize}
+    \item More efficient than FIR (fewer coefficients for same sharpness)
+    \item Cannot achieve linear phase in general
+    \item Can be unstable if poorly designed
+    \item The EMA is the simplest IIR: $y[n] = \alpha x[n] + (1-\alpha) y[n-1]$, i.e., $b_0 = \alpha$, $a_1 = -(1-\alpha)$
+\end{itemize}
+
+\subsection{Butterworth Filter}
+
+Maximally flat magnitude response in the passband:
+
+\begin{equation}
+|H(j\omega)|^2 = \frac{1}{1 + \left(\omega / \omega_c\right)^{2N}}
+\end{equation}
+
+where $N$ is the filter order and $\omega_c$ is the cutoff frequency.
+
+\textbf{Properties:}
+\begin{itemize}
+    \item No ripple in passband or stopband
+    \item Roll-off: $-20N$ dB/decade
+    \item Monotonically decreasing magnitude response
+\end{itemize}
+
+\textbf{Application to NAT:} Clean separation of ``fast'' and ``slow'' components of microstructure features, parameterized by cutoff frequency that the Feature Factory Agent can optimize.
+
+\subsection{Relationship to Existing NAT Filters}
+
+\begin{center}
+\begin{tabular}{l l l}
+\hline
+\textbf{NAT Filter} & \textbf{Type} & \textbf{Equivalent} \\
+\hline
+EMA & IIR (1st order) & $b_0 = \alpha$, $a_1 = \alpha - 1$ \\
+Kalman (OU) & Optimal (state-space) & Time-varying IIR with gain $K_t$ \\
+Rolling mean & FIR (uniform) & $b_k = 1/N$ for $k = 0, \ldots, N-1$ \\
+\hline
+\end{tabular}
+\end{center}
+
+The Kalman filter subsumes fixed-coefficient filters by adapting its gain $K_t$ based on the innovation covariance. FIR/IIR filters are useful when the adaptation is unnecessary or when specific frequency-domain properties (e.g., linear phase) are required.
+
+% ============================================================
+% PART XIII: NEAR PROTOCOL
+% ============================================================
+\newpage
+\section{NEAR Protocol: Technical Analysis}
+
+\subsection{Architecture}
+
+\begin{center}
+\begin{tabular}{l p{8cm}}
+\hline
+\textbf{Component} & \textbf{Description} \\
+\hline
+Consensus & PoS with threshold-based block producer selection \\
+Block time & 600ms, $\sim$1.2s finality \\
+Sharding & Nightshade --- state split across shards processed in parallel \\
+Runtime & Wasm-based VM (contracts compile from Rust or JS) \\
+Core client & \texttt{nearcore} (Rust) \\
+Shards (current) & 8 (benchmarked at 1M+ TPS across 70 shards) \\
+\hline
+\end{tabular}
+\end{center}
+
+\textbf{Nightshade 2.0 (2024--2025):} Stateless validation --- validators verify via cryptographic proofs without storing full shard state. \textbf{Nightshade 3.0 (Feb 2026):} Privacy shards running inside TEEs.
+
+\subsection{Strengths vs.\ Other L1s}
+
+\begin{center}
+\begin{tabular}{l p{4cm} p{4cm}}
+\hline
+\textbf{Dimension} & \textbf{NEAR} & \textbf{Comparison} \\
+\hline
+Scaling & Horizontal (sharding) & Solana: monolithic, higher HW reqs \\
+Finality & $\sim$1.2s & Solana: $\sim$400ms (faster) \\
+Fees & $\sim$\$0.001 & Ethereum: \$1--10+ (L1) \\
+Accounts & Human-readable names & Ethereum: hex addresses \\
+Chain abstraction & Native (Intents, \$10B volume) & Unique --- no other L1 has this \\
+AI agents & 747+ active, TEE runtime & Most developed on-chain AI infra \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Relevance for Quantitative Trading}
+
+\begin{itemize}
+    \item \textbf{On-chain orderbooks:} Orderly Network (shared orderbook), Tonic (CLOB DEX) --- 600ms blocks make on-chain market making feasible
+    \item \textbf{Caveat:} DeFi TVL and volume still thin vs.\ Ethereum/Solana --- liquidity is the constraint, not technology
+    \item \textbf{AI agent runtime:} IronClaw (TEE-isolated execution), confidential GPU marketplace
+\end{itemize}
+
+\subsection{Potential Contribution Areas}
+
+Given an embedded systems + quant + Rust profile:
+
+\begin{enumerate}
+    \item \textbf{nearcore performance:} Sharding runtime optimization, parallel execution scheduling
+    \item \textbf{On-chain orderbook infra:} CLOB DEX smart contracts --- microstructure knowledge is rare in crypto
+    \item \textbf{AI agent execution runtime:} TEE integration, deterministic scheduling
+    \item \textbf{MPC/Chain Signatures:} Low-level Rust cryptographic infrastructure
+\end{enumerate}
+
+% ============================================================
+% PART XIV: HERMES & EVOLUTIONARY AGENTS
+% ============================================================
+\newpage
+\section{Hermes Agents \& Evolutionary Self-Learning}
+
+\subsection{Hermes Agent (Nous Research)}
+
+An open-source autonomous AI \textit{runtime} (not a model) released Feb 2026. Core mechanism: after any task with 5+ tool calls, a background process distills the trajectory into a Markdown skill file. Over time, it accumulates a library of reusable procedures.
+
+\textbf{Capabilities:}
+\begin{itemize}
+    \item Persistent memory across sessions
+    \item Autonomous skill creation from trajectories
+    \item Scheduled automations
+    \item MCP server integration for tool extensibility
+\end{itemize}
+
+\textbf{Limitation:} Learns \textit{procedures} (how to do X), not \textit{strategies} (what X to try). No hypothesis generation, no statistical testing, no evolutionary selection.
+
+\subsection{Comparison with NAT Agent}
+
+\begin{center}
+\begin{tabular}{l c c}
+\hline
+\textbf{Capability} & \textbf{Hermes} & \textbf{NAT Agent} \\
+\hline
+Hypothesis generation & -- & $\checkmark$ \\
+Statistical testing (5-gate) & -- & $\checkmark$ \\
+FDR control & -- & $\checkmark$ \\
+Cost viability gating & -- & $\checkmark$ \\
+Skill/procedure learning & $\checkmark$ & -- \\
+Cross-agent coordination & -- & $\checkmark$ (MetaAgent) \\
+Evolutionary selection & -- & Partial (prune, no crossover) \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Related Evolutionary Approaches}
+
+\begin{description}
+    \item[QuantEvolve] (arXiv 2510.18569): Multi-agent evolutionary framework for trading strategy space exploration. Hypothesis-driven search inspired by AlphaEvolve.
+    \item[Vectorial GP] (arXiv 2504.05418): Genetic programming evolving trading rules from technical indicators with multi-objective optimization (return vs.\ risk).
+    \item[NNGPT] (arXiv 2511.20333): LLM as self-improving AutoML engine --- generate pipeline, assess, refine in closed loop.
+\end{description}
+
+\subsection{The Generate-Test-Prune-Evolve Loop}
+
+NAT's current architecture implements three of four phases:
+
+\begin{verbatim}
+    GENERATE -----> TEST -----> PRUNE -----> [EVOLVE] -----> GENERATE
+       |             |            |              |
+    Hypothesis    5-gate       FDR +          Missing:
+    generators    protocol     correlation    crossover,
+                               dedup          mutation
+\end{verbatim}
+
+\textbf{The missing evolution step} is the key upgrade: crossover and mutation of surviving strategies to spawn new candidates, rather than generating from scratch each cycle. This transforms the system from a \textbf{search engine} (enumerate and filter) into an \textbf{evolutionary optimizer} (breed and improve).
+
+% ============================================================
+% PART XV: EVOLUTIONARY & AUTOML FRAMEWORKS
+% ============================================================
+\newpage
+\section{Evolutionary \& AutoML Frameworks for Strategy Discovery}
+
+This section summarizes three recent papers that are closest to the vision of an autonomous, self-improving strategy generation system. We first introduce the foundational concepts --- evolutionary computation, genetic programming, and AutoML --- with worked examples before diving into each paper.
+
+\subsection{Foundations: Evolutionary Computation}
+
+Evolutionary computation borrows from biological evolution: a \textit{population} of candidate solutions is maintained, evaluated for \textit{fitness}, and iteratively improved through \textit{selection}, \textit{crossover} (recombination), and \textit{mutation}. The process is domain-agnostic --- what changes is how solutions are represented and how fitness is measured.
+
+\subsubsection{Core Loop}
+
+\begin{verbatim}
+    1. INITIALIZE: Create N random candidate solutions (population)
+    2. EVALUATE:   Score each candidate with a fitness function
+    3. SELECT:     Choose parents (higher fitness = higher probability)
+    4. CROSSOVER:  Combine two parents to produce offspring
+    5. MUTATE:     Randomly perturb offspring
+    6. REPLACE:    Offspring replace worst members of population
+    7. REPEAT from step 2 until convergence or budget exhausted
+\end{verbatim}
+
+\subsubsection{Example: Evolving a Trading Signal Weight Vector}
+
+Suppose we want to find optimal weights $\mathbf{w} = (w_1, w_2, w_3)$ for a composite signal:
+\begin{equation}
+\text{signal}(t) = w_1 \cdot \text{imbalance}(t) + w_2 \cdot \text{entropy}(t) + w_3 \cdot \text{VPIN}(t)
+\end{equation}
+
+\textbf{Step 1 --- Initialize:} Create 100 random weight vectors, e.g.:
+\begin{align*}
+\mathbf{w}_1 &= (0.3, -0.1, 0.5) \\
+\mathbf{w}_2 &= (-0.2, 0.8, 0.1) \\
+&\vdots
+\end{align*}
+
+\textbf{Step 2 --- Evaluate:} Backtest each on historical data, compute Sharpe ratio as fitness:
+\begin{align*}
+f(\mathbf{w}_1) &= 1.2 \quad \text{(decent)} \\
+f(\mathbf{w}_2) &= -0.3 \quad \text{(losing money)}
+\end{align*}
+
+\textbf{Step 3 --- Select:} Tournament selection picks $k$ random candidates, takes the best. With tournament size $k = 5$: draw 5 random candidates, the one with highest Sharpe becomes a parent. Repeat for second parent.
+
+\textbf{Step 4 --- Crossover:} Blend two parents. Single-point crossover at position 2:
+\begin{align*}
+\text{Parent A} &= (\underbrace{0.3, -0.1}_{\text{keep}}, \underbrace{0.5}_{\text{swap}}) \\
+\text{Parent B} &= (\underbrace{-0.2, 0.8}_{\text{swap}}, \underbrace{0.1}_{\text{keep}}) \\
+\text{Child}   &= (0.3, -0.1, 0.1) \quad \text{(A's head + B's tail)}
+\end{align*}
+
+\textbf{Step 5 --- Mutate:} Add Gaussian noise to one gene with small probability $p_m$:
+\begin{equation}
+w_2' = w_2 + \mathcal{N}(0, 0.05) = -0.1 + 0.03 = -0.07
+\end{equation}
+
+\textbf{Step 6 --- Replace:} The child $(0.3, -0.07, 0.1)$ replaces the worst member of the population.
+
+After 50--200 generations, the population converges toward high-Sharpe weight vectors. The key advantage over grid search: crossover \textit{recombines} partial solutions that work, so the search is directed, not random.
+
+\subsubsection{Selection Methods}
+
+\begin{center}
+\begin{tabular}{l p{7cm}}
+\hline
+\textbf{Method} & \textbf{How It Works} \\
+\hline
+Tournament & Draw $k$ random candidates, pick the best. Larger $k$ = stronger selection pressure. \\
+Roulette Wheel & Probability proportional to fitness: $P(i) = f_i / \sum_j f_j$. Sensitive to fitness scaling. \\
+Rank-Based & Sort by fitness, assign selection probability by rank (not raw fitness). More robust. \\
+Elitism & Top $e$ individuals survive unchanged to next generation (prevents losing the best). \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsubsection{Quality-Diversity (MAP-Elites)}
+
+Standard evolution converges to a single optimum. \textbf{MAP-Elites} (Mouret \& Clune, 2015) instead maintains a \textit{grid} of solutions, one per cell, where each cell represents a different \textit{behavioral niche}. A new solution enters a cell only if it outperforms the current occupant.
+
+\textbf{Example in trading:} Define a 2D grid with axes ``trading frequency'' (low/medium/high) and ``max drawdown'' ($<$5\% / 5--15\% / $>$15\%). This gives $3 \times 3 = 9$ cells. Evolution fills each cell with the best strategy \textit{for that niche}. You get 9 diverse strategies, not 9 copies of the same one.
+
+\begin{verbatim}
+                   Max Drawdown
+                   <5%     5-15%    >15%
+              +--------+--------+--------+
+    Low freq  | SR=0.8 | SR=1.1 | SR=1.9 |   <-- conservative
+              +--------+--------+--------+
+    Med freq  | SR=0.5 | SR=1.3 | SR=2.1 |
+              +--------+--------+--------+
+    High freq | SR=0.3 | SR=0.9 | SR=1.5 |   <-- aggressive
+              +--------+--------+--------+
+\end{verbatim}
+
+Each cell answers a different question: ``What's the best strategy for an investor who wants low drawdown and trades infrequently?'' This is the core of QuantEvolve's archive.
+
+% ----------------------------------------------------------
+
+\subsection{Foundations: Genetic Programming (GP)}
+
+While standard evolutionary algorithms evolve fixed-length vectors (weights, parameters), \textbf{genetic programming} evolves \textit{programs} --- typically represented as expression trees.
+
+\subsubsection{Tree Representation}
+
+A trading rule is a tree where:
+\begin{itemize}
+    \item \textbf{Leaves (terminals):} Market data (price, volume, EMA, RSI, imbalance)
+    \item \textbf{Internal nodes (functions):} Mathematical operations (ADD, MULT, SUB, GT, AND)
+    \item \textbf{Root:} Produces the final output (signal value or buy/sell decision)
+\end{itemize}
+
+\textbf{Example tree} (a momentum crossover rule):
+
+\begin{verbatim}
+            GT                     "Is EMA5 - EMA50 > 0?"
+           /  \
+         SUB   0.0                 If true -> buy
+        /   \
+     EMA5   EMA50
+\end{verbatim}
+
+This tree computes: $\text{GT}(\text{EMA}_5 - \text{EMA}_{50}, \; 0.0)$, returning 1 (buy) if short EMA exceeds long EMA.
+
+\textbf{A more complex tree} (entropy-gated momentum):
+
+\begin{verbatim}
+              AND
+             /   \
+           GT     LT
+          / \    / \
+        SUB  0  ENT  0.3
+       / \
+    EMA5 EMA50
+\end{verbatim}
+
+This computes: $(\text{EMA}_5 - \text{EMA}_{50} > 0) \;\text{AND}\; (\text{entropy} < 0.3)$. Buy only when momentum is positive \textit{and} entropy is low (structured market). This is the kind of conditional logic that GP discovers automatically.
+
+\subsubsection{GP Crossover}
+
+Select a random subtree from each parent, swap them:
+
+\begin{verbatim}
+  Parent A:          Parent B:          Child:
+      GT                 MULT                GT
+     / \                /   \               / \
+   SUB  0.0         VOL    IMB           MULT  0.0
+  / \                                   /   \
+EMA5 EMA50                            VOL   IMB
+\end{verbatim}
+
+The SUB subtree in Parent A is replaced by the MULT subtree from Parent B. The child now computes $\text{GT}(\text{VOL} \times \text{IMB}, \; 0.0)$ --- a volume-imbalance signal that neither parent had.
+
+\subsubsection{GP Mutation}
+
+Replace a random subtree with a new random subtree:
+
+\begin{verbatim}
+  Before mutation:          After mutation:
+      GT                        GT
+     / \                       / \
+   SUB  0.0                 MEAN  0.0
+  / \                       |
+EMA5 EMA50                 RSI
+\end{verbatim}
+
+The momentum rule mutated into a mean-reversion rule (buy when mean RSI $> 0$). Most mutations are harmful (lower fitness), but occasionally one discovers a better structure.
+
+\subsubsection{Bloat Control}
+
+GP trees tend to grow without bound (``bloat''). Controls:
+\begin{itemize}
+    \item \textbf{Max depth:} Trees deeper than $D_{\max}$ are rejected (Vectorial GP uses $D_{\max} = 13$)
+    \item \textbf{Max nodes:} Cap total nodes (Vectorial GP uses 90)
+    \item \textbf{Parsimony pressure:} Penalize fitness by tree size: $f' = f - c \cdot |\text{nodes}|$
+\end{itemize}
+
+\subsubsection{Vectorial GP: The Key Innovation}
+
+Standard GP operates on \textit{scalars}: each terminal is a single number (today's close, current RSI). Vectorial GP operates on \textit{vectors}: each terminal is a window of values (last 21 closes, last 21 RSI values).
+
+\textbf{Scalar GP example:}
+\begin{verbatim}
+    SUB(Close_today, EMA50_today) = 105.3 - 103.1 = 2.2
+\end{verbatim}
+
+\textbf{Vectorial GP example:}
+\begin{verbatim}
+    DOT(Close[t-20:t], Volume[t-20:t])
+    = sum of element-wise products over 21 days
+    = captures price-volume correlation over the lookback window
+\end{verbatim}
+
+The vector DOT product automatically computes a correlation-like feature that a scalar GP cannot express without hand-engineering 21 separate lagged terminals. This is why VGP outperforms standard GP.
+
+\textbf{Strongly-Typed GP (STVGP):} Forces the tree's root to output a boolean (buy/sell), not a number. This eliminates the arbitrary threshold problem (``buy when signal $> 1.0$'' --- why 1.0?). The type system ensures:
+\begin{itemize}
+    \item Data nodes (OHLCV, indicators) produce vectors
+    \item Relational nodes (GT, LT) consume vectors, produce booleans
+    \item Logic nodes (AND, OR, IF\_ELSE) consume and produce booleans
+    \item Root must be relational or boolean
+\end{itemize}
+
+% ----------------------------------------------------------
+
+\subsection{Foundations: AutoML and Self-Improving Systems}
+
+AutoML automates the machine learning pipeline: feature engineering, model selection, hyperparameter tuning. Traditional AutoML (Optuna, Auto-sklearn) uses \textbf{search} --- try thousands of configurations, pick the best. NNGPT replaces search with \textbf{generation} --- an LLM proposes configurations directly, then learns from outcomes.
+
+\subsubsection{The Closed-Loop Self-Improvement Pattern}
+
+\begin{verbatim}
+    +----------+     +----------+     +----------+     +-----------+
+    | GENERATE |---->| EXECUTE  |---->|  SCORE   |---->|  LEARN    |
+    | candidate|     | (backtest|     | (IC, MI, |     | (update   |
+    | feature  |     |  or train|     |  Sharpe) |     |  generator|
+    |          |     |  model)  |     |          |     |  weights) |
+    +----------+     +----------+     +----------+     +-----------+
+         ^                                                   |
+         +---------------------------------------------------+
+                    feedback loop (self-improvement)
+\end{verbatim}
+
+\textbf{Without learning (NAT today):} Generator produces candidates from a fixed rule set. Bad candidates are filtered (5-gate), but the generator doesn't improve. Generation 100 is no smarter than generation 1.
+
+\textbf{With learning (NNGPT pattern):} Generator tracks which operation types produce survivors. After 50 cycles, it has learned: ``Kalman filters on imbalance features survive 3$\times$ more often than raw EMA. Interaction terms between entropy and flow survive 2$\times$ more often than single-feature transforms.'' Generation 100 produces better candidates than generation 1 because the generator has been \textit{fine-tuned on its own execution history}.
+
+\subsubsection{Concrete Example: Feature Factory Learning}
+
+\textbf{Cycle 1 (no learning):} Generator produces 100 random features:
+\begin{itemize}
+    \item 20 EMA variants $\to$ 2 survive gates (10\% survival)
+    \item 20 z-score variants $\to$ 3 survive (15\%)
+    \item 20 Kalman variants $\to$ 6 survive (30\%)
+    \item 20 interaction terms $\to$ 4 survive (20\%)
+    \item 20 ratio features $\to$ 1 survives (5\%)
+\end{itemize}
+
+\textbf{Cycle 2 (with learning):} Generator observes survival rates and adjusts generation probabilities:
+\begin{itemize}
+    \item Kalman variants: $30\% \to$ generate 40 (up from 20)
+    \item Interaction terms: $20\% \to$ generate 25
+    \item Z-score variants: $15\% \to$ generate 20
+    \item EMA variants: $10\% \to$ generate 10 (down)
+    \item Ratio features: $5\% \to$ generate 5 (down)
+\end{itemize}
+
+Over time, the generator converges toward the productive region of the feature space. This is the ``LoRA fine-tuning'' of NNGPT, adapted to feature engineering.
+
+\subsubsection{Early-Stop Predictor}
+
+Training a model or backtesting a feature is expensive. An early-stop predictor estimates final quality from partial results:
+
+\textbf{Example:} After evaluating a candidate feature on only the first 2 hours of data (out of 24 hours total):
+\begin{itemize}
+    \item If ICIR after 2h $< 0.1$: predict final ICIR $< 0.2$ with 80\% confidence $\Rightarrow$ \textbf{kill early}, save 22 hours of compute
+    \item If ICIR after 2h $> 0.5$: predict final ICIR $> 0.3$ $\Rightarrow$ continue full evaluation
+\end{itemize}
+
+NNGPT trains this predictor on historical (early-metric, final-metric) pairs. In NAT, the equivalent is: collect (IC-after-1-window, IC-after-all-windows) pairs from past feature evaluations, train a simple regression to predict final IC from early IC.
+
+\subsubsection{RL Reward Shaping for Feature Generation}
+
+Reinforcement learning reward for a candidate feature $f$:
+
+\begin{equation}
+r(f) = \underbrace{w_1 \cdot \mathbb{1}[\text{computes without error}]}_{\text{validity}} + \underbrace{w_2 \cdot \text{IC}(f)}_{\text{predictiveness}} + \underbrace{w_3 \cdot \mathbb{1}[\text{MI} > I_{\min}]}_{\text{cost viability}} + \underbrace{w_4 \cdot (1 - \max_j |\rho(f, z_j)|)}_{\text{novelty}}
+\end{equation}
+
+\textbf{Example scoring:}
+
+\begin{center}
+\begin{tabular}{l c c c c c}
+\hline
+\textbf{Feature} & \textbf{Valid} & \textbf{IC} & \textbf{Cost OK} & \textbf{Novelty} & \textbf{Total} \\
+\hline
+kalman(imb, 0.1) & 1.0 & 0.04 & 1.0 & 0.8 & 2.84 \\
+ema(entropy, 50) & 1.0 & 0.01 & 0.0 & 0.9 & 1.91 \\
+ratio(vol, 0) & 0.0 & --- & --- & --- & 0.00 \\
+zscore(imb $\times$ ent, 100) & 1.0 & 0.06 & 1.0 & 0.7 & 2.76 \\
+\hline
+\end{tabular}
+\end{center}
+
+The RL loop pushes the generator toward features like ``kalman(imb, 0.1)'' (high reward) and away from features like ``ratio(vol, 0)'' (crashes) or ``ema(entropy, 50)'' (doesn't cover costs).
+
+% ===========================================================
+
+\subsection{QuantEvolve: Multi-Agent Evolutionary Strategy Discovery}
+
+\textbf{Paper:} Yun, J., Lee, H.J. \& Jeon, I. (2025). QuantEvolve: Automating Quantitative Strategy Discovery through Multi-Agent Evolutionary Framework. \textit{arXiv:2510.18569}. Accepted for oral presentation at 2nd Workshop on LLMs and Generative AI for Finance (AI4F), ACM ICAIF 2025.
+
+\subsubsection{Architecture}
+
+A quality-diversity evolutionary system (MAP-Elites variant) where LLM agents evolve trading strategies represented as \textbf{executable Python code}. Multiple islands evolve populations independently, sharing a common feature map archive.
+
+\textbf{Four specialized agents per generation cycle:}
+\begin{enumerate}
+    \item \textbf{Data Agent} --- analyzes input data schema, identifies viable strategy categories
+    \item \textbf{Research Agent} --- generates hypotheses from parent/cousin strategies plus accumulated insights
+    \item \textbf{Coding Team} --- implements hypotheses as Python with \texttt{initialize(context)} and \texttt{handle\_data(context, data)}, backtests via Zipline, iteratively debugs
+    \item \textbf{Evaluation Team} --- extracts actionable insights, categorizes results
+\end{enumerate}
+
+LLM backbone: Qwen3-30B-A3B (lightweight) and Qwen3-80B-A3B (reasoning).
+
+\subsubsection{Feature Map Archive (MAP-Elites)}
+
+Strategies are binned along 6 dimensions: strategy category (binary-encoded, e.g., ``101'' = momentum + mean-reversion), trading frequency, max drawdown, Sharpe ratio, Sortino ratio, total return. Continuous dimensions are discretized into equal bins over observed min-max. Each cell retains only the best strategy; displaced strategies go to a separate evolutionary database.
+
+\subsubsection{Evolution Operators}
+
+\textbf{Parent selection} balances exploitation vs.\ exploration:
+\begin{equation}
+P(s_p = s) = \begin{cases} \alpha / |M_I| & \text{if } s \in M_I \text{ (feature map)} \\ (1-\alpha) / |I| & \text{if } s \in I \text{ (full island)} \end{cases}
+\end{equation}
+with $\alpha = 0.5$.
+
+\textbf{Cousin sampling} uses three strategies: best performers, feature-space neighbors (perturbed via $f_c^d = \lfloor \mathcal{N}(f_p^d, \sigma_d^2) \rfloor$ for continuous dims, BitFlip with $k_{\text{bf}} = n/4$ for categorical), and uniform random.
+
+\textbf{Migration:} Top 10\% exchanged across islands every $M$ generations.
+
+\textbf{Insight curation:} Every $K = 50$ generations, accumulated insights are deduplicated and pruned.
+
+\subsubsection{Fitness Function}
+
+Equal-weighted composite:
+\begin{equation}
+\text{Score} = \text{SR} + \text{IR} + \text{MDD}
+\end{equation}
+where SR = Sharpe ratio, IR = information ratio vs.\ market-cap benchmark, MDD = maximum drawdown. This balances absolute risk-adjusted return, relative outperformance, and tail risk.
+
+\subsubsection{Key Results}
+
+On US equities (AAPL, NVDA, AMZN, GOOGL, MSFT, TSLA; test Aug 2022--Jul 2025): generation-150 strategies achieved SR 1.52, cumulative return 256\%, MDD $-32\%$, vs.\ best baseline Risk Parity at SR 1.22, CR 130\%. Transaction costs modeled at \$0.0075/share with quadratic slippage.
+
+\subsubsection{Relation to AlphaEvolve}
+
+Builds on the AlphaEvolve (Novikov et al.) and AI Scientist (Lu et al.) paradigm of LLM-driven evolutionary search over code. Key distinction: QuantEvolve adds a \textbf{quality-diversity archive} (MAP-Elites feature map) to maintain strategy diversity across investor preferences, rather than optimizing a single objective.
+
+\subsubsection{Limitations}
+
+\begin{itemize}
+    \item No formal statistical correction for data snooping during the search process
+    \item Generated hypotheses may be post-hoc rationalizations rather than causal mechanisms
+    \item Each cycle requires 5--10 LLM inferences, limiting scalability
+    \item Evaluated on only 6 equities + 2 futures with daily OHLCV; baselines are not SOTA
+    \item No out-of-distribution or regime-shift stress testing
+\end{itemize}
+
+\subsubsection{Relevance to NAT}
+
+QuantEvolve's MAP-Elites archive maps directly to NAT's need: maintain a \textit{diverse} population of features/strategies across different market regimes and frequencies, rather than converging on a single best. The multi-agent structure (Data $\to$ Research $\to$ Code $\to$ Evaluate) parallels NAT's existing MANIFEST $\to$ GENERATE $\to$ EXECUTE $\to$ FDR pipeline. The key takeaway is the \textbf{quality-diversity} principle: optimize not just fitness but coverage of the strategy space.
+
+% ----------------------------------------------------------
+
+\subsection{Vectorial Genetic Programming for Trading Rules}
+
+\textbf{Paper:} Menoita, R. \& Silva, S. (2025). Evolving Financial Trading Strategies with Vectorial Genetic Programming. \textit{arXiv:2504.05418}. Published at GECCO 2025 Companion (ACM).
+
+\subsubsection{Vectorial GP vs.\ Standard GP}
+
+Standard GP operates on scalar terminals and produces scalar outputs. Vectorial GP (VGP) extends this by allowing \textbf{fixed-length vector inputs} (window of 21 trading days) and introducing vector-native operators. All vectors are either size 1 (scalar) or size 21. When a VGP tree produces a vector output, the mean is taken and thresholded for signal generation.
+
+\textbf{Key insight:} Vectors naturally encode temporal context (a lookback window) directly in the GP representation, eliminating the need to hand-engineer lagged features.
+
+\subsubsection{Terminal and Function Sets}
+
+\textbf{Terminals (13):} OHLCV, four EMAs (periods 5, 13, 50, 200), RSI(14), profit percentage, smallEmaDiff (EMA5 $-$ EMA13), bigEmaDiff (EMA50 $-$ EMA200).
+
+\textbf{Standard GP functions:} ADD, MULT, SUB, DIV (protected), NEG, SIN, COS, TAN, SIGNUM, GT.
+
+\textbf{VGP additions:} DOT, MEAN, STD\_VAR, CUM\_MEAN, GT\_THAN (compares vector means).
+
+\subsubsection{Three Variants}
+
+\begin{description}
+    \item[VGP:] Basic vectorial GP with vector operators.
+    \item[CVGP (Complex VGP):] Vectors contain complex elements; adds LOG, SQRT, complex trigonometric functions. Only the real part of the output drives trading signals. Explores a richer function space.
+    \item[STVGP (Strongly-Typed VGP):] Enforces a type system with three categories --- vectorial functions (data manipulation), relational functions (vectors/booleans $\to$ booleans), boolean functions (AND, OR, XOR, NOT, IF\_ELSE). The root node must be relational or boolean, so the tree outputs a boolean directly: true $=$ buy, false $=$ sell. \textbf{Eliminates the arbitrary scalar threshold.}
+\end{description}
+
+\subsubsection{Fitness Function}
+
+Single-objective optimization with tournament selection (not multi-objective):
+
+\begin{equation}
+f = \begin{cases} \text{ROI} \times w_{\text{rate}} & \text{if ROI} > 0 \\ \text{ROI} & \text{if ROI} \leq 0 \end{cases}
+\end{equation}
+
+where $\text{ROI} = 100 \times \text{TotalProfit} / M$, $M = 1000$ (fixed investment per trade), and $w_{\text{rate}}$ is the win rate (fraction of profitable trades). The win-rate multiplier rewards consistency only when profitable.
+
+\subsubsection{Overfitting Mitigation}
+
+Training data split into three equal segments; each generation evaluates on only one segment (rotating). Every 50th ``super generation'' evaluates on all three. A 100-day buffer at the start is skipped, and the first evaluation day is randomized per generation.
+
+\subsubsection{GP Parameters}
+
+\begin{center}
+\begin{tabular}{l l}
+\hline
+\textbf{Parameter} & \textbf{Value} \\
+\hline
+Population & 3,000 \\
+Generations & 50 \\
+Tournament size & 30 \\
+Mutation rate & 0.001 \\
+Max tree depth & 13 \\
+Max nodes & 90 \\
+Runs per config & 10 \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsubsection{Key Results}
+
+Kruskal-Wallis tests ($p < 0.05$): on KO (Coca-Cola), all three VGP variants significantly outperformed standard GP ($p < 0.005$). Critical difference analysis across all instruments: \textbf{STVGP consistently ranked best; standard GP consistently ranked worst.} The strong typing constraint (forcing boolean output) was the single most impactful design choice.
+
+\subsubsection{Relevance to NAT}
+
+The vectorial representation is directly applicable to NAT's feature algebra: instead of applying transformations to scalar feature values, operate on fixed-length vectors (e.g., 100-tick windows) with vector-native operations (DOT, MEAN, STD). The strongly-typed approach suggests that constraining the Feature Factory Agent's operation grammar (e.g., requiring that final outputs are bounded signals, not arbitrary reals) improves evolution quality. The overfitting mitigation (rotating evaluation segments) is a pattern NAT's agent should adopt.
+
+% ----------------------------------------------------------
+
+\subsection{NNGPT: LLM as Self-Improving AutoML Engine}
+
+\textbf{Paper:} Kochnev, R., Khalid, W., Uzun, T.A. et al. (2025). NNGPT: Rethinking AutoML with Large Language Models. \textit{arXiv:2511.20333}. November 2025.
+
+\subsubsection{Core Concept}
+
+NNGPT wraps an LLM (DeepSeek-R1, CodeLlama-7B) into a self-improving AutoML engine. Unlike search-based AutoML (Optuna, hundreds of trials) or NAS (DARTS, ENAS, compute-intensive), it generates \textbf{complete executable training specifications} --- architecture code, preprocessing transforms, optimizer config, loss, metrics --- from a single natural-language prompt, then \textbf{learns from execution outcomes} via LoRA fine-tuning and RL.
+
+\subsubsection{Closed-Loop Architecture}
+
+Seven-stage cycle:
+
+\begin{verbatim}
+RETRIEVE --> GENERATE --> VALIDATE --> EXECUTE --> LOG --> FINE-TUNE --> STORE
+   |                                                                    |
+   +--- LEMUR dataset (audited PyTorch programs) <----------------------+
+\end{verbatim}
+
+Formally: generator $G_\theta$ maps prompt $P$ and retrieval set $R$ to executable configuration $C$; validator $V$ checks structural correctness; executor $E$ produces metrics $m$; predictor $H_\phi$ estimates final accuracy from early epochs. Every 50 completed runs, LoRA adapters are fine-tuned for 3 epochs (linear warmup + cosine decay).
+
+\subsubsection{Five Integrated Pipelines}
+
+\begin{center}
+\begin{longtable}{c p{3cm} p{7cm}}
+\hline
+\textbf{\#} & \textbf{Pipeline} & \textbf{Description} \\
+\hline
+\endhead
+1 & Zero-shot architecture synthesis (FSAP) & 1--6 few-shot exemplars from LEMUR; MD5 deduplication. Produced $\sim$1,900 unique architectures out of $\sim$5,000 trained models. Mean accuracy 53.1\% vs.\ 51.5\% baseline; +11.6pp on CIFAR-100. \\
+2 & Hyperparameter optimization & LLM generates complete HP sets (lr, momentum, weight decay, batch size). 93\% schema validity. RMSE 0.603 vs.\ Optuna's 0.636 --- \textbf{one-shot generation eliminates 20,000+ Optuna trials}. \\
+3 & Code-aware accuracy prediction & 4-bit QLoRA model consumes metadata + code + epoch-1--2 accuracies. RMSE 0.1449, Pearson $r = 0.7766$ across 1,200+ runs. $\sim$50\%/75\% of predictions within 5\%/10\% of true accuracy. \\
+4 & NN-RAG & Retrieval-augmented patching: scans repositories for \texttt{nn.Module} subclasses, syntax-preserving extraction via LibCST, SHA-1 content addressing. 73\% executability on 1,289 target blocks. \\
+5 & RL closed loop & Masked-architecture corpus where layer definitions are replaced by placeholders; model reconstructs them. GRPO-style policy-gradient updates to LoRA adapters. Parallel channel-mutation via \texttt{torch.fx} tracing. \\
+\hline
+\end{longtable}
+\end{center}
+
+\subsubsection{Self-Improvement Mechanism}
+
+The key innovation is the \textbf{execution feedback loop}: every generated configuration is executed end-to-end, metrics are logged, and the LLM's LoRA weights are updated on the accumulated (prompt, config, outcome) tuples. This means the model improves at generating high-performing configurations over time, without explicit search. The accuracy predictor ($H_\phi$) enables \textbf{early stopping} of unpromising runs, reducing compute waste.
+
+The RL component adds a reward signal mixing syntactic validity, runtime feasibility, and validation accuracy:
+\begin{equation}
+r = w_1 \cdot \mathbb{1}[\text{valid syntax}] + w_2 \cdot \mathbb{1}[\text{runs without error}] + w_3 \cdot \text{val\_accuracy}
+\end{equation}
+
+GRPO-style policy gradients update the LoRA adapters toward configurations that execute correctly and achieve high accuracy.
+
+\subsubsection{Key Results}
+
+\begin{center}
+\begin{tabular}{l l l}
+\hline
+\textbf{Metric} & \textbf{NNGPT} & \textbf{Baseline} \\
+\hline
+Architecture diversity & 1,900 unique / 5,000 runs & N/A \\
+HPO RMSE & 0.603 & Optuna: 0.636 \\
+Accuracy prediction ($r$) & 0.7766 & N/A \\
+Schema validity & 93\% & N/A \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsubsection{Limitations}
+
+\begin{itemize}
+    \item Single-GPU (24GB) bottleneck limits context window and schema complexity
+    \item Scope restricted to mid-scale vision (CIFAR, MNIST); ImageNet deferred
+    \item No explicit novelty or hardware-efficiency objective
+    \item RL underperforms on hard regimes (CIFAR-100: 0.016 vs.\ 0.208 baseline)
+    \item Accuracy predictor correlation varies sharply across datasets
+\end{itemize}
+
+\subsubsection{Relevance to NAT}
+
+NNGPT's closed-loop pattern (generate $\to$ execute $\to$ log $\to$ fine-tune) maps directly to the Feature Factory Agent:
+
+\begin{center}
+\begin{tabular}{l l}
+\hline
+\textbf{NNGPT Component} & \textbf{NAT Equivalent} \\
+\hline
+LEMUR dataset & Parquet feature archive \\
+Architecture generation & Feature operation DAG generation \\
+Execution + metrics & IC/MI/ICIR evaluation \\
+LoRA fine-tuning & Bias generator toward productive operations \\
+Accuracy predictor & Early-stop unpromising features (ICIR $<$ 0.2 after 1 window) \\
+RL reward & Composite: IC significance + cost viability + novelty \\
+\hline
+\end{tabular}
+\end{center}
+
+The key transferable idea is \textbf{learning to generate better candidates from execution history}, not just filtering bad ones. This closes the gap between NAT's current ``search and filter'' approach and a true self-improving system.
+
+% ----------------------------------------------------------
+
+\subsection{Synthesis: What NAT Should Adopt}
+
+\begin{center}
+\begin{tabular}{l p{4cm} p{5cm}}
+\hline
+\textbf{From} & \textbf{Concept} & \textbf{How to Apply in NAT} \\
+\hline
+QuantEvolve & Quality-diversity archive (MAP-Elites) & Bin features by regime, frequency, IC, turnover --- maintain diversity, not just top performers \\
+QuantEvolve & Multi-agent specialization & Data Agent (parquet analysis) $\to$ Research Agent (hypothesis) $\to$ Code Agent (feature DAG) $\to$ Eval Agent (IC/MI) \\
+Vectorial GP & Vector-native operations & Operate on 100-tick windows with DOT, MEAN, STD as first-class GP operators \\
+Vectorial GP & Strong typing & Constrain feature DAG output to bounded signals; boolean root for entry/exit \\
+Vectorial GP & Rotating evaluation segments & Evaluate on rotating OOS windows to mitigate overfitting \\
+NNGPT & Execution feedback fine-tuning & Track which operation types/params produce survivors; bias future generation \\
+NNGPT & Early-stop predictor & Kill candidate features with ICIR $< 0.2$ after first evaluation window \\
+NNGPT & RL reward shaping & Composite reward: IC + cost viability + novelty + temporal stability \\
+\hline
+\end{tabular}
+\end{center}
+
+% ============================================================
+% PART XVI: STUDY ROADMAP
+% ============================================================
+\newpage
+\section{Recommended Study Roadmap}
+
+\begin{center}
+\begin{longtable}{c l p{5cm} p{3cm}}
+\hline
+\textbf{Priority} & \textbf{Subject} & \textbf{Reference} & \textbf{NAT Relevance} \\
+\hline
+\endhead
+1 & Information Theory & Cover \& Thomas, \textit{Elements of Information Theory} & Feature selection, IT engine \\
+2 & KSG MI Estimation & Kraskov et al.\ (2004), PRE 69(6) & Core of alpha discovery \\
+3 & Kalman Filtering & S\"arkk\"a, \textit{Bayesian Filtering and Smoothing} (free PDF) & 3 algorithms use Kalman \\
+4 & FIR/IIR Filter Design & Oppenheim \& Willsky, \textit{Signals and Systems} Ch.\ 5--7 & Feature Factory extension \\
+5 & Hawkes Processes & Bacry et al.\ (2015) review paper & Trade clustering model \\
+6 & Market Microstructure & Bouchaud et al., \textit{Trades, Quotes, and Prices} & Kyle, Amihud, VPIN, propagator \\
+7 & Evolutionary Computation & Koza, \textit{Genetic Programming} & Autonomous agent evolution \\
+8 & Sequential Analysis & Wald (1947), Tartakovsky \textit{Sequential Analysis} & SPRT optimal entry \\
+9 & Hidden Markov Models & Rabiner (1989) tutorial & Regime detection extension \\
+10 & Transfer Entropy & Schreiber (2000), PRL 85(2) & Causal feature selection \\
+\hline
+\end{longtable}
+\end{center}
+
+% ============================================================
+% APPENDIX: FEATURE COUNT SUMMARY
+% ============================================================
+\newpage
+\section*{Appendix: Feature Count Summary}
+
+\begin{center}
+\begin{tabular}{l r l}
+\hline
+\textbf{Category} & \textbf{Count} & \textbf{Type} \\
+\hline
+Raw & 10 & Base (always computed) \\
+Imbalance & 8 & Base \\
+Flow & 12 & Base \\
+Volatility & 9 & Base \\
+Entropy & 24 & Base \\
+Context & 12 & Base \\
+Trend & 15 & Base \\
+Illiquidity & 12 & Base \\
+Toxicity & 10 & Base \\
+Derived & 15 & Base \\
+Microstructure & 5 & Base \\
+Resilience & 3 & Base \\
+Hawkes & 3 & Base \\
+\hline
+\textbf{Base subtotal} & \textbf{138} & \\
+\hline
+Whale Flow & 12 & Optional \\
+Liquidation Risk & 13 & Optional \\
+Concentration & 15 & Optional \\
+Regime & 20 & Optional \\
+GMM Classification & 8 & Optional \\
+Cross-Symbol & 3 & Optional \\
+\hline
+\textbf{Optional subtotal} & \textbf{71} & \\
+\hline
+\textbf{Total features} & \textbf{209} & \\
+\hline
+Algorithm-derived & 56+ & Streaming \\
+\hline
+\end{tabular}
+\end{center}
+
+\end{document}
