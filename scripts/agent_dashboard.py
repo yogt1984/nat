@@ -24,15 +24,43 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
+import time
 import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+log = logging.getLogger("nat.dashboard")
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = ROOT / "data" / "agent"
 DB_PATH = ROOT / "data" / "nat.db"
+
+# ---------------------------------------------------------------------------
+# In-memory cache with TTL
+# ---------------------------------------------------------------------------
+
+_cache: dict[str, tuple[Any, float]] = {}
+_CACHE_TTL = 60.0  # seconds
+
+
+def _cached(key: str, loader: Callable[[], Any], ttl: float = _CACHE_TTL) -> Any:
+    """Return cached value if fresh, otherwise call loader and cache result."""
+    now = time.time()
+    if key in _cache:
+        data, ts = _cache[key]
+        if now - ts < ttl:
+            return data
+    data = loader()
+    _cache[key] = (data, now)
+    return data
+
+
+def cache_clear() -> None:
+    """Clear all cached data (for testing)."""
+    _cache.clear()
 
 # ---------------------------------------------------------------------------
 # SQLite store (lazy singleton for read-only dashboard use)
@@ -943,7 +971,8 @@ setInterval(() => { if (document.getElementById('autoRefresh').checked) refreshA
 
 class AgentDashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        sys.stderr.write(f"[agent-dashboard] {args[0]}\n")
+        # Suppress default stderr logging; we use structured log below
+        pass
 
     def _json_response(self, data: Any, status: int = 200) -> None:
         body = json.dumps(data, indent=2, default=str).encode()
@@ -951,6 +980,7 @@ class AgentDashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", f"max-age={int(_CACHE_TTL)}")
         self.end_headers()
         self.wfile.write(body)
 
@@ -963,74 +993,102 @@ class AgentDashboardHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        t0 = time.time()
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path.rstrip("/")
+        status = 200
 
         if path == "" or path == "/":
             self._html_response(DASHBOARD_HTML)
 
         elif path == "/api/state":
-            state = read_state()
-            # Enrich with queue depth and gen stats
-            hyps = read_hypotheses()
-            state["_queue_depth"] = len([h for h in hyps if h.get("status") == "queued"])
-            state["_gen_stats"] = read_gen_stats()
-            self._json_response(state)
+            def _load_state():
+                state = read_state()
+                hyps = read_hypotheses()
+                state["_queue_depth"] = len(
+                    [h for h in hyps if h.get("status") == "queued"]
+                )
+                state["_gen_stats"] = read_gen_stats()
+                return state
+            self._json_response(_cached("state", _load_state))
 
         elif path == "/api/queue":
-            hyps = read_hypotheses()
-            self._json_response(get_queue(hyps))
+            self._json_response(
+                _cached("queue", lambda: get_queue(read_hypotheses()))
+            )
 
         elif path == "/api/registry":
-            self._json_response(read_registry())
+            self._json_response(_cached("registry", read_registry))
 
         elif path == "/api/graveyard":
-            hyps = read_hypotheses()
-            self._json_response(get_graveyard(hyps))
+            self._json_response(
+                _cached("graveyard", lambda: get_graveyard(read_hypotheses()))
+            )
 
         elif path == "/api/heatmap":
-            hyps = read_hypotheses()
-            self._json_response(build_heatmap_data(hyps))
+            self._json_response(
+                _cached("heatmap", lambda: build_heatmap_data(read_hypotheses()))
+            )
 
         elif path == "/api/cache":
-            self._json_response(get_cache_stats())
+            self._json_response(_cached("cache_stats", get_cache_stats))
 
         elif path == "/api/graveyard_sankey":
-            hyps = read_hypotheses()
-            self._json_response(build_graveyard_sankey(hyps))
+            self._json_response(
+                _cached("sankey", lambda: build_graveyard_sankey(read_hypotheses()))
+            )
 
         elif path == "/api/cross_symbol_ic":
-            hyps = read_hypotheses()
-            self._json_response(build_cross_symbol_ic(hyps))
+            self._json_response(
+                _cached("cross_symbol", lambda: build_cross_symbol_ic(read_hypotheses()))
+            )
 
         elif path == "/api/ic_decay":
-            registry = read_registry()
-            self._json_response(build_ic_decay_data(registry))
+            self._json_response(
+                _cached("ic_decay", lambda: build_ic_decay_data(read_registry()))
+            )
 
         elif path == "/api/correlation_matrix":
-            registry = read_registry()
-            self._json_response(build_correlation_matrix(registry))
+            self._json_response(
+                _cached("corr_matrix", lambda: build_correlation_matrix(read_registry()))
+            )
 
         elif path == "/api/ic_threshold_curve":
-            hyps = read_hypotheses()
-            self._json_response(build_ic_threshold_curve(hyps))
+            self._json_response(
+                _cached("ic_threshold", lambda: build_ic_threshold_curve(read_hypotheses()))
+            )
 
         else:
             self.send_error(404)
+            status = 404
+
+        elapsed_ms = (time.time() - t0) * 1000
+        log.debug("%s %s %d %.1fms", self.command, path, status, elapsed_ms)
 
 
 def main():
     parser = argparse.ArgumentParser(description="NAT Agent Dashboard")
     parser.add_argument("--port", type=int, default=8060)
     parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Log every request to stderr")
     args = parser.parse_args()
 
+    level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [dashboard] %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+    )
+
     server = HTTPServer((args.host, args.port), AgentDashboardHandler)
-    print(f"Agent dashboard: http://{args.host}:{args.port}")
+    log.info("Agent dashboard: http://%s:%d (cache TTL=%ds)",
+             args.host, args.port, int(_CACHE_TTL))
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nShutting down.")
+        log.info("Shutting down.")
         server.shutdown()
 
 
