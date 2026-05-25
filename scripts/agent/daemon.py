@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
-"""NAT Agent Daemon — Autonomous hypothesis-driven alpha discovery.
+"""NAT Microstructure Agent — Autonomous hypothesis-driven alpha discovery.
 
-Main loop:
-    1. UPDATE MANIFEST  — scan data/features/, write manifest.json
-    2. GENERATE         — each generator emits hypotheses into queue
-    3. EXECUTE          — pop highest-priority, run 5-gate protocol
-    4. MONITOR          — check paper trading metrics for registered signals
-    5. SLEEP            — wait until next cycle
-
-Follows the pipeline_runner.py pattern: persistent state, SIGTERM handling,
-tmux-based launch, cron watchdog.
+Discovers scalping signals (5s horizon) from Hyperliquid perpetual futures
+using 6 generators and a 5-gate replication protocol.
 
 Usage:
     python scripts/agent/daemon.py start     # run main loop
@@ -19,79 +12,23 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import json
 import logging
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
-# Ensure project root is importable
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from agent.base import (  # noqa: E402
     ResearchAgent, BaseRunner, AgentPhase, AgentState,  # re-export for compat
+    cli_main,
 )
 from agent.hypothesis import Hypothesis, GeneratorStats  # noqa: E402
 from agent.hypothesis_queue import HypothesisQueue  # noqa: E402
 
 log = logging.getLogger("nat.agent")
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
-DEFAULT_CONFIG = {
-    "cycle_interval_s": 3600,          # 1 hour between cycles
-    "max_experiments_per_cycle": 10,
-    "max_cycle_runtime_s": 5400,       # 90 minutes
-    "generators_enabled": [
-        "systematic",
-        "spectral",
-        "regime",
-        "cross_asset",
-        "recycler",
-        "ensemble",
-    ],
-}
-
-STATE_PATH = ROOT / "data" / "agent" / "agent_state.json"
-STATS_PATH = ROOT / "data" / "agent" / "generator_stats.json"
-
-
-def load_config() -> dict:
-    """Load agent config from TOML or return defaults."""
-    config_path = ROOT / "config" / "agent.toml"
-    if config_path.exists():
-        try:
-            import tomllib
-        except ImportError:
-            import tomli as tomllib  # type: ignore[no-redef]
-        with open(config_path, "rb") as f:
-            return {**DEFAULT_CONFIG, **tomllib.load(f).get("agent", {})}
-    return DEFAULT_CONFIG
-
-
-# Backward compatibility — module-level functions still importable
-def load_gen_stats() -> dict[str, GeneratorStats]:
-    if STATS_PATH.exists():
-        with open(STATS_PATH) as f:
-            raw = json.load(f)
-        return {k: GeneratorStats(**v) for k, v in raw.items()}
-    return {g: GeneratorStats() for g in DEFAULT_CONFIG["generators_enabled"]}
-
-
-def save_gen_stats(stats: dict[str, GeneratorStats]) -> None:
-    STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(STATS_PATH, "w") as f:
-        json.dump({k: {"attempts": v.attempts, "successes": v.successes}
-                    for k, v in stats.items()}, f, indent=2)
-
-
-# ---------------------------------------------------------------------------
-# MicrostructureAgent — the NAT alpha discovery agent
-# ---------------------------------------------------------------------------
 
 class MicrostructureAgent(ResearchAgent):
     """Microstructure research agent for HFT alpha discovery.
@@ -101,58 +38,29 @@ class MicrostructureAgent(ResearchAgent):
     """
 
     agent_type = "microstructure"
+    config_section = "agent"
     default_generators = [
         "systematic", "spectral", "regime",
         "cross_asset", "recycler", "ensemble",
     ]
 
-    # --- Path overrides (use module-level vars for monkeypatchability) -----
-
     @property
     def root(self) -> Path:
         return ROOT
 
-    @property
-    def state_path(self) -> Path:
-        return STATE_PATH
-
-    @property
-    def queue_path(self) -> Path:
-        return ROOT / "data" / "agent" / "hypotheses.json"
-
-    @property
-    def stats_path(self) -> Path:
-        return STATS_PATH
-
-    # --- Config -----------------------------------------------------------
-
-    def load_config(self) -> dict:
-        return load_config()
-
-    # --- Abstract hook implementations ------------------------------------
+    # Tick-level rolling IC (no bar resampling)
+    _rolling_ic_bar_period = None
+    _rolling_ic_horizon_default = 5.0  # 5 seconds (50 rows at 100ms)
+    _rolling_ic_min_valid = 200
+    _rolling_ic_feature_suffixes = ("",)
+    _rolling_ic_use_gated_signal = True
 
     def get_generator(self, name: str):
         """Lazy-import microstructure generator functions."""
         try:
-            if name == "systematic":
-                from agent.generators.systematic import generate
-                return generate
-            elif name == "spectral":
-                from agent.generators.spectral import generate
-                return generate
-            elif name == "regime":
-                from agent.generators.regime import generate
-                return generate
-            elif name == "cross_asset":
-                from agent.generators.cross_asset import generate
-                return generate
-            elif name == "recycler":
-                from agent.generators.recycler import generate
-                return generate
-            elif name == "ensemble":
-                from agent.generators.ensemble import generate
-                return generate
-        except ImportError as e:
+            mod = __import__(f"agent.generators.{name}", fromlist=["generate"])
+            return mod.generate
+        except (ImportError, AttributeError) as e:
             log.debug("Generator %s not yet implemented: %s", name, e)
         return None
 
@@ -160,49 +68,17 @@ class MicrostructureAgent(ResearchAgent):
         from agent.runner import MicrostructureRunner
         return MicrostructureRunner(hypothesis, manifest)
 
-    def pre_execute(self, hypothesis: Hypothesis) -> None:
-        """Inject adaptive IC threshold — raises the bar as registry grows."""
-        adaptive_min_ic = self._compute_adaptive_ic()
-        hypothesis.thresholds.setdefault("min_ic", 0.10)
-        if adaptive_min_ic > hypothesis.thresholds["min_ic"]:
-            hypothesis.thresholds["min_ic"] = adaptive_min_ic
-
-    def post_cycle(self, cycle_hypotheses: list) -> int:
-        """Hypothesis chaining + cache stats logging."""
-        n = self._chain_hypotheses(cycle_hypotheses)
-
-        # Log cache stats
-        from agent.runner import get_cache
-        cache_stats = get_cache().stats
-        log.info("Cache stats: %d hits, %d misses (%.0f%% hit rate, %d entries)",
-                 cache_stats["hits"], cache_stats["misses"],
-                 cache_stats["hit_rate"] * 100, cache_stats["entries"])
-        return n
-
-    def on_fdr_reject(self, hypothesis: Hypothesis) -> None:
-        """Remove FDR-rejected signal from registry."""
-        self._remove_from_registry(hypothesis.id)
-
     def run_monitor(self) -> None:
-        """Check registered signals for IC decay and promotion.
+        """IC decay monitoring + microstructure-specific promotion check."""
+        super().run_monitor()
+        self._check_promotions()
 
-        For each registered signal:
-        1. Compute IC on the latest data window
-        2. If IC < 50% of discovery IC, increment decay counter
-        3. Auto-retire after 14 consecutive decay days
-        4. Check paper trading signals for promotion eligibility
-        """
-        from agent.runner import REGISTRY_PATH
-        if not REGISTRY_PATH.exists():
+    def _check_promotions(self) -> None:
+        """Check paper trading signals for promotion eligibility."""
+        if not self.registry_path.exists():
             return
-        with open(REGISTRY_PATH) as f:
+        with open(self.registry_path) as f:
             registry = json.load(f)
-        if not registry:
-            return
-
-        decay_cfg = self.config.get("decay", {})
-        decay_ratio = decay_cfg.get("ic_decay_ratio", 0.5)
-        decay_days_limit = decay_cfg.get("consecutive_days_limit", 14)
 
         promotion = self.config.get("promotion", {})
         paper_sharpe_min = promotion.get("paper_sharpe_min", 1.5)
@@ -210,48 +86,7 @@ class MicrostructureAgent(ResearchAgent):
         realized_ic_ratio_min = promotion.get("realized_ic_ratio_min", 0.8)
         max_drawdown_pct = promotion.get("max_drawdown_pct", 2.0)
 
-        # IC decay monitoring
-        n_retired = 0
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        modified = False
-        for sig in registry:
-            if sig.get("status") == "retired":
-                continue
-            rolling_ic = self._compute_rolling_ic(sig)
-            if rolling_ic is not None:
-                expected_ic = sig.get("expected_ic", 0)
-                threshold = expected_ic * decay_ratio
-                sig.setdefault("ic_history", [])
-                sig["ic_history"].append({"date": today, "ic": rolling_ic})
-                # Keep last 30 entries
-                sig["ic_history"] = sig["ic_history"][-30:]
-                sig["latest_ic"] = rolling_ic
-                modified = True
-
-                if rolling_ic < threshold:
-                    days = sig.get("decay_days", 0) + 1
-                    sig["decay_days"] = days
-                    log.warning("  IC DECAY: %s IC=%.3f < %.3f (%.0f%% of %.3f), day %d/%d",
-                                sig["name"][:40], rolling_ic, threshold,
-                                decay_ratio * 100, expected_ic, days, decay_days_limit)
-                    if days >= decay_days_limit:
-                        sig["status"] = "retired"
-                        sig["retired_reason"] = "ic_decay"
-                        sig["retired_date"] = today
-                        n_retired += 1
-                        log.info("  AUTO-RETIRED: %s (IC decayed for %d days)",
-                                 sig["name"][:40], days)
-                else:
-                    # Reset decay counter on recovery
-                    if sig.get("decay_days", 0) > 0:
-                        log.info("  IC recovered: %s IC=%.3f >= %.3f, resetting decay counter",
-                                 sig["name"][:40], rolling_ic, threshold)
-                    sig["decay_days"] = 0
-
-        # Promotion check
-        n_validated = 0
-        n_paper = 0
-        n_promotable = 0
+        n_validated = n_paper = n_promotable = 0
         for sig in registry:
             status = sig.get("status", "validated")
             if status == "validated":
@@ -274,47 +109,21 @@ class MicrostructureAgent(ResearchAgent):
                              sig["name"][:50], paper_sharpe, paper_days_actual,
                              realized_ic / expected_ic if expected_ic else 0)
 
-        # Save registry if modified
-        if modified or n_retired > 0:
-            with open(REGISTRY_PATH, "w") as f:
-                json.dump(registry, f, indent=2)
+        log.info("Promotion check: %d validated, %d paper, %d promotable",
+                 n_validated, n_paper, n_promotable)
 
-        if n_retired > 0:
-            self.state.set("total_signals_registered",
-                          max(0, self.state.get("total_signals_registered", 0) - n_retired))
-
-        log.info("Monitor: %d validated, %d paper, %d promotable, %d retired this cycle",
-                 n_validated, n_paper, n_promotable, n_retired)
-
-    # --- Domain-specific methods ------------------------------------------
-
-    @staticmethod
-    def _remove_from_registry(hypothesis_id: str) -> None:
-        """Remove a signal from the registry by its hypothesis_id."""
-        from agent.runner import REGISTRY_PATH
-        if not REGISTRY_PATH.exists():
-            return
-        with open(REGISTRY_PATH) as f:
-            registry = json.load(f)
-        registry = [s for s in registry if s.get("hypothesis_id") != hypothesis_id]
-        with open(REGISTRY_PATH, "w") as f:
-            json.dump(registry, f, indent=2)
+    def post_cycle(self, cycle_hypotheses: list) -> int:
+        """Hypothesis chaining + cache stats logging."""
+        n = self._chain_hypotheses(cycle_hypotheses)
+        from agent.runner import get_cache
+        cache_stats = get_cache().stats
+        log.info("Cache stats: %d hits, %d misses (%.0f%% hit rate, %d entries)",
+                 cache_stats["hits"], cache_stats["misses"],
+                 cache_stats["hit_rate"] * 100, cache_stats["entries"])
+        return n
 
     def _chain_hypotheses(self, cycle_hypotheses: list) -> int:
-        """Spawn follow-up hypotheses from near-misses and strong results.
-
-        Rule 1 — Symbol-specific variant: if a hypothesis passed discovery,
-        cost, and temporal replication but failed symbol replication on
-        exactly 1 symbol, spawn a symbol-specific variant (primary + passing
-        symbol only) with lower priority.
-
-        Rule 2 — Ensemble promotion: if a hypothesis passed with dIC >> min_dIC
-        (at least 2x), it's a strong single gate. Trigger the ensemble generator
-        to pair it with other strong gates. (Ensemble generator picks these up
-        automatically on the next cycle; here we just log the signal.)
-
-        Returns the number of chained hypotheses spawned.
-        """
+        """Spawn follow-up hypotheses from near-misses and strong results."""
         n_spawned = 0
         min_dIC = self.config.get("gates", {}).get("min_dIC", 0.05)
 
@@ -328,7 +137,6 @@ class MicrostructureAgent(ResearchAgent):
                 passed_syms = sr.get("passed", [])
                 failed_syms = sr.get("failed", [])
 
-                # Failed on exactly 1 symbol → spawn variant for passing symbols
                 if len(failed_syms) == 1 and len(passed_syms) >= 2:
                     claim = f"{h.claim} [symbol-specific: {','.join(passed_syms)}]"
                     existing = {x.claim for x in self.queue._all}
@@ -356,7 +164,6 @@ class MicrostructureAgent(ResearchAgent):
                 if dIC >= min_dIC * 2:
                     log.info("  Strong gate (dIC=%.3f): %s — ensemble candidate",
                              dIC, h.claim[:60])
-                    # Ensemble generator will pick this up next cycle
 
         return n_spawned
 
@@ -374,209 +181,69 @@ class MicrostructureAgent(ResearchAgent):
                     pass
         return 0.0
 
-    def _compute_adaptive_ic(self) -> float:
-        """Compute adaptive IC threshold: max(0.10, median(registry_ic) * 0.8).
-
-        As the registry grows with high-quality signals, the bar rises so
-        marginal signals are rejected. Floor is always the config min_ic.
-        """
-        from agent.runner import REGISTRY_PATH
-        floor_ic = self.config.get("gates", {}).get("min_ic", 0.10)
-        if not REGISTRY_PATH.exists():
-            log.info("Adaptive IC: no registry, using floor %.2f", floor_ic)
-            return floor_ic
-        with open(REGISTRY_PATH) as f:
-            registry = json.load(f)
-        ics = [s.get("expected_ic", 0) for s in registry
-               if s.get("status") != "retired"]
-        if not ics:
-            log.info("Adaptive IC: empty registry, using floor %.2f", floor_ic)
-            return floor_ic
-        ics.sort()
-        median_ic = ics[len(ics) // 2]
-        adaptive = max(floor_ic, median_ic * 0.8)
-        log.info("Adaptive IC: median=%.3f -> threshold=%.3f (floor=%.2f, %d signals)",
-                 median_ic, adaptive, floor_ic, len(ics))
-        return adaptive
-
-    def _compute_rolling_ic(self, sig: dict) -> float | None:
-        """Compute rolling IC for a registered signal on the latest available data.
-
-        Loads the most recent date's Parquet data, applies the regime gate,
-        and computes Spearman correlation between the signal feature and
-        5-second forward returns.
-
-        Returns None if data is unavailable or insufficient.
-        """
-        try:
-            import numpy as np
-            import pandas as pd
-        except ImportError:
-            return None
-
-        from agent.runner import _load_feature_data, _extract_gated_signal
-
-        # Find the latest data directory
-        data_root = ROOT / "data" / "features"
-        if not data_root.exists():
-            return None
-        dates = sorted(d.name for d in data_root.iterdir() if d.is_dir())
-        if not dates:
-            return None
-
-        features = sig.get("features", [])
-        if not features:
-            return None
-        feature = features[0]
-        gate = sig.get("regime_gate")
-        symbol = sig.get("symbols", ["BTC"])[0]
-
-        # Try latest date, fall back to second latest
-        for date in reversed(dates[-2:]):
-            data_dir = f"data/features/{date}"
-            df = _load_feature_data(data_dir, symbol)
-            if df is None or len(df) < 500:
-                continue
-
-            signal_vals = _extract_gated_signal(df, feature, gate)
-            if signal_vals is None:
-                continue
-
-            # Compute 5s forward returns (50 rows at 100ms)
-            if "raw_midprice" not in df.columns:
-                continue
-            mid = df["raw_midprice"].to_numpy(dtype=float)
-            fwd = np.full_like(mid, np.nan)
-            fwd[:-50] = (mid[50:] - mid[:-50]) / mid[:-50]
-
-            # Spearman on valid overlap
-            valid = ~(np.isnan(signal_vals) | np.isnan(fwd))
-            if valid.sum() < 200:
-                continue
-
-            ic = pd.Series(signal_vals[valid]).corr(
-                pd.Series(fwd[valid]), method="spearman"
-            )
-            return float(ic) if not np.isnan(ic) else None
-
-        return None
-
     def print_report(self) -> None:
-        """Print a full summary: registry + queue + graveyard + generator stats."""
-        from agent.runner import REGISTRY_PATH
-        s = self.state
-
-        print("=" * 60)
-        print("  NAT Agent Report")
-        print("=" * 60)
-
-        # Status
-        print(f"\nPhase:       {s.phase.value}")
-        print(f"Cycles:      {s.get('cycle_count', 0)}")
-        print(f"Tested:      {s.get('total_hypotheses_tested', 0)} hypotheses")
-        print(f"Registered:  {s.get('total_signals_registered', 0)} signals")
-        print(f"Queue depth: {self.queue.depth}")
-        print(f"Graveyard:   {len(self.queue.graveyard)}")
-
-        # Registry
-        print(f"\n{'─' * 60}")
-        print("REGISTRY")
-        print(f"{'─' * 60}")
-        if REGISTRY_PATH.exists():
-            with open(REGISTRY_PATH) as f:
-                registry = json.load(f)
-            if registry:
-                for sig in registry:
-                    print(f"  IC={sig['expected_ic']:.3f}  gate={sig.get('regime_gate', '-'):30s}  "
-                          f"{sig['name'][:50]}")
-            else:
-                print("  (empty)")
-        else:
-            print("  (no registry file)")
-
-        # Graveyard breakdown
-        print(f"\n{'─' * 60}")
-        print("GRAVEYARD BREAKDOWN")
-        print(f"{'─' * 60}")
-        reasons = {}
-        for h in self.queue.graveyard:
-            r = h.failure_reason or "unknown"
-            reasons[r] = reasons.get(r, 0) + 1
-        if reasons:
-            for r, count in sorted(reasons.items(), key=lambda x: -x[1]):
-                print(f"  {r:20s}  {count}")
-        else:
-            print("  (no failures)")
-
-        # Generator stats
-        print(f"\n{'─' * 60}")
-        print("GENERATOR PERFORMANCE")
-        print(f"{'─' * 60}")
-        for name, gs in self.gen_stats.items():
-            print(f"  {name:15s}  attempts={gs.attempts:3d}  "
-                  f"successes={gs.successes:3d}  "
-                  f"hit_rate={gs.hit_rate:.0%}  "
-                  f"weight={gs.weight:.3f}")
-
-        # Cache
-        cache_dir = ROOT / "data" / "agent" / "cache"
+        """Report with cache stats appended."""
+        super().print_report()
+        cache_dir = self.root / "data" / "agent" / "cache"
         if cache_dir.exists():
             entries = len(list(cache_dir.glob("*.meta.json")))
             size_kb = sum(f.stat().st_size for f in cache_dir.glob("*.json")) / 1024
-            print(f"\n{'─' * 60}")
+            print(f"{'─' * 60}")
             print("CACHE")
             print(f"{'─' * 60}")
             print(f"  Entries: {entries}  Size: {size_kb:.1f} KB")
+            print()
 
-        print()
 
-
-# Backward compatibility alias
+# Backward compatibility aliases and module-level constants
 AgentDaemon = MicrostructureAgent
+STATE_PATH = ROOT / "data" / "agent" / "agent_state.json"
+STATS_PATH = ROOT / "data" / "agent" / "generator_stats.json"
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+# Backward compatibility — module-level functions
+def load_config() -> dict:
+    """Load agent config from TOML or return defaults."""
+    config_path = ROOT / "config" / "agent.toml"
+    DEFAULT_CONFIG = {
+        "cycle_interval_s": 3600,
+        "max_experiments_per_cycle": 10,
+        "max_cycle_runtime_s": 5400,
+        "generators_enabled": [
+            "systematic", "spectral", "regime",
+            "cross_asset", "recycler", "ensemble",
+        ],
+    }
+    if config_path.exists():
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib  # type: ignore[no-redef]
+        with open(config_path, "rb") as f:
+            return {**DEFAULT_CONFIG, **tomllib.load(f).get("agent", {})}
+    return DEFAULT_CONFIG
+
+
+def load_gen_stats() -> dict[str, GeneratorStats]:
+    STATS_PATH = ROOT / "data" / "agent" / "generator_stats.json"
+    if STATS_PATH.exists():
+        with open(STATS_PATH) as f:
+            raw = json.load(f)
+        return {k: GeneratorStats(**v) for k, v in raw.items()}
+    return {g: GeneratorStats() for g in ["systematic", "spectral", "regime",
+                                            "cross_asset", "recycler", "ensemble"]}
+
+
+def save_gen_stats(stats: dict[str, GeneratorStats]) -> None:
+    STATS_PATH = ROOT / "data" / "agent" / "generator_stats.json"
+    STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(STATS_PATH, "w") as f:
+        json.dump({k: {"attempts": v.attempts, "successes": v.successes}
+                    for k, v in stats.items()}, f, indent=2)
+
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
-
-    parser = argparse.ArgumentParser(description="NAT Agent Daemon")
-    parser.add_argument("action", choices=["start", "status", "once", "queue",
-                                            "registry", "graveyard", "report"],
-                        help="Action to perform")
-    args = parser.parse_args()
-
-    agent = AgentDaemon()
-
-    if args.action == "start":
-        agent.run()
-    elif args.action == "once":
-        agent.run_cycle()
-    elif args.action == "status":
-        agent.print_status()
-    elif args.action == "queue":
-        for h in agent.queue.peek(20):
-            print(f"  [{h.priority:6.3f}] {h.id}  {h.generator:12s}  {h.claim[:60]}")
-    elif args.action == "registry":
-        reg_path = ROOT / "data" / "agent" / "registry.json"
-        if reg_path.exists():
-            with open(reg_path) as f:
-                for sig in json.load(f):
-                    print(f"  IC={sig['expected_ic']:.3f}  {sig['status']:10s}  "
-                          f"{','.join(sig['symbols']):12s}  {sig['name']}")
-        else:
-            print("  (empty)")
-    elif args.action == "graveyard":
-        for h in agent.queue.graveyard[-20:]:
-            print(f"  {h.id}  {h.failure_reason or '??':20s}  {h.claim[:50]}")
-    elif args.action == "report":
-        agent.print_report()
+    cli_main(MicrostructureAgent, "NAT Microstructure Agent")
 
 
 if __name__ == "__main__":

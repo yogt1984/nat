@@ -227,6 +227,7 @@ class ResearchAgent(ABC):
     """
 
     agent_type: str = "base"
+    config_section: str = "agent"
     default_generators: list[str] = []
 
     BASE_CONFIG = {
@@ -234,6 +235,13 @@ class ResearchAgent(ABC):
         "max_experiments_per_cycle": 10,
         "max_cycle_runtime_s": 5400,
     }
+
+    # Rolling IC configuration — subclasses override these
+    _rolling_ic_bar_period: str | None = None  # None = tick-level, "5min", "1h"
+    _rolling_ic_horizon_default: float = 5.0   # seconds
+    _rolling_ic_min_valid: int = 200
+    _rolling_ic_feature_suffixes: tuple[str, ...] = ("",)
+    _rolling_ic_use_gated_signal: bool = False
 
     def __init__(self, config: dict | None = None):
         self.config = config or self.load_config()
@@ -253,21 +261,38 @@ class ResearchAgent(ABC):
         return Path(__file__).resolve().parent.parent.parent
 
     @property
+    def agent_dir(self) -> str:
+        """Data subdirectory name. Override for non-default agents."""
+        return "agent"
+
+    @property
     def state_path(self) -> Path:
-        return self.root / "data" / "agent" / "agent_state.json"
+        return self.root / "data" / self.agent_dir / "agent_state.json"
 
     @property
     def queue_path(self) -> Path:
-        return self.root / "data" / "agent" / "hypotheses.json"
+        return self.root / "data" / self.agent_dir / "hypotheses.json"
 
     @property
     def stats_path(self) -> Path:
-        return self.root / "data" / "agent" / "generator_stats.json"
+        return self.root / "data" / self.agent_dir / "generator_stats.json"
+
+    @property
+    def registry_path(self) -> Path:
+        return self.root / "data" / self.agent_dir / "registry.json"
 
     # --- Config -----------------------------------------------------------
 
     def load_config(self) -> dict:
-        """Load configuration. Override for custom config sources."""
+        """Load config from TOML [config_section] merged over BASE_CONFIG."""
+        config_path = self.root / "config" / "agent.toml"
+        if config_path.exists():
+            try:
+                import tomllib
+            except ImportError:
+                import tomli as tomllib  # type: ignore[no-redef]
+            with open(config_path, "rb") as f:
+                return {**self.BASE_CONFIG, **tomllib.load(f).get(self.config_section, {})}
         return dict(self.BASE_CONFIG)
 
     # --- Generator stats --------------------------------------------------
@@ -464,26 +489,322 @@ class ResearchAgent(ABC):
         """Create an experiment runner for the given hypothesis."""
         ...
 
-    @abstractmethod
     def run_monitor(self) -> None:
-        """Check registered signals for health, decay, promotion."""
-        ...
+        """Check registered signals for IC decay. Auto-retire after N days.
+
+        Subclasses can override to add promotion logic (e.g., microstructure).
+        """
+        if not self.registry_path.exists():
+            return
+        with open(self.registry_path) as f:
+            registry = json.load(f)
+        if not registry:
+            return
+
+        decay_cfg = self.config.get("decay", {})
+        decay_ratio = decay_cfg.get("ic_decay_ratio", 0.5)
+        decay_days_limit = decay_cfg.get("consecutive_days_limit", 14)
+
+        n_retired = 0
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        modified = False
+        label = self.agent_type.upper()
+
+        for sig in registry:
+            if sig.get("status") == "retired":
+                continue
+            rolling_ic = self._compute_rolling_ic(sig)
+            if rolling_ic is not None:
+                expected_ic = sig.get("expected_ic", 0)
+                threshold = expected_ic * decay_ratio
+                sig.setdefault("ic_history", [])
+                sig["ic_history"].append({"date": today, "ic": rolling_ic})
+                sig["ic_history"] = sig["ic_history"][-30:]
+                sig["latest_ic"] = rolling_ic
+                modified = True
+
+                if rolling_ic < threshold:
+                    days = sig.get("decay_days", 0) + 1
+                    sig["decay_days"] = days
+                    log.warning("  %s IC DECAY: %s IC=%.3f < %.3f, day %d/%d",
+                                label, sig["name"][:40], rolling_ic, threshold,
+                                days, decay_days_limit)
+                    if days >= decay_days_limit:
+                        sig["status"] = "retired"
+                        sig["retired_reason"] = "ic_decay"
+                        sig["retired_date"] = today
+                        n_retired += 1
+                        log.info("  %s AUTO-RETIRED: %s", label, sig["name"][:40])
+                else:
+                    if sig.get("decay_days", 0) > 0:
+                        log.info("  %s IC recovered: %s IC=%.3f, resetting decay",
+                                 label, sig["name"][:40], rolling_ic)
+                    sig["decay_days"] = 0
+
+        if modified or n_retired > 0:
+            with open(self.registry_path, "w") as f:
+                json.dump(registry, f, indent=2)
+
+        if n_retired > 0:
+            self.state.set("total_signals_registered",
+                          max(0, self.state.get("total_signals_registered", 0) - n_retired))
+
+        n_active = sum(1 for s in registry if s.get("status") != "retired")
+        log.info("%s Monitor: %d active signals, %d retired this cycle",
+                 label, n_active, n_retired)
 
     # --- Optional hooks (subclass can override) ---------------------------
 
     def pre_execute(self, hypothesis: Hypothesis) -> None:
-        """Called before each hypothesis execution. Default: no-op."""
-        pass
+        """Inject adaptive IC threshold — raises the bar as registry grows."""
+        adaptive_min_ic = self._compute_adaptive_ic()
+        floor_ic = self.config.get("gates", {}).get("min_ic", 0.10)
+        hypothesis.thresholds.setdefault("min_ic", floor_ic)
+        if adaptive_min_ic > hypothesis.thresholds["min_ic"]:
+            hypothesis.thresholds["min_ic"] = adaptive_min_ic
 
     def post_cycle(self, cycle_hypotheses: list) -> int:
         """Called after execution phase. Return number of spawned follow-ups."""
         return 0
 
     def on_fdr_reject(self, hypothesis: Hypothesis) -> None:
-        """Called when a hypothesis is FDR-rejected. Default: no-op."""
-        pass
+        """Remove FDR-rejected signal from registry."""
+        self._remove_from_registry(hypothesis.id)
 
     def build_manifest(self) -> dict:
         """Build the data manifest. Override for custom data sources."""
         from .manifest import build_manifest
         return build_manifest()
+
+    # --- Shared monitoring methods ----------------------------------------
+
+    def _remove_from_registry(self, hypothesis_id: str) -> None:
+        """Remove a signal from the registry by its hypothesis_id."""
+        if not self.registry_path.exists():
+            return
+        with open(self.registry_path) as f:
+            registry = json.load(f)
+        registry = [s for s in registry if s.get("hypothesis_id") != hypothesis_id]
+        with open(self.registry_path, "w") as f:
+            json.dump(registry, f, indent=2)
+
+    def _compute_adaptive_ic(self) -> float:
+        """Compute adaptive IC threshold: max(floor, median(registry_ic) * 0.8)."""
+        floor_ic = self.config.get("gates", {}).get("min_ic", 0.10)
+        if not self.registry_path.exists():
+            return floor_ic
+        with open(self.registry_path) as f:
+            registry = json.load(f)
+        ics = [s.get("expected_ic", 0) for s in registry
+               if s.get("status") != "retired"]
+        if not ics:
+            return floor_ic
+        ics.sort()
+        median_ic = ics[len(ics) // 2]
+        adaptive = max(floor_ic, median_ic * 0.8)
+        log.info("%s Adaptive IC: median=%.3f -> threshold=%.3f (floor=%.2f)",
+                 self.agent_type.capitalize(), median_ic, adaptive, floor_ic)
+        return adaptive
+
+    def _compute_rolling_ic(self, sig: dict) -> float | None:
+        """Compute rolling IC for a registered signal on the latest data.
+
+        Behaviour is configured by class-level _rolling_ic_* attributes:
+        - _rolling_ic_bar_period: None for tick-level, "5min"/"1h" for resampled
+        - _rolling_ic_horizon_default: default forward horizon in seconds
+        - _rolling_ic_min_valid: minimum valid data points
+        - _rolling_ic_feature_suffixes: suffixes to try for feature column
+        - _rolling_ic_use_gated_signal: whether to apply regime gating
+        """
+        try:
+            import numpy as np
+            import pandas as pd
+        except ImportError:
+            return None
+
+        from agent.runner import _load_feature_data
+
+        data_root = self.root / "data" / "features"
+        if not data_root.exists():
+            return None
+        dates = sorted(d.name for d in data_root.iterdir() if d.is_dir())
+        if not dates:
+            return None
+
+        features = sig.get("features", [])
+        if not features:
+            return None
+        feature = features[0]
+        gate = sig.get("regime_gate")
+        symbol = sig.get("symbols", ["BTC"])[0]
+        horizon_s = sig.get("horizon_s", self._rolling_ic_horizon_default)
+
+        for date in reversed(dates[-2:]):
+            data_dir = f"data/features/{date}"
+            df = _load_feature_data(data_dir, symbol)
+            if df is None or len(df) < 500:
+                continue
+
+            # Tick-level path (microstructure)
+            if self._rolling_ic_bar_period is None:
+                if self._rolling_ic_use_gated_signal:
+                    from agent.runner import _extract_gated_signal
+                    signal_vals = _extract_gated_signal(df, feature, gate)
+                    if signal_vals is None:
+                        continue
+                elif feature in df.columns:
+                    signal_vals = df[feature].to_numpy(dtype=float)
+                else:
+                    continue
+
+                if "raw_midprice" not in df.columns:
+                    continue
+                mid = df["raw_midprice"].to_numpy(dtype=float)
+                horizon_rows = max(1, int(horizon_s / 0.1))  # 100ms ticks
+                fwd = np.full_like(mid, np.nan)
+                if len(mid) > horizon_rows:
+                    fwd[:-horizon_rows] = (mid[horizon_rows:] - mid[:-horizon_rows]) / mid[:-horizon_rows]
+            else:
+                # Bar-resampled path (MF / macro)
+                try:
+                    from cluster_pipeline.preprocess import aggregate_bars
+                    bars = aggregate_bars(df, self._rolling_ic_bar_period)
+                except (ImportError, Exception):
+                    continue
+
+                # Find feature column with suffix matching
+                feat_col = None
+                for suffix in self._rolling_ic_feature_suffixes:
+                    candidate = f"{feature}{suffix}" if suffix else feature
+                    if candidate in bars.columns:
+                        feat_col = candidate
+                        break
+                if feat_col is None:
+                    continue
+
+                signal_vals = bars[feat_col].to_numpy(dtype=float)
+
+                # Forward returns at bar horizon
+                bar_seconds = {"5min": 300, "1h": 3600}.get(self._rolling_ic_bar_period, 300)
+                horizon_bars = max(1, int(horizon_s / bar_seconds))
+                if "raw_midprice_mean" in bars.columns:
+                    mid_col = "raw_midprice_mean"
+                elif "raw_midprice_last" in bars.columns:
+                    mid_col = "raw_midprice_last"
+                else:
+                    continue
+                mid = bars[mid_col].to_numpy(dtype=float)
+                fwd = np.full_like(mid, np.nan)
+                if len(mid) > horizon_bars:
+                    fwd[:-horizon_bars] = (mid[horizon_bars:] - mid[:-horizon_bars]) / mid[:-horizon_bars]
+
+            valid = ~(np.isnan(signal_vals) | np.isnan(fwd))
+            if valid.sum() < self._rolling_ic_min_valid:
+                continue
+
+            ic = pd.Series(signal_vals[valid]).corr(
+                pd.Series(fwd[valid]), method="spearman"
+            )
+            return float(ic) if not np.isnan(ic) else None
+
+        return None
+
+    def print_report(self) -> None:
+        """Print a full summary: registry + graveyard + generator stats."""
+        s = self.state
+        title = f"NAT {self.agent_type.replace('_', ' ').title()} Agent Report"
+
+        print("=" * 60)
+        print(f"  {title}")
+        print("=" * 60)
+
+        print(f"\nPhase:       {s.phase.value}")
+        print(f"Cycles:      {s.get('cycle_count', 0)}")
+        print(f"Tested:      {s.get('total_hypotheses_tested', 0)} hypotheses")
+        print(f"Registered:  {s.get('total_signals_registered', 0)} signals")
+        print(f"Queue depth: {self.queue.depth}")
+        print(f"Graveyard:   {len(self.queue.graveyard)}")
+
+        print(f"\n{'─' * 60}")
+        print("REGISTRY")
+        print(f"{'─' * 60}")
+        if self.registry_path.exists():
+            with open(self.registry_path) as f:
+                registry = json.load(f)
+            if registry:
+                for sig in registry:
+                    print(f"  IC={sig['expected_ic']:.3f}  gate={sig.get('regime_gate', '-'):30s}  "
+                          f"{sig['name'][:50]}")
+            else:
+                print("  (empty)")
+        else:
+            print("  (no registry file)")
+
+        print(f"\n{'─' * 60}")
+        print("GRAVEYARD BREAKDOWN")
+        print(f"{'─' * 60}")
+        reasons = {}
+        for h in self.queue.graveyard:
+            r = h.failure_reason or "unknown"
+            reasons[r] = reasons.get(r, 0) + 1
+        if reasons:
+            for r, count in sorted(reasons.items(), key=lambda x: -x[1]):
+                print(f"  {r:20s}  {count}")
+        else:
+            print("  (no failures)")
+
+        print(f"\n{'─' * 60}")
+        print("GENERATOR PERFORMANCE")
+        print(f"{'─' * 60}")
+        for name, gs in self.gen_stats.items():
+            print(f"  {name:18s}  attempts={gs.attempts:3d}  "
+                  f"successes={gs.successes:3d}  "
+                  f"hit_rate={gs.hit_rate:.0%}  "
+                  f"weight={gs.weight:.3f}")
+
+        print()
+
+
+# ---------------------------------------------------------------------------
+# CLI helper — shared across all daemon subclasses
+# ---------------------------------------------------------------------------
+
+def cli_main(agent_class: type, description: str = "NAT Agent") -> None:
+    """Standard CLI entry point for agent daemons."""
+    import argparse
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("action", choices=["start", "status", "once", "queue",
+                                            "registry", "graveyard", "report"],
+                        help="Action to perform")
+    args = parser.parse_args()
+
+    agent = agent_class()
+
+    if args.action == "start":
+        agent.run()
+    elif args.action == "once":
+        agent.run_cycle()
+    elif args.action == "status":
+        agent.print_status()
+    elif args.action == "queue":
+        for h in agent.queue.peek(20):
+            print(f"  [{h.priority:6.3f}] {h.id}  {h.generator:12s}  {h.claim[:60]}")
+    elif args.action == "registry":
+        if agent.registry_path.exists():
+            with open(agent.registry_path) as f:
+                for sig in json.load(f):
+                    print(f"  IC={sig['expected_ic']:.3f}  {sig['status']:10s}  "
+                          f"{','.join(sig['symbols']):12s}  {sig['name']}")
+        else:
+            print("  (empty)")
+    elif args.action == "graveyard":
+        for h in agent.queue.graveyard[-20:]:
+            print(f"  {h.id}  {h.failure_reason or '??':20s}  {h.claim[:50]}")
+    elif args.action == "report":
+        agent.print_report()
