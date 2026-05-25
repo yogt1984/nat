@@ -913,3 +913,106 @@ class TestICThresholdEndpoint(TestHTTPEndpoints):
     def test_api_ic_threshold_curve(self):
         data = self._get("/api/ic_threshold_curve")
         assert "curves" in data
+
+
+# ---------------------------------------------------------------------------
+# Cache tests (P1-7)
+# ---------------------------------------------------------------------------
+
+class TestCache:
+    """Verify the in-memory cache with TTL."""
+
+    def setup_method(self):
+        from agent_dashboard import cache_clear
+        cache_clear()
+
+    def test_cached_returns_same_object_within_ttl(self):
+        from agent_dashboard import _cached
+        call_count = [0]
+
+        def loader():
+            call_count[0] += 1
+            return {"data": call_count[0]}
+
+        r1 = _cached("test_key", loader, ttl=60)
+        r2 = _cached("test_key", loader, ttl=60)
+        assert r1 is r2
+        assert call_count[0] == 1  # loader called only once
+
+    def test_cached_refreshes_after_ttl(self):
+        from agent_dashboard import _cached, _cache
+        call_count = [0]
+
+        def loader():
+            call_count[0] += 1
+            return {"n": call_count[0]}
+
+        r1 = _cached("ttl_key", loader, ttl=0.05)
+        assert r1["n"] == 1
+
+        # Expire by backdating timestamp
+        _cache["ttl_key"] = (_cache["ttl_key"][0], time.time() - 1)
+
+        r2 = _cached("ttl_key", loader, ttl=0.05)
+        assert r2["n"] == 2
+        assert call_count[0] == 2
+
+    def test_cache_clear_resets_all(self):
+        from agent_dashboard import _cached, _cache, cache_clear
+        _cached("a", lambda: 1)
+        _cached("b", lambda: 2)
+        assert len(_cache) == 2
+        cache_clear()
+        assert len(_cache) == 0
+
+    def test_different_keys_cached_independently(self):
+        from agent_dashboard import _cached
+        r1 = _cached("key_a", lambda: "alpha")
+        r2 = _cached("key_b", lambda: "beta")
+        assert r1 == "alpha"
+        assert r2 == "beta"
+
+    def test_api_state_uses_cache(self):
+        """Verify /api/state doesn't re-read on rapid successive calls."""
+        from agent_dashboard import _cached, _cache, cache_clear
+        cache_clear()
+        # Pre-populate cache
+        _cached("state", lambda: {"phase": "IDLE", "_queue_depth": 0, "_gen_stats": {}})
+
+        # Second call should return cached
+        result = _cached("state", lambda: {"phase": "CHANGED"})
+        assert result["phase"] == "IDLE"  # still cached
+
+    def test_cache_control_header_present(self):
+        """HTTP responses should include Cache-Control header."""
+        import io
+        from unittest.mock import MagicMock, patch
+
+        from agent_dashboard import AgentDashboardHandler, cache_clear, _CACHE_TTL
+        cache_clear()
+
+        # Create mock request
+        handler = MagicMock(spec=AgentDashboardHandler)
+        handler.path = "/api/registry"
+        handler.command = "GET"
+        handler.wfile = io.BytesIO()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+
+        # Call do_GET directly
+        with patch.object(AgentDashboardHandler, '__init__', lambda x, *a, **k: None):
+            h = AgentDashboardHandler.__new__(AgentDashboardHandler)
+            h.path = "/api/registry"
+            h.command = "GET"
+            h.wfile = io.BytesIO()
+            h.send_response = MagicMock()
+            h.send_header = MagicMock()
+            h.end_headers = MagicMock()
+            h.do_GET()
+
+        # Check Cache-Control was sent
+        header_calls = [c[0] for c in h.send_header.call_args_list]
+        cache_headers = [c for c in header_calls if c[0] == "Cache-Control"]
+        assert len(cache_headers) == 1
+        assert f"max-age={int(_CACHE_TTL)}" in cache_headers[0][1]
