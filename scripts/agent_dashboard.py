@@ -32,12 +32,32 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 STATE_DIR = ROOT / "data" / "agent"
+DB_PATH = ROOT / "data" / "nat.db"
 
 # ---------------------------------------------------------------------------
-# Data readers (pure functions)
+# SQLite store (lazy singleton for read-only dashboard use)
 # ---------------------------------------------------------------------------
 
-def read_state() -> dict:
+_store = None
+
+def _get_store():
+    """Get or create a read-only StateStore for the dashboard."""
+    global _store
+    if _store is None and DB_PATH.exists():
+        from data.state import StateStore
+        _store = StateStore(DB_PATH)
+    return _store
+
+# ---------------------------------------------------------------------------
+# Data readers — SQLite first, JSON fallback
+# ---------------------------------------------------------------------------
+
+def read_state(agent: str = "microstructure") -> dict:
+    store = _get_store()
+    if store:
+        data = store.load_state(agent)
+        if data:
+            return data
     path = STATE_DIR / "agent_state.json"
     if path.exists():
         with open(path) as f:
@@ -45,7 +65,12 @@ def read_state() -> dict:
     return {"phase": "UNKNOWN", "cycle_count": 0}
 
 
-def read_hypotheses() -> list[dict]:
+def read_hypotheses(agent: str = "microstructure") -> list[dict]:
+    store = _get_store()
+    if store:
+        hyps = store.load_hypotheses(agent)
+        if hyps:
+            return hyps
     path = STATE_DIR / "hypotheses.json"
     if path.exists():
         with open(path) as f:
@@ -53,7 +78,12 @@ def read_hypotheses() -> list[dict]:
     return []
 
 
-def read_registry() -> list[dict]:
+def read_registry(agent: str = "microstructure") -> list[dict]:
+    store = _get_store()
+    if store:
+        reg = store.load_registry(agent)
+        if reg:
+            return reg
     path = STATE_DIR / "registry.json"
     if path.exists():
         with open(path) as f:
@@ -61,7 +91,12 @@ def read_registry() -> list[dict]:
     return []
 
 
-def read_gen_stats() -> dict:
+def read_gen_stats(agent: str = "microstructure") -> dict:
+    store = _get_store()
+    if store:
+        stats = store.load_gen_stats(agent)
+        if stats:
+            return stats
     path = STATE_DIR / "generator_stats.json"
     if path.exists():
         with open(path) as f:

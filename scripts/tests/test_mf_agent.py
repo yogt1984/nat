@@ -40,24 +40,12 @@ def queue(tmp_path):
 
 @pytest.fixture
 def mf_agent(tmp_path):
-    """Create a MediumFrequencyAgent with tmp_path for state."""
-    from agent.mf_daemon import MediumFrequencyAgent, MF_STATE_PATH, MF_STATS_PATH
-    import agent.mf_daemon as mf_mod
+    """Create a MediumFrequencyAgent with tmp_path-isolated SQLite store."""
+    from agent.mf_daemon import MediumFrequencyAgent
+    from data.state import StateStore
 
-    # Patch paths to use tmp_path
-    state_dir = tmp_path / "data" / "agent_mf"
-    state_dir.mkdir(parents=True, exist_ok=True)
-
-    orig_state = mf_mod.MF_STATE_PATH
-    orig_stats = mf_mod.MF_STATS_PATH
-    mf_mod.MF_STATE_PATH = state_dir / "agent_state.json"
-    mf_mod.MF_STATS_PATH = state_dir / "generator_stats.json"
-
-    agent = MediumFrequencyAgent()
-
-    # Restore
-    mf_mod.MF_STATE_PATH = orig_state
-    mf_mod.MF_STATS_PATH = orig_stats
+    store = StateStore(tmp_path / "nat.db")
+    agent = MediumFrequencyAgent(store=store)
     return agent
 
 
@@ -230,18 +218,22 @@ class TestMFRunner:
 
     def test_load_registry_separate_from_micro(self, tmp_path):
         from agent.mf_runner import MediumFrequencyRunner
+        from agent.hypothesis import Hypothesis
+
+        h = Hypothesis(id="HYP-TEST-001", claim="test", generator="test",
+                       priority=1.0, test_protocol=["echo ok"])
+        runner = MediumFrequencyRunner(h, {})
 
         orig = MediumFrequencyRunner.REGISTRY_PATH
         MediumFrequencyRunner.REGISTRY_PATH = tmp_path / "mf_registry.json"
 
         # MF registry should be empty (no file)
-        assert MediumFrequencyRunner._load_registry() == []
+        assert runner._load_registry() == []
 
         # Write something to it
-        (tmp_path / "mf_registry.json").parent.mkdir(parents=True, exist_ok=True)
         with open(tmp_path / "mf_registry.json", "w") as f:
             json.dump([{"name": "mf_signal"}], f)
-        assert len(MediumFrequencyRunner._load_registry()) == 1
+        assert len(runner._load_registry()) == 1
 
         MediumFrequencyRunner.REGISTRY_PATH = orig
 

@@ -40,44 +40,69 @@ class AgentPhase(str, Enum):
 
 
 class AgentState:
-    """Persistent agent state — survives restarts."""
+    """Persistent agent state — survives restarts.
 
-    def __init__(self, path: Path):
+    Dual-mode: pass ``store`` + ``agent`` for SQLite, or ``path`` for JSON.
+    """
+
+    _DEFAULTS = {
+        "phase": AgentPhase.IDLE.value,
+        "cycle_count": 0,
+        "total_hypotheses_tested": 0,
+        "total_signals_registered": 0,
+        "current_hypothesis": None,
+        "started_at": None,
+        "last_cycle_at": None,
+    }
+
+    def __init__(self, path: Path | None = None, *,
+                 store=None, agent: str = "agent"):
+        self._store = store
+        self._agent = agent
         self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if path and not store:
+            path.parent.mkdir(parents=True, exist_ok=True)
         self._data = self._load()
 
     def _load(self) -> dict:
-        if self.path.exists():
+        if self._store:
+            loaded = self._store.load_state(self._agent)
+            if loaded:
+                loaded["history"] = self._store.load_history(
+                    self._agent, limit=200)
+                return loaded
+            return {**self._DEFAULTS, "history": []}
+        # JSON fallback
+        if self.path and self.path.exists():
             with open(self.path) as f:
                 return json.load(f)
-        return {
-            "phase": AgentPhase.IDLE.value,
-            "cycle_count": 0,
-            "total_hypotheses_tested": 0,
-            "total_signals_registered": 0,
-            "current_hypothesis": None,
-            "started_at": None,
-            "last_cycle_at": None,
-            "history": [],
-        }
+        return {**self._DEFAULTS, "history": []}
 
     def save(self) -> None:
+        if self._store:
+            self._store.save_state(self._agent, self._data)
+            return
+        # JSON fallback
         with open(self.path, "w") as f:
             json.dump(self._data, f, indent=2, default=str)
 
     def transition(self, phase: AgentPhase, msg: str = "") -> None:
         old = self._data["phase"]
         self._data["phase"] = phase.value
-        self._data["history"].append({
+        entry = {
             "from": old, "to": phase.value,
             "at": datetime.now(timezone.utc).isoformat(),
             "msg": msg,
-        })
-        # Keep history bounded
+        }
+        self._data.setdefault("history", []).append(entry)
+        # Keep in-memory history bounded
         if len(self._data["history"]) > 500:
             self._data["history"] = self._data["history"][-200:]
-        self.save()
+        if self._store:
+            self._store.save_state(self._agent, self._data)
+            self._store.append_history(self._agent, entry)
+        else:
+            self.save()
 
     def get(self, key: str, default=None):
         return self._data.get(key, default)
@@ -247,10 +272,13 @@ class BaseRunner(ABC):
     DEFAULT_HORIZON_S: float = 5.0
     REGISTRY_PATH: Path | None = None
 
-    def __init__(self, hypothesis: Hypothesis, manifest: dict):
+    def __init__(self, hypothesis: Hypothesis, manifest: dict, *,
+                 store=None, agent: str | None = None):
         self.h = hypothesis
         self.manifest = manifest
         self.gate_results: list[dict] = []
+        self._store = store
+        self._agent = agent
 
     def run_full(self) -> bool:
         """Run all gate steps sequentially. Register signal on full success."""
@@ -447,12 +475,15 @@ class BaseRunner(ABC):
             last_validated=datetime.now(timezone.utc).isoformat()[:10],
             hypothesis_id=self.h.id,
         )
-        registry = self._load_registry()
-        registry.append(signal.to_dict())
-        path = self.REGISTRY_PATH
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(registry, f, indent=2)
+        if self._store and self._agent:
+            self._store.append_signal(self._agent, signal.to_dict())
+        else:
+            registry = self._load_registry()
+            registry.append(signal.to_dict())
+            path = self.REGISTRY_PATH
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(registry, f, indent=2)
         log.info("  REGISTERED: %s (IC=%.3f, horizon=%.0fs)",
                  signal.name, signal.expected_ic, horizon_s)
         return signal
@@ -492,10 +523,11 @@ class BaseRunner(ABC):
                         pass
         return 0.0
 
-    @classmethod
-    def _load_registry(cls) -> list[dict]:
-        """Load the signal registry from REGISTRY_PATH."""
-        path = cls.REGISTRY_PATH
+    def _load_registry(self) -> list[dict]:
+        """Load the signal registry from store or REGISTRY_PATH."""
+        if self._store and self._agent:
+            return self._store.load_registry(self._agent)
+        path = self.REGISTRY_PATH
         if path and path.exists():
             with open(path) as f:
                 return json.load(f)
@@ -553,15 +585,32 @@ class ResearchAgent(ABC):
     _rolling_ic_feature_suffixes: tuple[str, ...] = ("",)
     _rolling_ic_use_gated_signal: bool = False
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict | None = None, *, store=None):
         self.config = config or self.load_config()
         self.config.setdefault("generators_enabled", list(self.default_generators))
-        self.state = AgentState(self.state_path)
-        self.queue = HypothesisQueue(path=self.queue_path)
+        # SQLite state store — auto-created or injected for testing
+        self._store = store or self._create_store()
+        self._auto_migrate()
+        self.state = AgentState(store=self._store, agent=self.agent_type)
+        self.queue = HypothesisQueue(store=self._store, agent=self.agent_type)
         self.gen_stats = self._load_gen_stats()
         self._shutdown = False
         signal_mod.signal(signal_mod.SIGTERM, self._handle_signal)
         signal_mod.signal(signal_mod.SIGINT, self._handle_signal)
+
+    def _create_store(self):
+        from data.state import StateStore
+        return StateStore(self.root / "data" / "nat.db")
+
+    def _auto_migrate(self) -> None:
+        """Import existing JSON files on first run."""
+        self._store.migrate_from_json(
+            self.agent_type,
+            state_path=self.state_path,
+            hyp_path=self.queue_path,
+            reg_path=self.registry_path,
+            stats_path=self.stats_path,
+        )
 
     # --- Paths (subclass overrides for testability / multi-agent) ----------
 
@@ -604,7 +653,11 @@ class ResearchAgent(ABC):
     # --- Generator stats --------------------------------------------------
 
     def _load_gen_stats(self) -> dict[str, GeneratorStats]:
-        if self.stats_path.exists():
+        if self._store:
+            raw = self._store.load_gen_stats(self.agent_type)
+            if raw:
+                return {k: GeneratorStats(**v) for k, v in raw.items()}
+        elif self.stats_path.exists():
             with open(self.stats_path) as f:
                 raw = json.load(f)
             return {k: GeneratorStats(**v) for k, v in raw.items()}
@@ -612,10 +665,14 @@ class ResearchAgent(ABC):
                 for g in self.config.get("generators_enabled", [])}
 
     def _save_gen_stats(self) -> None:
+        data = {k: {"attempts": v.attempts, "successes": v.successes}
+                for k, v in self.gen_stats.items()}
+        if self._store:
+            self._store.save_gen_stats(self.agent_type, data)
+            return
         self.stats_path.parent.mkdir(parents=True, exist_ok=True)
         with open(self.stats_path, "w") as f:
-            json.dump({k: {"attempts": v.attempts, "successes": v.successes}
-                        for k, v in self.gen_stats.items()}, f, indent=2)
+            json.dump(data, f, indent=2)
 
     # --- Signal handling --------------------------------------------------
 
@@ -800,10 +857,13 @@ class ResearchAgent(ABC):
 
         Subclasses can override to add promotion logic (e.g., microstructure).
         """
-        if not self.registry_path.exists():
+        if self._store:
+            registry = self._store.load_registry(self.agent_type)
+        elif self.registry_path.exists():
+            with open(self.registry_path) as f:
+                registry = json.load(f)
+        else:
             return
-        with open(self.registry_path) as f:
-            registry = json.load(f)
         if not registry:
             return
 
@@ -848,8 +908,14 @@ class ResearchAgent(ABC):
                     sig["decay_days"] = 0
 
         if modified or n_retired > 0:
-            with open(self.registry_path, "w") as f:
-                json.dump(registry, f, indent=2)
+            if self._store:
+                for sig in registry:
+                    hyp_id = sig.get("hypothesis_id")
+                    if hyp_id:
+                        self._store.update_signal(self.agent_type, hyp_id, sig)
+            else:
+                with open(self.registry_path, "w") as f:
+                    json.dump(registry, f, indent=2)
 
         if n_retired > 0:
             self.state.set("total_signals_registered",
@@ -886,6 +952,9 @@ class ResearchAgent(ABC):
 
     def _remove_from_registry(self, hypothesis_id: str) -> None:
         """Remove a signal from the registry by its hypothesis_id."""
+        if self._store:
+            self._store.remove_signal(self.agent_type, hypothesis_id)
+            return
         if not self.registry_path.exists():
             return
         with open(self.registry_path) as f:
@@ -897,10 +966,13 @@ class ResearchAgent(ABC):
     def _compute_adaptive_ic(self) -> float:
         """Compute adaptive IC threshold: max(floor, median(registry_ic) * 0.8)."""
         floor_ic = self.config.get("gates", {}).get("min_ic", 0.10)
-        if not self.registry_path.exists():
+        if self._store:
+            registry = self._store.load_registry(self.agent_type)
+        elif self.registry_path.exists():
+            with open(self.registry_path) as f:
+                registry = json.load(f)
+        else:
             return floor_ic
-        with open(self.registry_path) as f:
-            registry = json.load(f)
         ics = [s.get("expected_ic", 0) for s in registry
                if s.get("status") != "retired"]
         if not ics:

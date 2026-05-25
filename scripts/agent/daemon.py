@@ -66,7 +66,8 @@ class MicrostructureAgent(ResearchAgent):
 
     def create_runner(self, hypothesis: Hypothesis, manifest: dict) -> BaseRunner:
         from agent.runner import MicrostructureRunner
-        return MicrostructureRunner(hypothesis, manifest)
+        return MicrostructureRunner(hypothesis, manifest,
+                                    store=self._store, agent=self.agent_type)
 
     def run_monitor(self) -> None:
         """IC decay monitoring + microstructure-specific promotion check."""
@@ -75,10 +76,13 @@ class MicrostructureAgent(ResearchAgent):
 
     def _check_promotions(self) -> None:
         """Check paper trading signals for promotion eligibility."""
-        if not self.registry_path.exists():
+        if self._store:
+            registry = self._store.load_registry(self.agent_type)
+        elif self.registry_path.exists():
+            with open(self.registry_path) as f:
+                registry = json.load(f)
+        else:
             return
-        with open(self.registry_path) as f:
-            registry = json.load(f)
 
         promotion = self.config.get("promotion", {})
         paper_sharpe_min = promotion.get("paper_sharpe_min", 1.5)
