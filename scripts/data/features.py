@@ -27,6 +27,9 @@ DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "features"
 # Required columns always included in output regardless of `columns` parameter
 _ALWAYS_INCLUDE = {"timestamp_ns", "symbol"}
 
+# Per-session schema validation cache (one check per data_dir per process)
+_session_validated: set[str] = set()
+
 # Default bar aggregation spec (matches all 7 existing implementations)
 _DEFAULT_AGG = {
     "timestamp_ns": ("timestamp_ns", "first"),
@@ -47,6 +50,7 @@ def load_features(
     date_range: Optional[tuple[str, str]] = None,
     columns: Optional[list[str]] = None,
     data_dir: Optional[Path] = None,
+    validate: bool = True,
 ) -> pd.DataFrame:
     """Load tick-level features from parquet files.
 
@@ -98,6 +102,28 @@ def load_features(
 
     combined = pa.concat_tables(tables, promote_options="default")
     df = combined.to_pandas()
+
+    # Schema validation (once per data_dir per session)
+    if validate and str(root) not in _session_validated:
+        from .schema import validate_columns as _validate
+        result = _validate(list(df.columns))
+        if not result["valid"]:
+            warnings.warn(
+                f"Schema drift: {len(result['missing_base'])} base columns missing: "
+                f"{result['missing_base'][:5]}"
+                f"{'...' if len(result['missing_base']) > 5 else ''}",
+                UserWarning,
+                stacklevel=2,
+            )
+        if result["unexpected"]:
+            warnings.warn(
+                f"Unexpected columns: {result['unexpected'][:5]}"
+                f"{'...' if len(result['unexpected']) > 5 else ''}",
+                UserWarning,
+                stacklevel=2,
+            )
+        _session_validated.add(str(root))
+
     df.sort_values("timestamp_ns", inplace=True)
     df.reset_index(drop=True, inplace=True)
     return df
@@ -303,6 +329,14 @@ def data_health(data_dir: Optional[Path] = None) -> dict:
         "freshness_seconds": freshness,
         "warnings": warns,
     }
+
+
+def reset_validation_cache() -> None:
+    """Reset the per-session schema validation cache.
+
+    Useful for testing or after schema updates.
+    """
+    _session_validated.clear()
 
 
 # ---------------------------------------------------------------------------
