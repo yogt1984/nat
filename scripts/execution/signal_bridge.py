@@ -565,10 +565,8 @@ def main():
                         help="Cycle interval in seconds")
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+    from logging_config import setup_logging
+    setup_logging("nat.signal_bridge")
 
     run_bridge(
         mode=args.mode,

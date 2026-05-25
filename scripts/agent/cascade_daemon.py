@@ -555,11 +555,8 @@ class CascadeAgent:
 # ---------------------------------------------------------------------------
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    from logging_config import setup_logging
+    setup_logging("nat.agent_cascade")
 
     parser = argparse.ArgumentParser(description="NAT Cascade Validation Agent")
     parser.add_argument("action", choices=["start", "status", "once", "report"],
