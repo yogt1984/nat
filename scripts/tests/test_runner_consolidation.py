@@ -232,8 +232,8 @@ class TestCorrelationCheck:
 # ===========================================================================
 
 class TestCheckGates:
-    @patch("agent.runner.check_ic_gate", return_value=(True, "IC=0.20 PASS"))
-    @patch("agent.runner.check_dIC_gate", return_value=(True, "dIC skipped"))
+    @patch("agent.base.check_ic_gate", return_value=(True, "IC=0.20 PASS"))
+    @patch("agent.base.check_dIC_gate", return_value=(True, "dIC skipped"))
     def test_passes_when_both_pass(self, mock_dIC, mock_ic):
         from agent.mf_runner import MediumFrequencyRunner
         runner = _make_runner(MediumFrequencyRunner)
@@ -241,8 +241,8 @@ class TestCheckGates:
         assert passed is True
         assert "IC=0.20 PASS" in msg
 
-    @patch("agent.runner.check_ic_gate", return_value=(False, "IC=0.01 FAIL"))
-    @patch("agent.runner.check_dIC_gate", return_value=(True, "dIC skipped"))
+    @patch("agent.base.check_ic_gate", return_value=(False, "IC=0.01 FAIL"))
+    @patch("agent.base.check_dIC_gate", return_value=(True, "dIC skipped"))
     def test_fails_when_ic_fails(self, mock_dIC, mock_ic):
         from agent.mf_runner import MediumFrequencyRunner
         runner = _make_runner(MediumFrequencyRunner)
@@ -540,12 +540,20 @@ class TestRunnerBackwardCompat:
         for cls in [MicrostructureRunner, MediumFrequencyRunner, MacroRunner]:
             assert issubclass(cls, BaseRunner)
 
-    def test_load_registry_callable_on_class(self):
-        """_load_registry must be callable as ClassName._load_registry()."""
+    def test_load_registry_returns_empty_for_missing_path(self, tmp_path):
+        """_load_registry returns [] when registry file doesn't exist."""
         from agent.runner import MicrostructureRunner
         from agent.mf_runner import MediumFrequencyRunner
         from agent.macro_runner import MacroRunner
-        # Should not raise (returns [] for non-existent paths)
+        # Override REGISTRY_PATH to non-existent path for test
+        fake_path = tmp_path / "nonexistent" / "registry.json"
         for cls in [MicrostructureRunner, MediumFrequencyRunner, MacroRunner]:
-            result = cls._load_registry()
-            assert isinstance(result, list)
+            runner = _make_runner(cls)
+            orig = cls.REGISTRY_PATH
+            cls.REGISTRY_PATH = fake_path
+            try:
+                result = runner._load_registry()
+                assert isinstance(result, list)
+                assert result == []
+            finally:
+                cls.REGISTRY_PATH = orig
