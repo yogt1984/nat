@@ -157,6 +157,72 @@ def apply_fdr(hypotheses: list, q: float = 0.05) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Config inheritance
+# ---------------------------------------------------------------------------
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge *override* into *base* (neither dict is mutated)."""
+    result = dict(base)
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+# Keys recognised at the top level and in common subsections.
+# Unknown keys trigger a warning (not an error) so legacy configs keep working.
+_KNOWN_TOP_KEYS = {
+    "cycle_interval_s", "max_experiments_per_cycle", "max_cycle_runtime_s",
+    "timeframe", "generators_enabled",
+    "gates", "cost", "decay", "promotion", "symbols", "paths",
+}
+_KNOWN_GATE_KEYS = {
+    "min_ic", "min_dIC", "min_coverage", "fdr_q",
+    "min_walkforward_sign_consistency", "min_oos_dates", "min_symbols",
+}
+
+
+def validate_config(config: dict, section: str) -> list[str]:
+    """Return warnings for unknown keys. Does NOT raise."""
+    warnings = []
+    for key in config:
+        if key not in _KNOWN_TOP_KEYS:
+            warnings.append(f"[{section}] unknown key: {key!r}")
+    gates = config.get("gates", {})
+    for key in gates:
+        if key not in _KNOWN_GATE_KEYS:
+            warnings.append(f"[{section}.gates] unknown key: {key!r}")
+    return warnings
+
+
+def load_agent_config(config_path: Path, section: str,
+                      base_config: dict) -> dict:
+    """Load agent config with inheritance: base_config → [defaults] → [section].
+
+    Deep-merges nested subsections (gates, decay, symbols, paths) so that
+    a section only needs to override the keys that differ from [defaults].
+    """
+    if not config_path.exists():
+        return dict(base_config)
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib  # type: ignore[no-redef]
+    with open(config_path, "rb") as f:
+        raw = tomllib.load(f)
+    defaults = raw.get("defaults", {})
+    section_cfg = raw.get(section, {})
+    merged = _deep_merge(dict(base_config), defaults)
+    merged = _deep_merge(merged, section_cfg)
+
+    for w in validate_config(merged, section):
+        log.warning("Config: %s", w)
+    return merged
+
+
+# ---------------------------------------------------------------------------
 # BaseRunner ABC
 # ---------------------------------------------------------------------------
 
@@ -528,16 +594,12 @@ class ResearchAgent(ABC):
     # --- Config -----------------------------------------------------------
 
     def load_config(self) -> dict:
-        """Load config from TOML [config_section] merged over BASE_CONFIG."""
-        config_path = self.root / "config" / "agent.toml"
-        if config_path.exists():
-            try:
-                import tomllib
-            except ImportError:
-                import tomli as tomllib  # type: ignore[no-redef]
-            with open(config_path, "rb") as f:
-                return {**self.BASE_CONFIG, **tomllib.load(f).get(self.config_section, {})}
-        return dict(self.BASE_CONFIG)
+        """Load config with inheritance: BASE_CONFIG → [defaults] → [section]."""
+        return load_agent_config(
+            self.root / "config" / "agent.toml",
+            self.config_section,
+            self.BASE_CONFIG,
+        )
 
     # --- Generator stats --------------------------------------------------
 
