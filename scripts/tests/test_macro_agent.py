@@ -176,10 +176,9 @@ class TestMacroRunner:
 
     def test_register_signal_writes_to_macro_registry(self, tmp_path):
         from agent.macro_runner import MacroRunner
-        import agent.macro_runner as macro_runner_mod
 
-        orig = macro_runner_mod.MACRO_REGISTRY_PATH
-        macro_runner_mod.MACRO_REGISTRY_PATH = tmp_path / "registry.json"
+        orig = MacroRunner.REGISTRY_PATH
+        MacroRunner.REGISTRY_PATH = tmp_path / "registry.json"
 
         h = Hypothesis.create(
             "ctx_funding_zscore predicts 1h returns",
@@ -194,19 +193,18 @@ class TestMacroRunner:
         assert sig.hypothesis_id == h.id
         assert sig.horizon_s == 3600.0
 
-        with open(macro_runner_mod.MACRO_REGISTRY_PATH) as f:
+        with open(tmp_path / "registry.json") as f:
             registry = json.load(f)
         assert len(registry) == 1
         assert registry[0]["hypothesis_id"] == h.id
 
-        macro_runner_mod.MACRO_REGISTRY_PATH = orig
+        MacroRunner.REGISTRY_PATH = orig
 
     def test_register_signal_stores_1h_horizon(self, tmp_path):
         from agent.macro_runner import MacroRunner
-        import agent.macro_runner as macro_runner_mod
 
-        orig = macro_runner_mod.MACRO_REGISTRY_PATH
-        macro_runner_mod.MACRO_REGISTRY_PATH = tmp_path / "registry.json"
+        orig = MacroRunner.REGISTRY_PATH
+        MacroRunner.REGISTRY_PATH = tmp_path / "registry.json"
 
         h = Hypothesis.create("test", "funding_meanrev",
                               ["cmd --data d --symbol BTC"], 1.0,
@@ -218,23 +216,21 @@ class TestMacroRunner:
         sig = runner.register_signal()
         assert sig.horizon_s == 3600.0
 
-        macro_runner_mod.MACRO_REGISTRY_PATH = orig
+        MacroRunner.REGISTRY_PATH = orig
 
     def test_load_registry_separate_from_micro_and_mf(self, tmp_path):
         from agent.macro_runner import MacroRunner
-        import agent.macro_runner as macro_runner_mod
 
-        orig = macro_runner_mod.MACRO_REGISTRY_PATH
-        macro_runner_mod.MACRO_REGISTRY_PATH = tmp_path / "macro_registry.json"
+        orig = MacroRunner.REGISTRY_PATH
+        MacroRunner.REGISTRY_PATH = tmp_path / "macro_registry.json"
 
         assert MacroRunner._load_registry() == []
 
-        macro_runner_mod.MACRO_REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(macro_runner_mod.MACRO_REGISTRY_PATH, "w") as f:
+        with open(tmp_path / "macro_registry.json", "w") as f:
             json.dump([{"name": "macro_signal"}], f)
         assert len(MacroRunner._load_registry()) == 1
 
-        macro_runner_mod.MACRO_REGISTRY_PATH = orig
+        MacroRunner.REGISTRY_PATH = orig
 
     def test_timeframe_is_1h(self):
         from agent.macro_runner import MacroRunner

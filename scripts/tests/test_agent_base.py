@@ -226,26 +226,44 @@ class TestResearchAgentLifecycle:
 # ===========================================================================
 
 class TestBaseRunnerABC:
-    def test_cannot_instantiate_directly(self):
-        h = Hypothesis.create("test", "gen", ["cmd"], 1.0)
-        with pytest.raises(TypeError, match="abstract"):
-            BaseRunner(h, {})
+    def test_instantiable_with_defaults(self):
+        """BaseRunner can be instantiated — has concrete steps/register."""
+        h = Hypothesis.create("test", "gen", ["cmd --data d --symbol BTC"], 1.0)
+        runner = BaseRunner(h, {})
+        assert runner.h is h
+        assert runner.gate_results == []
 
-    def test_must_implement_steps(self):
-        class Bad(BaseRunner):
-            def register_signal(self):
-                pass
-        h = Hypothesis.create("test", "gen", ["cmd"], 1.0)
-        with pytest.raises(TypeError, match="steps"):
-            Bad(h, {})
+    def test_default_steps_returns_4_gates(self):
+        """Base steps() provides default 4-gate protocol."""
+        h = Hypothesis.create("test", "gen", ["cmd --data d --symbol BTC"], 1.0)
+        runner = StubRunner(h, {})
+        base_steps = BaseRunner.steps(runner)
+        assert len(base_steps) == 4
+        names = [s.__name__ for s in base_steps]
+        assert names == ["run_discovery", "run_replication_temporal",
+                         "run_replication_symbol", "run_correlation_check"]
 
-    def test_must_implement_register_signal(self):
-        class Bad(BaseRunner):
-            def steps(self):
-                return []
-        h = Hypothesis.create("test", "gen", ["cmd"], 1.0)
-        with pytest.raises(TypeError, match="register_signal"):
-            Bad(h, {})
+    def test_default_register_signal_uses_registry_path(self, tmp_path):
+        """Base register_signal() writes to REGISTRY_PATH class attr."""
+        reg_path = tmp_path / "registry.json"
+
+        class TestRunner(BaseRunner):
+            REGISTRY_PATH = reg_path
+            DEFAULT_HORIZON_S = 42.0
+            DEFAULT_FEATURE = "test_feat"
+
+        h = Hypothesis.create("test claim", "gen",
+                              ["cmd --data d --symbol BTC"], 1.0)
+        h.status = "replicated"
+        h.results = {"gate_results": [{"msg": "IC=0.15 PASS"}]}
+        runner = TestRunner(h, {})
+        sig = runner.register_signal()
+        assert sig.horizon_s == 42.0
+        assert reg_path.exists()
+        with open(reg_path) as f:
+            data = json.load(f)
+        assert len(data) == 1
+        assert data[0]["hypothesis_id"] == h.id
 
 
 # ===========================================================================
