@@ -109,7 +109,7 @@ Key files:
 
 Two crates in `rust/`:
 - `ing` — Main ingestor library + binary, plus validation binaries (validate_api, validate_positions, etc.)
-- `api` — REST/WebSocket API server (Axum on port 3000)
+- `api` — REST/WebSocket API server (Axum on port 3000). Research endpoints (`/api/research/*`) read structured JSON from `data/research/`. Config: `NAT_RESEARCH_DIR` env var.
 
 Release profile: LTO, single codegen unit, panic=abort, stripped.
 

@@ -7,6 +7,8 @@ pub struct ApiConfig {
     pub host: String,
     pub port: u16,
     pub redis_url: String,
+    /// Root directory for research output JSON files (hypotheses, cycles).
+    pub research_data_dir: String,
 }
 
 impl Default for ApiConfig {
@@ -15,6 +17,7 @@ impl Default for ApiConfig {
             host: "0.0.0.0".to_string(),
             port: 3000,
             redis_url: "redis://127.0.0.1:6379".to_string(),
+            research_data_dir: "../data/research".to_string(),
         }
     }
 }
@@ -34,6 +37,8 @@ impl ApiConfig {
                 .unwrap_or(3000),
             redis_url: std::env::var("REDIS_URL")
                 .unwrap_or_else(|_| redis_url_default.unwrap_or("redis://127.0.0.1:6379").to_string()),
+            research_data_dir: std::env::var("NAT_RESEARCH_DIR")
+                .unwrap_or_else(|_| "../data/research".to_string()),
         }
     }
 }
