@@ -78,40 +78,63 @@ def load_config(config_path: str = "config/pipeline.toml") -> Dict[str, Any]:
 
 
 class PipelineState:
-    """Persistent state for the pipeline, survives restarts."""
+    """Persistent state for the pipeline, survives restarts.
 
-    def __init__(self, state_file: str):
+    Dual-mode: pass ``store`` for SQLite, or ``state_file`` for legacy JSON.
+    When both are provided, SQLite is used and legacy JSON is auto-migrated.
+    """
+
+    AGENT = "pipeline"
+
+    _DEFAULTS: Dict[str, Any] = {
+        "state": State.IDLE.value,
+        "started_at": None,
+        "ingest_started_at": None,
+        "ingest_target_end": None,
+        "ingest_pid": None,
+        "ingest_stopped_at": None,
+        "analyze_started_at": None,
+        "analyze_finished_at": None,
+        "last_health_check": None,
+        "health_checks_ok": 0,
+        "health_checks_fail": 0,
+        "restarts": 0,
+        "total_rows": 0,
+        "total_files": 0,
+        "decision": None,
+        "error": None,
+    }
+
+    def __init__(self, state_file: str, store=None):
         self.state_file = Path(state_file)
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        self._store = store
+        if self._store:
+            self._store.migrate_from_json(
+                self.AGENT, state_path=self.state_file,
+            )
+        else:
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self._data: Dict[str, Any] = self._load()
 
     def _load(self) -> Dict[str, Any]:
-        if self.state_file.exists():
+        if self._store:
+            saved = self._store.load_state(self.AGENT)
+            if saved:
+                saved["history"] = self._store.load_history(
+                    self.AGENT, limit=200
+                )
+                return {**self._DEFAULTS, **saved}
+        elif self.state_file.exists():
             with open(self.state_file) as f:
                 return json.load(f)
-        return {
-            "state": State.IDLE.value,
-            "started_at": None,
-            "ingest_started_at": None,
-            "ingest_target_end": None,
-            "ingest_pid": None,
-            "ingest_stopped_at": None,
-            "analyze_started_at": None,
-            "analyze_finished_at": None,
-            "last_health_check": None,
-            "health_checks_ok": 0,
-            "health_checks_fail": 0,
-            "restarts": 0,
-            "total_rows": 0,
-            "total_files": 0,
-            "decision": None,
-            "error": None,
-            "history": [],
-        }
+        return {**self._DEFAULTS, "history": []}
 
     def save(self) -> None:
-        with open(self.state_file, "w") as f:
-            json.dump(self._data, f, indent=2, default=str)
+        if self._store:
+            self._store.save_state(self.AGENT, self._data)
+        else:
+            with open(self.state_file, "w") as f:
+                json.dump(self._data, f, indent=2, default=str)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self._data.get(key, default)
@@ -123,12 +146,16 @@ class PipelineState:
     def transition(self, new_state: State, message: str = "") -> None:
         old = self._data["state"]
         self._data["state"] = new_state.value
-        self._data["history"].append({
-            "from": old,
-            "to": new_state.value,
-            "at": datetime.datetime.utcnow().isoformat(),
-            "message": message,
-        })
+        now = datetime.datetime.utcnow().isoformat()
+        if self._store:
+            self._store.append_history(self.AGENT, {
+                "from": old, "to": new_state.value, "at": now, "msg": message,
+            })
+        else:
+            self._data.setdefault("history", []).append({
+                "from": old, "to": new_state.value,
+                "at": now, "message": message,
+            })
         self.save()
 
     @property
@@ -801,9 +828,21 @@ def run_pipeline(config: Dict[str, Any], ps: PipelineState, log: logging.Logger)
 # ---------------------------------------------------------------------------
 
 
+def _make_state(config: Dict[str, Any]) -> PipelineState:
+    """Create PipelineState backed by SQLite if available."""
+    state_file = config["state"]["state_file"]
+    try:
+        from data.state import StateStore
+        db_path = Path(state_file).resolve().parent.parent / "nat.db"
+        store = StateStore(db_path)
+    except ImportError:
+        store = None
+    return PipelineState(state_file, store=store)
+
+
 def cmd_start(args: argparse.Namespace) -> None:
     config = load_config(args.config)
-    ps = PipelineState(config["state"]["state_file"])
+    ps = _make_state(config)
     log = setup_logging(config["state"]["log_file"])
 
     if ps.current not in (State.IDLE, State.DONE, State.ERROR):
@@ -817,7 +856,7 @@ def cmd_start(args: argparse.Namespace) -> None:
 
 def cmd_resume(args: argparse.Namespace) -> None:
     config = load_config(args.config)
-    ps = PipelineState(config["state"]["state_file"])
+    ps = _make_state(config)
     log = setup_logging(config["state"]["log_file"])
 
     if ps.current in (State.IDLE, State.DONE):
@@ -831,7 +870,7 @@ def cmd_resume(args: argparse.Namespace) -> None:
 def cmd_analyze(args: argparse.Namespace) -> None:
     """Skip ingestion, run analysis directly on existing data."""
     config = load_config(args.config)
-    ps = PipelineState(config["state"]["state_file"])
+    ps = _make_state(config)
     log = setup_logging(config["state"]["log_file"])
 
     ps.transition(State.COLLECTING, "Direct analysis (skip ingestion)")
@@ -840,7 +879,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
 
 def cmd_stop(args: argparse.Namespace) -> None:
     config = load_config(args.config)
-    ps = PipelineState(config["state"]["state_file"])
+    ps = _make_state(config)
     log = setup_logging(config["state"]["log_file"])
 
     pid = ps.get("ingest_pid")
@@ -857,7 +896,7 @@ def cmd_stop(args: argparse.Namespace) -> None:
 
 def cmd_status(args: argparse.Namespace) -> None:
     config = load_config(args.config)
-    ps = PipelineState(config["state"]["state_file"])
+    ps = _make_state(config)
 
     print(f"\nPipeline State: {ps.current.value}")
     print(f"{'─' * 50}")

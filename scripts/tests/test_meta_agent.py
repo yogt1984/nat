@@ -24,52 +24,44 @@ import pytest
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def tmp_state(tmp_path, monkeypatch):
-    """Redirect all meta-agent paths to tmp_path."""
+def tmp_store(tmp_path):
+    """Create an isolated StateStore in tmp_path."""
+    from data.state import StateStore
+    store = StateStore(tmp_path / "nat.db")
+    return store
+
+
+@pytest.fixture
+def tmp_state(tmp_path, tmp_store, monkeypatch):
+    """Redirect meta-agent to use isolated StateStore and paths."""
     import agent.meta_daemon as meta_mod
 
     state_dir = tmp_path / "data" / "agent_meta"
     state_dir.mkdir(parents=True, exist_ok=True)
 
+    monkeypatch.setattr(meta_mod, "DB_PATH", tmp_path / "nat.db")
     monkeypatch.setattr(meta_mod, "META_STATE_PATH", state_dir / "meta_state.json")
-    monkeypatch.setattr(meta_mod, "AGENT_STATS_PATH", state_dir / "agent_stats.json")
     monkeypatch.setattr(meta_mod, "CORRELATION_PATH", state_dir / "correlation.json")
     monkeypatch.setattr(meta_mod, "PORTFOLIO_PATH", state_dir / "portfolio.json")
-
-    # Create isolated registry paths
-    for agent_name in ["agent", "agent_mf", "agent_macro"]:
-        d = tmp_path / "data" / agent_name
-        d.mkdir(parents=True, exist_ok=True)
-
-    monkeypatch.setattr(meta_mod, "AGENT_REGISTRY_PATHS", {
-        "microstructure": tmp_path / "data" / "agent" / "registry.json",
-        "medium_freq": tmp_path / "data" / "agent_mf" / "registry.json",
-        "macro": tmp_path / "data" / "agent_macro" / "registry.json",
-    })
-    monkeypatch.setattr(meta_mod, "AGENT_GEN_STATS_PATHS", {
-        "microstructure": tmp_path / "data" / "agent" / "generator_stats.json",
-        "medium_freq": tmp_path / "data" / "agent_mf" / "generator_stats.json",
-        "macro": tmp_path / "data" / "agent_macro" / "generator_stats.json",
-    })
-    monkeypatch.setattr(meta_mod, "AGENT_STATE_PATHS", {
-        "microstructure": tmp_path / "data" / "agent" / "agent_state.json",
-        "medium_freq": tmp_path / "data" / "agent_mf" / "agent_state.json",
-        "macro": tmp_path / "data" / "agent_macro" / "agent_state.json",
-    })
 
     return tmp_path
 
 
 @pytest.fixture
-def meta_agent(tmp_state):
+def meta_agent(tmp_state, tmp_store):
     from agent.meta_daemon import MetaAgent
-    return MetaAgent()
+    return MetaAgent(store=tmp_store)
 
 
-def _write_json(path, data):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(data, f)
+def _seed_gen_stats(store, agent, stats_dict):
+    """Write generator stats into the store (replaces writing JSON files)."""
+    store.save_gen_stats(agent, stats_dict)
+
+
+def _seed_registry(store, agent, signals):
+    """Write signals into the store registry (replaces writing JSON files)."""
+    for sig in signals:
+        store.append_signal(agent, sig)
 
 
 # ===========================================================================
@@ -83,10 +75,8 @@ class TestAgentStats:
             assert stats[agent_name]["attempts"] == 0
             assert stats[agent_name]["successes"] == 0
 
-    def test_load_existing_stats(self, meta_agent, tmp_state):
-        import agent.meta_daemon as meta_mod
-        stats_path = meta_mod.AGENT_GEN_STATS_PATHS["microstructure"]
-        _write_json(stats_path, {
+    def test_load_existing_stats(self, meta_agent, tmp_store):
+        _seed_gen_stats(tmp_store, "microstructure", {
             "systematic": {"attempts": 10, "successes": 3},
             "spectral": {"attempts": 5, "successes": 1},
         })
@@ -94,22 +84,19 @@ class TestAgentStats:
         assert stats["microstructure"]["attempts"] == 15
         assert stats["microstructure"]["successes"] == 4
 
-    def test_compute_agent_level_weight(self, meta_agent, tmp_state):
-        import agent.meta_daemon as meta_mod
-        stats_path = meta_mod.AGENT_GEN_STATS_PATHS["macro"]
-        _write_json(stats_path, {
+    def test_compute_agent_level_weight(self, meta_agent, tmp_store):
+        _seed_gen_stats(tmp_store, "macro", {
             "funding_meanrev": {"attempts": 20, "successes": 5},
         })
         stats = meta_agent.update_agent_stats()
         # weight = (5+1) / (20+2) = 6/22 ≈ 0.2727
         assert abs(stats["macro"]["weight"] - 6 / 22) < 0.01
 
-    def test_separate_stats_per_agent(self, meta_agent, tmp_state):
-        import agent.meta_daemon as meta_mod
-        _write_json(meta_mod.AGENT_GEN_STATS_PATHS["microstructure"], {
+    def test_separate_stats_per_agent(self, meta_agent, tmp_store):
+        _seed_gen_stats(tmp_store, "microstructure", {
             "systematic": {"attempts": 10, "successes": 5},
         })
-        _write_json(meta_mod.AGENT_GEN_STATS_PATHS["medium_freq"], {
+        _seed_gen_stats(tmp_store, "medium_freq", {
             "momentum": {"attempts": 8, "successes": 2},
         })
         stats = meta_agent.update_agent_stats()
@@ -117,15 +104,13 @@ class TestAgentStats:
         assert stats["medium_freq"]["attempts"] == 8
         assert stats["macro"]["attempts"] == 0
 
-    def test_save_and_reload_roundtrip(self, meta_agent, tmp_state):
-        import agent.meta_daemon as meta_mod
-        _write_json(meta_mod.AGENT_GEN_STATS_PATHS["microstructure"], {
+    def test_save_and_reload_roundtrip(self, meta_agent, tmp_store):
+        _seed_gen_stats(tmp_store, "microstructure", {
             "systematic": {"attempts": 10, "successes": 3},
         })
         meta_agent.update_agent_stats()
-        # Verify persisted
-        with open(meta_mod.AGENT_STATS_PATH) as f:
-            loaded = json.load(f)
+        # Verify persisted to SQLite
+        loaded = tmp_store.load_state("meta_stats")
         assert loaded["microstructure"]["attempts"] == 10
 
 
@@ -182,9 +167,8 @@ class TestCrossCorrelation:
         flagged = meta_agent.monitor_cross_correlation()
         assert flagged == []
 
-    def test_single_agent_signals_skipped(self, meta_agent, tmp_state):
-        import agent.meta_daemon as meta_mod
-        _write_json(meta_mod.AGENT_REGISTRY_PATHS["microstructure"], [
+    def test_single_agent_signals_skipped(self, meta_agent, tmp_store):
+        _seed_registry(tmp_store, "microstructure", [
             {"name": "sig_a", "features": ["f1"], "status": "validated"},
             {"name": "sig_b", "features": ["f2"], "status": "validated"},
         ])
@@ -192,13 +176,13 @@ class TestCrossCorrelation:
         # Both signals from same agent — no cross-agent pairs to check
         assert flagged == []
 
-    def test_cross_agent_pair_checked(self, meta_agent, tmp_state):
+    def test_cross_agent_pair_checked(self, meta_agent, tmp_state, tmp_store):
         """Two signals from different agents — correlation computed (or None if no data)."""
         import agent.meta_daemon as meta_mod
-        _write_json(meta_mod.AGENT_REGISTRY_PATHS["microstructure"], [
+        _seed_registry(tmp_store, "microstructure", [
             {"name": "micro_sig", "features": ["f1"], "status": "validated"},
         ])
-        _write_json(meta_mod.AGENT_REGISTRY_PATHS["macro"], [
+        _seed_registry(tmp_store, "macro", [
             {"name": "macro_sig", "features": ["f2"], "status": "validated"},
         ])
         flagged = meta_agent.monitor_cross_correlation()
@@ -211,13 +195,13 @@ class TestCrossCorrelation:
         assert data["pairs"][0]["signal_a"] == "micro_sig"
         assert data["pairs"][0]["agent_b"] == "macro"
 
-    def test_retired_signals_excluded(self, meta_agent, tmp_state):
+    def test_retired_signals_excluded(self, meta_agent, tmp_state, tmp_store):
         import agent.meta_daemon as meta_mod
-        _write_json(meta_mod.AGENT_REGISTRY_PATHS["microstructure"], [
+        _seed_registry(tmp_store, "microstructure", [
             {"name": "active", "features": ["f1"], "status": "validated"},
             {"name": "old", "features": ["f2"], "status": "retired"},
         ])
-        _write_json(meta_mod.AGENT_REGISTRY_PATHS["macro"], [
+        _seed_registry(tmp_store, "macro", [
             {"name": "macro_sig", "features": ["f3"], "status": "validated"},
         ])
         flagged = meta_agent.monitor_cross_correlation()
@@ -226,12 +210,12 @@ class TestCrossCorrelation:
         # Only 1 cross-agent pair (active × macro_sig), retired excluded
         assert len(data["pairs"]) == 1
 
-    def test_correlation_matrix_structure(self, meta_agent, tmp_state):
+    def test_correlation_matrix_structure(self, meta_agent, tmp_state, tmp_store):
         import agent.meta_daemon as meta_mod
-        _write_json(meta_mod.AGENT_REGISTRY_PATHS["microstructure"], [
+        _seed_registry(tmp_store, "microstructure", [
             {"name": "s1", "features": ["f1"], "status": "validated"},
         ])
-        _write_json(meta_mod.AGENT_REGISTRY_PATHS["medium_freq"], [
+        _seed_registry(tmp_store, "medium_freq", [
             {"name": "s2", "features": ["f2"], "status": "validated"},
         ])
         meta_agent.monitor_cross_correlation()

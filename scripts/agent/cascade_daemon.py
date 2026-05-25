@@ -33,6 +33,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from data.state import StateStore  # noqa: E402
+
 log = logging.getLogger("nat.agent_cascade")
 
 # ---------------------------------------------------------------------------
@@ -53,8 +55,9 @@ DEFAULT_CONFIG = {
     "symbols": ["BTC", "ETH", "SOL"],
 }
 
+DB_PATH = ROOT / "data" / "nat.db"
 STATE_DIR = ROOT / "data" / "agent_cascade"
-STATE_PATH = STATE_DIR / "agent_state.json"
+STATE_PATH = STATE_DIR / "agent_state.json"  # legacy, for auto-migration
 RESULTS_PATH = STATE_DIR / "gate_results.json"
 
 
@@ -76,27 +79,53 @@ def load_config() -> dict:
 # ---------------------------------------------------------------------------
 
 class CascadeState:
-    """Simple JSON-backed agent state."""
+    """SQLite-backed agent state (via shared StateStore)."""
 
-    def __init__(self, path: Path):
-        self.path = path
+    AGENT = "cascade"
+
+    def __init__(self, store: StateStore):
+        self._store = store
         self.data: dict = {
             "phase": "idle",
             "cycle_count": 0,
             "last_cycle": None,
-            "gate_history": [],  # list of {timestamp, gates: {G1..G5: bool}, overall: bool}
+            "gate_history": [],
         }
+        self._auto_migrate()
         self._load()
 
+    def _auto_migrate(self):
+        """One-time import from legacy JSON."""
+        self._store.migrate_from_json(self.AGENT, state_path=STATE_PATH)
+
     def _load(self):
-        if self.path.exists():
-            with open(self.path) as f:
-                self.data.update(json.load(f))
+        saved = self._store.load_state(self.AGENT)
+        if saved:
+            self.data.update(saved)
+        # Reconstruct gate_history from state_history msg payloads
+        raw_history = self._store.load_history(self.AGENT, limit=50)
+        gate_history = []
+        for entry in raw_history:
+            msg = entry.get("msg", "")
+            if msg:
+                try:
+                    gate_history.append(json.loads(msg))
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        if gate_history:
+            self.data["gate_history"] = gate_history
 
     def save(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.path, "w") as f:
-            json.dump(self.data, f, indent=2, default=str)
+        self._store.save_state(self.AGENT, self.data)
+
+    def append_gate_result(self, results: dict):
+        """Append a validation result to history."""
+        self._store.append_history(self.AGENT, {
+            "from": "validating",
+            "to": "idle",
+            "msg": json.dumps(results, default=str),
+            "at": results.get("timestamp", ""),
+        })
 
 
 # ---------------------------------------------------------------------------
@@ -454,9 +483,10 @@ class CascadeRunner:
 class CascadeAgent:
     """Continuously validates the cascade probability model."""
 
-    def __init__(self):
+    def __init__(self, store: StateStore | None = None):
         self.config = load_config()
-        self.state = CascadeState(STATE_PATH)
+        self._store = store or StateStore(DB_PATH)
+        self.state = CascadeState(self._store)
         self._shutdown = False
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -505,10 +535,7 @@ class CascadeAgent:
         self.state.data["cycle_count"] += 1
         self.state.data["last_cycle"] = results["timestamp"]
         self.state.data["phase"] = "idle"
-
-        history = self.state.data.get("gate_history", [])
-        history.append(results)
-        self.state.data["gate_history"] = history[-50:]  # keep last 50
+        self.state.append_gate_result(results)
         self.state.save()
 
         # Also save detailed results
