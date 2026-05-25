@@ -1780,6 +1780,23 @@ def cmd_15m_test(args):
     _exec(f"cd {ROOT / 'scripts'} && {PY} -m pytest tests/test_15m_test.py -v")
 
 
+def cmd_trade_viz(args):
+    """Visualize paper trades — snapshot PNG per symbol per day."""
+    _banner("PAPER TRADE VISUALIZATION")
+    sys.stdout.flush()
+    sym = _sym(args)
+    date = getattr(args, 'date', None)
+    date_range = getattr(args, 'date_range', None)
+    extra = ""
+    if date:
+        extra += f" --date {date}"
+    elif date_range:
+        extra += f" --date-range {date_range[0]} {date_range[1]}"
+    else:
+        extra += " --latest"
+    _py(f"scripts/trade_visualize.py{extra} --symbol {sym} -v")
+
+
 # ── Spannung ──────────────────────────────────────────────────────────────────
 
 def cmd_spannung(args):
@@ -2713,6 +2730,11 @@ def cmd_help(args=None):
     nat 15m [--duration SEC]   Ingest -> validate -> profile -> cluster -> report
     nat 15m offline [--data]   Analyze existing data (no ingestion)
     nat 15m viz [--page 0|1]   Visualize latest experiment
+
+  {BOLD}Trade Visualization{W}
+    nat trade viz              Visualize latest paper trades (--symbol, --date)
+    nat trade viz --date D     Specific date snapshot (YYYY-MM-DD)
+    nat trade viz --symbol all All symbols for a date
 
   {BOLD}ALG1 (MF 3-Feature Liquidity Signal){W}
     3f composite: zscore(spread_bps + depth_5_std + vwap_deviation_std) / 3.
@@ -3931,6 +3953,17 @@ def build_parser():
                      help='Page: 0=basic, 1=advanced, all=both')
     smv.set_defaults(func=cmd_15m_viz)
     smsub.add_parser('test', help='Run unit tests').set_defaults(func=cmd_15m_test)
+
+    # ── Trade visualization ──────────────────────────────────────────────────
+    tv_p = sub.add_parser('trade', help='Paper trade visualization')
+    tv_p.set_defaults(func=cmd_trade_viz)
+    tvsub = tv_p.add_subparsers(dest='subcmd')
+    tvv = tvsub.add_parser('viz', help='Visualize paper trades (snapshot PNG)')
+    tvv.add_argument('--date', type=str, default=None, help='Date (YYYY-MM-DD)')
+    tvv.add_argument('--date-range', nargs=2, metavar=('START', 'END'),
+                     help='Date range (inclusive)')
+    tvv.add_argument('--symbol', type=str, default='BTC', help='Symbol or "all"')
+    tvv.set_defaults(func=cmd_trade_viz)
 
     # ── Spannung ──────────────────────────────────────────────────────────────
     spn_p = sub.add_parser('spannung', help='Spannung signal grid search',
