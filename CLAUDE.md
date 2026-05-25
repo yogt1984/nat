@@ -27,7 +27,7 @@ make validate                           # Live API validation (4 binaries agains
 pytest scripts/tests/                   # Python tests
 make test_dashboard                     # Dashboard endpoint tests
 make test_pipeline                      # Pipeline state machine tests
-make test_agent                         # Agent tests (cache + dashboard, 101 tests)
+make test_agent                         # Agent tests (350 tests: unit + integration + logging + research output)
 ```
 
 ## Architecture
@@ -86,18 +86,22 @@ Cycle: DATA_HEALTH → SIGNAL_SWEEP → TRAINING → BACKTESTING → ALPHA_PIPEL
 
 `scripts/agent/daemon.py`: MANIFEST → GENERATE → EXECUTE → FDR → MONITOR → SLEEP. State persisted in `data/agent/agent_state.json`. 5-gate protocol per hypothesis: discovery (IC+dIC) → cost → temporal replication → symbol replication → correlation dedup. FDR control (BH q=0.05) at end of each cycle. Computation cache in `scripts/agent/cache.py` (SHA-256 keys, 7-day TTL). Web dashboard in `scripts/agent_dashboard.py` (stdlib HTTP on port 8060).
 
+Daemon architecture is consolidated: `ResearchAgent` (base.py) owns the full cycle loop, state machine, generator dispatch (via `generator_module_prefix`), FDR control, hypothesis chaining, promotion checks, and structured research output emission. Subclass daemons (`daemon.py`, `mf_daemon.py`, `macro_daemon.py`) are thin (~80-110 LOC each), overriding only config attributes and `create_runner()`.
+
 Key files:
-- `scripts/agent/base.py` — ResearchAgent ABC + BaseRunner ABC (multi-agent foundation)
-- `scripts/agent/daemon.py` — MicrostructureAgent(ResearchAgent) + CLI (aliased as AgentDaemon)
-- `scripts/agent/runner.py` — MicrostructureRunner(BaseRunner) 5-gate executor (aliased as ExperimentRunner)
-- `scripts/agent/hypothesis_queue.py` — JSON-backed priority queue (renamed from `queue.py` to avoid stdlib shadow)
-- `scripts/agent/mf_daemon.py` — MediumFrequencyAgent(ResearchAgent) + CLI for 1min-1h signals
+- `scripts/agent/base.py` — ResearchAgent ABC + BaseRunner ABC (full cycle loop, generator dispatch, FDR, chaining, promotions, research output emission)
+- `scripts/agent/daemon.py` — MicrostructureAgent(ResearchAgent) thin subclass + CLI
+- `scripts/agent/runner.py` — MicrostructureRunner(BaseRunner) 5-gate executor
+- `scripts/agent/hypothesis_queue.py` — SQLite-backed priority queue
+- `scripts/agent/mf_daemon.py` — MediumFrequencyAgent(ResearchAgent) thin subclass + CLI for 1min-1h signals
 - `scripts/agent/mf_runner.py` — MediumFrequencyRunner(BaseRunner) 4-gate executor
-- `scripts/agent/macro_daemon.py` — MacroAgent(ResearchAgent) + CLI for 1h-24h signals
+- `scripts/agent/macro_daemon.py` — MacroAgent(ResearchAgent) thin subclass + CLI for 1h-24h signals
 - `scripts/agent/macro_runner.py` — MacroRunner(BaseRunner) 4-gate executor
 - `scripts/agent/meta_daemon.py` — MetaAgent orchestrator (cross-agent budget, correlation, portfolio)
 - `scripts/agent/meta_portfolio.py` — Risk parity weights, portfolio metrics, promotion evaluation
+- `scripts/agent/research_output.py` — Structured JSON emitter (per-hypothesis records + cycle summaries with LaTeX math)
 - `scripts/agent/cache.py` — Deterministic command cache
+- `scripts/logging_config.py` — Centralized JSON logging with correlation context (cycle_id, hypothesis_id)
 - `scripts/agent_dashboard.py` — Agent web dashboard with IC heatmap
 - `config/agent.toml` — Gate thresholds, promotion criteria, generator config (`[agent]` + `[agent_mf]` + `[agent_macro]` + `[meta_agent]`)
 

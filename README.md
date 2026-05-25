@@ -405,7 +405,7 @@ cd rust && cargo test -- test_name      # single test
 pytest scripts/tests/                   # Python tests
 make validate                           # live API validation
 make test_pipeline                      # pipeline state machine
-make test_agent                         # agent tests (cache + dashboard + monitor, 129 tests)
+make test_agent                         # agent tests (350 tests: unit + integration + logging + research output)
 pytest scripts/tests/test_it_estimators.py   # IT engine estimator tests (17 tests)
 ```
 
@@ -436,19 +436,27 @@ rust/
 
 scripts/
   agent/                  Autonomous research agent
-    daemon.py               Main loop: manifest -> generate -> execute -> monitor
+    base.py                 ResearchAgent ABC + BaseRunner ABC (full cycle loop, FDR, chaining)
+    daemon.py               MicrostructureAgent thin subclass + CLI
+    mf_daemon.py            MediumFrequencyAgent thin subclass + CLI
+    macro_daemon.py         MacroAgent thin subclass + CLI
+    meta_daemon.py          MetaAgent orchestrator (cross-agent budget, correlation)
+    runner.py               MicrostructureRunner 5-gate executor
+    mf_runner.py            MediumFrequencyRunner 4-gate executor
+    macro_runner.py         MacroRunner 4-gate executor
     hypothesis.py           Hypothesis, RegisteredSignal, GeneratorStats dataclasses
-    hypothesis_queue.py     JSON-backed priority queue with dedup
+    hypothesis_queue.py     SQLite-backed priority queue with dedup
+    research_output.py      Structured JSON per hypothesis + cycle summary (LaTeX math)
     manifest.py             Data availability scanner
-    runner.py               5-gate experiment executor (IC, cost, temporal, symbol, correlation)
     cache.py                Computation cache (SHA-256 keys, TTL-based, corruption-resilient)
-    generators/             6 hypothesis generators
+    generators/             Hypothesis generators (lazy-imported via generator_module_prefix)
       systematic.py           Exhaustive feature x gate x threshold search
       spectral.py             PSD/OU anomaly detector
       regime.py               HMM transition detector
       cross_asset.py          Lead-lag prober (BTC/ETH/SOL)
       recycler.py             Graveyard re-evaluator
       it_discovery.py         IT engine-driven hypotheses (MI, CMI, II)
+  logging_config.py         Centralized JSON logging with correlation context
   agent_dashboard.py        Agent web dashboard (stdlib HTTP, port 8060, IC heatmap)
   algorithms/                   Microstructure algorithm library (18 algorithms, 59 features)
     base.py                       MicrostructureAlgorithm ABC, AlgorithmFeature
@@ -481,7 +489,12 @@ config/
 
 data/
   features/               Parquet output (YYYY-MM-DD/*.parquet)
-  agent/                  Agent state, hypotheses, registry, manifest
+  nat.db                  SQLite state store (agent state, hypotheses, registry)
+  research/               Structured research output
+    hypotheses/             Per-hypothesis JSON records (id, gates, math, status)
+    cycles/                 Per-cycle JSON summaries (tested, registered, FDR, stats)
+  logs/                   Structured JSON logs (nat.jsonl, daily rotation)
+  agent/                  Agent state (legacy JSON, migrated to SQLite)
 ```
 
 ## Agent Development Network
@@ -507,7 +520,11 @@ Register in `config/agent.toml`:
 generators_enabled = ["systematic", "spectral", "regime", "cross_asset", "recycler", "my_generator"]
 ```
 
-Add lazy import in `daemon.py:_get_generator()`.
+The generator is auto-discovered via `generator_module_prefix` — no import
+boilerplate needed. Place the module in the correct package for the agent type:
+- Microstructure: `scripts/agent/generators/my_generator.py`
+- Medium-frequency: `scripts/agent/generators/medium_freq/my_generator.py`
+- Macro: `scripts/agent/generators/macro/my_generator.py`
 
 ### Adding a New Gate Check
 
@@ -519,11 +536,30 @@ def check_my_gate(report: dict, thresholds: dict) -> tuple[bool, str]:
 
 Wire into `ExperimentRunner._check_gates()`.
 
+### Consolidated Daemon Architecture
+
+The agent daemon architecture is consolidated around `ResearchAgent` (base.py),
+which owns the full cycle loop, state machine, generator dispatch, FDR control,
+hypothesis chaining, promotion checks, and structured output emission. Each
+agent subclass is a thin ~80-110 LOC file overriding only config attributes
+and `create_runner()`. Adding a new agent requires only a TOML section and
+~30 LOC subclass.
+
+| Agent | Subclass | Timeframe | Generators |
+|-------|----------|-----------|------------|
+| Microstructure | `MicrostructureAgent` | Tick-level (1-10s) | `agent.generators.*` |
+| Medium-Frequency | `MediumFrequencyAgent` | 1min-1h | `agent.generators.medium_freq.*` |
+| Macro | `MacroAgent` | 1h-24h | `agent.generators.macro.*` |
+| Meta | `MetaAgent` | Orchestrator | Cross-agent budget, correlation, portfolio |
+
+Generator dispatch uses `generator_module_prefix` for lazy importing — no
+registration boilerplate needed beyond placing a module with a `generate()` function.
+
 ### Agent State Machine
 
 ```
 Per-cycle:   MANIFEST -> GENERATE -> ADAPTIVE IC -> EXECUTE (budget: 10 or 90min)
-             -> FDR control (BH q=0.05) -> MONITOR (decay + promotion) -> SLEEP
+             -> FDR control (BH q=0.05) -> STRUCTURED OUTPUT -> MONITOR (decay + promotion) -> SLEEP
 
 Per-hypothesis:
   SETUP -> DISCOVERY (IC+dIC) -> COST -> TEMPORAL -> SYMBOL -> CORRELATION -> REGISTER
@@ -533,8 +569,31 @@ Per-hypothesis:
            (no_effect)        (cost_killed)        (no_repl)   (redundant)
 ```
 
-State persists to `data/agent/agent_state.json`. The daemon handles SIGTERM
+State persists to `data/nat.db` (SQLite). The daemon handles SIGTERM
 gracefully (finishes current experiment before stopping).
+
+### Structured Research Output
+
+After each hypothesis completes, the agent emits a self-contained JSON record
+to `data/research/hypotheses/{id}.json` with full detail: claim, generator,
+status, gate results (metric, threshold, p-value per gate), LaTeX math
+derivation, features, regime gate, and timestamps. At cycle end, a summary
+is emitted to `data/research/cycles/{cycle_id}.json` with aggregate stats
+(tested, registered, FDR-rejected, chained) and per-generator hit rates.
+
+LaTeX derivations are included for all 13 generator types (systematic, spectral,
+regime, cross-asset, recycler, ensemble, momentum, vol_breakout, flow_cluster,
+funding_meanrev, oi_divergence, whale_momentum, it_discovery).
+
+### Structured Logging
+
+All Python daemons use centralized logging (`scripts/logging_config.py`) with:
+- **JSON format** to `data/logs/nat.jsonl` (daily rotation, 30-day retention)
+- **Correlation context**: `cycle_id` and `hypothesis_id` attached to every log line
+  within a cycle, enabling `grep hypothesis_id data/logs/nat.jsonl` to trace a
+  single hypothesis through all gates
+- **Human format** on stderr for interactive use
+- Thread-local context via `set_context()` / `clear_context()`
 
 ### Computation Cache
 
