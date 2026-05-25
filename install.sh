@@ -23,8 +23,20 @@ MAN_DIR="$HOME/.local/share/man/man1"
 mkdir -p "$MAN_DIR"
 cp "$SCRIPT_DIR/man/man1/nat.1" "$MAN_DIR/nat.1"
 
-# Ensure Python visualization dependencies are available
+# Ensure Python dependencies are available
 PYTHON="${PYTHON:-python3}"
+
+# SQLite3 is required for agent state persistence (P1-4)
+if ! $PYTHON -c "import sqlite3" 2>/dev/null; then
+    echo "  SQLite3 Python module not available — installing system package..."
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get install -y libsqlite3-dev 2>/dev/null || \
+            echo "  Warning: Could not install libsqlite3-dev. Run: sudo apt-get install libsqlite3-dev"
+    else
+        echo "  Warning: sqlite3 module missing. Install libsqlite3-dev for your distro."
+    fi
+fi
+
 if ! $PYTHON -c "import matplotlib" 2>/dev/null; then
     echo "  Installing Python visualization dependencies..."
     $PYTHON -m pip install --quiet matplotlib seaborn 2>/dev/null || \
