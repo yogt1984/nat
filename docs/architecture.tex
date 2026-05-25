@@ -1,0 +1,359 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1.8cm]{geometry}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage[T1]{fontenc}
+
+\title{\textbf{NAT System Architecture}\\[0.3em]
+\large Quantitative Research Platform for Hyperliquid Perpetual Futures}
+\author{NAT Project}
+\date{May 2026}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+
+NAT is a quantitative research platform for extracting alpha signals from Hyperliquid perpetual futures. The system comprises four layers:
+
+\begin{enumerate}
+    \item \textbf{Data Ingestion} --- Rust real-time ingestor computing 217 features at 100ms intervals
+    \item \textbf{Signal Discovery} --- Python-based research pipelines, algorithm framework, and autonomous agents
+    \item \textbf{Liquidity Engine} --- Alpha pipeline with 9-step quality gates producing validated signals
+    \item \textbf{Execution} --- Paper trading, portfolio assembly, and live order placement
+\end{enumerate}
+
+\section{System Architecture Diagram}
+
+{\small
+\begin{verbatim}
+                    +----------------------------------+
+                    |     HYPERLIQUID PERPETUALS        |
+                    |     BTC / ETH / SOL               |
+                    |     WebSocket (Book + Trades)      |
+                    +----------------+-----------------+
+                                     |
+    =================================================================
+    ||            LAYER 1: DATA INGESTION (Rust)                    ||
+    =================================================================
+                                     |
+                                     v
+            +-----------------------------------------------+
+            |            RUST INGESTOR (ing)                 |
+            |                                               |
+            |  [BTC Task]    [ETH Task]    [SOL Task]       |
+            |       |             |             |           |
+            |       v             v             v           |
+            |  +------------------------------------------+ |
+            |  |     MarketState (per symbol)              | |
+            |  |  OrderBook + TradeBuffer + Context        | |
+            |  +------------------+-----------------------+ |
+            |                     |                         |
+            |                     v  100ms emission         |
+            |  +------------------------------------------+ |
+            |  |   FeatureComputer (217 features)          | |
+            |  |                                           | |
+            |  |   BASE (138):                             | |
+            |  |    Raw(10) Imbalance(8) Flow(12)          | |
+            |  |    Volatility(9) Entropy(24) Context(9)   | |
+            |  |    Trend(15) Illiquidity(12) Toxicity(10) | |
+            |  |    Derived(15) Micro(5) Resilience(3)     | |
+            |  |    Hawkes(3)                              | |
+            |  |                                           | |
+            |  |   OPTIONAL (79, NaN if absent):           | |
+            |  |    WhaleFlow(12) Liquidation(13)          | |
+            |  |    Concentration(15) Regime(20)           | |
+            |  |    GMM(8) CrossSymbol(3) Heatmap(8)       | |
+            |  +------------------+-----------------------+ |
+            |                     |                         |
+            |                     v                         |
+            |  +------------------------------------------+ |
+            |  |   ParquetWriter                           | |
+            |  |   10k row batches, hourly rotation, zstd  | |
+            |  +------------------+-----------------------+ |
+            +---------------------+-------------------------+
+                                  |
+                                  v
+                +------------------------------------+
+                |  data/features/YYYY-MM-DD/          |
+                |  Symbol_YYYY-MM-DD_HH_MM.parquet    |
+                |  ~30 rows/sec/symbol                |
+                +----------------+-------------------+
+                                 |
+         +-----------------------+---------------------------+
+         |                       |                           |
+    =====|=======================|===========================|=====
+    ||   |  LAYER 2: SIGNAL DISCOVERY & RESEARCH (Python)   |    ||
+    =====|=======================|===========================|=====
+         |                       |                           |
+         v                       v                           v
++-----------------+  +---------------------+  +------------------------+
+| PIPELINE RUNNER |  | ALGORITHM FRAMEWORK |  |     AGENT SYSTEM       |
+|                 |  |                     |  |                        |
+| IDLE            |  | 30+ algorithms:     |  | +------------------+   |
+|   |             |  |                     |  | | Microstructure   |   |
+| BUILDING        |  | +---------------+   |  | | Agent (5s)       |   |
+|   |             |  | | CONVOLVER     |   |  | | 6 generators     |   |
+| INGESTING       |  | |               |   |  | | 5-gate protocol  |   |
+|   |             |  | | Offline:      |   |  | +------------------+   |
+| COLLECTING      |  | |  Event detect |   |  | +------------------+   |
+|   |             |  | |  SVD decompose|   |  | | Medium-Freq      |   |
+| ANALYZING       |  | |  IC + FDR     |   |  | | Agent (1m-1h)    |   |
+|   |             |  | |  -> 6 kernels |   |  | | 3 generators     |   |
+| DONE            |  | |               |   |  | | 4-gate protocol  |   |
+|                 |  | | Online:       |   |  | +------------------+   |
+| Gates:          |  | |  60s candles  |   |  | +------------------+   |
+| silhouette      |  | |  Cosine sim   |   |  | | Macro Agent      |   |
+| bootstrap_ari   |  | |  8 features   |   |  | | (1h-24h)         |   |
+| temporal_ari    |  | +---------------+   |  | | 3 generators     |   |
+|                 |  |                     |  | | 4-gate protocol  |   |
++-----------------+  | jump_detector       |  | +------------------+   |
+                     | funding_reversion   |  |          |             |
+                     | entropy_momentum    |  |          v             |
+                     | optimal_entry       |  | +------------------+   |
+                     | online_ridge        |  | | Meta Agent       |   |
+                     | ...                 |  | | (orchestrator)   |   |
+                     +----------+----------+  | | budget + correl  |   |
+                                |             | +------------------+   |
+                                |             +------------+-----------+
+                                |                          |
+                                |  +--------------------+  |
+                                +->| Signal Registries  |<-+
+                                   | data/agent/        |
+                                   | data/agent_mf/     |
+                                   | data/agent_macro/  |
+                                   | data/alpha/        |
+                                   +---------+----------+
+                                             |
+    =========================================|========================
+    ||          LAYER 3: LIQUIDITY ENGINE                            ||
+    =========================================|========================
+                                             |
+                                             v
+            +------------------------------------------------+
+            |        ALPHA PIPELINE (9 Steps)                  |
+            |                                                  |
+            |  SCREEN -> COMBINE -> SIZE -> VALIDATE -> REGIME |
+            |   (G1)     (G2)     (G3)    (G4)       (G5)     |
+            |                                                  |
+            |  -> MULTI_FREQ -> PORTFOLIO -> PAPER -> DEPLOY   |
+            |      (G6)          (G7)       (G8)     (G9)      |
+            +------------------------+-------------------------+
+                                     |
+                                     v
+          +-----------------------------------------------------+
+          |          3-FEATURE LIQUIDITY SIGNAL                   |
+          |                                                       |
+          |  Input: spread_bps + ask_depth_5 + vwap_deviation    |
+          |  Method: Walk-forward z-scores, P80/P20 thresholds   |
+          |  Output: direction (+1/-1/0), 100min horizon         |
+          |  Performance: Sharpe 5.6-11.8 (symbol-dependent)     |
+          +-------------------------+---------------------------+
+                                    |
+    ================================|================================
+    ||          LAYER 4: EXECUTION                                  ||
+    ================================|================================
+                                    |
+         +--------------------------+------------------------+
+         |                          |                        |
+         v                          v                        v
++-----------------+   +---------------------+   +-------------------+
+| PAPER TRADER    |   | PORTFOLIO ASSEMBLY  |   | SIGNAL BRIDGE     |
+|                 |   |                     |   | (Live Execution)  |
+| Modes:          |   | Risk parity weights |   |                   |
+|  batch (replay) |   | BTC/ETH/SOL         |   | Cycle: 5min       |
+|  watch (daemon) |   | Correlation adjust  |   | Modes:            |
+|                 |   | DD control:         |   |  dry-run           |
+| Gate G8:        |   |  50% scale if >2%   |   |  paper             |
+|  Sharpe > 0.5x  |   |                     |   |  live              |
+|  IC decay < 50% |   +----------+----------+   |                   |
+|  max loss < 2%  |              |              | Kill switches:     |
++--------+--------+              v              |  daily > 1%        |
+         |             +------------------+     |  weekly > 2%       |
+         |             | Capital Scaling   |     |  monthly > 5%      |
+         +------------>| 1% -> 5% -> 10%  |<----+  IC neg 5 days     |
+                       | -> 25% of equity  |     +----------+---------+
+                       +--------+---------+                |
+                                |                          |
+                                v                          |
+                   +------------------------+              |
+                   |   HYPERLIQUID API       |<-------------+
+                   |   Maker orders (limit)  |
+                   |   Position reconcile    |
+                   +------------------------+
+\end{verbatim}
+}
+
+\clearpage
+\section{Layer 1: Data Ingestion (Rust)}
+
+The ingestor connects to Hyperliquid's WebSocket API and computes 217 features per symbol at 100ms intervals.
+
+\subsection{Feature Categories}
+
+\begin{longtable}{|l|c|l|}
+\hline
+\textbf{Category} & \textbf{Count} & \textbf{Key Metrics} \\
+\hline
+\endfirsthead
+\hline
+\textbf{Category} & \textbf{Count} & \textbf{Key Metrics} \\
+\hline
+\endhead
+\multicolumn{3}{|l|}{\textit{Base Features (138, always computed)}} \\
+\hline
+Raw & 10 & Midprice, spread (bps), microprice, depth \\
+Imbalance & 8 & Qty/order/notional imbalance (L1/L5/L10) \\
+Flow & 12 & Trade count/volume, aggressor ratio, VWAP dev \\
+Volatility & 9 & Returns vol, Parkinson, Garman-Klass, z-score \\
+Entropy & 24 & Permutation, tick, vol-weighted tick entropy \\
+Context & 9 & Funding rate, OI, premium, 24h volume \\
+Trend & 15 & Momentum, $R^2$, Hurst, EMA crossover \\
+Illiquidity & 12 & Kyle $\lambda$, Amihud, Hasbrouck, Roll spread \\
+Toxicity & 10 & VPIN, adverse selection, effective spread \\
+Derived & 15 & Entropy-trend interaction, regime type \\
+Microstructure & 5 & OBI dynamics, depth recovery, queue proxy \\
+Resilience & 3 & Order book resilience (state machine) \\
+Hawkes & 3 & Self-exciting trade intensity \\
+\hline
+\multicolumn{3}{|l|}{\textit{Optional Features (79, NaN-padded when absent)}} \\
+\hline
+Whale Flow & 12 & Net flow, momentum, intensity, activity \\
+Liquidation & 13 & Cascade risk by price level, asymmetry \\
+Concentration & 15 & HHI, Gini, Theil, whale metrics \\
+Regime & 20 & Absorption, divergence, churn (minute-level) \\
+GMM & 8 & Regime label, probabilities, confidence \\
+Cross-Symbol & 3 & OBI divergence (multi-symbol) \\
+Heatmap & 8 & Spatial liquidation density, cascade chain \\
+\hline
+\end{longtable}
+
+\subsection{Output Format}
+
+Parquet files organized as \texttt{data/features/YYYY-MM-DD/Symbol\_HH\_MM.parquet}. Row groups of 10,000 rows ($\sim$5.5 min for 3 symbols), zstd compressed, hourly rotation.
+
+\section{Layer 2: Signal Discovery}
+
+\subsection{Convolver}
+
+Pattern-matching algorithm using data-driven SVD decomposition:
+
+\begin{itemize}
+    \item \textbf{Offline}: Detect 6 event types (breakouts, turtle soup, traps) $\to$ extract $W$=20 candle windows $\to$ SVD on 4 channels (body, upper wick, lower wick, volume) $\to$ IC gate + BH-FDR correction ($q=0.05$) $\to$ 6 surviving kernels
+    \item \textbf{Online}: Accumulate ticks $\to$ form 60s candles $\to$ score sliding window against kernels via cosine similarity $\to$ 8 real-time features
+\end{itemize}
+
+\subsection{Agent System}
+
+Three autonomous daemons operating at different timeframes:
+
+\begin{longtable}{|l|c|c|l|}
+\hline
+\textbf{Agent} & \textbf{Horizon} & \textbf{Generators} & \textbf{Gate Protocol} \\
+\hline
+Microstructure & 5s & 6 & 5-gate (IC, temporal, symbol, orthogonality, cost) \\
+Medium-Freq & 1m--1h & 3 & 4-gate (IC, temporal, symbol, cost) \\
+Macro & 1h--24h & 3 & 4-gate (IC, temporal, symbol, cost) \\
+\hline
+\end{longtable}
+
+Meta Agent orchestrates cross-agent budget allocation, correlation dedup, and portfolio assembly.
+
+\subsection{Discovery Orchestrator}
+
+Continuous 6-hour cycles: DATA\_HEALTH $\to$ SIGNAL\_SWEEP $\to$ TRAINING $\to$ BACKTESTING $\to$ ALPHA\_PIPELINE $\to$ REPORTING $\to$ SLEEPING.
+
+\section{Layer 3: Liquidity Engine}
+
+\subsection{Alpha Pipeline (9 Steps)}
+
+\begin{longtable}{|c|l|l|l|}
+\hline
+\textbf{Step} & \textbf{Name} & \textbf{Method} & \textbf{Gate} \\
+\hline
+1 & Screening & FDR on feature IC & G1: $\geq$5 significant features \\
+2 & Combining & IC-weighted, correlation dedup & G2: IC ratio $\geq 0.8\times$ max \\
+3 & Sizing & Kelly-fraction, cost-aware & G3: 50\% trade reduction \\
+4 & Validating & Walk-forward OOS & G4: Sharpe $\geq 0.5$, PF $\geq 1.2$ \\
+5 & Regime & GMM conditioning & G5: $1.5\times$ IC ratio improvement \\
+6 & Multi-Freq & Timeframe ensemble & G6: composite $>$ individual \\
+7 & Portfolio & Risk parity, cross-asset & G7: DD $< 0.8\times$ worst single \\
+8 & Paper & Live simulation & G8: Sharpe $> 0.5\times$ backtest \\
+9 & Deploy & Model readiness & G9: all artifacts ready \\
+\hline
+\end{longtable}
+
+\subsection{3-Feature Liquidity Signal}
+
+\begin{itemize}
+    \item \textbf{Inputs}: \texttt{raw\_spread\_bps}, \texttt{raw\_ask\_depth\_5}, \texttt{flow\_vwap\_deviation}
+    \item \textbf{Method}: Walk-forward z-scores (train on 3 prior dates), composite $= \frac{1}{3}(z_{\text{spread}} + z_{\text{depth}} + z_{\text{vwap}})$
+    \item \textbf{Entry}: Long when composite $\geq P_{80}$, short when $\leq P_{20}$
+    \item \textbf{Exit}: Fixed 100-minute horizon (20 five-minute bars)
+    \item \textbf{Performance}: Sharpe 5.6--11.8 (symbol-dependent), net 6.7--7.2 bps/trade
+\end{itemize}
+
+\section{Layer 4: Execution}
+
+\subsection{Paper Trading}
+
+Two modes: \textbf{batch} (replay all dates, compare to backtest) and \textbf{watch} (daemon monitoring for new data). Gate G8 requires paper Sharpe $> 0.5\times$ backtest, IC decay $< 50\%$, max daily loss $< 2\%$.
+
+\subsection{Signal Bridge}
+
+Live execution daemon with 5-minute cycles:
+\begin{itemize}
+    \item Reads latest bars $\to$ computes signal $\to$ reconciles position
+    \item Modes: dry-run, paper, live (requires \texttt{HL\_PRIVATE\_KEY})
+    \item Kill switches: daily loss $> 1\%$, weekly DD $> 2\%$, monthly DD $> 5\%$, IC negative 5 days
+\end{itemize}
+
+\subsection{Capital Scaling}
+
+Progressive deployment: 1\% $\to$ 5\% $\to$ 10\% $\to$ 25\% of equity. Portfolio-level drawdown control scales positions by 50\% if DD exceeds 2\%.
+
+\section{Component Interaction Matrix}
+
+\begin{longtable}{|l|l|l|}
+\hline
+\textbf{Producer $\to$ Consumer} & \textbf{Data Format} & \textbf{Frequency} \\
+\hline
+Hyperliquid $\to$ Ingestor & WebSocket JSON & $\sim$10ms \\
+Ingestor $\to$ Parquet & Arrow batches (10k rows) & $\sim$5.5 min flush \\
+Parquet $\to$ Algorithm Framework & DataFrame read & On-demand \\
+Parquet $\to$ Agent Daemons & DataFrame read & 1h / 2h / 4h cycles \\
+Parquet $\to$ Liquidity Engine & 5min bars & Walk-forward daily \\
+Convolver Discovery $\to$ Kernels & .npz + .json & Offline (rare) \\
+Convolver Online $\to$ Features & 8 floats per candle & Every 60s \\
+Alpha Pipeline $\to$ Registry & JSON & Per pipeline run \\
+Agent $\to$ Registry & JSON & Per hypothesis pass \\
+Registry $\to$ Paper Trader & Trade decisions & 5min \\
+Paper Trader $\to$ Signal Bridge & Validated signal & 5min \\
+Signal Bridge $\to$ Hyperliquid & REST API (orders) & 5min \\
+\hline
+\end{longtable}
+
+\section{Key File Paths}
+
+\begin{longtable}{|l|l|}
+\hline
+\textbf{Component} & \textbf{Entry Point} \\
+\hline
+Rust Ingestor & \texttt{rust/ing/src/main.rs} \\
+Feature Modules (26) & \texttt{rust/ing/src/features/*.rs} \\
+Convolver (online) & \texttt{scripts/algorithms/convolver.py} \\
+Convolver (discovery) & \texttt{scripts/analysis/convolver\_discovery.py} \\
+Pipeline Runner & \texttt{scripts/pipeline\_runner.py} \\
+Alpha Pipeline & \texttt{scripts/alpha/alpha\_pipeline.py} \\
+Liquidity Backtest & \texttt{scripts/analysis/mf\_liquidity\_backtest.py} \\
+Paper Trader & \texttt{scripts/alpha/paper\_trader.py} \\
+Signal Bridge & \texttt{scripts/execution/signal\_bridge.py} \\
+Agent (micro) & \texttt{scripts/agent/daemon.py} \\
+Agent (MF) & \texttt{scripts/agent/mf\_daemon.py} \\
+Agent (macro) & \texttt{scripts/agent/macro\_daemon.py} \\
+Meta Agent & \texttt{scripts/agent/meta\_daemon.py} \\
+Discovery Orchestrator & \texttt{scripts/discovery\_orchestrator.py} \\
+\hline
+\end{longtable}
+
+\end{document}

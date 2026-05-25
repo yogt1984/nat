@@ -1,0 +1,255 @@
+# NAT System Architecture
+
+Full system map of the NAT quantitative research platform — from raw market data to live execution. Three major subsystems: Feature Ingestor (Rust), Signal Discovery (Python), and Execution (Python).
+
+---
+
+## Complete System Diagram
+
+```
+                        ┌──────────────────────────────────┐
+                        │     HYPERLIQUID PERPETUALS        │
+                        │     BTC / ETH / SOL               │
+                        │     WebSocket (Book + Trades)      │
+                        └───────────────┬──────────────────┘
+                                        │
+                    ════════════════════════════════════════════
+                    ║          LAYER 1: DATA INGESTION         ║
+                    ════════════════════════════════════════════
+                                        │
+                                        ▼
+                ┌───────────────────────────────────────────────┐
+                │            RUST INGESTOR (ing)                 │
+                │                                               │
+                │  ┌─────────┐  ┌─────────┐  ┌─────────┐      │
+                │  │ BTC Task│  │ ETH Task│  │ SOL Task│      │
+                │  └────┬────┘  └────┬────┘  └────┬────┘      │
+                │       │            │            │             │
+                │       ▼            ▼            ▼             │
+                │  ┌──────────────────────────────────────┐    │
+                │  │          MarketState (per symbol)     │    │
+                │  │  OrderBook + TradeBuffer + Context    │    │
+                │  └──────────────────┬───────────────────┘    │
+                │                     │                         │
+                │                     ▼ 100ms emission          │
+                │  ┌──────────────────────────────────────┐    │
+                │  │      FeatureComputer (217 features)   │    │
+                │  │                                       │    │
+                │  │  BASE (138):                          │    │
+                │  │   Raw(10) Imbalance(8) Flow(12)       │    │
+                │  │   Volatility(9) Entropy(24) Context(9)│    │
+                │  │   Trend(15) Illiquidity(12)           │    │
+                │  │   Toxicity(10) Derived(15)            │    │
+                │  │   Micro(5) Resilience(3) Hawkes(3)    │    │
+                │  │                                       │    │
+                │  │  OPTIONAL (79, NaN if absent):        │    │
+                │  │   WhaleFlow(12) Liquidation(13)       │    │
+                │  │   Concentration(15) Regime(20)        │    │
+                │  │   GMM(8) CrossSymbol(3) Heatmap(8)    │    │
+                │  └──────────────────┬───────────────────┘    │
+                │                     │                         │
+                │                     ▼                         │
+                │  ┌──────────────────────────────────────┐    │
+                │  │   ParquetWriter                       │    │
+                │  │   10k row batches, hourly rotation    │    │
+                │  │   zstd compression                    │    │
+                │  └──────────────────┬───────────────────┘    │
+                └─────────────────────┼────────────────────────┘
+                                      │
+                                      ▼
+                    ┌────────────────────────────────────┐
+                    │  data/features/YYYY-MM-DD/          │
+                    │  Symbol_YYYY-MM-DD_HH_MM.parquet    │
+                    │  ~30 rows/sec/symbol                │
+                    └───────────────┬────────────────────┘
+                                    │
+         ┌──────────────────────────┼───────────────────────────────┐
+         │                          │                               │
+    ═════╪══════════════════════════╪═══════════════════════════════╪═════
+    ║    │   LAYER 2: SIGNAL DISCOVERY & RESEARCH                  │    ║
+    ═════╪══════════════════════════╪═══════════════════════════════╪═════
+         │                          │                               │
+         ▼                          ▼                               ▼
+┌─────────────────┐   ┌──────────────────────┐   ┌────────────────────────┐
+│ PIPELINE RUNNER │   │ ALGORITHM FRAMEWORK   │   │   AGENT SYSTEM          │
+│                 │   │                       │   │                          │
+│ IDLE            │   │ 30+ algorithms:       │   │ ┌──────────────────┐    │
+│  ↓              │   │                       │   │ │ Microstructure   │    │
+│ BUILDING        │   │ ┌───────────────────┐ │   │ │ Agent (5s)       │    │
+│  ↓              │   │ │ CONVOLVER         │ │   │ │ 6 generators     │    │
+│ INGESTING       │   │ │                   │ │   │ │ 5-gate protocol  │    │
+│  ↓              │   │ │ Offline:          │ │   │ └──────────────────┘    │
+│ COLLECTING      │   │ │  Event detect     │ │   │ ┌──────────────────┐    │
+│  ↓              │   │ │  SVD decompose    │ │   │ │ Medium-Freq      │    │
+│ ANALYZING       │   │ │  IC gate + FDR    │ │   │ │ Agent (1m-1h)    │    │
+│  ↓              │   │ │  → 6 kernels      │ │   │ │ 3 generators     │    │
+│ DONE            │   │ │                   │ │   │ │ 4-gate protocol  │    │
+│                 │   │ │ Online (8 feats): │ │   │ └──────────────────┘    │
+│ Gates:          │   │ │  Tick accumulate  │ │   │ ┌──────────────────┐    │
+│ silhouette,     │   │ │  60s candles      │ │   │ │ Macro Agent      │    │
+│ bootstrap_ari,  │   │ │  Score kernels    │ │   │ │ (1h-24h)         │    │
+│ temporal_ari    │   │ │  Cosine similarity│ │   │ │ 3 generators     │    │
+│                 │   │ └───────────────────┘ │   │ │ 4-gate protocol  │    │
+└─────────────────┘   │                       │   │ └──────────────────┘    │
+                      │ ┌───────────────────┐ │   │          │              │
+                      │ │ Other algorithms: │ │   │          ▼              │
+                      │ │  jump_detector    │ │   │ ┌──────────────────┐    │
+                      │ │  funding_reversion│ │   │ │ Meta Agent       │    │
+                      │ │  entropy_momentum │ │   │ │ (orchestrator)   │    │
+                      │ │  optimal_entry    │ │   │ │ Budget, correl,  │    │
+                      │ │  online_ridge     │ │   │ │ portfolio        │    │
+                      │ │  ...              │ │   │ └──────────────────┘    │
+                      │ └───────────────────┘ │   │                          │
+                      └───────────┬───────────┘   └────────────┬───────────┘
+                                  │                             │
+                                  │    ┌────────────────────┐   │
+                                  └───►│ Signal Registries   │◄──┘
+                                       │ data/agent/         │
+                                       │ data/agent_mf/      │
+                                       │ data/agent_macro/    │
+                                       │ data/alpha/          │
+                                       └─────────┬──────────┘
+                                                 │
+    ═══════════════════════════════════════════════╪════════════════════
+    ║              LAYER 3: LIQUIDITY ENGINE                          ║
+    ═══════════════════════════════════════════════╪════════════════════
+                                                  │
+                                                  ▼
+                    ┌────────────────────────────────────────────┐
+                    │        ALPHA PIPELINE (9 Steps)             │
+                    │                                             │
+                    │  ┌───────┐  ┌───────┐  ┌───────┐          │
+                    │  │SCREEN │→ │COMBINE│→ │ SIZE  │          │
+                    │  │ FDR   │  │IC dedup│  │Kelly  │          │
+                    │  │  G1   │  │  G2    │  │  G3   │          │
+                    │  └───────┘  └───────┘  └───────┘          │
+                    │       ↓                                     │
+                    │  ┌───────┐  ┌───────┐  ┌───────┐          │
+                    │  │VALIDAT│→ │REGIME │→ │MULTI_F│          │
+                    │  │WF OOS │  │GMM cond│  │TF blend│         │
+                    │  │  G4   │  │  G5    │  │  G6   │          │
+                    │  └───────┘  └───────┘  └───────┘          │
+                    │       ↓                                     │
+                    │  ┌───────┐  ┌───────┐  ┌───────┐          │
+                    │  │PORTFOL│→ │PAPER  │→ │DEPLOY │          │
+                    │  │RiskPar│  │Live sim│  │Model  │          │
+                    │  │  G7   │  │  G8    │  │  G9   │          │
+                    │  └───────┘  └───────┘  └───────┘          │
+                    └───────────────────┬────────────────────────┘
+                                        │
+                                        ▼
+              ┌─────────────────────────────────────────────────────┐
+              │          3-FEATURE LIQUIDITY SIGNAL                   │
+              │                                                       │
+              │  Input: raw_spread_bps + raw_ask_depth_5 +           │
+              │         flow_vwap_deviation                           │
+              │                                                       │
+              │  Method: Walk-forward z-scores (train on 3 prior     │
+              │          dates), composite = mean(z_spread, z_depth, │
+              │          z_vwap), entry on P80/P20 thresholds        │
+              │                                                       │
+              │  Output: direction (+1/-1/0), 100min horizon,        │
+              │          Sharpe 5.6-11.8 (symbol-dependent)          │
+              └──────────────────────┬──────────────────────────────┘
+                                     │
+    ═════════════════════════════════╪════════════════════════════════
+    ║          LAYER 4: EXECUTION                                   ║
+    ═════════════════════════════════╪════════════════════════════════
+                                     │
+         ┌───────────────────────────┼───────────────────────┐
+         │                           │                       │
+         ▼                           ▼                       ▼
+┌─────────────────┐   ┌──────────────────────┐   ┌───────────────────┐
+│ PAPER TRADER    │   │ PORTFOLIO ASSEMBLY    │   │ SIGNAL BRIDGE     │
+│                 │   │                       │   │ (Live Execution)  │
+│ Modes:          │   │ Risk parity weights   │   │                   │
+│  batch (replay) │   │ BTC/ETH/SOL           │   │ Cycle: 5min       │
+│  watch (daemon) │   │ Correlation adjust    │   │ Modes:            │
+│                 │   │ DD control:           │   │  dry-run           │
+│ Gate G8:        │   │  50% scale if DD>2%  │   │  paper             │
+│  Sharpe > 0.5×  │   │                       │   │  live              │
+│  IC decay < 50% │   │ Output: allocation    │   │                   │
+│  max loss < 2%  │   │ weights per symbol    │   │ Kill switches:     │
+└────────┬────────┘   └───────────┬───────────┘   │  daily > 1%       │
+         │                        │               │  weekly > 2%       │
+         │                        ▼               │  monthly > 5%      │
+         │              ┌──────────────────┐      │  IC neg 5 days     │
+         │              │ Capital Scaling  │      │                   │
+         └─────────────►│ 1% → 5% → 10%  │◄─────┘                   │
+                        │ → 25% of equity  │      │                   │
+                        └──────────────────┘      └─────────┬─────────┘
+                                                            │
+                                                            ▼
+                                              ┌──────────────────────┐
+                                              │ HYPERLIQUID API      │
+                                              │ Maker orders (limit) │
+                                              │ Position reconcile   │
+                                              └──────────────────────┘
+```
+
+---
+
+## Component Interaction Matrix
+
+| Producer → Consumer | Data Format | Frequency |
+|---|---|---|
+| Hyperliquid → Ingestor | WebSocket JSON | ~10ms |
+| Ingestor → Parquet | Arrow batches (10k rows) | ~5.5 min flush |
+| Parquet → Algorithm Framework | DataFrame read | On-demand |
+| Parquet → Agent Daemons | DataFrame read | 1h / 2h / 4h cycles |
+| Parquet → Liquidity Engine | 5min bars | Walk-forward daily |
+| Convolver Discovery → Kernel Files | .npz + .json | Offline (rare) |
+| Convolver Online → Feature Vector | 8 floats per candle | Every 60s |
+| Alpha Pipeline → Signal Registry | JSON | Per pipeline run |
+| Agent → Signal Registry | JSON | Per hypothesis pass |
+| Signal Registry → Paper Trader | Trade decisions | 5min |
+| Paper Trader → Signal Bridge | Validated signal | 5min |
+| Signal Bridge → Hyperliquid | REST API (orders) | 5min |
+
+---
+
+## Discovery Orchestrator (Cross-Cutting)
+
+```
+┌────────────────────────────────────────────────────────────┐
+│          DISCOVERY ORCHESTRATOR (6h cycles)                  │
+│                                                              │
+│  DATA_HEALTH → SIGNAL_SWEEP → TRAINING → BACKTESTING       │
+│       │              │              │            │            │
+│       ▼              ▼              ▼            ▼            │
+│  Parquet fresh?   Screen all    Train model  Walk-forward    │
+│                   (sym,horizon)  on winners   OOS validate   │
+│                   combinations                               │
+│                                                              │
+│  → ALPHA_PIPELINE → REPORTING → SLEEPING                    │
+│         │                │                                   │
+│         ▼                ▼                                   │
+│    Run full 9-step   JSON + plots                           │
+│    on winners        to reports/                             │
+└────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Key Paths
+
+| Component | Entry Point |
+|---|---|
+| Rust Ingestor | `rust/ing/src/main.rs` |
+| Feature Modules (26) | `rust/ing/src/features/*.rs` |
+| Convolver (online) | `scripts/algorithms/convolver.py` |
+| Convolver (discovery) | `scripts/analysis/convolver_discovery.py` |
+| Pipeline Runner | `scripts/pipeline_runner.py` |
+| Alpha Pipeline | `scripts/alpha/alpha_pipeline.py` |
+| Liquidity Backtest | `scripts/analysis/mf_liquidity_backtest.py` |
+| Paper Trader | `scripts/alpha/paper_trader.py` |
+| Signal Bridge | `scripts/execution/signal_bridge.py` |
+| Agent (micro) | `scripts/agent/daemon.py` |
+| Agent (MF) | `scripts/agent/mf_daemon.py` |
+| Agent (macro) | `scripts/agent/macro_daemon.py` |
+| Meta Agent | `scripts/agent/meta_daemon.py` |
+| Discovery Orchestrator | `scripts/discovery_orchestrator.py` |
+| Config (ingestor) | `config/ing.toml` |
+| Config (alpha) | `config/alpha.toml` |
+| Config (agents) | `config/agent.toml` |
+| Config (algorithms) | `config/algorithms.toml` |
