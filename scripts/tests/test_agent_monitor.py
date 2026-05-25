@@ -34,6 +34,7 @@ def agent_dirs(tmp_path, monkeypatch):
 
     import agent.daemon as daemon_mod
     import agent.runner as runner_mod
+    # Redirect ROOT so all path properties (state_path, registry_path, etc.) resolve to tmp
     monkeypatch.setattr(daemon_mod, "ROOT", tmp_path)
     monkeypatch.setattr(daemon_mod, "STATE_PATH", state_dir / "agent_state.json")
     monkeypatch.setattr(daemon_mod, "STATS_PATH", state_dir / "generator_stats.json")

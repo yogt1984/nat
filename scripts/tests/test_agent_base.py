@@ -115,9 +115,10 @@ class TestResearchAgentABC:
         with pytest.raises(TypeError, match="create_runner"):
             Bad()
 
-    def test_must_implement_run_monitor(self, tmp_path):
-        class Bad(ResearchAgent):
-            agent_type = "bad"
+    def test_run_monitor_has_default_impl(self, tmp_path):
+        """run_monitor is no longer abstract — it has shared IC decay logic."""
+        class Minimal(ResearchAgent):
+            agent_type = "minimal"
             @property
             def root(self):
                 return tmp_path
@@ -125,8 +126,9 @@ class TestResearchAgentABC:
                 return None
             def create_runner(self, h, m):
                 pass
-        with pytest.raises(TypeError, match="run_monitor"):
-            Bad()
+        agent = Minimal()
+        # Should not raise — base run_monitor handles missing registry gracefully
+        agent.run_monitor()
 
 
 # ===========================================================================
