@@ -167,40 +167,23 @@ class DailySummary:
 # ── Data loading ────────────────────────────────────────────────────────
 
 def discover_dates(data_dir: Path) -> list[str]:
-    return sorted(
-        d for d in os.listdir(data_dir)
-        if d.startswith("2026-") and "clean" not in d and (data_dir / d).is_dir()
-    )
+    from data.features import available_dates
+    return [d for d in available_dates(data_dir=data_dir) if "clean" not in d]
 
 
 def load_date_ticks(data_dir: Path, date_str: str, symbol: str,
                     columns: list[str]) -> pd.DataFrame | None:
-    date_path = data_dir / date_str
-    if not date_path.is_dir():
-        return None
-    files = sorted(f for f in date_path.iterdir() if f.suffix == ".parquet")
-    if not files:
-        return None
-
+    from data.features import load_features
     base_cols = ["timestamp_ns", "symbol", "raw_midprice"]
     load_cols = list(set(base_cols + columns))
-
-    dfs = []
-    for f in files:
-        try:
-            tbl = pq.read_table(str(f))
-            df = tbl.to_pandas()
-            cols = [c for c in load_cols if c in df.columns]
-            df = df[cols]
-            if "symbol" in df.columns:
-                df = df[df["symbol"] == symbol].copy()
-            if len(df) > 0:
-                dfs.append(df)
-        except Exception:
-            continue
-    if not dfs:
-        return None
-    return pd.concat(dfs, ignore_index=True).sort_values("timestamp_ns").reset_index(drop=True)
+    df = load_features(
+        symbols=[symbol],
+        date_range=(date_str, date_str),
+        columns=load_cols,
+        data_dir=data_dir,
+        validate=False,
+    )
+    return df if not df.empty else None
 
 
 def aggregate_to_bars(ticks: pd.DataFrame, features: pd.DataFrame,

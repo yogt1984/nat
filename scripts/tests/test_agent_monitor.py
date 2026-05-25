@@ -413,7 +413,9 @@ class TestComputeRollingIC:
         # P20 gating (~20% pass) AND 50-row fwd shift we still have >= 200
         n = 5000
         np.random.seed(42)
+        base_ts = int(pd.Timestamp("2026-05-12T00:00:00").value)
         df = pd.DataFrame({
+            "timestamp_ns": base_ts + np.arange(n) * 100_000_000,
             "symbol": ["BTC"] * n,
             "raw_midprice": 100 + np.cumsum(np.random.randn(n) * 0.01),
             "imbalance_qty_l1": np.random.randn(n),
@@ -440,7 +442,9 @@ class TestComputeRollingIC:
         for date in ["2026-05-10", "2026-05-12"]:
             d = agent_dirs / "data" / "features" / date
             d.mkdir(parents=True, exist_ok=True)
+            base_ts = int(pd.Timestamp(f"{date}T00:00:00").value)
             df = pd.DataFrame({
+                "timestamp_ns": base_ts + np.arange(n) * 100_000_000,
                 "symbol": ["BTC"] * n,
                 "raw_midprice": 100 + np.cumsum(np.random.randn(n) * 0.01),
                 "imbalance_qty_l1": np.random.randn(n),
@@ -458,7 +462,9 @@ class TestComputeRollingIC:
         import pandas as pd
 
         n = 100  # too few
+        base_ts = int(pd.Timestamp("2026-05-12T00:00:00").value)
         df = pd.DataFrame({
+            "timestamp_ns": base_ts + np.arange(n) * 100_000_000,
             "symbol": ["BTC"] * n,
             "raw_midprice": 100 + np.cumsum(np.random.randn(n) * 0.01),
             "imbalance_qty_l1": np.random.randn(n),

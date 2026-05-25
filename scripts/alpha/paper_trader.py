@@ -99,27 +99,15 @@ class DailySummary:
 # ── Data loading (shared with backtest) ──────────────────────────────────
 
 def load_date(data_dir: Path, date_str: str, symbol: str) -> pd.DataFrame | None:
-    date_path = data_dir / date_str
-    if not date_path.is_dir():
-        return None
-    files = sorted(f for f in date_path.iterdir() if f.suffix == ".parquet")
-    if not files:
-        return None
-    dfs = []
-    for f in files:
-        try:
-            tbl = pq.read_table(str(f))
-            df = tbl.to_pandas()
-            cols = [c for c in LOAD_COLUMNS if c in df.columns]
-            df = df[cols]
-            df = df[df["symbol"] == symbol].copy() if "symbol" in df.columns else df
-            if len(df) > 0:
-                dfs.append(df)
-        except Exception:
-            continue
-    if not dfs:
-        return None
-    return pd.concat(dfs, ignore_index=True).sort_values("timestamp_ns").reset_index(drop=True)
+    from data.features import load_features
+    df = load_features(
+        symbols=[symbol],
+        date_range=(date_str, date_str),
+        columns=LOAD_COLUMNS,
+        data_dir=data_dir,
+        validate=False,
+    )
+    return df if not df.empty else None
 
 
 def aggregate_to_bars(ticks: pd.DataFrame) -> pd.DataFrame:
@@ -144,10 +132,8 @@ def aggregate_to_bars(ticks: pd.DataFrame) -> pd.DataFrame:
 
 
 def discover_dates(data_dir: Path) -> list[str]:
-    return sorted(
-        d for d in os.listdir(data_dir)
-        if d.startswith("2026-") and "clean" not in d and (data_dir / d).is_dir()
-    )
+    from data.features import available_dates
+    return [d for d in available_dates(data_dir=data_dir) if "clean" not in d]
 
 
 # ── Signal (3-feature composite) ────────────────────────────────────────

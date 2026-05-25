@@ -238,25 +238,23 @@ def _parse_gate_spec(gate_str: str) -> Optional[tuple[str, str, str]]:
 
 
 def _load_feature_data(data_dir: str, symbol: str):
-    """Load and concatenate all Parquet files for a symbol from a data dir."""
-    import pandas as pd
+    """Load feature data for a symbol from a data directory.
+
+    Delegates to the unified data access layer (scripts/data/features.py).
+    """
+    from data.features import load_features
 
     data_path = ROOT / data_dir
     if not data_path.exists():
         return None
-    files = sorted(data_path.glob("*.parquet"))
-    if not files:
-        return None
-    frames = []
-    for f in files:
-        try:
-            frames.append(pd.read_parquet(f))
-        except Exception:
-            continue  # skip corrupted files
-    if not frames:
-        return None
-    df = pd.concat(frames, ignore_index=True)
-    return df[df["symbol"] == symbol] if "symbol" in df.columns else df
+    date_str = data_path.name  # e.g., "2026-05-20"
+    df = load_features(
+        symbols=[symbol],
+        date_range=(date_str, date_str),
+        data_dir=data_path.parent,
+        validate=False,
+    )
+    return df if not df.empty else None
 
 
 def _extract_gated_signal(df, feature: str,
