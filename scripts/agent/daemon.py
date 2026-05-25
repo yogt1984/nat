@@ -203,25 +203,16 @@ STATS_PATH = ROOT / "data" / "agent" / "generator_stats.json"
 
 # Backward compatibility — module-level functions
 def load_config() -> dict:
-    """Load agent config from TOML or return defaults."""
-    config_path = ROOT / "config" / "agent.toml"
-    DEFAULT_CONFIG = {
-        "cycle_interval_s": 3600,
-        "max_experiments_per_cycle": 10,
-        "max_cycle_runtime_s": 5400,
-        "generators_enabled": [
-            "systematic", "spectral", "regime",
-            "cross_asset", "recycler", "ensemble",
-        ],
-    }
-    if config_path.exists():
-        try:
-            import tomllib
-        except ImportError:
-            import tomli as tomllib  # type: ignore[no-redef]
-        with open(config_path, "rb") as f:
-            return {**DEFAULT_CONFIG, **tomllib.load(f).get("agent", {})}
-    return DEFAULT_CONFIG
+    """Load agent config from TOML or return defaults.
+
+    Uses [defaults] → [agent] inheritance via load_agent_config.
+    """
+    from agent.base import load_agent_config
+    return load_agent_config(
+        ROOT / "config" / "agent.toml",
+        "agent",
+        MicrostructureAgent.BASE_CONFIG,
+    )
 
 
 def load_gen_stats() -> dict[str, GeneratorStats]:

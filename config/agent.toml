@@ -1,13 +1,38 @@
 # NAT Agent Configuration
 # Autonomous hypothesis-driven alpha discovery daemon
 
+# ─────────────────────────────────────────────────────────────
+# Defaults — inherited by all agent sections unless overridden
+# ─────────────────────────────────────────────────────────────
+
+[defaults]
+max_cycle_runtime_s = 5400
+
+[defaults.gates]
+fdr_q = 0.05
+min_oos_dates = 2
+min_symbols = 2
+
+[defaults.decay]
+ic_decay_ratio = 0.5
+consecutive_days_limit = 14
+
+[defaults.symbols]
+primary = ["BTC", "ETH", "SOL"]
+
+[defaults.paths]
+data_dir = "data/features"
+
+# ─────────────────────────────────────────────────────────────
+# Microstructure Agent (tick-level, <1min horizons)
+# ─────────────────────────────────────────────────────────────
+
 [agent]
 # Cycle interval — time between research cycles (seconds)
 cycle_interval_s = 3600
 
 # Per-cycle budget
 max_experiments_per_cycle = 10
-max_cycle_runtime_s = 5400  # 90 minutes
 
 # Enabled generators (order = execution order)
 generators_enabled = [
@@ -24,21 +49,13 @@ generators_enabled = [
 min_ic = 0.10
 min_dIC = 0.05  # gate must improve IC by at least this over ungated baseline
 min_coverage = 0.10
-fdr_q = 0.05  # Benjamini-Hochberg false discovery rate
 min_walkforward_sign_consistency = 0.80
-min_oos_dates = 2
-min_symbols = 2
 
 [agent.cost]
 # Trading cost assumptions (bps, one-way)
 taker_fee_bps = 3.5
 # Minimum net Sharpe after costs to pass cost gate
 min_net_sharpe = 0.5
-
-[agent.decay]
-# IC decay monitoring — auto-retire degraded signals
-ic_decay_ratio = 0.5          # retire if IC < 50% of discovery IC
-consecutive_days_limit = 14   # must decay for this many consecutive days
 
 [agent.promotion]
 # Paper trading → live promotion criteria
@@ -47,13 +64,7 @@ paper_days = 7
 realized_ic_ratio_min = 0.8
 max_drawdown_pct = 2.0
 
-[agent.symbols]
-# Symbols to research
-primary = ["BTC", "ETH", "SOL"]
-
 [agent.paths]
-# Relative to project root
-data_dir = "data/features"
 state_dir = "data/agent"
 report_dir = "reports"
 
@@ -65,7 +76,6 @@ report_dir = "reports"
 [agent_mf]
 cycle_interval_s = 7200
 max_experiments_per_cycle = 8
-max_cycle_runtime_s = 5400
 timeframe = "5min"
 generators_enabled = [
     "momentum",
@@ -76,19 +86,8 @@ generators_enabled = [
 [agent_mf.gates]
 min_ic = 0.08       # lower than micro: fewer obs per day at 5min bars
 min_dIC = 0.03
-fdr_q = 0.05
-min_oos_dates = 2
-min_symbols = 2
-
-[agent_mf.decay]
-ic_decay_ratio = 0.5
-consecutive_days_limit = 14
-
-[agent_mf.symbols]
-primary = ["BTC", "ETH", "SOL"]
 
 [agent_mf.paths]
-data_dir = "data/features"
 state_dir = "data/agent_mf"
 
 # ─────────────────────────────────────────────────────────────
@@ -110,19 +109,8 @@ generators_enabled = [
 [agent_macro.gates]
 min_ic = 0.07       # lowest: ~24 bars/day at 1h
 min_dIC = 0.02
-fdr_q = 0.05
-min_oos_dates = 2
-min_symbols = 2
-
-[agent_macro.decay]
-ic_decay_ratio = 0.5
-consecutive_days_limit = 14
-
-[agent_macro.symbols]
-primary = ["BTC", "ETH", "SOL"]
 
 [agent_macro.paths]
-data_dir = "data/features"
 state_dir = "data/agent_macro"
 
 # ─────────────────────────────────────────────────────────────

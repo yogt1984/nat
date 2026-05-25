@@ -74,17 +74,16 @@ MF_REGISTRY_PATH = ROOT / "data" / "agent_mf" / "registry.json"
 
 
 def load_config() -> dict:
-    """Load MF agent config from TOML or return defaults."""
-    config_path = ROOT / "config" / "agent.toml"
-    default = dict(MediumFrequencyAgent.BASE_CONFIG)
-    if config_path.exists():
-        try:
-            import tomllib
-        except ImportError:
-            import tomli as tomllib  # type: ignore[no-redef]
-        with open(config_path, "rb") as f:
-            return {**default, **tomllib.load(f).get("agent_mf", {})}
-    return default
+    """Load MF agent config from TOML or return defaults.
+
+    Uses [defaults] → [agent_mf] inheritance via load_agent_config.
+    """
+    from agent.base import load_agent_config
+    return load_agent_config(
+        ROOT / "config" / "agent.toml",
+        "agent_mf",
+        MediumFrequencyAgent.BASE_CONFIG,
+    )
 
 
 def main():

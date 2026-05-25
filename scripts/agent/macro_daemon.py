@@ -74,17 +74,16 @@ MACRO_REGISTRY_PATH = ROOT / "data" / "agent_macro" / "registry.json"
 
 
 def load_config() -> dict:
-    """Load macro agent config from TOML or return defaults."""
-    config_path = ROOT / "config" / "agent.toml"
-    default = dict(MacroAgent.BASE_CONFIG)
-    if config_path.exists():
-        try:
-            import tomllib
-        except ImportError:
-            import tomli as tomllib  # type: ignore[no-redef]
-        with open(config_path, "rb") as f:
-            return {**default, **tomllib.load(f).get("agent_macro", {})}
-    return default
+    """Load macro agent config from TOML or return defaults.
+
+    Uses [defaults] → [agent_macro] inheritance via load_agent_config.
+    """
+    from agent.base import load_agent_config
+    return load_agent_config(
+        ROOT / "config" / "agent.toml",
+        "agent_macro",
+        MacroAgent.BASE_CONFIG,
+    )
 
 
 def main():
