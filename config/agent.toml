@@ -1,5 +1,24 @@
 # NAT Agent Configuration
 # Autonomous hypothesis-driven alpha discovery daemon
+#
+# Config Schema:
+#   [defaults]            — inherited by all agents unless overridden
+#   [defaults.gates]      — fdr_q, min_oos_dates, min_symbols
+#   [defaults.decay]      — ic_decay_ratio, consecutive_days_limit
+#   [defaults.symbols]    — primary = ["BTC", "ETH", "SOL"]
+#   [defaults.paths]      — data_dir
+#
+#   [agent]               — microstructure agent (tick-level)
+#   [agent_mf]            — medium-frequency agent (5min bars)
+#   [agent_macro]         — macro agent (1h bars)
+#   [meta_agent]          — orchestrator (no hypothesis generation)
+#   [agent_cascade]       — cascade validation agent
+#
+# Required keys (after defaults merge):
+#   cycle_interval_s, max_experiments_per_cycle, generators_enabled
+#
+# Each section only needs to specify keys that differ from [defaults].
+# Unknown keys produce warnings (not errors) for forward-compatibility.
 
 # ─────────────────────────────────────────────────────────────
 # Defaults — inherited by all agent sections unless overridden
@@ -143,4 +162,3 @@ cross_symbol_min_cosine = 0.6
 max_orthogonality_r2 = 0.30
 cascade_price_thresh = 0.03
 cascade_horizon_ticks = 3000
-symbols = ["BTC", "ETH", "SOL"]

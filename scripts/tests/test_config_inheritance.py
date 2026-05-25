@@ -81,30 +81,37 @@ class TestDeepMerge:
 # ===========================================================================
 
 class TestValidateConfig:
+    """Minimal valid config fixture for tests that need required keys present."""
+
+    VALID_BASE = {
+        "cycle_interval_s": 3600,
+        "max_experiments_per_cycle": 10,
+        "generators_enabled": ["systematic"],
+    }
+
     def test_clean_config_no_warnings(self):
         config = {
-            "cycle_interval_s": 3600,
-            "max_experiments_per_cycle": 10,
+            **self.VALID_BASE,
             "gates": {"min_ic": 0.10, "fdr_q": 0.05},
         }
         assert validate_config(config, "agent") == []
 
     def test_unknown_top_level_key(self):
-        config = {"cycle_interval_s": 3600, "bogus_key": True}
+        config = {**self.VALID_BASE, "bogus_key": True}
         warnings = validate_config(config, "agent")
         assert len(warnings) == 1
         assert "bogus_key" in warnings[0]
         assert "[agent]" in warnings[0]
 
     def test_unknown_gate_key(self):
-        config = {"gates": {"min_ic": 0.10, "bogus_gate": 0.5}}
+        config = {**self.VALID_BASE, "gates": {"min_ic": 0.10, "bogus_gate": 0.5}}
         warnings = validate_config(config, "test")
         assert len(warnings) == 1
         assert "bogus_gate" in warnings[0]
         assert "[test.gates]" in warnings[0]
 
     def test_multiple_unknown_keys(self):
-        config = {"bogus1": 1, "bogus2": 2, "gates": {"bogus3": 3}}
+        config = {**self.VALID_BASE, "bogus1": 1, "bogus2": 2, "gates": {"bogus3": 3}}
         warnings = validate_config(config, "x")
         assert len(warnings) == 3
 
@@ -114,6 +121,36 @@ class TestValidateConfig:
         config = {k: "dummy" for k in _KNOWN_TOP_KEYS}
         config["gates"] = {k: "dummy" for k in _KNOWN_GATE_KEYS}
         assert validate_config(config, "agent") == []
+
+    # --- Required key validation ---
+
+    def test_missing_all_required_keys_raises(self):
+        """Empty config should raise ValueError listing all missing keys."""
+        with pytest.raises(ValueError, match="missing required keys"):
+            validate_config({}, "agent")
+
+    def test_missing_one_required_key_raises(self):
+        """Missing just generators_enabled should raise."""
+        config = {"cycle_interval_s": 3600, "max_experiments_per_cycle": 10}
+        with pytest.raises(ValueError, match="generators_enabled"):
+            validate_config(config, "agent")
+
+    def test_error_message_includes_section_name(self):
+        with pytest.raises(ValueError, match=r"\[my_section\]"):
+            validate_config({"cycle_interval_s": 1}, "my_section")
+
+    def test_error_lists_all_missing_keys_sorted(self):
+        """All missing keys should appear in the error message."""
+        with pytest.raises(ValueError) as exc_info:
+            validate_config({}, "agent")
+        msg = str(exc_info.value)
+        assert "cycle_interval_s" in msg
+        assert "generators_enabled" in msg
+        assert "max_experiments_per_cycle" in msg
+
+    def test_required_keys_present_no_raise(self):
+        """Config with all required keys should not raise."""
+        validate_config(self.VALID_BASE, "agent")  # no exception
 
 
 # ===========================================================================
@@ -131,6 +168,8 @@ class TestLoadAgentConfig:
         toml_content = b"""
 [defaults]
 max_cycle_runtime_s = 9999
+max_experiments_per_cycle = 5
+generators_enabled = ["test"]
 
 [defaults.gates]
 fdr_q = 0.01
@@ -160,6 +199,11 @@ cycle_interval_s = 7200
     def test_section_overrides_defaults(self, tmp_path):
         """Section-specific keys beat [defaults]."""
         toml_content = b"""
+[defaults]
+cycle_interval_s = 3600
+max_experiments_per_cycle = 5
+generators_enabled = ["test"]
+
 [defaults.gates]
 min_ic = 0.10
 fdr_q = 0.05
@@ -179,6 +223,7 @@ min_ic = 0.08
         toml_content = b"""
 [defaults]
 max_experiments_per_cycle = 50
+generators_enabled = ["test"]
 
 [agent]
 max_experiments_per_cycle = 10
@@ -194,7 +239,11 @@ max_experiments_per_cycle = 10
     def test_empty_toml_returns_base(self, tmp_path):
         toml_file = tmp_path / "agent.toml"
         toml_file.write_bytes(b"")
-        base = {"cycle_interval_s": 42}
+        base = {
+            "cycle_interval_s": 42,
+            "max_experiments_per_cycle": 5,
+            "generators_enabled": ["test"],
+        }
         assert load_agent_config(toml_file, "agent", base) == base
 
     def test_missing_section_still_gets_defaults(self, tmp_path):
@@ -202,6 +251,9 @@ max_experiments_per_cycle = 10
         toml_content = b"""
 [defaults]
 max_cycle_runtime_s = 5400
+cycle_interval_s = 3600
+max_experiments_per_cycle = 10
+generators_enabled = ["test"]
 
 [defaults.gates]
 fdr_q = 0.05
@@ -216,6 +268,11 @@ fdr_q = 0.05
     def test_nested_defaults_preserved_under_section_override(self, tmp_path):
         """When section overrides one nested key, sibling keys from defaults survive."""
         toml_content = b"""
+[defaults]
+cycle_interval_s = 3600
+max_experiments_per_cycle = 5
+generators_enabled = ["test"]
+
 [defaults.decay]
 ic_decay_ratio = 0.5
 consecutive_days_limit = 14
@@ -229,6 +286,18 @@ consecutive_days_limit = 7
         cfg = load_agent_config(toml_file, "agent_macro", {})
         assert cfg["decay"]["consecutive_days_limit"] == 7   # overridden
         assert cfg["decay"]["ic_decay_ratio"] == 0.5         # inherited
+
+    def test_load_raises_on_missing_required_keys(self, tmp_path):
+        """load_agent_config should raise if merged config lacks required keys."""
+        toml_content = b"""
+[agent]
+cycle_interval_s = 3600
+"""
+        toml_file = tmp_path / "agent.toml"
+        toml_file.write_bytes(toml_content)
+
+        with pytest.raises(ValueError, match="missing required keys"):
+            load_agent_config(toml_file, "agent", {})
 
 
 # ===========================================================================
@@ -297,8 +366,10 @@ class TestRealTomlInheritance:
     def test_no_duplicate_keys_in_toml(self, toml_path):
         """Verify that fdr_q, min_oos_dates, etc. only appear in [defaults],
         not duplicated in [agent_mf] or [agent_macro] sections."""
-        content = toml_path.read_text()
-        # These should only appear once (in [defaults])
+        lines = [l for l in toml_path.read_text().splitlines()
+                 if not l.strip().startswith("#")]
+        content = "\n".join(lines)
+        # These should only appear once (in [defaults]), excluding comments
         for key in ["fdr_q", "ic_decay_ratio", "consecutive_days_limit"]:
             count = content.count(key)
             assert count == 1, f"{key} appears {count} times, expected 1 (only in [defaults])"

@@ -210,8 +210,23 @@ _KNOWN_GATE_KEYS = {
 }
 
 
+_REQUIRED_KEYS = {"cycle_interval_s", "max_experiments_per_cycle", "generators_enabled"}
+
+
 def validate_config(config: dict, section: str) -> list[str]:
-    """Return warnings for unknown keys. Does NOT raise."""
+    """Validate agent config after defaults merge.
+
+    Returns warnings for unknown keys.
+    Raises ValueError if required keys are missing.
+    """
+    # Required-key check (hard error)
+    missing = _REQUIRED_KEYS - config.keys()
+    if missing:
+        raise ValueError(
+            f"[{section}] missing required keys: {sorted(missing)}"
+        )
+
+    # Unknown-key check (soft warning)
     warnings = []
     for key in config:
         if key not in _KNOWN_TOP_KEYS:
