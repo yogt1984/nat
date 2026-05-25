@@ -571,6 +571,7 @@ class ResearchAgent(ABC):
     agent_type: str = "base"
     config_section: str = "agent"
     default_generators: list[str] = []
+    generator_module_prefix: str = "agent.generators"  # importlib path prefix
 
     BASE_CONFIG = {
         "cycle_interval_s": 3600,
@@ -839,12 +840,21 @@ class ResearchAgent(ABC):
                   f"hit_rate={gs.hit_rate:.0%}  "
                   f"weight={gs.weight:.3f}")
 
-    # --- Abstract hooks (subclass must implement) -------------------------
+    # --- Hooks (subclass may override) --------------------------------------
 
-    @abstractmethod
     def get_generator(self, name: str):
-        """Return the generate() function for a named generator, or None."""
-        ...
+        """Return the generate() function for a named generator, or None.
+
+        Default implementation imports from ``{generator_module_prefix}.{name}``.
+        Subclasses can override for custom import paths.
+        """
+        try:
+            mod = __import__(f"{self.generator_module_prefix}.{name}",
+                            fromlist=["generate"])
+            return mod.generate
+        except (ImportError, AttributeError) as e:
+            log.debug("Generator %s not available: %s", name, e)
+        return None
 
     @abstractmethod
     def create_runner(self, hypothesis: Hypothesis,
@@ -853,9 +863,9 @@ class ResearchAgent(ABC):
         ...
 
     def run_monitor(self) -> None:
-        """Check registered signals for IC decay. Auto-retire after N days.
+        """Check registered signals for IC decay, auto-retire, and promotion.
 
-        Subclasses can override to add promotion logic (e.g., microstructure).
+        Combines IC decay monitoring with paper trading promotion checks.
         """
         if self._store:
             registry = self._store.load_registry(self.agent_type)
@@ -925,6 +935,44 @@ class ResearchAgent(ABC):
         log.info("%s Monitor: %d active signals, %d retired this cycle",
                  label, n_active, n_retired)
 
+        # Promotion check: paper → live
+        self._check_promotions(registry)
+
+    def _check_promotions(self, registry: list[dict]) -> None:
+        """Check paper trading signals for promotion eligibility."""
+        promotion = self.config.get("promotion", {})
+        paper_sharpe_min = promotion.get("paper_sharpe_min", 1.5)
+        paper_days = promotion.get("paper_days", 7)
+        realized_ic_ratio_min = promotion.get("realized_ic_ratio_min", 0.8)
+        max_drawdown_pct = promotion.get("max_drawdown_pct", 2.0)
+
+        n_validated = n_paper = n_promotable = 0
+        for sig in registry:
+            status = sig.get("status", "validated")
+            if status == "validated":
+                n_validated += 1
+            elif status == "paper":
+                n_paper += 1
+                paper_sharpe = sig.get("paper_sharpe")
+                paper_days_actual = sig.get("paper_days_elapsed", 0)
+                realized_ic = sig.get("realized_ic", 0)
+                expected_ic = sig.get("expected_ic", 1)
+                max_dd = sig.get("max_drawdown_pct", 100)
+
+                if (paper_sharpe is not None
+                        and paper_sharpe >= paper_sharpe_min
+                        and paper_days_actual >= paper_days
+                        and (realized_ic / expected_ic if expected_ic else 0) >= realized_ic_ratio_min
+                        and max_dd <= max_drawdown_pct):
+                    n_promotable += 1
+                    log.info("  PROMOTION ELIGIBLE: %s (Sharpe=%.2f, %dd, IC ratio=%.2f)",
+                             sig["name"][:50], paper_sharpe, paper_days_actual,
+                             realized_ic / expected_ic if expected_ic else 0)
+
+        if n_paper > 0:
+            log.info("Promotion check: %d validated, %d paper, %d promotable",
+                     n_validated, n_paper, n_promotable)
+
     # --- Optional hooks (subclass can override) ---------------------------
 
     def pre_execute(self, hypothesis: Hypothesis) -> None:
@@ -936,8 +984,67 @@ class ResearchAgent(ABC):
             hypothesis.thresholds["min_ic"] = adaptive_min_ic
 
     def post_cycle(self, cycle_hypotheses: list) -> int:
-        """Called after execution phase. Return number of spawned follow-ups."""
-        return 0
+        """Hypothesis chaining: spawn follow-ups from near-misses and strong results."""
+        return self._chain_hypotheses(cycle_hypotheses)
+
+    def _chain_hypotheses(self, cycle_hypotheses: list) -> int:
+        """Spawn follow-up hypotheses from near-misses and strong results."""
+        n_spawned = 0
+        min_dIC = self.config.get("gates", {}).get("min_dIC", 0.05)
+
+        for h in cycle_hypotheses:
+            # Rule 1: symbol-specific variant when only 1 symbol fails
+            if (h.status == "failed"
+                    and h.failure_reason == "no_replication"
+                    and h.results
+                    and "symbol_replication" in h.results):
+                sr = h.results["symbol_replication"]
+                passed_syms = sr.get("passed", [])
+                failed_syms = sr.get("failed", [])
+
+                if len(failed_syms) == 1 and len(passed_syms) >= 2:
+                    claim = f"{h.claim} [symbol-specific: {','.join(passed_syms)}]"
+                    existing = {x.claim for x in self.queue._all}
+                    if claim not in existing:
+                        variant = Hypothesis.create(
+                            claim=claim,
+                            generator=h.generator,
+                            test_protocol=h.test_protocol,
+                            priority=h.priority * 0.7,
+                            thresholds={
+                                **h.thresholds,
+                                "min_symbols": len(passed_syms),
+                                "symbols_override": passed_syms,
+                            },
+                            parent_id=h.id,
+                        )
+                        self.queue.push(variant)
+                        n_spawned += 1
+                        log.info("  Chained symbol-specific: %s (%s)",
+                                 claim[:60], ",".join(passed_syms))
+
+            # Rule 2: strong dIC → flag for ensemble pairing
+            if h.status in ("replicated", "passed") and h.results:
+                dIC = self._extract_dIC_from_results(h)
+                if dIC >= min_dIC * 2:
+                    log.info("  Strong gate (dIC=%.3f): %s — ensemble candidate",
+                             dIC, h.claim[:60])
+
+        return n_spawned
+
+    @staticmethod
+    def _extract_dIC_from_results(h) -> float:
+        """Extract dIC value from hypothesis gate results."""
+        if not h.results or "gate_results" not in h.results:
+            return 0.0
+        for gr in h.results["gate_results"]:
+            msg = gr.get("msg", "")
+            if "dIC=" in msg:
+                try:
+                    return float(msg.split("dIC=")[1].split()[0])
+                except (IndexError, ValueError):
+                    pass
+        return 0.0
 
     def on_fdr_reject(self, hypothesis: Hypothesis) -> None:
         """Remove FDR-rejected signal from registry."""
