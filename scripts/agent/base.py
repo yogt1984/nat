@@ -161,12 +161,25 @@ def apply_fdr(hypotheses: list, q: float = 0.05) -> list[str]:
 # ---------------------------------------------------------------------------
 
 class BaseRunner(ABC):
-    """Abstract base for running a hypothesis through a gate protocol.
+    """Base for running a hypothesis through a gate protocol.
 
-    Subclasses define their gate steps via ``steps()`` and signal
-    registration via ``register_signal()``. The base class provides
-    the sequential execution logic and common argument parsing.
+    Provides default 4-gate protocol (discovery → temporal → symbol → dedup)
+    and shared registration logic. Subclasses configure via class attributes
+    and override ``steps()`` for different gate counts.
+
+    Class attributes for subclass configuration:
+        TIMEFRAME: None for tick-level (micro), "5min" (MF), "1h" (macro)
+        SIGNAL_FEATURES: feature names to match in hypothesis claims
+        DEFAULT_FEATURE: fallback when no feature matched in claim
+        DEFAULT_HORIZON_S: default signal horizon in seconds
+        REGISTRY_PATH: Path to the signal registry JSON file
     """
+
+    TIMEFRAME: str | None = None
+    SIGNAL_FEATURES: list[str] = []
+    DEFAULT_FEATURE: str = "unknown"
+    DEFAULT_HORIZON_S: float = 5.0
+    REGISTRY_PATH: Path | None = None
 
     def __init__(self, hypothesis: Hypothesis, manifest: dict):
         self.h = hypothesis
@@ -181,15 +194,246 @@ class BaseRunner(ABC):
         self.register_signal()
         return True
 
-    @abstractmethod
     def steps(self) -> list:
-        """Return ordered list of gate step methods. Each returns bool."""
-        ...
+        """Default 4-gate protocol: discovery → temporal → symbol → dedup."""
+        return [
+            self.run_discovery,
+            self.run_replication_temporal,
+            self.run_replication_symbol,
+            self.run_correlation_check,
+        ]
 
-    @abstractmethod
+    # --- Gate methods (shared across all runners) -------------------------
+
+    def run_discovery(self) -> bool:
+        """Execute the test protocol and check IC/dIC gates."""
+        from .runner import run_nat_cached, parse_report
+
+        log.info("=== DISCOVERY: %s ===", self.h.claim[:80])
+
+        for i, cmd_str in enumerate(self.h.test_protocol):
+            cmd_parts = cmd_str.split()
+            symbol = self._extract_symbol(cmd_str)
+            result, report = run_nat_cached(cmd_parts, symbol=symbol)
+
+            if result.returncode != 0:
+                self.h.fail("command_error")
+                self.h.results = {"failed_cmd": cmd_str, "stderr": result.stderr[:500]}
+                return False
+
+            # Bar-resampled runners try timeframe-aware parse as fallback
+            if report is None and self.TIMEFRAME is not None:
+                report = parse_report(
+                    cmd_str, symbol=symbol, timeframe=self.TIMEFRAME,
+                )
+
+            if report:
+                passed, msg = self._check_gates(report)
+                self.gate_results.append({"cmd": cmd_str, "passed": passed, "msg": msg})
+                log.info("  Gate %d: %s", i, msg)
+                if not passed:
+                    self.h.fail("no_effect")
+                    self.h.results = {"gate_results": self.gate_results}
+                    return False
+
+        self.h.pass_discovery()
+        self.h.results = {"gate_results": self.gate_results}
+        log.info("  DISCOVERY PASSED: %s", self.h.claim[:60])
+        return True
+
+    def run_replication_temporal(self) -> bool:
+        """Re-run on other available dates."""
+        from .runner import run_nat_cached
+
+        dates = list(self.manifest.get("dates", {}).keys())
+        if len(dates) < 2:
+            log.warning("Only %d dates available, skipping temporal replication",
+                        len(dates))
+            return True
+
+        n_pass = 0
+        n_tested = 0
+        for date in dates[1:3]:
+            data_dir = f"data/features/{date}"
+            for cmd_str in self.h.test_protocol[:1]:
+                cmd_parts = cmd_str.split()
+                new_parts = []
+                skip_next = False
+                for p in cmd_parts:
+                    if skip_next:
+                        new_parts.append(data_dir)
+                        skip_next = False
+                    elif p in ("--data", "--data-dir"):
+                        new_parts.append(p)
+                        skip_next = True
+                    else:
+                        new_parts.append(p)
+                if not skip_next and "--data" not in cmd_str:
+                    new_parts.extend(["--data", data_dir])
+                # Append --timeframe for bar-resampled agents
+                if self.TIMEFRAME and "--timeframe" not in cmd_str:
+                    new_parts.extend(["--timeframe", self.TIMEFRAME])
+
+                symbol = self._extract_symbol(cmd_str)
+                result, _ = run_nat_cached(new_parts, symbol=symbol)
+                n_tested += 1
+                if result.returncode == 0:
+                    n_pass += 1
+
+        # Tick-level agents default to min_oos_dates=1, bar-resampled to 2
+        default_min = 1 if self.TIMEFRAME is None else 2
+        min_dates = self.h.thresholds.get("min_oos_dates", default_min)
+        if n_pass >= min_dates:
+            log.info("  TEMPORAL REPLICATION PASSED: %d/%d dates", n_pass, n_tested)
+            return True
+        else:
+            self.h.fail("no_replication")
+            log.info("  TEMPORAL REPLICATION FAILED: %d/%d dates", n_pass, n_tested)
+            return False
+
+    def run_replication_symbol(self) -> bool:
+        """Re-run on other symbols."""
+        from .runner import run_nat_cached
+
+        primary_sym = self._extract_symbol(self.h.test_protocol[0])
+        other_symbols = [s for s in ["BTC", "ETH", "SOL"] if s != primary_sym]
+
+        n_pass = 0
+        passed_symbols = [primary_sym]
+        failed_symbols = []
+        for sym in other_symbols:
+            for cmd_str in self.h.test_protocol[:1]:
+                new_cmd = cmd_str.replace(
+                    f"--symbol {primary_sym}", f"--symbol {sym}")
+                cmd_parts = new_cmd.split()
+                result, report = run_nat_cached(cmd_parts, symbol=sym)
+                if result.returncode == 0 and report:
+                    passed, _ = self._check_gates(report)
+                    if passed:
+                        n_pass += 1
+                        passed_symbols.append(sym)
+                    else:
+                        failed_symbols.append(sym)
+                else:
+                    failed_symbols.append(sym)
+
+        self.h.results = {
+            **(self.h.results or {}),
+            "symbol_replication": {
+                "passed": passed_symbols,
+                "failed": failed_symbols,
+                "n_pass": n_pass,
+                "n_total": len(other_symbols),
+            },
+        }
+
+        min_symbols = self.h.thresholds.get("min_symbols", 2) - 1
+        if n_pass >= min_symbols:
+            self.h.replicate()
+            log.info("  SYMBOL REPLICATION PASSED: %d/%d", n_pass, len(other_symbols))
+            return True
+        else:
+            self.h.fail("no_replication")
+            log.info("  SYMBOL REPLICATION FAILED: %d/%d", n_pass, len(other_symbols))
+            return False
+
+    def run_correlation_check(self) -> bool:
+        """Check if signal is redundant with existing registry entries."""
+        from .runner import check_correlation_gate
+
+        registry = self._load_registry()
+        if not registry:
+            return True
+
+        data_dir = self._extract_data_dir()
+        symbol = self._extract_symbol(self.h.test_protocol[0])
+        features = self._extract_features()
+        gate = self.h.thresholds.get("regime_gate")
+        max_corr = self.h.thresholds.get("max_corr", 0.70)
+
+        for feat in features:
+            passed, msg = check_correlation_gate(
+                feat, gate, registry, data_dir, symbol, max_corr,
+            )
+            log.info("  Correlation check (%s): %s", feat, msg)
+            self.h.results = {**(self.h.results or {}), "correlation_check": msg}
+            if not passed:
+                self.h.fail("redundant")
+                return False
+        return True
+
+    # --- Registration (shared) --------------------------------------------
+
     def register_signal(self):
-        """Register a validated signal after all gates pass."""
-        ...
+        """Register a validated signal into the registry."""
+        from .hypothesis import RegisteredSignal
+
+        horizon_s = self.h.thresholds.get("horizon_s", self.DEFAULT_HORIZON_S)
+        signal = RegisteredSignal(
+            name=self.h.claim,
+            features=self._extract_features(),
+            regime_gate=self.h.thresholds.get("regime_gate"),
+            extraction=self.h.thresholds.get("extraction", "raw"),
+            horizon_s=horizon_s,
+            expected_ic=self._extract_ic_from_results(),
+            symbols=["BTC", "ETH", "SOL"],
+            discovery_date=self.h.created[:10],
+            last_validated=datetime.now(timezone.utc).isoformat()[:10],
+            hypothesis_id=self.h.id,
+        )
+        registry = self._load_registry()
+        registry.append(signal.to_dict())
+        path = self.REGISTRY_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(registry, f, indent=2)
+        log.info("  REGISTERED: %s (IC=%.3f, horizon=%.0fs)",
+                 signal.name, signal.expected_ic, horizon_s)
+        return signal
+
+    # --- Helpers ----------------------------------------------------------
+
+    def _check_gates(self, report: dict) -> tuple[bool, str]:
+        """Run IC and dIC gate checks against hypothesis thresholds."""
+        from .runner import check_ic_gate, check_dIC_gate
+
+        checks = [
+            ("IC", check_ic_gate(report, self.h.thresholds)),
+            ("dIC", check_dIC_gate(report, self.h.thresholds)),
+        ]
+        msgs = []
+        for name, (passed, msg) in checks:
+            msgs.append(msg)
+            if not passed:
+                return False, f"{name}: {msg}"
+        return True, " | ".join(msgs)
+
+    def _extract_features(self) -> list[str]:
+        """Extract signal feature names from the hypothesis claim."""
+        claim = self.h.claim.lower()
+        features = [f for f in self.SIGNAL_FEATURES if f in claim]
+        return features or [self.DEFAULT_FEATURE]
+
+    def _extract_ic_from_results(self) -> float:
+        """Extract the IC value from gate results (excludes dIC messages)."""
+        if self.h.results and "gate_results" in self.h.results:
+            for g in self.h.results["gate_results"]:
+                msg = g.get("msg", "")
+                if "IC=" in msg and "dIC=" not in msg:
+                    try:
+                        return float(msg.split("IC=")[1].split()[0])
+                    except (IndexError, ValueError):
+                        pass
+        return 0.0
+
+    @classmethod
+    def _load_registry(cls) -> list[dict]:
+        """Load the signal registry from REGISTRY_PATH."""
+        path = cls.REGISTRY_PATH
+        if path and path.exists():
+            with open(path) as f:
+                return json.load(f)
+        return []
 
     @staticmethod
     def _extract_symbol(cmd_str: str) -> str:

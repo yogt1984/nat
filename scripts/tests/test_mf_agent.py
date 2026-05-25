@@ -202,11 +202,10 @@ class TestMFRunner:
 
     def test_register_signal_writes_to_mf_registry(self, tmp_path):
         from agent.mf_runner import MediumFrequencyRunner
-        import agent.mf_runner as mf_runner_mod
 
-        # Point registry to tmp
-        orig = mf_runner_mod.MF_REGISTRY_PATH
-        mf_runner_mod.MF_REGISTRY_PATH = tmp_path / "registry.json"
+        # Point registry to tmp via class attr
+        orig = MediumFrequencyRunner.REGISTRY_PATH
+        MediumFrequencyRunner.REGISTRY_PATH = tmp_path / "registry.json"
 
         h = Hypothesis.create(
             "trend_momentum_300 predicts 5min returns",
@@ -222,30 +221,29 @@ class TestMFRunner:
         assert sig.horizon_s == 300.0
 
         # Check file was written
-        with open(mf_runner_mod.MF_REGISTRY_PATH) as f:
+        with open(tmp_path / "registry.json") as f:
             registry = json.load(f)
         assert len(registry) == 1
         assert registry[0]["hypothesis_id"] == h.id
 
-        mf_runner_mod.MF_REGISTRY_PATH = orig
+        MediumFrequencyRunner.REGISTRY_PATH = orig
 
     def test_load_registry_separate_from_micro(self, tmp_path):
         from agent.mf_runner import MediumFrequencyRunner
-        import agent.mf_runner as mf_runner_mod
 
-        orig = mf_runner_mod.MF_REGISTRY_PATH
-        mf_runner_mod.MF_REGISTRY_PATH = tmp_path / "mf_registry.json"
+        orig = MediumFrequencyRunner.REGISTRY_PATH
+        MediumFrequencyRunner.REGISTRY_PATH = tmp_path / "mf_registry.json"
 
         # MF registry should be empty (no file)
         assert MediumFrequencyRunner._load_registry() == []
 
         # Write something to it
-        mf_runner_mod.MF_REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(mf_runner_mod.MF_REGISTRY_PATH, "w") as f:
+        (tmp_path / "mf_registry.json").parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp_path / "mf_registry.json", "w") as f:
             json.dump([{"name": "mf_signal"}], f)
         assert len(MediumFrequencyRunner._load_registry()) == 1
 
-        mf_runner_mod.MF_REGISTRY_PATH = orig
+        MediumFrequencyRunner.REGISTRY_PATH = orig
 
 
 # ===========================================================================
