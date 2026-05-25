@@ -433,6 +433,7 @@ rust/
     output/               Parquet writer (ArrowWriter, hourly rotation)
     dashboard/            Real-time monitoring (Axum WebSocket)
   api/                    REST/WS API server (Axum, port 3000)
+    routes/research.rs      Research endpoints (hypotheses, cycles, signals, stats, heatmap)
 
 scripts/
   agent/                  Autonomous research agent
@@ -594,6 +595,22 @@ All Python daemons use centralized logging (`scripts/logging_config.py`) with:
   single hypothesis through all gates
 - **Human format** on stderr for interactive use
 - Thread-local context via `set_context()` / `clear_context()`
+
+### Research REST API
+
+The Axum API server (port 3000) exposes research data through REST endpoints
+that read from the structured JSON files emitted by the agent:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/research/hypotheses` | GET | Paginated list, filterable by `?agent=`, `?generator=`, `?status=`, `?limit=`, `?offset=` |
+| `/api/research/hypotheses/:id` | GET | Full detail for a single hypothesis (gates, math, thresholds) |
+| `/api/research/cycles` | GET | Cycle summaries, filterable by `?agent=` |
+| `/api/research/signals` | GET | Registered signals only (status=replicated) |
+| `/api/research/stats` | GET | Aggregate counts by status, agent, generator |
+| `/api/research/heatmap` | GET | Feature x horizon IC matrix for visualization |
+
+Configure data directory via `NAT_RESEARCH_DIR` env var (default: `../data/research`).
 
 ### Computation Cache
 

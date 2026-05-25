@@ -48,6 +48,13 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/whales/:symbol", get(routes::whales::get_whale_summary))
         // Regime endpoints
         .route("/api/regime/:symbol", get(routes::regime::get_regime_state))
+        // Research endpoints
+        .route("/api/research/hypotheses", get(routes::research::list_hypotheses))
+        .route("/api/research/hypotheses/:id", get(routes::research::get_hypothesis))
+        .route("/api/research/cycles", get(routes::research::list_cycles))
+        .route("/api/research/signals", get(routes::research::list_signals))
+        .route("/api/research/stats", get(routes::research::get_stats))
+        .route("/api/research/heatmap", get(routes::research::get_heatmap))
         // WebSocket streaming
         .route("/ws/stream/:symbol", get(routes::ws::websocket_handler))
         .route("/ws/alerts", get(routes::ws::alerts_websocket_handler))
