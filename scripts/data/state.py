@@ -532,3 +532,96 @@ class StateStore:
         stats = self.load_gen_stats(agent)
         with open(output_dir / "generator_stats.json", "w") as f:
             json.dump(stats, f, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# CLI: python -m data.state {status,export,migrate}
+# ---------------------------------------------------------------------------
+
+def _cli_status(db_path: Path) -> None:
+    """Print all agents and their current phase."""
+    store = StateStore(db_path)
+    states = store.all_states()
+    if not states:
+        print("(no agents found in database)")
+        return
+    print(f"{'Agent':<20s} {'Phase':<12s} {'Cycles':>6s}  Last transition")
+    print("-" * 65)
+    for agent, data in sorted(states.items()):
+        phase = data.get("phase", "?")
+        cycles = data.get("cycle_count", "?")
+        history = store.load_history(agent, limit=1)
+        last = history[-1]["at"] if history else "—"
+        print(f"{agent:<20s} {phase:<12s} {str(cycles):>6s}  {last}")
+    store.close()
+
+
+def _cli_export(db_path: Path, agent: str, output_dir: Path) -> None:
+    store = StateStore(db_path)
+    store.export_json(agent, output_dir)
+    print(f"Exported {agent!r} to {output_dir}")
+    store.close()
+
+
+def _cli_migrate(db_path: Path, data_root: Path) -> None:
+    """Run JSON→SQLite migration for all known agent directories."""
+    store = StateStore(db_path)
+    agents = {
+        "microstructure": data_root / "agent",
+        "medium_freq": data_root / "agent_mf",
+        "macro": data_root / "agent_macro",
+        "cascade": data_root / "agent_cascade",
+        "meta": data_root / "agent_meta",
+    }
+    for agent, dir_path in agents.items():
+        state_path = dir_path / "agent_state.json"
+        if agent == "meta":
+            state_path = dir_path / "meta_state.json"
+        imported = store.migrate_from_json(
+            agent,
+            state_path=state_path if state_path.exists() else None,
+            hyp_path=(dir_path / "hypotheses.json")
+            if (dir_path / "hypotheses.json").exists() else None,
+            reg_path=(dir_path / "registry.json")
+            if (dir_path / "registry.json").exists() else None,
+            stats_path=(dir_path / "generator_stats.json")
+            if (dir_path / "generator_stats.json").exists() else None,
+        )
+        status = "migrated" if imported else "already done"
+        print(f"  {agent:<20s} {status}")
+    store.close()
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="NAT SQLite state store CLI",
+        prog="python -m data.state",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("status", help="Show all agent states")
+
+    p_export = sub.add_parser("export", help="Export agent state to JSON")
+    p_export.add_argument("agent", help="Agent name (e.g. microstructure)")
+    p_export.add_argument("output_dir", help="Output directory")
+
+    sub.add_parser("migrate", help="Migrate all JSON state files to SQLite")
+
+    parser.add_argument("--db", default=None,
+                        help="Path to nat.db (default: data/nat.db)")
+
+    args = parser.parse_args()
+
+    root = Path(__file__).resolve().parent.parent.parent
+    db = Path(args.db) if args.db else root / "data" / "nat.db"
+
+    if args.command == "status":
+        _cli_status(db)
+    elif args.command == "export":
+        _cli_export(db, args.agent, Path(args.output_dir))
+    elif args.command == "migrate":
+        _cli_migrate(db, root / "data")
+    else:
+        parser.print_help()

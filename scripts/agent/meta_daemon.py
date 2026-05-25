@@ -42,6 +42,7 @@ from agent.meta_portfolio import (  # noqa: E402
     filter_redundant_signals,
     evaluate_promotion,
 )
+from data.state import StateStore  # noqa: E402
 
 log = logging.getLogger("nat.meta_agent")
 
@@ -60,29 +61,15 @@ DEFAULT_CONFIG = {
     },
 }
 
+DB_PATH = ROOT / "data" / "nat.db"
+
+# Legacy JSON paths — used only for auto-migration and CLI display
 META_STATE_PATH = ROOT / "data" / "agent_meta" / "meta_state.json"
-AGENT_STATS_PATH = ROOT / "data" / "agent_meta" / "agent_stats.json"
 CORRELATION_PATH = ROOT / "data" / "agent_meta" / "correlation.json"
 PORTFOLIO_PATH = ROOT / "data" / "agent_meta" / "portfolio.json"
 
-# Registry and stats paths for each sub-agent
-AGENT_REGISTRY_PATHS = {
-    "microstructure": ROOT / "data" / "agent" / "registry.json",
-    "medium_freq": ROOT / "data" / "agent_mf" / "registry.json",
-    "macro": ROOT / "data" / "agent_macro" / "registry.json",
-}
-
-AGENT_GEN_STATS_PATHS = {
-    "microstructure": ROOT / "data" / "agent" / "generator_stats.json",
-    "medium_freq": ROOT / "data" / "agent_mf" / "generator_stats.json",
-    "macro": ROOT / "data" / "agent_macro" / "generator_stats.json",
-}
-
-AGENT_STATE_PATHS = {
-    "microstructure": ROOT / "data" / "agent" / "agent_state.json",
-    "medium_freq": ROOT / "data" / "agent_mf" / "agent_state.json",
-    "macro": ROOT / "data" / "agent_macro" / "agent_state.json",
-}
+# Sub-agent identifiers (matching their agent_type in base.py)
+SUB_AGENTS = ["microstructure", "medium_freq", "macro"]
 
 
 def load_config() -> dict:
@@ -122,21 +109,31 @@ class MetaAgent:
     Runs on a 6-hour cycle by default.
     """
 
-    AGENTS = list(AGENT_REGISTRY_PATHS.keys())
+    AGENTS = list(SUB_AGENTS)
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict | None = None, store: StateStore | None = None):
         self.config = config or load_config()
+        self._store = store or StateStore(DB_PATH)
         self._shutdown = False
+        self._auto_migrate()
         self._state = self._load_state()
         signal_mod.signal(signal_mod.SIGTERM, self._handle_signal)
         signal_mod.signal(signal_mod.SIGINT, self._handle_signal)
 
     # --- State persistence ---------------------------------------------------
 
+    def _auto_migrate(self) -> None:
+        """One-time import of legacy JSON state into SQLite."""
+        self._store.migrate_from_json(
+            "meta",
+            state_path=META_STATE_PATH,
+        )
+
     def _load_state(self) -> dict:
-        if META_STATE_PATH.exists():
-            with open(META_STATE_PATH) as f:
-                return json.load(f)
+        data = self._store.load_state("meta")
+        if data:
+            data["history"] = self._store.load_history("meta", limit=200)
+            return data
         return {
             "phase": "IDLE",
             "cycle_count": 0,
@@ -146,9 +143,7 @@ class MetaAgent:
         }
 
     def _save_state(self) -> None:
-        META_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(META_STATE_PATH, "w") as f:
-            json.dump(self._state, f, indent=2, default=str)
+        self._store.save_state("meta", self._state)
 
     def _handle_signal(self, signum, frame):
         log.info("Received signal %d, stopping after current cycle", signum)
@@ -199,9 +194,11 @@ class MetaAgent:
         self._state["cycle_count"] += 1
         self._state["phase"] = "IDLE"
         self._state["budget"] = budget
-        self._state["history"].append({"at": now, "budget": budget})
-        if len(self._state["history"]) > 200:
-            self._state["history"] = self._state["history"][-100:]
+        self._store.append_history("meta", {
+            "from": "RUNNING", "to": "IDLE",
+            "msg": json.dumps({"budget": budget}),
+            "at": now,
+        })
         self._save_state()
 
         log.info("Meta-agent cycle %d complete", self._state["cycle_count"])
@@ -211,15 +208,10 @@ class MetaAgent:
     def update_agent_stats(self) -> dict[str, dict]:
         """Read each agent's generator stats, compute agent-level success rate."""
         agent_stats = {}
-        for agent_name, stats_path in AGENT_GEN_STATS_PATHS.items():
-            total_attempts = 0
-            total_successes = 0
-            if stats_path.exists():
-                with open(stats_path) as f:
-                    raw = json.load(f)
-                for gen_name, gen_data in raw.items():
-                    total_attempts += gen_data.get("attempts", 0)
-                    total_successes += gen_data.get("successes", 0)
+        for agent_name in self.AGENTS:
+            raw = self._store.load_gen_stats(agent_name)
+            total_attempts = sum(g.get("attempts", 0) for g in raw.values())
+            total_successes = sum(g.get("successes", 0) for g in raw.values())
 
             # Thompson weight at agent level
             weight = (total_successes + 1) / (total_attempts + 2)
@@ -231,11 +223,8 @@ class MetaAgent:
             log.info("  %s: %d attempts, %d successes, weight=%.3f",
                      agent_name, total_attempts, total_successes, weight)
 
-        # Persist
-        AGENT_STATS_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(AGENT_STATS_PATH, "w") as f:
-            json.dump(agent_stats, f, indent=2)
-
+        # Persist agent stats to meta state
+        self._store.save_state("meta_stats", agent_stats)
         return agent_stats
 
     # --- Step 2: Budget allocation -------------------------------------------
@@ -268,12 +257,9 @@ class MetaAgent:
 
         # Load all registries with agent labels
         all_signals = []
-        for agent_name, reg_path in AGENT_REGISTRY_PATHS.items():
-            if not reg_path.exists():
-                continue
-            with open(reg_path) as f:
-                registry = json.load(f)
-            for sig in registry:
+        all_regs = self._store.all_registries()
+        for agent_name in self.AGENTS:
+            for sig in all_regs.get(agent_name, []):
                 if sig.get("status") == "retired":
                     continue
                 sig_copy = dict(sig)
@@ -372,12 +358,9 @@ class MetaAgent:
     def assemble_portfolio(self, flagged_pairs: list[dict]) -> dict:
         """Build risk-parity-weighted portfolio from all agent registries."""
         all_signals = []
-        for agent_name, reg_path in AGENT_REGISTRY_PATHS.items():
-            if not reg_path.exists():
-                continue
-            with open(reg_path) as f:
-                registry = json.load(f)
-            for sig in registry:
+        all_regs = self._store.all_registries()
+        for agent_name in self.AGENTS:
+            for sig in all_regs.get(agent_name, []):
                 if sig.get("status") == "retired":
                     continue
                 sig_copy = dict(sig)
@@ -486,11 +469,10 @@ class MetaAgent:
                 print(f"  {agent:18s}  {share:.1%}")
 
         print(f"\nAgent registries:")
-        for agent_name, reg_path in AGENT_REGISTRY_PATHS.items():
-            n = 0
-            if reg_path.exists():
-                with open(reg_path) as f:
-                    n = sum(1 for s in json.load(f) if s.get("status") != "retired")
+        all_regs = self._store.all_registries()
+        for agent_name in self.AGENTS:
+            n = sum(1 for s in all_regs.get(agent_name, [])
+                    if s.get("status") != "retired")
             print(f"  {agent_name:18s}  {n} active signals")
 
     def print_portfolio(self) -> None:
@@ -527,12 +509,8 @@ class MetaAgent:
                       f"{p['signal_b'][:25]:25s} ({p['agent_b']})")
 
     def print_budget(self) -> None:
-        # Load agent stats
-        if AGENT_STATS_PATH.exists():
-            with open(AGENT_STATS_PATH) as f:
-                stats = json.load(f)
-        else:
-            stats = {}
+        # Load agent stats from SQLite
+        stats = self._store.load_state("meta_stats") or {}
 
         budget = self._state.get("budget", {})
         if not budget:
