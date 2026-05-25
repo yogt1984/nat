@@ -641,6 +641,14 @@ class ResearchAgent(ABC):
     def registry_path(self) -> Path:
         return self.root / "data" / self.agent_dir / "registry.json"
 
+    @property
+    def research_output_root(self) -> Path | None:
+        """Root for structured research output JSON files.
+
+        Returns data/research/ by default. Set to None to disable output.
+        """
+        return self.root / "data" / "research"
+
     # --- Config -----------------------------------------------------------
 
     def load_config(self) -> dict:
@@ -758,6 +766,7 @@ class ResearchAgent(ABC):
 
             self.queue.update(hypothesis)
             cycle_hypotheses.append(hypothesis)
+            self._emit_hypothesis_record(hypothesis)
             n_run += 1
             self.state.set("total_hypotheses_tested",
                           self.state.get("total_hypotheses_tested", 0) + 1)
@@ -793,6 +802,13 @@ class ResearchAgent(ABC):
         self._save_gen_stats()
         self.state.set("current_hypothesis", None)
 
+        # 3d. Emit structured cycle summary
+        self._emit_cycle_summary(
+            cycle_id, cycle_start, cycle_hypotheses,
+            n_registered, len(rejected_ids) if rejected_ids else 0,
+            n_chained or 0, fdr_q,
+        )
+
         # 4. Monitor registered signals
         self.state.transition(AgentPhase.MONITOR, "checking registered signals")
         self.run_monitor()
@@ -803,6 +819,47 @@ class ResearchAgent(ABC):
         log.info("Cycle complete: %d experiments, queue depth=%d",
                  n_run, self.queue.depth)
         clear_context()
+
+    def _emit_hypothesis_record(self, hypothesis) -> None:
+        """Emit structured JSON record for a completed hypothesis."""
+        try:
+            from .research_output import build_hypothesis_record
+            build_hypothesis_record(
+                hypothesis,
+                agent_type=self.agent_type,
+                output_root=self.research_output_root,
+            )
+        except Exception as e:
+            log.debug("Failed to emit hypothesis record: %s", e)
+
+    def _emit_cycle_summary(
+        self, cycle_id: str, cycle_start: float,
+        hypotheses: list, n_registered: int, n_fdr_rejected: int,
+        n_chained: int, fdr_q: float,
+    ) -> None:
+        """Emit structured JSON cycle summary."""
+        try:
+            from .research_output import build_cycle_summary
+            started = datetime.fromtimestamp(
+                time.time() - (time.monotonic() - cycle_start),
+                tz=timezone.utc,
+            ).isoformat()
+            duration_s = time.monotonic() - cycle_start
+            build_cycle_summary(
+                cycle_id=cycle_id,
+                agent_type=self.agent_type,
+                started=started,
+                duration_s=duration_s,
+                hypotheses=hypotheses,
+                n_registered=n_registered,
+                n_fdr_rejected=n_fdr_rejected,
+                n_chained=n_chained,
+                fdr_q=fdr_q,
+                generator_stats=self.gen_stats,
+                output_root=self.research_output_root,
+            )
+        except Exception as e:
+            log.debug("Failed to emit cycle summary: %s", e)
 
     def _run_generators(self, manifest: dict) -> int:
         """Run all enabled generators and push hypotheses into the queue."""
