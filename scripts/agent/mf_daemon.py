@@ -64,7 +64,8 @@ class MediumFrequencyAgent(ResearchAgent):
 
     def create_runner(self, hypothesis: Hypothesis, manifest: dict) -> BaseRunner:
         from agent.mf_runner import MediumFrequencyRunner
-        return MediumFrequencyRunner(hypothesis, manifest)
+        return MediumFrequencyRunner(hypothesis, manifest,
+                                     store=self._store, agent=self.agent_type)
 
 
 # Backward compatibility — module-level path constants

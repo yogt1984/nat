@@ -40,20 +40,10 @@ def queue(tmp_path):
 @pytest.fixture
 def macro_agent(tmp_path):
     from agent.macro_daemon import MacroAgent
-    import agent.macro_daemon as macro_mod
+    from data.state import StateStore
 
-    state_dir = tmp_path / "data" / "agent_macro"
-    state_dir.mkdir(parents=True, exist_ok=True)
-
-    orig_state = macro_mod.MACRO_STATE_PATH
-    orig_stats = macro_mod.MACRO_STATS_PATH
-    macro_mod.MACRO_STATE_PATH = state_dir / "agent_state.json"
-    macro_mod.MACRO_STATS_PATH = state_dir / "generator_stats.json"
-
-    agent = MacroAgent()
-
-    macro_mod.MACRO_STATE_PATH = orig_state
-    macro_mod.MACRO_STATS_PATH = orig_stats
+    store = StateStore(tmp_path / "nat.db")
+    agent = MacroAgent(store=store)
     return agent
 
 
@@ -220,15 +210,20 @@ class TestMacroRunner:
 
     def test_load_registry_separate_from_micro_and_mf(self, tmp_path):
         from agent.macro_runner import MacroRunner
+        from agent.hypothesis import Hypothesis
+
+        h = Hypothesis(id="HYP-TEST-001", claim="test", generator="test",
+                       priority=1.0, test_protocol=["echo ok"])
+        runner = MacroRunner(h, {})
 
         orig = MacroRunner.REGISTRY_PATH
         MacroRunner.REGISTRY_PATH = tmp_path / "macro_registry.json"
 
-        assert MacroRunner._load_registry() == []
+        assert runner._load_registry() == []
 
         with open(tmp_path / "macro_registry.json", "w") as f:
             json.dump([{"name": "macro_signal"}], f)
-        assert len(MacroRunner._load_registry()) == 1
+        assert len(runner._load_registry()) == 1
 
         MacroRunner.REGISTRY_PATH = orig
 
