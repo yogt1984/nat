@@ -712,6 +712,10 @@ class ResearchAgent(ABC):
 
     def run_cycle(self) -> None:
         """Execute one complete research cycle."""
+        from logging_config import set_context, clear_context
+        import uuid
+        cycle_id = f"CYC-{uuid.uuid4().hex[:8]}"
+        set_context(cycle_id=cycle_id, agent=self.agent_type)
         cycle_start = time.monotonic()
 
         # 1. Update manifest
@@ -742,6 +746,7 @@ class ResearchAgent(ABC):
                 break
 
             self.state.set("current_hypothesis", hypothesis.id)
+            set_context(hypothesis_id=hypothesis.id)
             self.pre_execute(hypothesis)
             runner = self.create_runner(hypothesis, manifest)
             success = runner.run_full()
@@ -797,6 +802,7 @@ class ResearchAgent(ABC):
         self.state.set("last_cycle_at", datetime.now(timezone.utc).isoformat())
         log.info("Cycle complete: %d experiments, queue depth=%d",
                  n_run, self.queue.depth)
+        clear_context()
 
     def _run_generators(self, manifest: dict) -> int:
         """Run all enabled generators and push hypotheses into the queue."""
@@ -1257,11 +1263,8 @@ class ResearchAgent(ABC):
 def cli_main(agent_class: type, description: str = "NAT Agent") -> None:
     """Standard CLI entry point for agent daemons."""
     import argparse
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    from logging_config import setup_logging
+    setup_logging("nat.agent")
 
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("action", choices=["start", "status", "once", "queue",

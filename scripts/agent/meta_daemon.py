@@ -579,11 +579,8 @@ class MetaAgent:
 # ---------------------------------------------------------------------------
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    from logging_config import setup_logging
+    setup_logging("nat.meta_agent")
 
     parser = argparse.ArgumentParser(description="NAT Meta-Agent (Orchestrator)")
     parser.add_argument("action", choices=[

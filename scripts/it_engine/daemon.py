@@ -422,11 +422,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def cmd_start(args):
+    from logging_config import setup_logging
     level = logging.DEBUG if args.verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    setup_logging("nat.it_engine", level=level)
 
     config = ITEngineConfig.load(args.config)
     engine = ITEngine(config, args.symbol)

@@ -479,10 +479,8 @@ def main():
 
     args = parser.parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-    )
+    from logging_config import setup_logging
+    setup_logging("nat.paper_trader")
 
     data_dir = Path(args.data_dir)
     if not data_dir.exists():
