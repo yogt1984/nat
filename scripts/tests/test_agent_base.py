@@ -65,14 +65,8 @@ class StubAgent(ResearchAgent):
     def stats_path(self):
         return self._tmp_path / "data" / "agent" / "generator_stats.json"
 
-    def get_generator(self, name):
-        return None  # No real generators
-
     def create_runner(self, hypothesis, manifest):
         return StubRunner(hypothesis, manifest, step_results=[True])
-
-    def run_monitor(self):
-        pass
 
 
 @pytest.fixture
@@ -89,18 +83,19 @@ class TestResearchAgentABC:
         with pytest.raises(TypeError, match="abstract"):
             ResearchAgent()
 
-    def test_must_implement_get_generator(self, tmp_path):
-        class Bad(ResearchAgent):
-            agent_type = "bad"
+    def test_get_generator_has_default_impl(self, tmp_path):
+        """get_generator uses generator_module_prefix, returns None for missing."""
+        from unittest.mock import MagicMock
+        class Minimal(ResearchAgent):
+            agent_type = "minimal"
+            generator_module_prefix = "agent.generators.nonexistent"
             @property
             def root(self):
                 return tmp_path
             def create_runner(self, h, m):
                 pass
-            def run_monitor(self):
-                pass
-        with pytest.raises(TypeError, match="get_generator"):
-            Bad()
+        agent = Minimal(store=MagicMock())
+        assert agent.get_generator("no_such_gen") is None
 
     def test_must_implement_create_runner(self, tmp_path):
         class Bad(ResearchAgent):
@@ -108,22 +103,16 @@ class TestResearchAgentABC:
             @property
             def root(self):
                 return tmp_path
-            def get_generator(self, name):
-                return None
-            def run_monitor(self):
-                pass
         with pytest.raises(TypeError, match="create_runner"):
             Bad()
 
     def test_run_monitor_has_default_impl(self, tmp_path):
-        """run_monitor is no longer abstract — it has shared IC decay logic."""
+        """run_monitor is concrete — it has shared IC decay + promotion logic."""
         class Minimal(ResearchAgent):
             agent_type = "minimal"
             @property
             def root(self):
                 return tmp_path
-            def get_generator(self, name):
-                return None
             def create_runner(self, h, m):
                 pass
         agent = Minimal()

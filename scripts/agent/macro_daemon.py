@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from agent.base import ResearchAgent, BaseRunner, AgentPhase, cli_main  # noqa: E402
+from agent.base import ResearchAgent, BaseRunner, cli_main, load_agent_config  # noqa: E402
 from agent.hypothesis import Hypothesis, GeneratorStats  # noqa: E402
 
 log = logging.getLogger("nat.agent_macro")
@@ -31,6 +31,7 @@ class MacroAgent(ResearchAgent):
     agent_type = "macro"
     config_section = "agent_macro"
     default_generators = ["funding_meanrev", "oi_divergence", "whale_momentum"]
+    generator_module_prefix = "agent.generators.macro"
 
     BASE_CONFIG = {
         "cycle_interval_s": 14400,
@@ -53,15 +54,6 @@ class MacroAgent(ResearchAgent):
     def agent_dir(self) -> str:
         return "agent_macro"
 
-    def get_generator(self, name: str):
-        """Lazy-import macro generator functions."""
-        try:
-            mod = __import__(f"agent.generators.macro.{name}", fromlist=["generate"])
-            return mod.generate
-        except (ImportError, AttributeError) as e:
-            log.debug("Macro generator %s not yet implemented: %s", name, e)
-        return None
-
     def create_runner(self, hypothesis: Hypothesis, manifest: dict) -> BaseRunner:
         from agent.macro_runner import MacroRunner
         return MacroRunner(hypothesis, manifest,
@@ -75,11 +67,7 @@ MACRO_REGISTRY_PATH = ROOT / "data" / "agent_macro" / "registry.json"
 
 
 def load_config() -> dict:
-    """Load macro agent config from TOML or return defaults.
-
-    Uses [defaults] → [agent_macro] inheritance via load_agent_config.
-    """
-    from agent.base import load_agent_config
+    """Load macro agent config from TOML or return defaults."""
     return load_agent_config(
         ROOT / "config" / "agent.toml",
         "agent_macro",
