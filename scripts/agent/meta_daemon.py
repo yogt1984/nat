@@ -115,19 +115,11 @@ class MetaAgent:
         self.config = config or load_config()
         self._store = store or StateStore(DB_PATH)
         self._shutdown = False
-        self._auto_migrate()
         self._state = self._load_state()
         signal_mod.signal(signal_mod.SIGTERM, self._handle_signal)
         signal_mod.signal(signal_mod.SIGINT, self._handle_signal)
 
     # --- State persistence ---------------------------------------------------
-
-    def _auto_migrate(self) -> None:
-        """One-time import of legacy JSON state into SQLite."""
-        self._store.migrate_from_json(
-            "meta",
-            state_path=META_STATE_PATH,
-        )
 
     def _load_state(self) -> dict:
         data = self._store.load_state("meta")
