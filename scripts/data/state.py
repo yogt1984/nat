@@ -109,6 +109,23 @@ CREATE INDEX IF NOT EXISTS idx_ro_kind ON research_output(kind);
 CREATE INDEX IF NOT EXISTS idx_ro_created ON research_output(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_ro_status ON research_output(status);
 
+CREATE TABLE IF NOT EXISTS budget (
+    agent                    TEXT PRIMARY KEY,
+    max_hypotheses_per_cycle INTEGER NOT NULL,
+    compute_share            REAL NOT NULL DEFAULT 0.0,
+    updated_at               TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS directives (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    target_agent TEXT NOT NULL,
+    action       TEXT NOT NULL,
+    payload      TEXT,
+    consumed     INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dir_target ON directives(target_agent, consumed);
+
 CREATE TABLE IF NOT EXISTS _migrations (
     name       TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL
@@ -368,6 +385,80 @@ class StateStore:
                     "VALUES (?, ?, ?, ?)",
                     (agent, gen, s.get("attempts", 0), s.get("successes", 0)),
                 )
+
+    # -----------------------------------------------------------------------
+    # Budget
+    # -----------------------------------------------------------------------
+
+    def set_budget(self, agent: str, max_hypotheses: int,
+                   compute_share: float) -> None:
+        """Set the per-cycle budget for an agent (written by meta-agent)."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO budget "
+                "(agent, max_hypotheses_per_cycle, compute_share, updated_at) "
+                "VALUES (?, ?, ?, ?)",
+                (agent, max_hypotheses, compute_share, now),
+            )
+
+    def get_budget(self, agent: str) -> dict | None:
+        """Read the budget for *agent*. Returns None if not set."""
+        row = self._conn.execute(
+            "SELECT max_hypotheses_per_cycle, compute_share, updated_at "
+            "FROM budget WHERE agent = ?",
+            (agent,),
+        ).fetchone()
+        if row:
+            return {
+                "max_hypotheses_per_cycle": row["max_hypotheses_per_cycle"],
+                "compute_share": row["compute_share"],
+                "updated_at": row["updated_at"],
+            }
+        return None
+
+    # -----------------------------------------------------------------------
+    # Directives (meta-agent → research agents)
+    # -----------------------------------------------------------------------
+
+    def add_directive(self, target_agent: str, action: str,
+                      payload: dict | None = None) -> int:
+        """Queue a directive for *target_agent*. Returns the directive id."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO directives (target_agent, action, payload, created_at) "
+                "VALUES (?, ?, ?, ?)",
+                (target_agent, action,
+                 json.dumps(payload, default=str) if payload else None, now),
+            )
+            return cur.lastrowid
+
+    def consume_directives(self, agent: str) -> list[dict]:
+        """Read and mark consumed all pending directives for *agent*."""
+        rows = self._conn.execute(
+            "SELECT id, action, payload, created_at FROM directives "
+            "WHERE target_agent = ? AND consumed = 0 ORDER BY id",
+            (agent,),
+        ).fetchall()
+        if not rows:
+            return []
+        ids = [r["id"] for r in rows]
+        with self._conn:
+            self._conn.execute(
+                f"UPDATE directives SET consumed = 1 "
+                f"WHERE id IN ({','.join('?' * len(ids))})",
+                ids,
+            )
+        return [
+            {
+                "id": r["id"],
+                "action": r["action"],
+                "payload": json.loads(r["payload"]) if r["payload"] else None,
+                "created_at": r["created_at"],
+            }
+            for r in rows
+        ]
 
     # -----------------------------------------------------------------------
     # Research output

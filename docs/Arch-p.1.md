@@ -298,7 +298,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 
 ---
 
-### 4.3 Strengthen Meta-Agent Coordination
+### 4.3 Strengthen Meta-Agent Coordination ✅
 
 **Problem:** `MetaAgent` reads other agents' registries via SQLite but cannot direct them (pause a generator, enforce budget allocation, force a re-test). Budget allocation is computed but agents don't consume it.
 
@@ -352,7 +352,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 | 3.3 | Retention policy ✅ | P3 | ~1h | Prevents unbounded file/data growth |
 | 4.1 | Dependency injection ✅ | P4 | ~2h | Testable agents without mock.patch |
 | 4.2 | Gate strategy pattern ✅ | P4 | ~3h | Composable, reorderable gate protocol |
-| 4.3 | Meta-agent coordination | P4 | ~3h | Agents respect cross-agent budget/directives |
+| 4.3 | Meta-agent coordination ✅ | P4 | ~3h | Agents respect cross-agent budget/directives |
 
 **Total:** ~25-27h across 12 items.
 

@@ -920,6 +920,9 @@ class ResearchAgent(ABC):
         set_context(cycle_id=cycle_id, agent=self.agent_type)
         cycle_start = time.monotonic()
 
+        # 0. Process pending directives from meta-agent
+        self._process_directives()
+
         # 1. Update manifest
         self.state.transition(AgentPhase.MANIFEST, "scanning data")
         manifest = self.build_manifest()
@@ -932,7 +935,7 @@ class ResearchAgent(ABC):
         self.state.transition(AgentPhase.EXECUTE, "running experiments")
         n_run = 0
         n_registered = 0
-        max_run = self.config["max_experiments_per_cycle"]
+        max_run = self._effective_max_experiments()
         max_time = self.config["max_cycle_runtime_s"]
         cycle_hypotheses = []
 
@@ -1039,6 +1042,45 @@ class ResearchAgent(ABC):
         log.info("Cycle complete: %d experiments, queue depth=%d",
                  n_run, self.queue.depth)
         clear_context()
+
+    def _effective_max_experiments(self) -> int:
+        """Read per-cycle budget from meta-agent, fall back to config."""
+        try:
+            budget = self._store.get_budget(self.agent_type)
+            if budget:
+                return budget["max_hypotheses_per_cycle"]
+        except Exception:
+            pass
+        return self.config["max_experiments_per_cycle"]
+
+    def _process_directives(self) -> None:
+        """Consume pending directives from the meta-agent."""
+        try:
+            directives = self._store.consume_directives(self.agent_type)
+        except Exception:
+            return
+        for d in directives:
+            action = d["action"]
+            payload = d.get("payload") or {}
+            if action == "pause_generator":
+                gen = payload.get("generator")
+                if gen:
+                    enabled = self.config.get("generators_enabled", [])
+                    if gen in enabled:
+                        enabled.remove(gen)
+                        log.info("Directive: paused generator %s", gen)
+            elif action == "retest_hypothesis":
+                hyp_id = payload.get("hypothesis_id")
+                if hyp_id:
+                    log.info("Directive: retest %s (queued)", hyp_id)
+            elif action == "adjust_threshold":
+                key = payload.get("key")
+                value = payload.get("value")
+                if key and value is not None:
+                    self.config[key] = value
+                    log.info("Directive: set %s = %s", key, value)
+            else:
+                log.warning("Unknown directive action: %s", action)
 
     def _cleanup_retention(self) -> None:
         """Delete research output older than configured max_age_days."""

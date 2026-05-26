@@ -852,3 +852,61 @@ class TestRetention:
         removed = StateStore.cleanup_old_json(tmp_path, max_age_days=90)
         assert removed == 0
         assert (hyp_dir / "bad.json").exists()
+
+
+# ===========================================================================
+# Budget & directives
+# ===========================================================================
+
+class TestBudget:
+    def test_set_and_get_budget(self, store):
+        store.set_budget("micro", 8, 0.45)
+        b = store.get_budget("micro")
+        assert b is not None
+        assert b["max_hypotheses_per_cycle"] == 8
+        assert b["compute_share"] == pytest.approx(0.45)
+        assert "updated_at" in b
+
+    def test_get_budget_returns_none_if_unset(self, store):
+        assert store.get_budget("nonexistent") is None
+
+    def test_set_budget_upserts(self, store):
+        store.set_budget("micro", 5, 0.3)
+        store.set_budget("micro", 10, 0.6)
+        b = store.get_budget("micro")
+        assert b["max_hypotheses_per_cycle"] == 10
+        assert b["compute_share"] == pytest.approx(0.6)
+
+
+class TestDirectives:
+    def test_add_and_consume(self, store):
+        d_id = store.add_directive("micro", "pause_generator",
+                                   {"generator": "spectral"})
+        assert d_id > 0
+
+        pending = store.consume_directives("micro")
+        assert len(pending) == 1
+        assert pending[0]["action"] == "pause_generator"
+        assert pending[0]["payload"]["generator"] == "spectral"
+
+    def test_consume_marks_consumed(self, store):
+        store.add_directive("micro", "retest_hypothesis",
+                            {"hypothesis_id": "HYP-001"})
+        store.consume_directives("micro")
+        # Second consume should return empty
+        assert store.consume_directives("micro") == []
+
+    def test_directives_isolated_per_agent(self, store):
+        store.add_directive("micro", "pause_generator", {"generator": "x"})
+        store.add_directive("macro", "pause_generator", {"generator": "y"})
+        micro = store.consume_directives("micro")
+        assert len(micro) == 1
+        assert micro[0]["payload"]["generator"] == "x"
+
+    def test_consume_empty(self, store):
+        assert store.consume_directives("micro") == []
+
+    def test_directive_without_payload(self, store):
+        store.add_directive("micro", "some_action")
+        pending = store.consume_directives("micro")
+        assert pending[0]["payload"] is None
