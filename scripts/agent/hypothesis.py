@@ -28,6 +28,7 @@ class Hypothesis:
     results: Optional[dict] = None                # raw output from nat commands
     created: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     completed: Optional[str] = None
+    data_version: Optional[str] = None            # sha256[:16] fingerprint of data state at test time
 
     # Generator prefixes for ID generation
     GEN_PREFIX = {

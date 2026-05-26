@@ -177,6 +177,38 @@ class StateStore:
 
     def _ensure_schema(self) -> None:
         self._conn.executescript(_SCHEMA)
+        self._run_migrations()
+
+    def _run_migrations(self) -> None:
+        """Apply incremental schema migrations."""
+        migrations = [
+            ("add_data_version_to_hypotheses",
+             "ALTER TABLE hypotheses ADD COLUMN data_version TEXT"),
+        ]
+        for name, sql in migrations:
+            already = self._conn.execute(
+                "SELECT 1 FROM _migrations WHERE name = ?", (name,)
+            ).fetchone()
+            if already:
+                continue
+            try:
+                with self._conn:
+                    self._conn.execute(sql)
+                    self._conn.execute(
+                        "INSERT INTO _migrations (name, applied_at) VALUES (?, ?)",
+                        (name, datetime.now(timezone.utc).isoformat()),
+                    )
+                log.info("Applied migration: %s", name)
+            except sqlite3.OperationalError as e:
+                if "duplicate column" in str(e).lower():
+                    # Column already exists (e.g. from manual ALTER)
+                    with self._conn:
+                        self._conn.execute(
+                            "INSERT INTO _migrations (name, applied_at) VALUES (?, ?)",
+                            (name, datetime.now(timezone.utc).isoformat()),
+                        )
+                else:
+                    raise
 
     def close(self) -> None:
         self._conn.close()
@@ -245,8 +277,8 @@ class StateStore:
                 "INSERT OR REPLACE INTO hypotheses "
                 "(id, agent, claim, generator, priority, test_protocol, "
                 " thresholds, status, failure_reason, parent_id, results, "
-                " created, completed) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " created, completed, data_version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     h["id"], agent, h["claim"], h["generator"],
                     h.get("priority", 0.0),
@@ -258,12 +290,23 @@ class StateStore:
                     json.dumps(h["results"], default=str) if h.get("results") else None,
                     h["created"],
                     h.get("completed"),
+                    h.get("data_version"),
                 ),
             )
 
     def delete_hypothesis(self, hyp_id: str) -> None:
         with self._conn:
             self._conn.execute("DELETE FROM hypotheses WHERE id = ?", (hyp_id,))
+
+    def check_provenance(self, current_version: str) -> list[dict]:
+        """Return hypotheses whose data_version differs from *current_version*."""
+        rows = self._conn.execute(
+            "SELECT id, agent, claim, status, data_version "
+            "FROM hypotheses "
+            "WHERE data_version IS NOT NULL AND data_version != ?",
+            (current_version,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     @staticmethod
     def _row_to_hyp(row: sqlite3.Row) -> dict:

@@ -144,6 +144,14 @@ class BaseRunner(ABC):
 
         self.h.pass_discovery()
         self.h.results = {"gate_results": self.gate_results}
+
+        # Stamp data provenance
+        try:
+            from data.features import compute_data_version
+            self.h.data_version = compute_data_version()
+        except Exception:
+            pass
+
         log.info("  DISCOVERY PASSED: %s", self.h.claim[:60])
         return True
 
