@@ -232,12 +232,13 @@ class TestBaseRunnerABC:
         assert names == ["run_discovery", "run_replication_temporal",
                          "run_replication_symbol", "run_correlation_check"]
 
-    def test_default_register_signal_uses_registry_path(self, tmp_path):
-        """Base register_signal() writes to REGISTRY_PATH class attr."""
-        reg_path = tmp_path / "registry.json"
+    def test_default_register_signal_uses_store(self, tmp_path):
+        """Base register_signal() writes to SQLite via store."""
+        from data.state import StateStore
+        store = StateStore(":memory:")
 
         class TestRunner(BaseRunner):
-            REGISTRY_PATH = reg_path
+            REGISTRY_PATH = tmp_path / "registry.json"
             DEFAULT_HORIZON_S = 42.0
             DEFAULT_FEATURE = "test_feat"
 
@@ -245,14 +246,12 @@ class TestBaseRunnerABC:
                               ["cmd --data d --symbol BTC"], 1.0)
         h.status = "replicated"
         h.results = {"gate_results": [{"msg": "IC=0.15 PASS"}]}
-        runner = TestRunner(h, {})
+        runner = TestRunner(h, {}, store=store, agent="micro")
         sig = runner.register_signal()
         assert sig.horizon_s == 42.0
-        assert reg_path.exists()
-        with open(reg_path) as f:
-            data = json.load(f)
-        assert len(data) == 1
-        assert data[0]["hypothesis_id"] == h.id
+        registry = store.load_registry("micro")
+        assert len(registry) == 1
+        assert registry[0]["hypothesis_id"] == h.id
 
 
 # ===========================================================================

@@ -8,7 +8,6 @@ Provides:
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import signal as signal_mod
@@ -41,10 +40,7 @@ class AgentPhase(str, Enum):
 
 
 class AgentState:
-    """Persistent agent state — survives restarts.
-
-    Dual-mode: pass ``store`` + ``agent`` for SQLite, or ``path`` for JSON.
-    """
+    """Persistent agent state backed by SQLite (via StateStore)."""
 
     _DEFAULTS = {
         "phase": AgentPhase.IDLE.value,
@@ -56,36 +52,21 @@ class AgentState:
         "last_cycle_at": None,
     }
 
-    def __init__(self, path: Path | None = None, *,
-                 store=None, agent: str = "agent"):
+    def __init__(self, *, store, agent: str = "agent"):
         self._store = store
         self._agent = agent
-        self.path = path
-        if path and not store:
-            path.parent.mkdir(parents=True, exist_ok=True)
         self._data = self._load()
 
     def _load(self) -> dict:
-        if self._store:
-            loaded = self._store.load_state(self._agent)
-            if loaded:
-                loaded["history"] = self._store.load_history(
-                    self._agent, limit=200)
-                return loaded
-            return {**self._DEFAULTS, "history": []}
-        # JSON fallback
-        if self.path and self.path.exists():
-            with open(self.path) as f:
-                return json.load(f)
+        loaded = self._store.load_state(self._agent)
+        if loaded:
+            loaded["history"] = self._store.load_history(
+                self._agent, limit=200)
+            return loaded
         return {**self._DEFAULTS, "history": []}
 
     def save(self) -> None:
-        if self._store:
-            self._store.save_state(self._agent, self._data)
-            return
-        # JSON fallback
-        with open(self.path, "w") as f:
-            json.dump(self._data, f, indent=2, default=str)
+        self._store.save_state(self._agent, self._data)
 
     def transition(self, phase: AgentPhase, msg: str = "") -> None:
         old = self._data["phase"]
@@ -99,11 +80,8 @@ class AgentState:
         # Keep in-memory history bounded
         if len(self._data["history"]) > 500:
             self._data["history"] = self._data["history"][-200:]
-        if self._store:
-            self._store.save_state(self._agent, self._data)
-            self._store.append_history(self._agent, entry)
-        else:
-            self.save()
+        self._store.save_state(self._agent, self._data)
+        self._store.append_history(self._agent, entry)
 
     def get(self, key: str, default=None):
         return self._data.get(key, default)
@@ -717,15 +695,7 @@ class BaseRunner(ABC):
             last_validated=datetime.now(timezone.utc).isoformat()[:10],
             hypothesis_id=self.h.id,
         )
-        if self._store and self._agent:
-            self._store.append_signal(self._agent, signal.to_dict())
-        else:
-            registry = self._load_registry()
-            registry.append(signal.to_dict())
-            path = self.REGISTRY_PATH
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "w") as f:
-                json.dump(registry, f, indent=2)
+        self._store.append_signal(self._agent, signal.to_dict())
         log.info("  REGISTERED: %s (IC=%.3f, horizon=%.0fs)",
                  signal.name, signal.expected_ic, horizon_s)
         return signal
@@ -764,14 +734,8 @@ class BaseRunner(ABC):
         return 0.0
 
     def _load_registry(self) -> list[dict]:
-        """Load the signal registry from store or REGISTRY_PATH."""
-        if self._store and self._agent:
-            return self._store.load_registry(self._agent)
-        path = self.REGISTRY_PATH
-        if path and path.exists():
-            with open(path) as f:
-                return json.load(f)
-        return []
+        """Load the signal registry from SQLite."""
+        return self._store.load_registry(self._agent)
 
     @staticmethod
     def _extract_symbol(cmd_str: str) -> str:
@@ -831,7 +795,6 @@ class ResearchAgent(ABC):
         self.config.setdefault("generators_enabled", list(self.default_generators))
         # SQLite state store — auto-created or injected for testing
         self._store = store or self._create_store()
-        self._auto_migrate()
         self.state = AgentState(store=self._store, agent=self.agent_type)
         self.queue = HypothesisQueue(store=self._store, agent=self.agent_type)
         self.gen_stats = self._load_gen_stats()
@@ -842,16 +805,6 @@ class ResearchAgent(ABC):
     def _create_store(self):
         from data.state import StateStore
         return StateStore(self.root / "data" / "nat.db")
-
-    def _auto_migrate(self) -> None:
-        """Import existing JSON files on first run."""
-        self._store.migrate_from_json(
-            self.agent_type,
-            state_path=self.state_path,
-            hyp_path=self.queue_path,
-            reg_path=self.registry_path,
-            stats_path=self.stats_path,
-        )
 
     # --- Paths (subclass overrides for testability / multi-agent) ----------
 
@@ -902,13 +855,8 @@ class ResearchAgent(ABC):
     # --- Generator stats --------------------------------------------------
 
     def _load_gen_stats(self) -> dict[str, GeneratorStats]:
-        if self._store:
-            raw = self._store.load_gen_stats(self.agent_type)
-            if raw:
-                return {k: GeneratorStats(**v) for k, v in raw.items()}
-        elif self.stats_path.exists():
-            with open(self.stats_path) as f:
-                raw = json.load(f)
+        raw = self._store.load_gen_stats(self.agent_type)
+        if raw:
             return {k: GeneratorStats(**v) for k, v in raw.items()}
         return {g: GeneratorStats()
                 for g in self.config.get("generators_enabled", [])}
@@ -916,12 +864,7 @@ class ResearchAgent(ABC):
     def _save_gen_stats(self) -> None:
         data = {k: {"attempts": v.attempts, "successes": v.successes}
                 for k, v in self.gen_stats.items()}
-        if self._store:
-            self._store.save_gen_stats(self.agent_type, data)
-            return
-        self.stats_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.stats_path, "w") as f:
-            json.dump(data, f, indent=2)
+        self._store.save_gen_stats(self.agent_type, data)
 
     # --- Signal handling --------------------------------------------------
 
@@ -1201,13 +1144,7 @@ class ResearchAgent(ABC):
 
         Combines IC decay monitoring with paper trading promotion checks.
         """
-        if self._store:
-            registry = self._store.load_registry(self.agent_type)
-        elif self.registry_path.exists():
-            with open(self.registry_path) as f:
-                registry = json.load(f)
-        else:
-            return
+        registry = self._store.load_registry(self.agent_type)
         if not registry:
             return
 
@@ -1252,14 +1189,10 @@ class ResearchAgent(ABC):
                     sig["decay_days"] = 0
 
         if modified or n_retired > 0:
-            if self._store:
-                for sig in registry:
-                    hyp_id = sig.get("hypothesis_id")
-                    if hyp_id:
-                        self._store.update_signal(self.agent_type, hyp_id, sig)
-            else:
-                with open(self.registry_path, "w") as f:
-                    json.dump(registry, f, indent=2)
+            for sig in registry:
+                hyp_id = sig.get("hypothesis_id")
+                if hyp_id:
+                    self._store.update_signal(self.agent_type, hyp_id, sig)
 
         if n_retired > 0:
             self.state.set("total_signals_registered",
@@ -1393,27 +1326,12 @@ class ResearchAgent(ABC):
 
     def _remove_from_registry(self, hypothesis_id: str) -> None:
         """Remove a signal from the registry by its hypothesis_id."""
-        if self._store:
-            self._store.remove_signal(self.agent_type, hypothesis_id)
-            return
-        if not self.registry_path.exists():
-            return
-        with open(self.registry_path) as f:
-            registry = json.load(f)
-        registry = [s for s in registry if s.get("hypothesis_id") != hypothesis_id]
-        with open(self.registry_path, "w") as f:
-            json.dump(registry, f, indent=2)
+        self._store.remove_signal(self.agent_type, hypothesis_id)
 
     def _compute_adaptive_ic(self) -> float:
         """Compute adaptive IC threshold: max(floor, median(registry_ic) * 0.8)."""
         floor_ic = self.config.get("gates", {}).get("min_ic", 0.10)
-        if self._store:
-            registry = self._store.load_registry(self.agent_type)
-        elif self.registry_path.exists():
-            with open(self.registry_path) as f:
-                registry = json.load(f)
-        else:
-            return floor_ic
+        registry = self._store.load_registry(self.agent_type)
         ics = [s.get("expected_ic", 0) for s in registry
                if s.get("status") != "retired"]
         if not ics:
@@ -1547,17 +1465,13 @@ class ResearchAgent(ABC):
         print(f"\n{'─' * 60}")
         print("REGISTRY")
         print(f"{'─' * 60}")
-        if self.registry_path.exists():
-            with open(self.registry_path) as f:
-                registry = json.load(f)
-            if registry:
-                for sig in registry:
-                    print(f"  IC={sig['expected_ic']:.3f}  gate={sig.get('regime_gate', '-'):30s}  "
-                          f"{sig['name'][:50]}")
-            else:
-                print("  (empty)")
+        registry = self._store.load_registry(self.agent_type)
+        if registry:
+            for sig in registry:
+                print(f"  IC={sig['expected_ic']:.3f}  gate={sig.get('regime_gate', '-'):30s}  "
+                      f"{sig['name'][:50]}")
         else:
-            print("  (no registry file)")
+            print("  (empty)")
 
         print(f"\n{'─' * 60}")
         print("GRAVEYARD BREAKDOWN")
@@ -1612,11 +1526,11 @@ def cli_main(agent_class: type, description: str = "NAT Agent") -> None:
         for h in agent.queue.peek(20):
             print(f"  [{h.priority:6.3f}] {h.id}  {h.generator:12s}  {h.claim[:60]}")
     elif args.action == "registry":
-        if agent.registry_path.exists():
-            with open(agent.registry_path) as f:
-                for sig in json.load(f):
-                    print(f"  IC={sig['expected_ic']:.3f}  {sig['status']:10s}  "
-                          f"{','.join(sig['symbols']):12s}  {sig['name']}")
+        registry = agent._store.load_registry(agent.agent_type)
+        if registry:
+            for sig in registry:
+                print(f"  IC={sig['expected_ic']:.3f}  {sig['status']:10s}  "
+                      f"{','.join(sig['symbols']):12s}  {sig['name']}")
         else:
             print("  (empty)")
     elif args.action == "graveyard":

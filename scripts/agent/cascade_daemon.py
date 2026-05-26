@@ -91,12 +91,7 @@ class CascadeState:
             "last_cycle": None,
             "gate_history": [],
         }
-        self._auto_migrate()
         self._load()
-
-    def _auto_migrate(self):
-        """One-time import from legacy JSON."""
-        self._store.migrate_from_json(self.AGENT, state_path=STATE_PATH)
 
     def _load(self):
         saved = self._store.load_state(self.AGENT)
