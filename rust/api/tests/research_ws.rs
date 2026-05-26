@@ -4,8 +4,8 @@
 //!   cargo test --package nat-api -- --skip research_ws
 //!
 //! The test spawns a temporary Axum server on a random port, connects
-//! a WebSocket client, publishes events to Redis, and asserts they
-//! arrive on the WebSocket within a timeout.
+//! a WebSocket client, publishes events via XADD to the research stream,
+//! and asserts they arrive on the WebSocket within a timeout.
 
 use axum::{routing::get, Router};
 use futures_util::{SinkExt, StreamExt};
@@ -17,6 +17,8 @@ use nat_api::config::ApiConfig;
 use nat_api::redis_client::RedisClient;
 use nat_api::routes;
 use nat_api::state::AppState;
+
+const RESEARCH_STREAM: &str = "nat:research:stream";
 
 /// Spawn a test Axum server on a random port, return the base URL.
 async fn spawn_test_server() -> Result<String, Box<dyn std::error::Error>> {
@@ -37,7 +39,7 @@ async fn spawn_test_server() -> Result<String, Box<dyn std::error::Error>> {
     Ok(format!("127.0.0.1:{}", addr.port()))
 }
 
-/// Get a Redis connection for publishing test events.
+/// Get a Redis connection for publishing test events via XADD.
 async fn get_redis_publisher() -> Result<redis::aio::ConnectionManager, Box<dyn std::error::Error>>
 {
     let url =
@@ -45,6 +47,24 @@ async fn get_redis_publisher() -> Result<redis::aio::ConnectionManager, Box<dyn 
     let client = redis::Client::open(url)?;
     let conn = redis::aio::ConnectionManager::new(client).await?;
     Ok(conn)
+}
+
+/// Publish an event to the research stream via XADD.
+async fn xadd_event(
+    publisher: &mut redis::aio::ConnectionManager,
+    event: &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    redis::cmd("XADD")
+        .arg(RESEARCH_STREAM)
+        .arg("MAXLEN")
+        .arg("~")
+        .arg("10000")
+        .arg("*")
+        .arg("event")
+        .arg(event.to_string())
+        .query_async::<_, String>(publisher)
+        .await?;
+    Ok(())
 }
 
 #[tokio::test]
@@ -92,8 +112,8 @@ async fn test_hypothesis_started_event() {
         .expect("Failed to connect");
     let (_write, mut read) = ws_stream.split();
 
-    // Small delay for subscription to be ready
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Allow consumer group setup to complete
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     let event = serde_json::json!({
         "event": "hypothesis_started",
@@ -101,14 +121,9 @@ async fn test_hypothesis_started_event() {
         "agent": "micro",
         "claim": "test claim"
     });
-    redis::cmd("PUBLISH")
-        .arg("nat:research:events")
-        .arg(event.to_string())
-        .query_async::<_, i64>(&mut publisher)
-        .await
-        .expect("Failed to publish");
+    xadd_event(&mut publisher, &event).await.expect("Failed to XADD");
 
-    let msg = tokio::time::timeout(Duration::from_secs(2), read.next())
+    let msg = tokio::time::timeout(Duration::from_secs(5), read.next())
         .await
         .expect("Timeout waiting for WS message")
         .expect("Stream ended")
@@ -141,7 +156,7 @@ async fn test_gate_passed_event() {
         .expect("Failed to connect");
     let (_write, mut read) = ws_stream.split();
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     let event = serde_json::json!({
         "event": "gate_passed",
@@ -149,14 +164,9 @@ async fn test_gate_passed_event() {
         "gate": "G2_temporal",
         "msg": "2/2 dates passed"
     });
-    redis::cmd("PUBLISH")
-        .arg("nat:research:events")
-        .arg(event.to_string())
-        .query_async::<_, i64>(&mut publisher)
-        .await
-        .unwrap();
+    xadd_event(&mut publisher, &event).await.unwrap();
 
-    let msg = tokio::time::timeout(Duration::from_secs(2), read.next())
+    let msg = tokio::time::timeout(Duration::from_secs(5), read.next())
         .await
         .expect("Timeout")
         .expect("Stream ended")
@@ -187,7 +197,7 @@ async fn test_gate_failed_event() {
         .expect("Failed to connect");
     let (_write, mut read) = ws_stream.split();
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     let event = serde_json::json!({
         "event": "gate_failed",
@@ -195,14 +205,9 @@ async fn test_gate_failed_event() {
         "gate": "G3_symbol",
         "reason": "only 1/3 symbols passed"
     });
-    redis::cmd("PUBLISH")
-        .arg("nat:research:events")
-        .arg(event.to_string())
-        .query_async::<_, i64>(&mut publisher)
-        .await
-        .unwrap();
+    xadd_event(&mut publisher, &event).await.unwrap();
 
-    let msg = tokio::time::timeout(Duration::from_secs(2), read.next())
+    let msg = tokio::time::timeout(Duration::from_secs(5), read.next())
         .await
         .expect("Timeout")
         .expect("Stream ended")
@@ -233,7 +238,7 @@ async fn test_cycle_completed_event() {
         .expect("Failed to connect");
     let (_write, mut read) = ws_stream.split();
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
 
     let event = serde_json::json!({
         "event": "cycle_completed",
@@ -242,14 +247,9 @@ async fn test_cycle_completed_event() {
         "passed": 1,
         "cycle": 42
     });
-    redis::cmd("PUBLISH")
-        .arg("nat:research:events")
-        .arg(event.to_string())
-        .query_async::<_, i64>(&mut publisher)
-        .await
-        .unwrap();
+    xadd_event(&mut publisher, &event).await.unwrap();
 
-    let msg = tokio::time::timeout(Duration::from_secs(2), read.next())
+    let msg = tokio::time::timeout(Duration::from_secs(5), read.next())
         .await
         .expect("Timeout")
         .expect("Stream ended")

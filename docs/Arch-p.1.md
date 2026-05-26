@@ -149,7 +149,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 
 ---
 
-### 2.3 Remove JSON State Fallback
+### 2.3 Remove JSON State Fallback ✅
 
 **Problem:** Every `load()`/`save()` in `AgentState` branches on `if self._store` (SQLite) vs JSON path. The JSON fallback is legacy — SQLite migration is done and tested (63 tests). The dual-mode code doubles the surface area for state bugs.
 
