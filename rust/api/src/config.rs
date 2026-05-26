@@ -8,9 +8,12 @@ pub struct ApiConfig {
     pub port: u16,
     pub redis_url: String,
     /// Root directory for research output JSON files (hypotheses, cycles).
+    /// Used as fallback if research_db_path is not available.
     pub research_data_dir: String,
     /// Root directory for IT engine state files (MI, CMI, interaction info).
     pub it_engine_data_dir: String,
+    /// Path to nat.db SQLite database (primary research data source).
+    pub research_db_path: String,
 }
 
 impl Default for ApiConfig {
@@ -21,6 +24,7 @@ impl Default for ApiConfig {
             redis_url: "redis://127.0.0.1:6379".to_string(),
             research_data_dir: "../data/research".to_string(),
             it_engine_data_dir: "../data/it_engine".to_string(),
+            research_db_path: "../data/nat.db".to_string(),
         }
     }
 }
@@ -44,6 +48,8 @@ impl ApiConfig {
                 .unwrap_or_else(|_| "../data/research".to_string()),
             it_engine_data_dir: std::env::var("NAT_IT_ENGINE_DIR")
                 .unwrap_or_else(|_| "../data/it_engine".to_string()),
+            research_db_path: std::env::var("NAT_RESEARCH_DB")
+                .unwrap_or_else(|_| "../data/nat.db".to_string()),
         }
     }
 }

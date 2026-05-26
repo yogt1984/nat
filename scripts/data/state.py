@@ -94,6 +94,21 @@ CREATE TABLE IF NOT EXISTS generator_stats (
     PRIMARY KEY (agent, generator)
 );
 
+CREATE TABLE IF NOT EXISTS research_output (
+    id              TEXT PRIMARY KEY,
+    kind            TEXT NOT NULL,
+    agent           TEXT NOT NULL,
+    generator       TEXT,
+    status          TEXT,
+    payload         TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    schema_version  INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_ro_agent ON research_output(agent);
+CREATE INDEX IF NOT EXISTS idx_ro_kind ON research_output(kind);
+CREATE INDEX IF NOT EXISTS idx_ro_created ON research_output(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ro_status ON research_output(status);
+
 CREATE TABLE IF NOT EXISTS _migrations (
     name       TEXT PRIMARY KEY,
     applied_at TEXT NOT NULL
@@ -353,6 +368,90 @@ class StateStore:
                     "VALUES (?, ?, ?, ?)",
                     (agent, gen, s.get("attempts", 0), s.get("successes", 0)),
                 )
+
+    # -----------------------------------------------------------------------
+    # Research output
+    # -----------------------------------------------------------------------
+
+    def insert_research_output(self, record: dict, kind: str) -> None:
+        """Insert a hypothesis or cycle record into research_output table."""
+        record_id = record.get("id") or record.get("cycle_id")
+        if not record_id:
+            return
+        agent = record.get("agent", "")
+        generator = record.get("generator")
+        status = record.get("status")
+        created_at = (
+            record.get("timestamps", {}).get("completed")
+            or record.get("completed")
+            or datetime.now(timezone.utc).isoformat()
+        )
+        schema_version = record.get("schema_version", 1)
+        payload = json.dumps(record, default=str)
+
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO research_output "
+                "(id, kind, agent, generator, status, payload, created_at, schema_version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (record_id, kind, agent, generator, status, payload,
+                 created_at, schema_version),
+            )
+
+    def query_research_output(
+        self,
+        kind: str | None = None,
+        agent: str | None = None,
+        generator: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict], int]:
+        """Query research output with filters. Returns (items, total)."""
+        where_parts = []
+        params: list[Any] = []
+
+        if kind:
+            where_parts.append("kind = ?")
+            params.append(kind)
+        if agent:
+            where_parts.append("agent = ?")
+            params.append(agent)
+        if generator:
+            where_parts.append("generator = ?")
+            params.append(generator)
+        if status:
+            where_parts.append("status = ?")
+            params.append(status)
+
+        where_clause = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
+
+        # Count total
+        count_row = self._conn.execute(
+            f"SELECT COUNT(*) as cnt FROM research_output{where_clause}",
+            params,
+        ).fetchone()
+        total = count_row["cnt"] if count_row else 0
+
+        # Fetch page
+        rows = self._conn.execute(
+            f"SELECT payload FROM research_output{where_clause} "
+            f"ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            params + [limit, offset],
+        ).fetchall()
+
+        items = [json.loads(r["payload"]) for r in rows]
+        return items, total
+
+    def get_research_output(self, record_id: str) -> dict | None:
+        """Get a single research output record by ID."""
+        row = self._conn.execute(
+            "SELECT payload FROM research_output WHERE id = ?",
+            (record_id,),
+        ).fetchone()
+        if row:
+            return json.loads(row["payload"])
+        return None
 
     # -----------------------------------------------------------------------
     # Cross-agent queries

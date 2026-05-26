@@ -678,3 +678,107 @@ class TestExportJSON:
         with open(out / "hypotheses.json") as f:
             hyps = json.load(f)
         assert hyps[0]["status"] == "running"
+
+
+# ===========================================================================
+# Research output
+# ===========================================================================
+
+class TestResearchOutput:
+    def test_insert_and_query_hypothesis(self, store):
+        record = {
+            "id": "HYP-SYS-001",
+            "agent": "microstructure",
+            "generator": "systematic",
+            "status": "replicated",
+            "timestamps": {"created": "2026-05-25T10:00:00", "completed": "2026-05-25T10:01:00"},
+            "gates": [{"name": "IC", "passed": True}],
+            "schema_version": 1,
+        }
+        store.insert_research_output(record, kind="hypothesis")
+        items, total = store.query_research_output(kind="hypothesis")
+        assert total == 1
+        assert items[0]["id"] == "HYP-SYS-001"
+
+    def test_insert_and_query_cycle(self, store):
+        record = {
+            "cycle_id": "CYC-001",
+            "agent": "microstructure",
+            "completed": "2026-05-25T10:05:00",
+            "n_tested": 10,
+            "schema_version": 1,
+        }
+        store.insert_research_output(record, kind="cycle")
+        items, total = store.query_research_output(kind="cycle")
+        assert total == 1
+        assert items[0]["cycle_id"] == "CYC-001"
+
+    def test_filter_by_agent(self, store):
+        for i, agent in enumerate(["micro", "macro", "micro"]):
+            store.insert_research_output(
+                {"id": f"H{i}", "agent": agent, "generator": "sys", "status": "failed",
+                 "timestamps": {"completed": f"2026-05-25T10:0{i}:00"}, "schema_version": 1},
+                kind="hypothesis",
+            )
+        items, total = store.query_research_output(kind="hypothesis", agent="micro")
+        assert total == 2
+
+    def test_filter_by_status(self, store):
+        store.insert_research_output(
+            {"id": "H1", "agent": "micro", "status": "replicated",
+             "timestamps": {"completed": "2026-05-25T10:00:00"}, "schema_version": 1},
+            kind="hypothesis",
+        )
+        store.insert_research_output(
+            {"id": "H2", "agent": "micro", "status": "failed",
+             "timestamps": {"completed": "2026-05-25T10:01:00"}, "schema_version": 1},
+            kind="hypothesis",
+        )
+        items, total = store.query_research_output(kind="hypothesis", status="replicated")
+        assert total == 1
+        assert items[0]["id"] == "H1"
+
+    def test_pagination(self, store):
+        for i in range(10):
+            store.insert_research_output(
+                {"id": f"H{i}", "agent": "micro", "status": "failed",
+                 "timestamps": {"completed": f"2026-05-25T10:{i:02d}:00"}, "schema_version": 1},
+                kind="hypothesis",
+            )
+        items, total = store.query_research_output(kind="hypothesis", limit=3, offset=0)
+        assert total == 10
+        assert len(items) == 3
+
+        items, total = store.query_research_output(kind="hypothesis", limit=3, offset=8)
+        assert len(items) == 2
+
+    def test_get_single_record(self, store):
+        store.insert_research_output(
+            {"id": "HYP-1", "agent": "micro", "status": "replicated",
+             "timestamps": {"completed": "2026-05-25T10:00:00"}, "schema_version": 1},
+            kind="hypothesis",
+        )
+        record = store.get_research_output("HYP-1")
+        assert record is not None
+        assert record["id"] == "HYP-1"
+        assert store.get_research_output("MISSING") is None
+
+    def test_upsert_overwrites(self, store):
+        store.insert_research_output(
+            {"id": "H1", "agent": "micro", "status": "running",
+             "timestamps": {"completed": "2026-05-25T10:00:00"}, "schema_version": 1},
+            kind="hypothesis",
+        )
+        store.insert_research_output(
+            {"id": "H1", "agent": "micro", "status": "replicated",
+             "timestamps": {"completed": "2026-05-25T10:01:00"}, "schema_version": 1},
+            kind="hypothesis",
+        )
+        items, total = store.query_research_output(kind="hypothesis")
+        assert total == 1
+        assert items[0]["status"] == "replicated"
+
+    def test_no_id_skipped(self, store):
+        store.insert_research_output({"agent": "micro"}, kind="hypothesis")
+        items, total = store.query_research_output(kind="hypothesis")
+        assert total == 0

@@ -99,4 +99,5 @@ impl RedisClient {
     pub fn get_connection(&self) -> ConnectionManager {
         self.conn.clone()
     }
+
 }

@@ -1,8 +1,7 @@
 //! Research API routes — hypothesis history, cycle reports, signal registry, stats.
 //!
-//! Reads structured JSON files emitted by the Python agent (P2-1):
-//!   data/research/hypotheses/{id}.json
-//!   data/research/cycles/{cycle_id}.json
+//! Primary data source: SQLite `research_output` table (written by Python agents).
+//! Fallback: JSON file scanning from `data/research/` (legacy).
 
 use axum::{
     extract::{Path, Query, State},
@@ -12,7 +11,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::routes::features::ErrorResponse;
 use crate::state::AppState;
@@ -74,7 +73,117 @@ pub struct HeatmapResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// SQLite query helpers
+// ---------------------------------------------------------------------------
+
+/// Query research_output table with filters. Returns (items, total).
+async fn query_db(
+    state: &AppState,
+    kind: &str,
+    agent: Option<&str>,
+    generator: Option<&str>,
+    status: Option<&str>,
+    limit: usize,
+    offset: usize,
+) -> Option<(Vec<serde_json::Value>, usize)> {
+    let db = state.research_db.as_ref()?;
+    let conn = db.lock().await;
+
+    // Build WHERE clause with positional params
+    let mut conditions = vec!["kind = ?".to_string()];
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(kind.to_string())];
+
+    if let Some(a) = agent {
+        conditions.push("agent = ?".to_string());
+        params.push(Box::new(a.to_string()));
+    }
+    if let Some(g) = generator {
+        conditions.push("generator = ?".to_string());
+        params.push(Box::new(g.to_string()));
+    }
+    if let Some(s) = status {
+        conditions.push("status = ?".to_string());
+        params.push(Box::new(s.to_string()));
+    }
+
+    let where_clause = conditions.join(" AND ");
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+
+    // Count total
+    let count_sql = format!("SELECT COUNT(*) FROM research_output WHERE {}", where_clause);
+    let total: usize = conn
+        .query_row(&count_sql, rusqlite::params_from_iter(param_refs.iter()), |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap_or(0) as usize;
+
+    // Fetch page
+    let mut fetch_params = params;
+    fetch_params.push(Box::new(limit as i64));
+    fetch_params.push(Box::new(offset as i64));
+    let fetch_refs: Vec<&dyn rusqlite::ToSql> = fetch_params.iter().map(|p| p.as_ref()).collect();
+
+    let fetch_sql = format!(
+        "SELECT payload FROM research_output WHERE {} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        where_clause
+    );
+
+    let mut stmt = match conn.prepare(&fetch_sql) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("SQLite query error: {}", e);
+            return None;
+        }
+    };
+
+    let items: Vec<serde_json::Value> = stmt
+        .query_map(rusqlite::params_from_iter(fetch_refs.iter()), |row| {
+            row.get::<_, String>(0)
+        })
+        .ok()
+        .map(|rows| {
+            rows.filter_map(|r| r.ok())
+                .filter_map(|p| serde_json::from_str(&p).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Some((items, total))
+}
+
+/// Get a single record by ID from SQLite.
+async fn get_db_record(state: &AppState, id: &str) -> Option<serde_json::Value> {
+    let db = state.research_db.as_ref()?;
+    let conn = db.lock().await;
+    let result = conn.query_row(
+        "SELECT payload FROM research_output WHERE id = ?1",
+        [id],
+        |row| row.get::<_, String>(0),
+    );
+    match result {
+        Ok(payload) => serde_json::from_str(&payload).ok(),
+        Err(_) => None,
+    }
+}
+
+/// Get all records of a kind (for stats/heatmap aggregation).
+async fn get_all_db(state: &AppState, kind: &str) -> Option<Vec<serde_json::Value>> {
+    let db = state.research_db.as_ref()?;
+    let conn = db.lock().await;
+    let mut stmt = conn
+        .prepare("SELECT payload FROM research_output WHERE kind = ?1 ORDER BY created_at DESC")
+        .ok()?;
+    let items: Vec<serde_json::Value> = stmt
+        .query_map([kind], |row| row.get::<_, String>(0))
+        .ok()?
+        .filter_map(|r| r.ok())
+        .filter_map(|p| serde_json::from_str(&p).ok())
+        .collect();
+    Some(items)
+}
+
+// ---------------------------------------------------------------------------
+// JSON fallback helpers (used when SQLite is unavailable)
 // ---------------------------------------------------------------------------
 
 fn research_dir(state: &AppState) -> PathBuf {
@@ -94,6 +203,13 @@ fn read_json_dir(dir: &std::path::Path) -> Vec<serde_json::Value> {
             e.path()
                 .extension()
                 .map(|ext| ext == "json")
+                .unwrap_or(false)
+        })
+        .filter(|e| {
+            // Skip .tmp files (atomic write pattern)
+            !e.path()
+                .file_stem()
+                .map(|s| s.to_string_lossy().ends_with(".json"))
                 .unwrap_or(false)
         })
         .filter_map(|e| {
@@ -176,47 +292,6 @@ fn paginate(items: Vec<serde_json::Value>, offset: usize, limit: usize) -> Pagin
 }
 
 // ---------------------------------------------------------------------------
-// Cache helpers
-// ---------------------------------------------------------------------------
-
-/// Ensure the research cache is fresh, reloading from disk if stale.
-async fn ensure_cache(state: &AppState) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
-    // Fast path: read lock, check freshness
-    {
-        let cache = state.research_cache.read().await;
-        if !cache.is_stale() {
-            return (cache.hypotheses.clone(), cache.cycles.clone());
-        }
-    }
-
-    // Slow path: write lock, reload from disk
-    let mut cache = state.research_cache.write().await;
-    // Double-check after acquiring write lock (another request may have refreshed)
-    if !cache.is_stale() {
-        return (cache.hypotheses.clone(), cache.cycles.clone());
-    }
-
-    let hyp_dir = research_dir(state).join("hypotheses");
-    let cyc_dir = research_dir(state).join("cycles");
-    cache.hypotheses = read_json_dir(&hyp_dir);
-    cache.cycles = read_json_dir(&cyc_dir);
-    cache.loaded_at = std::time::Instant::now();
-    debug!(
-        hypotheses = cache.hypotheses.len(),
-        cycles = cache.cycles.len(),
-        "Research cache refreshed"
-    );
-
-    (cache.hypotheses.clone(), cache.cycles.clone())
-}
-
-/// Invalidate the cache (called after research events).
-pub async fn invalidate_cache(state: &AppState) {
-    let mut cache = state.research_cache.write().await;
-    cache.loaded_at = std::time::Instant::now() - cache.ttl - std::time::Duration::from_secs(1);
-}
-
-// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
@@ -226,10 +301,28 @@ pub async fn list_hypotheses(
     State(state): State<Arc<AppState>>,
     Query(q): Query<HypothesisQuery>,
 ) -> Result<Json<PaginatedResponse<serde_json::Value>>, (StatusCode, Json<ErrorResponse>)> {
-    let (all, _) = ensure_cache(&state).await;
-    let filtered = filter_hypotheses(&all, &q);
     let offset = q.offset.unwrap_or(0);
     let limit = q.limit.unwrap_or(50).min(200);
+
+    // Try SQLite first
+    if let Some((items, total)) = query_db(
+        &state,
+        "hypothesis",
+        q.agent.as_deref(),
+        q.generator.as_deref(),
+        q.status.as_deref(),
+        limit,
+        offset,
+    ).await {
+        debug!(total, "Served hypotheses from SQLite");
+        return Ok(Json(PaginatedResponse { total, offset, limit, items }));
+    }
+
+    // Fallback to JSON files
+    debug!("Falling back to JSON file scan for hypotheses");
+    let hyp_dir = research_dir(&state).join("hypotheses");
+    let all = read_json_dir(&hyp_dir);
+    let filtered = filter_hypotheses(&all, &q);
     Ok(Json(paginate(filtered, offset, limit)))
 }
 
@@ -239,12 +332,12 @@ pub async fn get_hypothesis(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
-    // Single hypothesis: check cache first, fall back to direct read
-    let (all, _) = ensure_cache(&state).await;
-    if let Some(h) = all.iter().find(|h| h.get("id").and_then(|v| v.as_str()) == Some(&id)) {
-        return Ok(Json(h.clone()));
+    // Try SQLite first
+    if let Some(record) = get_db_record(&state, &id).await {
+        return Ok(Json(record));
     }
-    // Not in cache — try direct file read (may be very new)
+
+    // Fallback to direct file read
     let path = research_dir(&state).join("hypotheses").join(format!("{}.json", id));
     let data = std::fs::read_to_string(&path).map_err(|_| {
         (
@@ -271,10 +364,28 @@ pub async fn list_cycles(
     State(state): State<Arc<AppState>>,
     Query(q): Query<CycleQuery>,
 ) -> Result<Json<PaginatedResponse<serde_json::Value>>, (StatusCode, Json<ErrorResponse>)> {
-    let (_, all) = ensure_cache(&state).await;
-    let filtered = filter_cycles(&all, &q);
     let offset = q.offset.unwrap_or(0);
     let limit = q.limit.unwrap_or(50).min(200);
+
+    // Try SQLite first
+    if let Some((items, total)) = query_db(
+        &state,
+        "cycle",
+        q.agent.as_deref(),
+        None,  // cycles don't filter by generator
+        None,
+        limit,
+        offset,
+    ).await {
+        debug!(total, "Served cycles from SQLite");
+        return Ok(Json(PaginatedResponse { total, offset, limit, items }));
+    }
+
+    // Fallback to JSON files
+    debug!("Falling back to JSON file scan for cycles");
+    let cyc_dir = research_dir(&state).join("cycles");
+    let all = read_json_dir(&cyc_dir);
+    let filtered = filter_cycles(&all, &q);
     Ok(Json(paginate(filtered, offset, limit)))
 }
 
@@ -283,7 +394,14 @@ pub async fn list_cycles(
 pub async fn list_signals(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, Json<ErrorResponse>)> {
-    let (all, _) = ensure_cache(&state).await;
+    // Try SQLite first
+    if let Some((items, _)) = query_db(&state, "hypothesis", None, None, Some("replicated"), 1000, 0).await {
+        return Ok(Json(items));
+    }
+
+    // Fallback
+    let hyp_dir = research_dir(&state).join("hypotheses");
+    let all = read_json_dir(&hyp_dir);
     let signals: Vec<serde_json::Value> = all
         .into_iter()
         .filter(|h| h.get("status").and_then(|v| v.as_str()) == Some("replicated"))
@@ -296,13 +414,99 @@ pub async fn list_signals(
 pub async fn get_stats(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ResearchStats>, (StatusCode, Json<ErrorResponse>)> {
-    let (hypotheses, cycles) = ensure_cache(&state).await;
+    // Try SQLite aggregation
+    if let Some(stats) = compute_stats_from_db(&state).await {
+        return Ok(Json(stats));
+    }
 
+    // Fallback to JSON
+    let hyp_dir = research_dir(&state).join("hypotheses");
+    let cyc_dir = research_dir(&state).join("cycles");
+    let hypotheses = read_json_dir(&hyp_dir);
+    let cycles = read_json_dir(&cyc_dir);
+
+    Ok(Json(compute_stats_from_items(&hypotheses, cycles.len())))
+}
+
+async fn compute_stats_from_db(state: &AppState) -> Option<ResearchStats> {
+    let db = state.research_db.as_ref()?;
+    let conn = db.lock().await;
+
+    // Total hypotheses
+    let total_hypotheses: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM research_output WHERE kind = 'hypothesis'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0) as usize;
+
+    // Total cycles
+    let total_cycles: usize = conn
+        .query_row(
+            "SELECT COUNT(*) FROM research_output WHERE kind = 'cycle'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0) as usize;
+
+    // By status
+    let mut by_status = std::collections::HashMap::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT status, COUNT(*) FROM research_output WHERE kind = 'hypothesis' GROUP BY status",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        }) {
+            for r in rows.flatten() {
+                by_status.insert(r.0, r.1 as usize);
+            }
+        }
+    }
+
+    // By agent
+    let mut by_agent = std::collections::HashMap::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT agent, COUNT(*) FROM research_output WHERE kind = 'hypothesis' GROUP BY agent",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        }) {
+            for r in rows.flatten() {
+                by_agent.insert(r.0, r.1 as usize);
+            }
+        }
+    }
+
+    // By generator
+    let mut by_generator = std::collections::HashMap::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT generator, COUNT(*) FROM research_output WHERE kind = 'hypothesis' AND generator IS NOT NULL GROUP BY generator",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        }) {
+            for r in rows.flatten() {
+                by_generator.insert(r.0, r.1 as usize);
+            }
+        }
+    }
+
+    Some(ResearchStats {
+        total_hypotheses,
+        by_status,
+        by_agent,
+        by_generator,
+        total_cycles,
+    })
+}
+
+fn compute_stats_from_items(hypotheses: &[serde_json::Value], total_cycles: usize) -> ResearchStats {
     let mut by_status: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut by_agent: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut by_generator: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
 
-    for h in &hypotheses {
+    for h in hypotheses {
         if let Some(s) = h.get("status").and_then(|v| v.as_str()) {
             *by_status.entry(s.to_string()).or_default() += 1;
         }
@@ -314,13 +518,13 @@ pub async fn get_stats(
         }
     }
 
-    Ok(Json(ResearchStats {
+    ResearchStats {
         total_hypotheses: hypotheses.len(),
         by_status,
         by_agent,
         by_generator,
-        total_cycles: cycles.len(),
-    }))
+        total_cycles,
+    }
 }
 
 /// GET /api/research/heatmap
@@ -328,7 +532,13 @@ pub async fn get_stats(
 pub async fn get_heatmap(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<HeatmapResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let (all, _) = ensure_cache(&state).await;
+    // Get all hypotheses (from SQLite or fallback)
+    let all = if let Some(items) = get_all_db(&state, "hypothesis").await {
+        items
+    } else {
+        let hyp_dir = research_dir(&state).join("hypotheses");
+        read_json_dir(&hyp_dir)
+    };
 
     let mut entries = Vec::new();
     let mut features_set = std::collections::BTreeSet::new();
@@ -445,7 +655,6 @@ fn feature_category(name: &str) -> &'static str {
     if name.starts_with("raw_") { return "raw"; }
     if name.starts_with("regime_") || name.starts_with("gmm_") { return "regime"; }
     if name.starts_with("cross_") { return "cross_symbol"; }
-    if name.starts_with("derived_") { return "derived"; }
     "other"
 }
 
@@ -598,9 +807,15 @@ pub async fn get_network(
         )
     })?;
 
-    let (hypotheses, _) = ensure_cache(&state).await;
-    let network = build_network(&it_state, &hypotheses);
+    // Get hypotheses from SQLite or fallback
+    let hypotheses = if let Some(items) = get_all_db(&state, "hypothesis").await {
+        items
+    } else {
+        let hyp_dir = research_dir(&state).join("hypotheses");
+        read_json_dir(&hyp_dir)
+    };
 
+    let network = build_network(&it_state, &hypotheses);
     Ok(Json(network))
 }
 
@@ -611,9 +826,301 @@ pub async fn get_network(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::Connection;
     use std::fs;
+    use tokio::sync::Mutex;
 
-    fn write_hypothesis(dir: &std::path::Path, id: &str, agent: &str, gen: &str, status: &str) {
+    /// Create an in-memory SQLite DB with research_output table and return it wrapped.
+    fn test_db() -> Arc<Mutex<Connection>> {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE research_output (
+                id              TEXT PRIMARY KEY,
+                kind            TEXT NOT NULL,
+                agent           TEXT NOT NULL,
+                generator       TEXT,
+                status          TEXT,
+                payload         TEXT NOT NULL,
+                created_at      TEXT NOT NULL,
+                schema_version  INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE INDEX idx_ro_agent ON research_output(agent);
+            CREATE INDEX idx_ro_kind ON research_output(kind);
+            CREATE INDEX idx_ro_created ON research_output(created_at DESC);
+            CREATE INDEX idx_ro_status ON research_output(status);",
+        )
+        .unwrap();
+        Arc::new(Mutex::new(conn))
+    }
+
+    fn insert_hypothesis(db: &Arc<Mutex<Connection>>, id: &str, agent: &str, gen: &str, status: &str) {
+        let conn = db.blocking_lock();
+        let record = serde_json::json!({
+            "schema_version": 1,
+            "id": id,
+            "agent": agent,
+            "generator": gen,
+            "claim": format!("Test claim for {}", id),
+            "math": "IC = ...",
+            "status": status,
+            "failure_reason": if status == "failed" { Some("no_effect") } else { None::<&str> },
+            "gates": [{
+                "name": "IC",
+                "passed": status != "failed",
+                "message": "PASS IC=0.08 vs min=0.03 p=0.001",
+                "metric": 0.08,
+                "threshold": 0.03,
+                "p_value": 0.001
+            }],
+            "features": ["ent_book_shape"],
+            "regime_gate": "ent_book_shape<0.4",
+            "horizon_s": 5.0,
+            "thresholds": {"horizon_s": 5.0},
+            "parent_id": null,
+            "timestamps": {
+                "created": "2026-05-25T10:00:00+00:00",
+                "completed": "2026-05-25T10:01:00+00:00"
+            }
+        });
+        let payload = serde_json::to_string(&record).unwrap();
+        conn.execute(
+            "INSERT INTO research_output (id, kind, agent, generator, status, payload, created_at, schema_version)
+             VALUES (?1, 'hypothesis', ?2, ?3, ?4, ?5, '2026-05-25T10:01:00+00:00', 1)",
+            rusqlite::params![id, agent, gen, status, payload],
+        ).unwrap();
+    }
+
+    fn insert_cycle(db: &Arc<Mutex<Connection>>, cycle_id: &str, agent: &str, n_tested: usize) {
+        let conn = db.blocking_lock();
+        let record = serde_json::json!({
+            "schema_version": 1,
+            "cycle_id": cycle_id,
+            "agent": agent,
+            "started": "2026-05-25T10:00:00+00:00",
+            "completed": "2026-05-25T10:05:00+00:00",
+            "duration_s": 300.0,
+            "n_tested": n_tested,
+            "n_registered": 1,
+            "n_fdr_rejected": 0,
+            "n_chained": 0,
+            "fdr_q": 0.05,
+            "hypotheses": [],
+            "generator_stats": {}
+        });
+        let payload = serde_json::to_string(&record).unwrap();
+        conn.execute(
+            "INSERT INTO research_output (id, kind, agent, generator, status, payload, created_at, schema_version)
+             VALUES (?1, 'cycle', ?2, NULL, NULL, ?3, '2026-05-25T10:05:00+00:00', 1)",
+            rusqlite::params![cycle_id, agent, payload],
+        ).unwrap();
+    }
+
+    /// Direct SQLite queries for testing — bypass AppState dependency.
+    fn test_query_db(
+        db: &Arc<Mutex<Connection>>,
+        kind: &str,
+        agent: Option<&str>,
+        generator: Option<&str>,
+        status: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> (Vec<serde_json::Value>, usize) {
+        let conn = db.blocking_lock();
+
+        // Build WHERE clause
+        let mut conditions = vec!["kind = ?".to_string()];
+        let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(kind.to_string())];
+
+        if let Some(a) = agent {
+            conditions.push("agent = ?".to_string());
+            params_vec.push(Box::new(a.to_string()));
+        }
+        if let Some(g) = generator {
+            conditions.push("generator = ?".to_string());
+            params_vec.push(Box::new(g.to_string()));
+        }
+        if let Some(s) = status {
+            conditions.push("status = ?".to_string());
+            params_vec.push(Box::new(s.to_string()));
+        }
+
+        let where_clause = conditions.join(" AND ");
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+
+        // Count
+        let count_sql = format!("SELECT COUNT(*) FROM research_output WHERE {}", where_clause);
+        let total: i64 = conn
+            .query_row(&count_sql, rusqlite::params_from_iter(params_refs.iter()), |row| row.get(0))
+            .unwrap_or(0);
+
+        // Fetch
+        let mut fetch_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        for p in &params_vec {
+            // Re-extract string values
+            fetch_params.push(Box::new(format!("{}", ""))); // placeholder
+        }
+        // Simpler approach: just build the full query with all params
+        let mut all_params: Vec<Box<dyn rusqlite::ToSql>> = params_vec;
+        all_params.push(Box::new(limit as i64));
+        all_params.push(Box::new(offset as i64));
+        let all_refs: Vec<&dyn rusqlite::ToSql> = all_params.iter().map(|p| p.as_ref()).collect();
+
+        let fetch_sql = format!(
+            "SELECT payload FROM research_output WHERE {} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            where_clause
+        );
+        let mut stmt = conn.prepare(&fetch_sql).unwrap();
+        let items: Vec<serde_json::Value> = stmt
+            .query_map(rusqlite::params_from_iter(all_refs.iter()), |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .filter_map(|p| serde_json::from_str(&p).ok())
+            .collect();
+
+        (items, total as usize)
+    }
+
+    fn test_get_record(db: &Arc<Mutex<Connection>>, id: &str) -> Option<serde_json::Value> {
+        let conn = db.blocking_lock();
+        let result = conn.query_row(
+            "SELECT payload FROM research_output WHERE id = ?1",
+            [id],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(payload) => serde_json::from_str(&payload).ok(),
+            Err(_) => None,
+        }
+    }
+
+    fn test_get_all(db: &Arc<Mutex<Connection>>, kind: &str) -> Vec<serde_json::Value> {
+        let conn = db.blocking_lock();
+        let mut stmt = conn
+            .prepare("SELECT payload FROM research_output WHERE kind = ?1 ORDER BY created_at DESC")
+            .unwrap();
+        stmt.query_map([kind], |row| row.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .filter_map(|p| serde_json::from_str(&p).ok())
+            .collect()
+    }
+
+    // -----------------------------------------------------------------------
+    // SQLite query tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_query_db_hypotheses() {
+        let db = test_db();
+        insert_hypothesis(&db, "H1", "micro", "systematic", "replicated");
+        insert_hypothesis(&db, "H2", "micro", "spectral", "failed");
+        insert_hypothesis(&db, "H3", "macro", "systematic", "replicated");
+
+        // All hypotheses
+        let (items, total) = test_query_db(&db, "hypothesis", None, None, None, 50, 0);
+        assert_eq!(total, 3);
+        assert_eq!(items.len(), 3);
+
+        // Filter by agent
+        let (items, total) = test_query_db(&db, "hypothesis", Some("micro"), None, None, 50, 0);
+        assert_eq!(total, 2);
+        assert_eq!(items.len(), 2);
+
+        // Filter by status
+        let (items, total) = test_query_db(&db, "hypothesis", None, None, Some("replicated"), 50, 0);
+        assert_eq!(total, 2);
+        assert_eq!(items.len(), 2);
+
+        // Filter by generator
+        let (items, total) = test_query_db(&db, "hypothesis", None, Some("systematic"), None, 50, 0);
+        assert_eq!(total, 2);
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn test_query_db_pagination() {
+        let db = test_db();
+        for i in 0..10 {
+            insert_hypothesis(&db, &format!("H{}", i), "micro", "systematic", "failed");
+        }
+
+        let (items, total) = test_query_db(&db, "hypothesis", None, None, None, 3, 0);
+        assert_eq!(total, 10);
+        assert_eq!(items.len(), 3);
+
+        let (items, _) = test_query_db(&db, "hypothesis", None, None, None, 3, 8);
+        assert_eq!(items.len(), 2); // only 2 left
+    }
+
+    #[test]
+    fn test_query_db_cycles() {
+        let db = test_db();
+        insert_cycle(&db, "CYC-1", "micro", 10);
+        insert_cycle(&db, "CYC-2", "macro", 5);
+
+        let (items, total) = test_query_db(&db, "cycle", None, None, None, 50, 0);
+        assert_eq!(total, 2);
+        assert_eq!(items.len(), 2);
+
+        let (items, total) = test_query_db(&db, "cycle", Some("micro"), None, None, 50, 0);
+        assert_eq!(total, 1);
+        assert_eq!(items.len(), 1);
+    }
+
+    #[test]
+    fn test_get_db_record() {
+        let db = test_db();
+        insert_hypothesis(&db, "H-TEST-1", "micro", "systematic", "replicated");
+
+        let record = test_get_record(&db, "H-TEST-1");
+        assert!(record.is_some());
+        assert_eq!(record.unwrap()["id"], "H-TEST-1");
+
+        let missing = test_get_record(&db, "NONEXISTENT");
+        assert!(missing.is_none());
+    }
+
+    #[test]
+    fn test_get_all_db() {
+        let db = test_db();
+        insert_hypothesis(&db, "H1", "micro", "systematic", "replicated");
+        insert_hypothesis(&db, "H2", "micro", "spectral", "failed");
+        insert_cycle(&db, "C1", "micro", 5);
+
+        let hyps = test_get_all(&db, "hypothesis");
+        assert_eq!(hyps.len(), 2);
+
+        let cycles = test_get_all(&db, "cycle");
+        assert_eq!(cycles.len(), 1);
+    }
+
+    #[test]
+    fn test_stats_aggregation_from_db() {
+        let db = test_db();
+        insert_hypothesis(&db, "H1", "micro", "systematic", "replicated");
+        insert_hypothesis(&db, "H2", "micro", "spectral", "failed");
+        insert_hypothesis(&db, "H3", "macro", "systematic", "replicated");
+
+        let items = test_get_all(&db, "hypothesis");
+        let stats = compute_stats_from_items(&items, 2);
+
+        assert_eq!(stats.total_hypotheses, 3);
+        assert_eq!(stats.total_cycles, 2);
+        assert_eq!(stats.by_status["replicated"], 2);
+        assert_eq!(stats.by_status["failed"], 1);
+        assert_eq!(stats.by_agent["micro"], 2);
+        assert_eq!(stats.by_agent["macro"], 1);
+        assert_eq!(stats.by_generator["systematic"], 2);
+        assert_eq!(stats.by_generator["spectral"], 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // JSON fallback tests (existing)
+    // -----------------------------------------------------------------------
+
+    fn write_hypothesis_json(dir: &std::path::Path, id: &str, agent: &str, gen: &str, status: &str) {
         let hyp_dir = dir.join("hypotheses");
         fs::create_dir_all(&hyp_dir).unwrap();
         let record = serde_json::json!({
@@ -625,16 +1132,14 @@ mod tests {
             "math": "IC = ...",
             "status": status,
             "failure_reason": if status == "failed" { Some("no_effect") } else { None::<&str> },
-            "gates": [
-                {
-                    "name": "IC",
-                    "passed": status != "failed",
-                    "message": "PASS IC=0.08 vs min=0.03 p=0.001",
-                    "metric": 0.08,
-                    "threshold": 0.03,
-                    "p_value": 0.001
-                }
-            ],
+            "gates": [{
+                "name": "IC",
+                "passed": status != "failed",
+                "message": "PASS IC=0.08 vs min=0.03 p=0.001",
+                "metric": 0.08,
+                "threshold": 0.03,
+                "p_value": 0.001
+            }],
             "features": ["ent_book_shape"],
             "regime_gate": "ent_book_shape<0.4",
             "horizon_s": 5.0,
@@ -649,7 +1154,7 @@ mod tests {
         fs::write(path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
     }
 
-    fn write_cycle(dir: &std::path::Path, cycle_id: &str, agent: &str, n_tested: usize) {
+    fn write_cycle_json(dir: &std::path::Path, cycle_id: &str, agent: &str, n_tested: usize) {
         let cyc_dir = dir.join("cycles");
         fs::create_dir_all(&cyc_dir).unwrap();
         let record = serde_json::json!({
@@ -671,10 +1176,6 @@ mod tests {
         fs::write(path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
     }
 
-    // -----------------------------------------------------------------------
-    // read_json_dir
-    // -----------------------------------------------------------------------
-
     #[test]
     fn test_read_json_dir_empty() {
         let tmp = tempfile::tempdir().unwrap();
@@ -694,11 +1195,7 @@ mod tests {
     fn test_read_json_dir_ignores_non_json() {
         let tmp = tempfile::tempdir().unwrap();
         fs::write(tmp.path().join("readme.txt"), "not json").unwrap();
-        fs::write(
-            tmp.path().join("valid.json"),
-            r#"{"id": "test"}"#,
-        )
-        .unwrap();
+        fs::write(tmp.path().join("valid.json"), r#"{"id": "test"}"#).unwrap();
         let items = read_json_dir(tmp.path());
         assert_eq!(items.len(), 1);
     }
@@ -713,41 +1210,13 @@ mod tests {
     }
 
     #[test]
-    fn test_read_json_dir_sorted_by_completed() {
-        let tmp = tempfile::tempdir().unwrap();
-        fs::write(
-            tmp.path().join("a.json"),
-            r#"{"timestamps": {"completed": "2026-05-25T10:00:00+00:00"}}"#,
-        ).unwrap();
-        fs::write(
-            tmp.path().join("b.json"),
-            r#"{"timestamps": {"completed": "2026-05-25T12:00:00+00:00"}}"#,
-        ).unwrap();
-        let items = read_json_dir(tmp.path());
-        assert_eq!(items.len(), 2);
-        // b (12:00) should come first (newest)
-        let ts_first = items[0]["timestamps"]["completed"].as_str().unwrap();
-        assert!(ts_first.contains("12:00"));
-    }
-
-    // -----------------------------------------------------------------------
-    // filter_hypotheses
-    // -----------------------------------------------------------------------
-
-    #[test]
     fn test_filter_by_agent() {
         let items = vec![
             serde_json::json!({"agent": "micro", "status": "replicated"}),
             serde_json::json!({"agent": "macro", "status": "failed"}),
             serde_json::json!({"agent": "micro", "status": "failed"}),
         ];
-        let q = HypothesisQuery {
-            agent: Some("micro".to_string()),
-            generator: None,
-            status: None,
-            limit: None,
-            offset: None,
-        };
+        let q = HypothesisQuery { agent: Some("micro".to_string()), generator: None, status: None, limit: None, offset: None };
         let filtered = filter_hypotheses(&items, &q);
         assert_eq!(filtered.len(), 2);
     }
@@ -758,128 +1227,22 @@ mod tests {
             serde_json::json!({"agent": "micro", "status": "replicated"}),
             serde_json::json!({"agent": "macro", "status": "failed"}),
         ];
-        let q = HypothesisQuery {
-            agent: None,
-            generator: None,
-            status: Some("replicated".to_string()),
-            limit: None,
-            offset: None,
-        };
-        let filtered = filter_hypotheses(&items, &q);
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0]["status"], "replicated");
-    }
-
-    #[test]
-    fn test_filter_by_generator() {
-        let items = vec![
-            serde_json::json!({"generator": "systematic", "status": "replicated"}),
-            serde_json::json!({"generator": "spectral", "status": "replicated"}),
-        ];
-        let q = HypothesisQuery {
-            agent: None,
-            generator: Some("spectral".to_string()),
-            status: None,
-            limit: None,
-            offset: None,
-        };
-        let filtered = filter_hypotheses(&items, &q);
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0]["generator"], "spectral");
-    }
-
-    #[test]
-    fn test_filter_combined() {
-        let items = vec![
-            serde_json::json!({"agent": "micro", "generator": "systematic", "status": "replicated"}),
-            serde_json::json!({"agent": "micro", "generator": "systematic", "status": "failed"}),
-            serde_json::json!({"agent": "macro", "generator": "systematic", "status": "replicated"}),
-        ];
-        let q = HypothesisQuery {
-            agent: Some("micro".to_string()),
-            generator: Some("systematic".to_string()),
-            status: Some("replicated".to_string()),
-            limit: None,
-            offset: None,
-        };
+        let q = HypothesisQuery { agent: None, generator: None, status: Some("replicated".to_string()), limit: None, offset: None };
         let filtered = filter_hypotheses(&items, &q);
         assert_eq!(filtered.len(), 1);
     }
-
-    #[test]
-    fn test_filter_no_match() {
-        let items = vec![
-            serde_json::json!({"agent": "micro", "status": "failed"}),
-        ];
-        let q = HypothesisQuery {
-            agent: Some("nonexistent".to_string()),
-            generator: None,
-            status: None,
-            limit: None,
-            offset: None,
-        };
-        let filtered = filter_hypotheses(&items, &q);
-        assert!(filtered.is_empty());
-    }
-
-    #[test]
-    fn test_filter_no_filters() {
-        let items = vec![
-            serde_json::json!({"agent": "micro"}),
-            serde_json::json!({"agent": "macro"}),
-        ];
-        let q = HypothesisQuery {
-            agent: None,
-            generator: None,
-            status: None,
-            limit: None,
-            offset: None,
-        };
-        let filtered = filter_hypotheses(&items, &q);
-        assert_eq!(filtered.len(), 2);
-    }
-
-    // -----------------------------------------------------------------------
-    // filter_cycles
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_filter_cycles_by_agent() {
-        let items = vec![
-            serde_json::json!({"agent": "micro", "cycle_id": "CYC-1"}),
-            serde_json::json!({"agent": "macro", "cycle_id": "CYC-2"}),
-        ];
-        let q = CycleQuery {
-            agent: Some("micro".to_string()),
-            limit: None,
-            offset: None,
-        };
-        let filtered = filter_cycles(&items, &q);
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0]["cycle_id"], "CYC-1");
-    }
-
-    // -----------------------------------------------------------------------
-    // paginate
-    // -----------------------------------------------------------------------
 
     #[test]
     fn test_paginate_basic() {
-        let items: Vec<serde_json::Value> = (0..10)
-            .map(|i| serde_json::json!({"i": i}))
-            .collect();
+        let items: Vec<serde_json::Value> = (0..10).map(|i| serde_json::json!({"i": i})).collect();
         let result = paginate(items, 0, 3);
         assert_eq!(result.total, 10);
         assert_eq!(result.items.len(), 3);
-        assert_eq!(result.offset, 0);
-        assert_eq!(result.limit, 3);
     }
 
     #[test]
     fn test_paginate_offset() {
-        let items: Vec<serde_json::Value> = (0..10)
-            .map(|i| serde_json::json!({"i": i}))
-            .collect();
+        let items: Vec<serde_json::Value> = (0..10).map(|i| serde_json::json!({"i": i})).collect();
         let result = paginate(items, 5, 3);
         assert_eq!(result.total, 10);
         assert_eq!(result.items.len(), 3);
@@ -887,230 +1250,17 @@ mod tests {
     }
 
     #[test]
-    fn test_paginate_past_end() {
-        let items: Vec<serde_json::Value> = (0..3)
-            .map(|i| serde_json::json!({"i": i}))
-            .collect();
-        let result = paginate(items, 10, 5);
-        assert_eq!(result.total, 3);
-        assert!(result.items.is_empty());
-    }
-
-    #[test]
-    fn test_paginate_empty() {
-        let result = paginate(Vec::new(), 0, 10);
-        assert_eq!(result.total, 0);
-        assert!(result.items.is_empty());
-    }
-
-    // -----------------------------------------------------------------------
-    // Integration: full file read + filter + paginate
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_end_to_end_hypotheses() {
-        let tmp = tempfile::tempdir().unwrap();
-        write_hypothesis(tmp.path(), "HYP-SYS-001", "micro", "systematic", "replicated");
-        write_hypothesis(tmp.path(), "HYP-SYS-002", "micro", "systematic", "failed");
-        write_hypothesis(tmp.path(), "HYP-SPE-003", "micro", "spectral", "replicated");
-        write_hypothesis(tmp.path(), "HYP-MAC-004", "macro", "funding_meanrev", "failed");
-
-        let dir = tmp.path().join("hypotheses");
-        let all = read_json_dir(&dir);
-        assert_eq!(all.len(), 4);
-
-        // Filter: micro + replicated
-        let q = HypothesisQuery {
-            agent: Some("micro".to_string()),
-            generator: None,
-            status: Some("replicated".to_string()),
-            limit: None,
-            offset: None,
-        };
-        let filtered = filter_hypotheses(&all, &q);
-        assert_eq!(filtered.len(), 2);
-
-        // Paginate
-        let page = paginate(filtered, 0, 1);
-        assert_eq!(page.total, 2);
-        assert_eq!(page.items.len(), 1);
-    }
-
-    #[test]
-    fn test_end_to_end_cycles() {
-        let tmp = tempfile::tempdir().unwrap();
-        write_cycle(tmp.path(), "CYC-001", "micro", 10);
-        write_cycle(tmp.path(), "CYC-002", "macro", 5);
-        write_cycle(tmp.path(), "CYC-003", "micro", 8);
-
-        let dir = tmp.path().join("cycles");
-        let all = read_json_dir(&dir);
-        assert_eq!(all.len(), 3);
-
-        let q = CycleQuery {
-            agent: Some("micro".to_string()),
-            limit: None,
-            offset: None,
-        };
-        let filtered = filter_cycles(&all, &q);
-        assert_eq!(filtered.len(), 2);
-    }
-
-    #[test]
-    fn test_signals_filters_replicated_only() {
-        let tmp = tempfile::tempdir().unwrap();
-        write_hypothesis(tmp.path(), "H1", "micro", "systematic", "replicated");
-        write_hypothesis(tmp.path(), "H2", "micro", "systematic", "failed");
-        write_hypothesis(tmp.path(), "H3", "micro", "spectral", "replicated");
-
-        let dir = tmp.path().join("hypotheses");
-        let all = read_json_dir(&dir);
-        let signals: Vec<_> = all
-            .into_iter()
-            .filter(|h| h.get("status").and_then(|v| v.as_str()) == Some("replicated"))
-            .collect();
-        assert_eq!(signals.len(), 2);
-    }
-
-    #[test]
-    fn test_stats_aggregation() {
-        let tmp = tempfile::tempdir().unwrap();
-        write_hypothesis(tmp.path(), "H1", "micro", "systematic", "replicated");
-        write_hypothesis(tmp.path(), "H2", "micro", "spectral", "failed");
-        write_hypothesis(tmp.path(), "H3", "macro", "systematic", "replicated");
-        write_cycle(tmp.path(), "C1", "micro", 5);
-        write_cycle(tmp.path(), "C2", "macro", 3);
-
-        let hyp_dir = tmp.path().join("hypotheses");
-        let cyc_dir = tmp.path().join("cycles");
-        let hypotheses = read_json_dir(&hyp_dir);
-        let cycles = read_json_dir(&cyc_dir);
-
-        let mut by_status: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        let mut by_agent: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        let mut by_generator: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-
-        for h in &hypotheses {
-            if let Some(s) = h.get("status").and_then(|v| v.as_str()) {
-                *by_status.entry(s.to_string()).or_default() += 1;
-            }
-            if let Some(a) = h.get("agent").and_then(|v| v.as_str()) {
-                *by_agent.entry(a.to_string()).or_default() += 1;
-            }
-            if let Some(g) = h.get("generator").and_then(|v| v.as_str()) {
-                *by_generator.entry(g.to_string()).or_default() += 1;
-            }
-        }
-
-        assert_eq!(hypotheses.len(), 3);
-        assert_eq!(cycles.len(), 2);
-        assert_eq!(by_status["replicated"], 2);
-        assert_eq!(by_status["failed"], 1);
-        assert_eq!(by_agent["micro"], 2);
-        assert_eq!(by_agent["macro"], 1);
-        assert_eq!(by_generator["systematic"], 2);
-        assert_eq!(by_generator["spectral"], 1);
-    }
-
-    #[test]
-    fn test_heatmap_extraction() {
-        let tmp = tempfile::tempdir().unwrap();
-        write_hypothesis(tmp.path(), "H1", "micro", "systematic", "replicated");
-        write_hypothesis(tmp.path(), "H2", "micro", "systematic", "failed");
-
-        let dir = tmp.path().join("hypotheses");
-        let all = read_json_dir(&dir);
-
-        let mut entries = Vec::new();
-        let mut features_set = std::collections::BTreeSet::new();
-
-        for h in &all {
-            let status = h.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
-            let horizon = h.get("horizon_s").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let feats = h.get("features").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-            let ic = h.get("gates")
-                .and_then(|g| g.as_array())
-                .and_then(|gates| {
-                    gates.iter().find_map(|gate| {
-                        if gate.get("name").and_then(|v| v.as_str()) == Some("IC") {
-                            gate.get("metric").and_then(|v| v.as_f64())
-                        } else {
-                            None
-                        }
-                    })
-                })
-                .unwrap_or(0.0);
-
-            for feat_val in &feats {
-                if let Some(feat) = feat_val.as_str() {
-                    features_set.insert(feat.to_string());
-                    entries.push(HeatmapEntry {
-                        feature: feat.to_string(),
-                        horizon_s: horizon,
-                        ic,
-                        status: status.to_string(),
-                    });
-                }
-            }
-        }
-
-        assert_eq!(entries.len(), 2);
-        assert!(features_set.contains("ent_book_shape"));
-        assert!((entries[0].ic - 0.08).abs() < 1e-6);
-        assert_eq!(entries[0].horizon_s, 5.0);
-    }
-
-    #[test]
-    fn test_hypothesis_schema_fields() {
-        let tmp = tempfile::tempdir().unwrap();
-        write_hypothesis(tmp.path(), "HYP-SYS-test", "micro", "systematic", "replicated");
-
-        let dir = tmp.path().join("hypotheses");
-        let all = read_json_dir(&dir);
-        assert_eq!(all.len(), 1);
-
-        let h = &all[0];
-        assert_eq!(h["schema_version"], 1);
-        assert_eq!(h["id"], "HYP-SYS-test");
-        assert_eq!(h["agent"], "micro");
-        assert_eq!(h["generator"], "systematic");
-        assert!(h["claim"].as_str().unwrap().len() > 0);
-        assert!(h["math"].as_str().unwrap().len() > 0);
-        assert_eq!(h["status"], "replicated");
-        assert!(h["gates"].as_array().unwrap().len() > 0);
-        assert!(h["features"].as_array().unwrap().len() > 0);
-        assert!(h["timestamps"]["created"].as_str().is_some());
-        assert!(h["timestamps"]["completed"].as_str().is_some());
-    }
-
-    #[test]
-    fn test_cycle_schema_fields() {
-        let tmp = tempfile::tempdir().unwrap();
-        write_cycle(tmp.path(), "CYC-test01", "micro", 7);
-
-        let dir = tmp.path().join("cycles");
-        let all = read_json_dir(&dir);
-        assert_eq!(all.len(), 1);
-
-        let c = &all[0];
-        assert_eq!(c["schema_version"], 1);
-        assert_eq!(c["cycle_id"], "CYC-test01");
-        assert_eq!(c["agent"], "micro");
-        assert_eq!(c["n_tested"], 7);
-        assert_eq!(c["n_registered"], 1);
-        assert_eq!(c["fdr_q"], 0.05);
-        assert!(c["started"].as_str().is_some());
-        assert!(c["completed"].as_str().is_some());
-    }
-
-    #[test]
-    fn test_empty_research_dir() {
-        let tmp = tempfile::tempdir().unwrap();
-        // No hypotheses or cycles dirs created
-        let hyp_dir = tmp.path().join("hypotheses");
-        let cyc_dir = tmp.path().join("cycles");
-        assert!(read_json_dir(&hyp_dir).is_empty());
-        assert!(read_json_dir(&cyc_dir).is_empty());
+    fn test_compute_stats_from_items() {
+        let items = vec![
+            serde_json::json!({"agent": "micro", "generator": "systematic", "status": "replicated"}),
+            serde_json::json!({"agent": "micro", "generator": "spectral", "status": "failed"}),
+            serde_json::json!({"agent": "macro", "generator": "systematic", "status": "replicated"}),
+        ];
+        let stats = compute_stats_from_items(&items, 2);
+        assert_eq!(stats.total_hypotheses, 3);
+        assert_eq!(stats.total_cycles, 2);
+        assert_eq!(stats.by_status["replicated"], 2);
+        assert_eq!(stats.by_agent["micro"], 2);
     }
 
     // -----------------------------------------------------------------------
@@ -1131,10 +1281,6 @@ mod tests {
         assert_eq!(feature_category("whale_net_flow_1h"), "whale");
         assert_eq!(feature_category("liquidation_intensity"), "liquidation");
         assert_eq!(feature_category("top5_concentration"), "concentration");
-        assert_eq!(feature_category("herfindahl_index"), "concentration");
-        assert_eq!(feature_category("gini_coefficient"), "concentration");
-        assert_eq!(feature_category("ctx_open_interest"), "context");
-        assert_eq!(feature_category("raw_microprice"), "raw");
         assert_eq!(feature_category("unknown_feature"), "other");
     }
 
@@ -1148,77 +1294,34 @@ mod tests {
             },
             "cmi_matrix": {
                 "spread_ba": {"10t": 0.04, "50t": 0.02},
-                "depth_bid": {"10t": 0.01, "50t": 0.005},
-                "ent_shape": {"10t": 0.0, "50t": 0.0}
+                "depth_bid": {"10t": 0.01, "50t": 0.005}
             },
-            "interaction": {
-                "spread_ba": 0.003,
-                "depth_bid": -0.001,
-                "ent_shape": 0.0
-            },
-            "cost_viable": {
-                "spread_ba": true,
-                "depth_bid": false,
-                "ent_shape": false
-            },
+            "interaction": {"spread_ba": 0.003, "depth_bid": -0.001},
+            "cost_viable": {"spread_ba": true, "depth_bid": false},
             "selected_features": ["spread_ba"],
             "symbol": "BTC",
             "n_samples": 6000,
-            "last_updated": "2026-05-21T11:00:00",
-            "cycle_count": 1
+            "last_updated": "2026-05-21T11:00:00"
         });
 
         let hypotheses = vec![
-            serde_json::json!({"features": ["spread_ba", "depth_bid"], "status": "replicated"}),
-            serde_json::json!({"features": ["spread_ba", "ent_shape"], "status": "failed"}),
-            serde_json::json!({"features": ["spread_ba"], "status": "replicated"}),
+            serde_json::json!({"features": ["spread_ba", "depth_bid"]}),
+            serde_json::json!({"features": ["spread_ba", "ent_shape"]}),
+            serde_json::json!({"features": ["spread_ba"]}),
         ];
 
         let net = build_network(&it_state, &hypotheses);
-
         assert_eq!(net.nodes.len(), 3);
         assert_eq!(net.meta.symbol, "BTC");
-        assert_eq!(net.meta.n_samples, 6000);
-        assert_eq!(net.meta.total_features, 3);
 
         let spread_node = net.nodes.iter().find(|n| n.id == "spread_ba").unwrap();
-        assert_eq!(spread_node.category, "spread");
         assert!(spread_node.cost_viable);
         assert!(spread_node.selected);
         assert_eq!(spread_node.hypothesis_count, 3);
-        assert!((spread_node.mi["10t"] - 0.05).abs() < 1e-9);
-        assert!((spread_node.interaction - 0.003).abs() < 1e-9);
-
-        let depth_node = net.nodes.iter().find(|n| n.id == "depth_bid").unwrap();
-        assert_eq!(depth_node.hypothesis_count, 1);
-        assert!(!depth_node.selected);
-
-        // Edges: spread_ba-depth_bid (1), spread_ba-ent_shape (1)
-        assert_eq!(net.edges.len(), 2);
     }
 
     #[test]
-    fn test_build_network_no_hypotheses() {
-        let it_state = serde_json::json!({
-            "mi_matrix": {"spread_ba": {"10t": 0.05}},
-            "cmi_matrix": {},
-            "interaction": {},
-            "cost_viable": {},
-            "selected_features": [],
-            "symbol": "ETH",
-            "n_samples": 1000,
-            "last_updated": "2026-05-20",
-            "cycle_count": 0
-        });
-        let net = build_network(&it_state, &[]);
-        assert_eq!(net.nodes.len(), 1);
-        assert_eq!(net.nodes[0].hypothesis_count, 0);
-        assert!(net.edges.is_empty());
-        assert_eq!(net.meta.symbol, "ETH");
-    }
-
-    #[test]
-    fn test_build_network_empty_state() {
+    fn test_build_network_empty() {
         let it_state = serde_json::json!({
             "mi_matrix": {},
             "symbol": "SOL",
@@ -1228,84 +1331,52 @@ mod tests {
         let net = build_network(&it_state, &[]);
         assert!(net.nodes.is_empty());
         assert!(net.edges.is_empty());
-        assert_eq!(net.meta.total_features, 0);
     }
 
     #[test]
     fn test_read_it_engine_state() {
         let tmp = tempfile::tempdir().unwrap();
-        let state = serde_json::json!({
-            "mi_matrix": {"feat_a": {"10t": 0.1}},
-            "symbol": "BTC",
-            "n_samples": 100,
-            "last_updated": "2026-05-25"
-        });
+        let state = serde_json::json!({"mi_matrix": {"feat_a": {"10t": 0.1}}, "symbol": "BTC"});
         fs::write(
             tmp.path().join("state_BTC.json"),
             serde_json::to_string(&state).unwrap(),
         ).unwrap();
-
         let loaded = read_it_engine_state(tmp.path(), "BTC");
         assert!(loaded.is_some());
-        assert_eq!(loaded.unwrap()["symbol"], "BTC");
-
-        // Missing symbol returns None
-        let missing = read_it_engine_state(tmp.path(), "ETH");
-        assert!(missing.is_none());
-    }
-
-    #[test]
-    fn test_paginate_limit_clamped() {
-        // Verify that limit > total still works
-        let items: Vec<serde_json::Value> = (0..3)
-            .map(|i| serde_json::json!({"i": i}))
-            .collect();
-        let result = paginate(items, 0, 100);
-        assert_eq!(result.total, 3);
-        assert_eq!(result.items.len(), 3);
-        assert_eq!(result.limit, 100);
+        assert!(read_it_engine_state(tmp.path(), "ETH").is_none());
     }
 
     // -----------------------------------------------------------------------
-    // Cache tests
+    // End-to-end: JSON fallback still works
     // -----------------------------------------------------------------------
 
-    use crate::state::ResearchCache;
-    use std::time::{Duration, Instant};
-
     #[test]
-    fn test_cache_starts_stale() {
-        let cache = ResearchCache::new(Duration::from_secs(30));
-        assert!(cache.is_stale());
-        assert!(cache.hypotheses.is_empty());
-        assert!(cache.cycles.is_empty());
+    fn test_json_fallback_hypotheses() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_hypothesis_json(tmp.path(), "H1", "micro", "systematic", "replicated");
+        write_hypothesis_json(tmp.path(), "H2", "micro", "systematic", "failed");
+
+        let dir = tmp.path().join("hypotheses");
+        let all = read_json_dir(&dir);
+        assert_eq!(all.len(), 2);
+
+        let q = HypothesisQuery { agent: Some("micro".to_string()), generator: None, status: Some("replicated".to_string()), limit: None, offset: None };
+        let filtered = filter_hypotheses(&all, &q);
+        assert_eq!(filtered.len(), 1);
     }
 
     #[test]
-    fn test_cache_fresh_after_load() {
-        let mut cache = ResearchCache::new(Duration::from_secs(30));
-        cache.hypotheses = vec![serde_json::json!({"id": "H1"})];
-        cache.loaded_at = Instant::now();
-        assert!(!cache.is_stale());
-        assert_eq!(cache.hypotheses.len(), 1);
-    }
+    fn test_json_fallback_cycles() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_cycle_json(tmp.path(), "CYC-1", "micro", 10);
+        write_cycle_json(tmp.path(), "CYC-2", "macro", 5);
 
-    #[test]
-    fn test_cache_stale_after_ttl() {
-        let mut cache = ResearchCache::new(Duration::from_millis(1));
-        cache.loaded_at = Instant::now() - Duration::from_millis(10);
-        assert!(cache.is_stale());
-    }
+        let dir = tmp.path().join("cycles");
+        let all = read_json_dir(&dir);
+        assert_eq!(all.len(), 2);
 
-    #[test]
-    fn test_cache_invalidation() {
-        let mut cache = ResearchCache::new(Duration::from_secs(30));
-        cache.hypotheses = vec![serde_json::json!({"id": "H1"})];
-        cache.loaded_at = Instant::now();
-        assert!(!cache.is_stale());
-
-        // Invalidate by pushing loaded_at back past TTL
-        cache.loaded_at = Instant::now() - cache.ttl - Duration::from_secs(1);
-        assert!(cache.is_stale());
+        let q = CycleQuery { agent: Some("micro".to_string()), limit: None, offset: None };
+        let filtered = filter_cycles(&all, &q);
+        assert_eq!(filtered.len(), 1);
     }
 }

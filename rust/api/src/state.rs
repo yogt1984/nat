@@ -2,46 +2,46 @@
 
 use crate::config::ApiConfig;
 use crate::redis_client::RedisClient;
+use rusqlite::Connection;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
-
-/// Cached research data — avoids re-reading JSON from disk on every request.
-pub struct ResearchCache {
-    pub hypotheses: Vec<serde_json::Value>,
-    pub cycles: Vec<serde_json::Value>,
-    pub loaded_at: Instant,
-    pub ttl: Duration,
-}
-
-impl ResearchCache {
-    pub fn new(ttl: Duration) -> Self {
-        Self {
-            hypotheses: Vec::new(),
-            cycles: Vec::new(),
-            loaded_at: Instant::now() - ttl - Duration::from_secs(1), // force initial load
-            ttl,
-        }
-    }
-
-    pub fn is_stale(&self) -> bool {
-        self.loaded_at.elapsed() > self.ttl
-    }
-}
+use tokio::sync::Mutex as TokioMutex;
+use tracing::warn;
 
 /// Shared application state
 pub struct AppState {
     pub redis: RedisClient,
     pub config: ApiConfig,
-    pub research_cache: Arc<RwLock<ResearchCache>>,
+    /// SQLite connection for research data (WAL mode, read-only from API side).
+    pub research_db: Option<Arc<TokioMutex<Connection>>>,
 }
 
 impl AppState {
     pub fn new(redis: RedisClient, config: ApiConfig) -> Self {
+        let research_db = open_research_db(&config.research_db_path);
         Self {
             redis,
             config,
-            research_cache: Arc::new(RwLock::new(ResearchCache::new(Duration::from_secs(30)))),
+            research_db,
+        }
+    }
+}
+
+/// Open SQLite database in WAL mode (read-only access for the API).
+/// Returns None if the database doesn't exist or can't be opened.
+fn open_research_db(path: &str) -> Option<Arc<TokioMutex<Connection>>> {
+    match Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(conn) => {
+            // Ensure WAL mode for concurrent reads
+            let _ = conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
+            Some(Arc::new(TokioMutex::new(conn)))
+        }
+        Err(e) => {
+            warn!("Could not open research DB at {}: {} — falling back to JSON", path, e);
+            None
         }
     }
 }
