@@ -276,19 +276,222 @@ nat backtest algorithm --algorithm weighted_ofi --symbol BTC
 | 21 | `spectral` | Spectral momentum extraction | — |
 | 22-27 | Various | Additional signal algorithms | See `scripts/algorithms/` |
 
-### Algorithm Evaluation Results (Experiment Report 2)
+### Top Performer Algorithms — `nat oos30`
 
-Walk-forward paper trading across BTC/ETH/SOL at 100min horizon, 5min bars, 1.61 bps fees:
+These 5 algorithms are the validated winners from a 17-algorithm walk-forward paper trade sweep (Experiment Report 2). They are tested together via `nat oos30` on 30-day out-of-sample data. Walk-forward conditions: 5min bars, 100min horizon (20 bars), 3-day rolling training window, P20/P80 z-score entry, 1.61 bps round-trip fees.
 
-| Tier | Algorithm | Total P&L (bps) | Best Sharpe |
-|------|-----------|-----------------|-------------|
-| **1 — Deployable** | `jump_detector` | **+23,199** | 6.2 (ETH/SOL) |
-| **1 — Deployable** | `funding_reversion` | **+14,459** | 6.0 (ETH) |
-| **1 — Deployable** | `optimal_entry` | **+13,679** | 5.2 (ETH) |
-| **2 — Symbol-specific** | `surprise_signal` | +3,505 | 6.7 (SOL) |
-| **Baseline** | `3f_liquidity` | — | 9.2 (BTC) |
+| Tier | Algorithm | Total P&L (bps) | BTC Sharpe | ETH Sharpe | SOL Sharpe |
+|------|-----------|-----------------|-----------|-----------|-----------|
+| **1 — Deployable** | `jump_detector` | **+23,199** | 1.6 | **6.2** | **6.2** |
+| **1 — Deployable** | `funding_reversion` | **+14,459** | 0.4 | **6.0** | 1.7 |
+| **1 — Deployable** | `optimal_entry` | **+13,679** | 1.1 | **5.2** | 1.0 |
+| **2 — Symbol-specific** | `surprise_signal` | +3,505 | -8.3 | 3.1 | **6.7** |
+| **Baseline** | `3f_liquidity` | — | **9.2** | **7.8** | 3.2 |
 
-The winning algorithms are complementary: 3f dominates BTC, jump/optimal dominate ETH/SOL.
+The algorithms are complementary: 3f dominates BTC, jump/optimal dominate ETH/SOL, surprise captures SOL microstructure.
+
+---
+
+#### 1. `3f_liquidity` — Three-Feature Liquidity Composite (BTC Specialist)
+
+**Verbal description.** Constructs a composite liquidity score from three order book features — spread, depth, and VWAP deviation — then z-scores the composite over a rolling training window. Extreme z-scores (P20/P80) trigger mean-reversion entries: wide spreads and thin depth revert as liquidity providers refill.
+
+**Mathematical formulation.** Given 5-minute bars, the three input features are:
+
+```
+  f₁ = raw_spread_bps       (bid-ask spread in basis points)
+  f₂ = raw_ask_depth_5      (ask-side volume, levels 1-5)
+  f₃ = flow_vwap_deviation  (price deviation from volume-weighted average)
+```
+
+Each feature is z-scored over a rolling W-day training window:
+
+```
+  z_i(t) = ( f_i(t) - μ_i ) / σ_i       where μ_i, σ_i from training window
+```
+
+The composite signal is:
+
+```
+  C(t) = z₁(t) + z₂(t) + z₃(t)
+```
+
+Entry logic (percentile thresholds from training distribution):
+
+```
+  Long   if  C(t) ≤ P₂₀(C_train)     (liquidity stress → reversion expected)
+  Short  if  C(t) ≥ P₈₀(C_train)     (excess liquidity → reversion expected)
+  Flat   otherwise
+```
+
+Exit: fixed 100-minute horizon (20 bars). P&L computed net of 1.61 bps round-trip fees.
+
+**Performance:** Sharpe 9.2 (BTC), 7.8 (ETH), 3.2 (SOL). Strongest single-symbol algorithm on BTC.
+
+---
+
+#### 2. `jump_detector` — Lee-Mykland Nonparametric Jump Detection
+
+**Verbal description.** Detects intraday price jumps by comparing each log-return against a locally-estimated diffusion volatility that is robust to other jumps in the window. After a jump is detected, the algorithm trades the post-jump mean-reversion: prices that jump sharply tend to partially revert within the next 50 ticks.
+
+**Mathematical formulation.** Let r_t = ln(p_t / p_{t-1}) be the tick-level log-return. The local volatility is estimated via bipower variation, which is robust to jumps (unlike standard deviation):
+
+```
+  σ̂_BV(t) = √( (π/2) · mean_{i=2}^{K} |r_{t-i}| · |r_{t-i+1}| )
+```
+
+The constant π/2 = 1/μ₁² corrects for the expected product of adjacent half-normal random variables (μ₁ = E[|Z|] = √(2/π) for Z ~ N(0,1)).
+
+The Lee-Mykland test statistic is:
+
+```
+  L(t) = |r_t| / σ̂_BV(t)
+```
+
+A jump is declared when L(t) > c (default c = 3.0, corresponding to ~3σ under normal approximation). The exact critical value follows a Gumbel distribution under continuous-record asymptotics.
+
+After a detected jump at tick t_J with return r_J and price p_J, the post-jump reversion signal at tick t is:
+
+```
+  REV(t) = - ln(p_t / p_J) / r_J       for 0 < t - t_J ≤ H
+```
+
+Interpretation: REV > 0 means price has reverted against the jump direction. The negation convention makes +1 = "fully reverted", so a positive signal directly indicates reversion.
+
+**Parameters:** window K = 100 ticks, significance c = 3.0, reversion horizon H = 50 ticks.
+
+**Performance:** +23,199 bps total. Sharpe 6.2 on both ETH and SOL. Strongest cross-symbol algorithm.
+
+**Reference:** Lee, S.S. & Mykland, P.A. (2008). Jumps in financial markets: a new nonparametric test and jump dynamics. *Review of Financial Studies*, 21(6), 2535-2563.
+
+---
+
+#### 3. `optimal_entry` — SPRT on Kalman Innovation
+
+**Verbal description.** Uses a Sequential Probability Ratio Test (Wald 1947) on the innovation sequence of a Kalman filter tracking an Ornstein-Uhlenbeck process on order book imbalance. The SPRT accumulates evidence for whether a systematic drift has appeared in the filtered imbalance signal. When sufficient evidence accumulates, an entry signal fires in the drift direction. This provides statistically optimal entry timing — the SPRT minimizes expected sample size for a given error rate.
+
+**Mathematical formulation.** A Kalman filter tracks latent OU dynamics on `imbalance_qty_l1`. The one-step-ahead innovation is:
+
+```
+  ν_t = z_t - ẑ_{t|t-1}
+```
+
+The SPRT tests between two hypotheses:
+
+```
+  H₀: ν_t ~ N(0, σ̂²)         (no signal — noise only)
+  H₁: ν_t ~ N(μ, σ̂²)         (drift present — entry opportunity)
+```
+
+where μ = 0.001 (minimum detectable drift) and σ̂² is an EMA estimate of innovation variance:
+
+```
+  σ̂²(t) = α · ν_t² + (1 - α) · σ̂²(t-1)       α = 0.02
+```
+
+The per-tick log-likelihood ratio increment (closed-form Gaussian ratio):
+
+```
+  Λ_t = (μ / σ̂²) · ν_t  −  μ² / (2σ̂²)
+```
+
+The cumulative test statistic is updated recursively:
+
+```
+  S_n = S_{n-1} + Λ_t
+```
+
+Wald's optimal decision boundaries:
+
+```
+  A = log((1 - β) / α) ≈ 2.77     (accept H₁ — fire entry signal)
+  B = log(β / (1 - α)) ≈ -1.55    (accept H₀ — no entry)
+```
+
+When S_n ≥ A: entry direction = sign(ν_t), S resets to 0. When S_n ≤ B: no signal, S resets.
+
+**Parameters:** OU theta = 0.1, process noise = 0.01, observation noise = 0.1, α = 0.05, β = 0.20.
+
+**Performance:** +13,679 bps total. Sharpe 5.2 (ETH). Especially strong at filtering noise from imbalance signals.
+
+**References:** Wald, A. (1947). *Sequential Analysis*. Wiley. Shiryaev, A.N. (1978). *Optimal Stopping Rules*. Springer.
+
+---
+
+#### 4. `funding_reversion` — Funding Rate Mean-Reversion
+
+**Verbal description.** Perpetual futures funding rates exhibit strong mean-reversion: when funding is extremely positive (longs pay shorts), the rate tends to revert toward zero, creating a predictable price movement. This algorithm monitors the funding rate z-score and fires a contrarian entry when it exceeds a threshold. It also incorporates premium divergence — the gap between spot and futures price — as a confirming signal.
+
+**Mathematical formulation.** Given the funding rate z-score z_t and premium p_t (in basis points):
+
+The entry signal activates only when funding is extreme (|z| ≥ z_entry, default 2.0):
+
+```
+  signal(t) = -sign(z_t) · min(|z_t| / z_entry, 3) / 3       if |z_t| ≥ z_entry
+            = 0                                                 otherwise
+```
+
+The signal is contrarian: short when funding is extremely positive (crowded longs), long when extremely negative. The magnitude is clamped to [-1, 1] via the min/3 normalization.
+
+Funding momentum tracks the EMA of the raw funding rate for trend detection:
+
+```
+  EMA(t) = α · rate(t) + (1 - α) · EMA(t-1)       α = 2/(span+1), span=100
+```
+
+Premium divergence combines funding and premium into a unified score:
+
+```
+  D(t) = (1 - w) · z_t + w · (p_t / 10)       w = 0.3
+```
+
+The premium is scaled by 1/10 to bring it to a comparable magnitude with the z-score.
+
+**Parameters:** z-score entry threshold = 2.0, momentum span = 100 ticks, premium weight = 0.3.
+
+**Performance:** +14,459 bps total. Sharpe 6.0 (ETH). Crypto-native signal with no traditional finance analogue.
+
+---
+
+#### 5. `surprise_signal` — Entropy Regime Transition Detection
+
+**Verbal description.** Markets alternate between disordered (high entropy) and ordered (low entropy) states. A sudden entropy drop signals the market transitioning from noise to structure — a regime shift that often precedes directional moves. This algorithm detects these transitions by computing the rate-of-change of a composite entropy measure and z-scoring it. Large surprise values indicate regime transitions.
+
+**Mathematical formulation.** The composite entropy blends book shape entropy and tick entropy:
+
+```
+  E(t) = 0.5 · ent_book_shape(t) + 0.5 · ent_tick_5s(t)
+```
+
+The entropy rate-of-change over window W (default 50 ticks):
+
+```
+  ROC(t) = Ē₅(t) - Ē₅(t - W)
+```
+
+where Ē₅ is a 5-tick moving average of E (smoothing).
+
+The surprise z-score normalizes ROC against its own recent distribution:
+
+```
+  surprise(t) = (ROC(t) - μ_ROC) / σ_ROC
+```
+
+where μ_ROC, σ_ROC are computed over a rolling 2W window (min 20 observations).
+
+The regime transition probability uses a sigmoid transform:
+
+```
+  P_transition(t) = 1 / (1 + exp(-|surprise(t)| + τ))       τ = 2.0
+```
+
+Large |surprise| → high transition probability. The sign of surprise indicates direction: negative surprise (entropy dropping) = market ordering = potential trend formation.
+
+**Parameters:** ROC window = 50 ticks, transition threshold τ = 2.0.
+
+**Performance:** +3,505 bps total. Sharpe 6.7 (SOL). Captures SOL's more volatile microstructure transitions exceptionally well.
+
+**References:** Bandt, C. & Pompe, B. (2002). Permutation entropy. *Physical Review Letters*, 88(17), 174102. Schreiber, T. (2000). Measuring information transfer. *Physical Review Letters*, 85(2), 461-464.
 
 ---
 
