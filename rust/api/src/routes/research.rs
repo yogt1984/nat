@@ -1508,4 +1508,237 @@ mod tests {
         let filtered = filter_cycles(&all, &q);
         assert_eq!(filtered.len(), 1);
     }
+
+    // -----------------------------------------------------------------------
+    // API contract tests — verify response shapes match frontend TypeScript
+    // interfaces defined in web/src/lib/api.ts
+    // -----------------------------------------------------------------------
+
+    /// Assert that a hypothesis record has every field the frontend Hypothesis
+    /// interface expects, with correct types.
+    fn assert_hypothesis_shape(h: &serde_json::Value) {
+        assert!(h["id"].is_string(), "Hypothesis.id must be string");
+        assert!(h["agent"].is_string(), "Hypothesis.agent must be string");
+        assert!(h["generator"].is_string(), "Hypothesis.generator must be string");
+        assert!(h["claim"].is_string(), "Hypothesis.claim must be string");
+        assert!(h["math"].is_string(), "Hypothesis.math must be string");
+        assert!(h["status"].is_string(), "Hypothesis.status must be string");
+        // failure_reason: string | null
+        assert!(
+            h["failure_reason"].is_string() || h["failure_reason"].is_null(),
+            "Hypothesis.failure_reason must be string|null"
+        );
+        // gates: Gate[]
+        assert!(h["gates"].is_array(), "Hypothesis.gates must be array");
+        for gate in h["gates"].as_array().unwrap() {
+            assert!(gate["name"].is_string(), "Gate.name must be string");
+            assert!(gate["passed"].is_boolean(), "Gate.passed must be boolean");
+            assert!(gate["message"].is_string(), "Gate.message must be string");
+            assert!(
+                gate["metric"].is_number() || gate["metric"].is_null(),
+                "Gate.metric must be number|null"
+            );
+            assert!(
+                gate["threshold"].is_number() || gate["threshold"].is_null(),
+                "Gate.threshold must be number|null"
+            );
+            assert!(
+                gate["p_value"].is_number() || gate["p_value"].is_null(),
+                "Gate.p_value must be number|null"
+            );
+        }
+        // features: string[]
+        assert!(h["features"].is_array(), "Hypothesis.features must be array");
+        for f in h["features"].as_array().unwrap() {
+            assert!(f.is_string(), "features[] items must be strings");
+        }
+        // regime_gate: string | null
+        assert!(
+            h["regime_gate"].is_string() || h["regime_gate"].is_null(),
+            "Hypothesis.regime_gate must be string|null"
+        );
+        // horizon_s: number | null
+        assert!(
+            h["horizon_s"].is_number() || h["horizon_s"].is_null(),
+            "Hypothesis.horizon_s must be number|null"
+        );
+        // thresholds: Record<string, unknown>
+        assert!(h["thresholds"].is_object(), "Hypothesis.thresholds must be object");
+        // parent_id: string | null
+        assert!(
+            h["parent_id"].is_string() || h["parent_id"].is_null(),
+            "Hypothesis.parent_id must be string|null"
+        );
+        // timestamps: { created: string; completed: string | null }
+        assert!(h["timestamps"].is_object(), "Hypothesis.timestamps must be object");
+        assert!(h["timestamps"]["created"].is_string(), "timestamps.created must be string");
+        assert!(
+            h["timestamps"]["completed"].is_string() || h["timestamps"]["completed"].is_null(),
+            "timestamps.completed must be string|null"
+        );
+    }
+
+    /// Assert that a cycle record has every field the frontend CycleSummary
+    /// interface expects.
+    fn assert_cycle_shape(c: &serde_json::Value) {
+        assert!(c["cycle_id"].is_string(), "CycleSummary.cycle_id must be string");
+        assert!(c["agent"].is_string(), "CycleSummary.agent must be string");
+        assert!(c["started"].is_string(), "CycleSummary.started must be string");
+        assert!(c["completed"].is_string(), "CycleSummary.completed must be string");
+        assert!(c["duration_s"].is_number(), "CycleSummary.duration_s must be number");
+        assert!(c["n_tested"].is_number(), "CycleSummary.n_tested must be number");
+        assert!(c["n_registered"].is_number(), "CycleSummary.n_registered must be number");
+        assert!(c["n_fdr_rejected"].is_number(), "CycleSummary.n_fdr_rejected must be number");
+        assert!(c["n_chained"].is_number(), "CycleSummary.n_chained must be number");
+        assert!(c["fdr_q"].is_number(), "CycleSummary.fdr_q must be number");
+        assert!(c["hypotheses"].is_array(), "CycleSummary.hypotheses must be array");
+        assert!(c["generator_stats"].is_object(), "CycleSummary.generator_stats must be object");
+    }
+
+    #[test]
+    fn contract_hypothesis_record_shape() {
+        let db = test_db();
+        insert_hypothesis(&db, "H-CONTRACT-1", "micro", "systematic", "replicated");
+        insert_hypothesis(&db, "H-CONTRACT-2", "macro", "spectral", "failed");
+
+        let record = test_get_record(&db, "H-CONTRACT-1").unwrap();
+        let normalized = normalize_record(record);
+        assert_hypothesis_shape(&normalized);
+
+        let failed = test_get_record(&db, "H-CONTRACT-2").unwrap();
+        let normalized_failed = normalize_record(failed);
+        assert_hypothesis_shape(&normalized_failed);
+        assert!(normalized_failed["failure_reason"].is_string());
+    }
+
+    #[test]
+    fn contract_cycle_record_shape() {
+        let db = test_db();
+        insert_cycle(&db, "CYC-CONTRACT-1", "micro", 10);
+
+        let record = test_get_record(&db, "CYC-CONTRACT-1").unwrap();
+        assert_cycle_shape(&record);
+    }
+
+    #[test]
+    fn contract_paginated_response_shape() {
+        let items: Vec<serde_json::Value> = (0..5).map(|i| serde_json::json!({"i": i})).collect();
+        let resp = paginate(items, 1, 2);
+        let json = serde_json::to_value(&resp).unwrap();
+
+        assert!(json["items"].is_array(), "PaginatedResponse.items must be array");
+        assert!(json["total"].is_number(), "PaginatedResponse.total must be number");
+        assert!(json["offset"].is_number(), "PaginatedResponse.offset must be number");
+        assert!(json["limit"].is_number(), "PaginatedResponse.limit must be number");
+        assert_eq!(json["total"], 5);
+        assert_eq!(json["offset"], 1);
+        assert_eq!(json["limit"], 2);
+        assert_eq!(json["items"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn contract_stats_response_shape() {
+        let items = vec![
+            serde_json::json!({"agent": "micro", "generator": "systematic", "status": "replicated"}),
+            serde_json::json!({"agent": "macro", "generator": "spectral", "status": "failed"}),
+        ];
+        let stats = compute_stats_from_items(&items, 3);
+        let json = serde_json::to_value(&stats).unwrap();
+
+        assert!(json["total_hypotheses"].is_number(), "ResearchStats.total_hypotheses must be number");
+        assert!(json["total_cycles"].is_number(), "ResearchStats.total_cycles must be number");
+        assert!(json["by_status"].is_object(), "ResearchStats.by_status must be object");
+        assert!(json["by_agent"].is_object(), "ResearchStats.by_agent must be object");
+        assert!(json["by_generator"].is_object(), "ResearchStats.by_generator must be object");
+        // Values in maps must be numbers
+        for (_, v) in json["by_status"].as_object().unwrap() {
+            assert!(v.is_number(), "by_status values must be numbers");
+        }
+    }
+
+    #[test]
+    fn contract_heatmap_response_shape() {
+        let resp = HeatmapResponse {
+            entries: vec![HeatmapEntry {
+                feature: "ent_book_shape".to_string(),
+                horizon_s: 5.0,
+                ic: 0.08,
+                status: "replicated".to_string(),
+            }],
+            features: vec!["ent_book_shape".to_string()],
+            horizons: vec![5.0],
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+
+        assert!(json["entries"].is_array(), "HeatmapResponse.entries must be array");
+        assert!(json["features"].is_array(), "HeatmapResponse.features must be array");
+        assert!(json["horizons"].is_array(), "HeatmapResponse.horizons must be array");
+        let entry = &json["entries"][0];
+        assert!(entry["feature"].is_string(), "HeatmapEntry.feature must be string");
+        assert!(entry["horizon_s"].is_number(), "HeatmapEntry.horizon_s must be number");
+        assert!(entry["ic"].is_number(), "HeatmapEntry.ic must be number");
+        assert!(entry["status"].is_string(), "HeatmapEntry.status must be string");
+    }
+
+    #[test]
+    fn contract_network_response_shape() {
+        let it_state = serde_json::json!({
+            "mi_matrix": {"spread_ba": {"10t": 0.05}},
+            "cmi_matrix": {"spread_ba": {"10t": 0.04}},
+            "interaction": {"spread_ba": 0.003},
+            "cost_viable": {"spread_ba": true},
+            "selected_features": ["spread_ba"],
+            "symbol": "BTC",
+            "n_samples": 6000,
+            "last_updated": "2026-05-21T11:00:00"
+        });
+        let hypotheses = vec![serde_json::json!({"features": ["spread_ba"]})];
+        let net = build_network(&it_state, &hypotheses);
+        let json = serde_json::to_value(&net).unwrap();
+
+        // NetworkResponse top level
+        assert!(json["nodes"].is_array(), "NetworkResponse.nodes must be array");
+        assert!(json["edges"].is_array(), "NetworkResponse.edges must be array");
+        assert!(json["meta"].is_object(), "NetworkResponse.meta must be object");
+
+        // NetworkMeta
+        let meta = &json["meta"];
+        assert!(meta["symbol"].is_string(), "NetworkMeta.symbol must be string");
+        assert!(meta["n_samples"].is_number(), "NetworkMeta.n_samples must be number");
+        assert!(meta["last_updated"].is_string(), "NetworkMeta.last_updated must be string");
+        assert!(meta["total_features"].is_number(), "NetworkMeta.total_features must be number");
+
+        // NetworkNode
+        let node = &json["nodes"][0];
+        assert!(node["id"].is_string(), "NetworkNode.id must be string");
+        assert!(node["category"].is_string(), "NetworkNode.category must be string");
+        assert!(node["mi"].is_object(), "NetworkNode.mi must be object");
+        assert!(node["cmi"].is_object(), "NetworkNode.cmi must be object");
+        assert!(node["interaction"].is_number(), "NetworkNode.interaction must be number");
+        assert!(node["cost_viable"].is_boolean(), "NetworkNode.cost_viable must be boolean");
+        assert!(node["hypothesis_count"].is_number(), "NetworkNode.hypothesis_count must be number");
+        assert!(node["selected"].is_boolean(), "NetworkNode.selected must be boolean");
+    }
+
+    #[test]
+    fn contract_json_fallback_hypothesis_shape() {
+        // Verify JSON file fallback path also produces valid contract shape
+        let tmp = tempfile::tempdir().unwrap();
+        write_hypothesis_json(tmp.path(), "H-FB-1", "micro", "systematic", "replicated");
+        let dir = tmp.path().join("hypotheses");
+        let all = read_json_dir(&dir);
+        let normalized = normalize_batch(all);
+        assert_eq!(normalized.len(), 1);
+        assert_hypothesis_shape(&normalized[0]);
+    }
+
+    #[test]
+    fn contract_json_fallback_cycle_shape() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_cycle_json(tmp.path(), "CYC-FB-1", "micro", 5);
+        let dir = tmp.path().join("cycles");
+        let all = read_json_dir(&dir);
+        assert_eq!(all.len(), 1);
+        assert_cycle_shape(&all[0]);
+    }
 }

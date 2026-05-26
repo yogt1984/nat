@@ -119,7 +119,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 
 ---
 
-### 2.2 API Contract Testing
+### 2.2 API Contract Testing ✅
 
 **Problem:** Frontend TypeScript interfaces and Rust API response shapes are coupled by convention. A field rename in Rust silently breaks the frontend. No integration test verifies the full chain.
 
