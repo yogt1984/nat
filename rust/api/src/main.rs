@@ -58,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
         // WebSocket streaming
         .route("/ws/stream/:symbol", get(routes::ws::websocket_handler))
         .route("/ws/alerts", get(routes::ws::alerts_websocket_handler))
+        .route("/ws/research", get(routes::ws::research_websocket_handler))
         // Add state
         .with_state(state)
         // Add middleware

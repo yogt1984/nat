@@ -487,6 +487,14 @@ class BaseRunner(ABC):
             self.run_correlation_check,
         ]
 
+    def _publish_event(self, event_type: str, payload: dict) -> None:
+        """Publish a research event to Redis (best-effort)."""
+        try:
+            from .research_output import publish_research_event
+            publish_research_event(event_type, payload)
+        except Exception:
+            pass
+
     # --- Gate methods (shared across all runners) -------------------------
 
     def run_discovery(self) -> bool:
@@ -514,6 +522,15 @@ class BaseRunner(ABC):
             if report:
                 passed, msg = self._check_gates(report)
                 self.gate_results.append({"cmd": cmd_str, "passed": passed, "msg": msg})
+                gate_name = f"G{i + 1}_discovery"
+                if passed:
+                    self._publish_event("gate_passed", {
+                        "id": self.h.id, "gate": gate_name, "msg": msg,
+                    })
+                else:
+                    self._publish_event("gate_failed", {
+                        "id": self.h.id, "gate": gate_name, "reason": msg,
+                    })
                 log.info("  Gate %d: %s", i, msg)
                 if not passed:
                     self.h.fail("no_effect")
@@ -568,9 +585,17 @@ class BaseRunner(ABC):
         default_min = 1 if self.TIMEFRAME is None else 2
         min_dates = self.h.thresholds.get("min_oos_dates", default_min)
         if n_pass >= min_dates:
+            self._publish_event("gate_passed", {
+                "id": self.h.id, "gate": "G2_temporal",
+                "msg": f"{n_pass}/{n_tested} dates passed",
+            })
             log.info("  TEMPORAL REPLICATION PASSED: %d/%d dates", n_pass, n_tested)
             return True
         else:
+            self._publish_event("gate_failed", {
+                "id": self.h.id, "gate": "G2_temporal",
+                "reason": f"only {n_pass}/{n_tested} dates passed",
+            })
             self.h.fail("no_replication")
             log.info("  TEMPORAL REPLICATION FAILED: %d/%d dates", n_pass, n_tested)
             return False
@@ -614,9 +639,17 @@ class BaseRunner(ABC):
         min_symbols = self.h.thresholds.get("min_symbols", 2) - 1
         if n_pass >= min_symbols:
             self.h.replicate()
+            self._publish_event("gate_passed", {
+                "id": self.h.id, "gate": "G3_symbol",
+                "msg": f"{n_pass}/{len(other_symbols)} symbols passed",
+            })
             log.info("  SYMBOL REPLICATION PASSED: %d/%d", n_pass, len(other_symbols))
             return True
         else:
+            self._publish_event("gate_failed", {
+                "id": self.h.id, "gate": "G3_symbol",
+                "reason": f"only {n_pass}/{len(other_symbols)} symbols passed",
+            })
             self.h.fail("no_replication")
             log.info("  SYMBOL REPLICATION FAILED: %d/%d", n_pass, len(other_symbols))
             return False
@@ -640,8 +673,16 @@ class BaseRunner(ABC):
             log.info("  Correlation check (%s): %s", feat, msg)
             self.h.results = {**(self.h.results or {}), "correlation_check": msg}
             if not passed:
+                self._publish_event("gate_failed", {
+                    "id": self.h.id, "gate": "G4_correlation",
+                    "reason": msg,
+                })
                 self.h.fail("redundant")
                 return False
+        self._publish_event("gate_passed", {
+            "id": self.h.id, "gate": "G4_correlation",
+            "msg": "not redundant",
+        })
         return True
 
     # --- Registration (shared) --------------------------------------------
@@ -941,6 +982,11 @@ class ResearchAgent(ABC):
 
             self.state.set("current_hypothesis", hypothesis.id)
             set_context(hypothesis_id=hypothesis.id)
+            self._publish_event("hypothesis_started", {
+                "id": hypothesis.id, "agent": self.agent_type,
+                "claim": hypothesis.claim[:200],
+                "generator": hypothesis.generator,
+            })
             self.pre_execute(hypothesis)
             runner = self.create_runner(hypothesis, manifest)
             success = runner.run_full()
@@ -960,6 +1006,19 @@ class ResearchAgent(ABC):
                 n_registered += 1
                 self.state.set("total_signals_registered",
                               self.state.get("total_signals_registered", 0) + 1)
+                ic = None
+                if hypothesis.results and hypothesis.results.get("gate_results"):
+                    for gr in hypothesis.results["gate_results"]:
+                        if "IC=" in gr.get("msg", ""):
+                            import re as _re
+                            m = _re.search(r"IC=([+-]?\d+\.?\d*)", gr["msg"])
+                            if m:
+                                ic = float(m.group(1))
+                                break
+                self._publish_event("hypothesis_registered", {
+                    "id": hypothesis.id, "agent": self.agent_type,
+                    "ic": ic,
+                })
 
         # 3b. FDR control — retroactively reject hypotheses that don't survive
         #     Benjamini-Hochberg correction across this cycle's tests.
@@ -1000,11 +1059,24 @@ class ResearchAgent(ABC):
         self.run_monitor()
 
         # 5. Update cycle counter
-        self.state.set("cycle_count", self.state.get("cycle_count", 0) + 1)
+        cycle_num = self.state.get("cycle_count", 0) + 1
+        self.state.set("cycle_count", cycle_num)
         self.state.set("last_cycle_at", datetime.now(timezone.utc).isoformat())
+        self._publish_event("cycle_completed", {
+            "agent": self.agent_type, "cycle": cycle_num,
+            "tested": n_run, "passed": n_registered,
+        })
         log.info("Cycle complete: %d experiments, queue depth=%d",
                  n_run, self.queue.depth)
         clear_context()
+
+    def _publish_event(self, event_type: str, payload: dict) -> None:
+        """Publish a research event to Redis (best-effort, never throws)."""
+        try:
+            from .research_output import publish_research_event
+            publish_research_event(event_type, payload)
+        except Exception:
+            pass
 
     def _emit_hypothesis_record(self, hypothesis) -> None:
         """Emit structured JSON record for a completed hypothesis."""

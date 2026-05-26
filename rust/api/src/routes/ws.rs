@@ -166,3 +166,68 @@ async fn handle_alerts_stream(socket: WebSocket, state: Arc<AppState>) {
 
     info!("Alerts WebSocket disconnected");
 }
+
+/// GET /ws/research
+/// WebSocket endpoint for real-time research event streaming
+/// Events: hypothesis_started, gate_passed, gate_failed, hypothesis_registered, cycle_completed
+pub async fn research_websocket_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    info!("WebSocket connection request for research events");
+    ws.on_upgrade(move |socket| handle_research_stream(socket, state))
+}
+
+async fn handle_research_stream(socket: WebSocket, state: Arc<AppState>) {
+    let (mut sender, mut receiver) = socket.split();
+
+    let channel = "nat:research:events";
+
+    let mut pubsub = match state.redis.subscribe(channel).await {
+        Ok(ps) => ps,
+        Err(e) => {
+            error!("Failed to subscribe to research events: {}", e);
+            let _ = sender
+                .send(Message::Text(format!(
+                    r#"{{"error": "Failed to subscribe: {}"}}"#,
+                    e
+                )))
+                .await;
+            return;
+        }
+    };
+
+    info!("Research WebSocket connected");
+
+    let mut recv_task = tokio::spawn(async move {
+        while let Some(msg) = receiver.next().await {
+            match msg {
+                Ok(Message::Close(_)) => break,
+                Err(_) => break,
+                _ => {}
+            }
+        }
+    });
+
+    let mut stream = pubsub.on_message();
+    loop {
+        tokio::select! {
+            msg = stream.next() => {
+                match msg {
+                    Some(msg) => {
+                        let payload: String = msg.get_payload().unwrap_or_default();
+                        if sender.send(Message::Text(payload)).await.is_err() {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+            _ = &mut recv_task => {
+                break;
+            }
+        }
+    }
+
+    info!("Research WebSocket disconnected");
+}

@@ -21,12 +21,56 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 log = logging.getLogger("nat.agent")
+
+# Redis channel for real-time research events
+_RESEARCH_CHANNEL = "nat:research:events"
+
+# Lazy-initialized Redis connection for publishing
+_redis_conn = None
+
+
+def _get_redis():
+    """Lazy-connect to Redis for event publishing. Returns None if unavailable."""
+    global _redis_conn
+    if _redis_conn is not None:
+        return _redis_conn
+    try:
+        import redis as redis_lib
+        url = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379")
+        _redis_conn = redis_lib.Redis.from_url(url, socket_connect_timeout=2)
+        _redis_conn.ping()
+        return _redis_conn
+    except Exception:
+        log.debug("Redis not available, research events will not be published")
+        _redis_conn = None
+        return None
+
+
+def publish_research_event(event_type: str, payload: dict) -> bool:
+    """Publish a research event to Redis for WebSocket streaming.
+
+    Event types: hypothesis_started, gate_passed, gate_failed,
+                 hypothesis_registered, cycle_completed
+
+    Returns True if published, False if Redis unavailable.
+    """
+    conn = _get_redis()
+    if conn is None:
+        return False
+    msg = json.dumps({"event": event_type, **payload}, default=str)
+    try:
+        conn.publish(_RESEARCH_CHANNEL, msg)
+        return True
+    except Exception:
+        log.debug("Failed to publish research event: %s", event_type)
+        return False
 
 # Default output root
 _OUTPUT_ROOT = Path(__file__).resolve().parent.parent.parent / "data" / "research"
