@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useResearchWs } from "@/lib/ws";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard" },
@@ -15,6 +16,7 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { readyState } = useResearchWs();
 
   return (
     <aside className="w-56 shrink-0 border-r border-zinc-800 bg-zinc-900 flex flex-col">
@@ -44,17 +46,35 @@ export function Sidebar() {
       </nav>
 
       <div className="p-4 border-t border-zinc-800">
-        <StatusDot />
+        <ConnectionStatus readyState={readyState} />
       </div>
     </aside>
   );
 }
 
-function StatusDot() {
+function ConnectionStatus({ readyState }: { readyState: number }) {
+  const isOpen = readyState === WebSocket.OPEN;
+  const isConnecting = readyState === WebSocket.CONNECTING;
+
+  const dotColor = isOpen
+    ? "bg-emerald-500"
+    : isConnecting
+      ? "bg-amber-500"
+      : "bg-red-500";
+
+  const label = isOpen
+    ? "Connected"
+    : isConnecting
+      ? "Connecting..."
+      : "Disconnected";
+
   return (
     <div className="flex items-center gap-2 text-xs text-zinc-500">
-      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-      System online
+      <span
+        className={`w-2 h-2 rounded-full ${dotColor} ${isOpen ? "animate-pulse" : ""}`}
+        data-testid="ws-status-dot"
+      />
+      <span data-testid="ws-status-label">{label}</span>
     </div>
   );
 }

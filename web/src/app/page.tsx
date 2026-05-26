@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentCard } from "@/components/agent-card";
 import { CycleRing } from "@/components/cycle-ring";
 import { HypothesisFeed } from "@/components/hypothesis-feed";
@@ -24,6 +24,8 @@ export default function DashboardPage() {
   const [hypotheses, setHypotheses] = useState<Hypothesis[]>([]);
   const [liveEvents, setLiveEvents] = useState<ResearchEvent[]>([]);
   const [agentStates, setAgentStates] = useState<Record<string, AgentState>>({});
+  const [flashingAgents, setFlashingAgents] = useState<Set<string>>(new Set());
+  const prevPhasesRef = useRef<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   // Fetch initial data
@@ -86,6 +88,36 @@ export default function DashboardPage() {
 
   useResearchWs({ onEvent });
 
+  // Detect phase transitions → flash the agent card for 2s
+  useEffect(() => {
+    const prev = prevPhasesRef.current;
+    const toFlash: string[] = [];
+
+    for (const agent of AGENTS) {
+      const currentPhase = agentStates[agent]?.phase || "IDLE";
+      if (prev[agent] && prev[agent] !== currentPhase) {
+        toFlash.push(agent);
+      }
+      prev[agent] = currentPhase;
+    }
+
+    if (toFlash.length > 0) {
+      setFlashingAgents((s) => {
+        const next = new Set(s);
+        toFlash.forEach((a) => next.add(a));
+        return next;
+      });
+      const timer = setTimeout(() => {
+        setFlashingAgents((s) => {
+          const next = new Set(s);
+          toFlash.forEach((a) => next.delete(a));
+          return next;
+        });
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [agentStates]);
+
   // Pick the most active agent for the ring
   const activeAgent = Object.entries(agentStates).find(
     ([, s]) => s.phase !== "IDLE" && s.phase !== "SLEEPING"
@@ -119,6 +151,7 @@ export default function DashboardPage() {
                 cycleCount={s?.cycleCount || 0}
                 lastCycleAt={s?.lastCycleAt || null}
                 tested={s?.tested || 0}
+                flash={flashingAgents.has(name)}
               />
             );
           })}

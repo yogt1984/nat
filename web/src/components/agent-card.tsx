@@ -38,9 +38,10 @@ interface AgentCardProps {
   cycleCount: number;
   lastCycleAt: string | null;
   tested: number;
+  flash?: boolean;
 }
 
-export function AgentCard({ name, phase, cycleCount, lastCycleAt, tested }: AgentCardProps) {
+export function AgentCard({ name, phase, cycleCount, lastCycleAt, tested, flash }: AgentCardProps) {
   const borderColor = PHASE_COLORS[phase] || "border-zinc-700";
   const dotColor = PHASE_DOTS[phase] || "bg-zinc-600";
   const label = AGENT_LABELS[name] || name;
@@ -48,7 +49,10 @@ export function AgentCard({ name, phase, cycleCount, lastCycleAt, tested }: Agen
   const timeAgo = lastCycleAt ? formatTimeAgo(lastCycleAt) : "never";
 
   return (
-    <div className={`rounded-lg border-l-4 ${borderColor} bg-zinc-900 p-4`}>
+    <div
+      className={`rounded-lg border-l-4 ${borderColor} bg-zinc-900 p-4 transition-[border-color] duration-500 ${flash ? "animate-flash-border" : ""}`}
+      data-testid={`agent-card-${name}`}
+    >
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-semibold">{label}</h3>
         <div className="flex items-center gap-1.5">
