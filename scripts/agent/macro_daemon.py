@@ -13,14 +13,12 @@ Usage:
 from __future__ import annotations
 
 import logging
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
-from agent.base import ResearchAgent, BaseRunner, cli_main, load_agent_config  # noqa: E402
-from agent.hypothesis import Hypothesis, GeneratorStats  # noqa: E402
+from agent.base import ResearchAgent, BaseRunner, cli_main, load_agent_config
+from agent.hypothesis import Hypothesis, GeneratorStats
 
 log = logging.getLogger("nat.agent_macro")
 

@@ -25,15 +25,13 @@ import argparse
 import json
 import logging
 import signal
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
-from data.state import StateStore  # noqa: E402
+from data.state import StateStore
 
 log = logging.getLogger("nat.agent_cascade")
 

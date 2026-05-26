@@ -8,7 +8,7 @@ Actionable fixes for structural weaknesses in the Python codebase. Ordered by de
 
 ## Priority 1 — Python Packaging & Organization
 
-### 1.1 Add pyproject.toml and __init__.py Files
+### 1.1 Add pyproject.toml and __init__.py Files ✅
 
 **Problem:** Zero `__init__.py` files in the entire `scripts/` tree. 133 `sys.path.insert` hacks across 127 files. Imports are fragile — renaming a directory silently breaks downstream code with no traceback pointing to the actual cause.
 
@@ -163,7 +163,7 @@ A hypothesis can show Sharpe 2.0 in backtest (7 bps costs) and Sharpe 4.0 in pap
 
 | # | Item | Priority | Effort | Impact |
 |---|------|----------|--------|--------|
-| 1.1 | pyproject.toml + __init__.py | P1 | ~3h | Eliminates 133 sys.path hacks, enables proper imports |
+| 1.1 | pyproject.toml + __init__.py ✅ | P1 | ~3h | Eliminates 133 sys.path hacks, enables proper imports |
 | 1.2 | Organize root scripts | P1 | ~2h | Clear boundary between production and exploration |
 | 2.1 | Split base.py | P2 | ~3h | 1550 → ~400 lines, navigable after 3 months away |
 | 2.2 | Unify cost model | P2 | ~2h | Consistent fee assumptions across backtest/paper/live |
