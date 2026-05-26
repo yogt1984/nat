@@ -58,6 +58,29 @@ reports/
 # Claude Code
 .claude/
 
+# Node
+node_modules/
+
+# LaTeX auxiliary files
+*.aux
+*.toc
+*.out
+*.log
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.bbl
+*.blg
+
+# Models (binary artifacts)
+models/
+
+# Analysis output
+analysis/
+
+# Exploration artifacts
+exploration/
+
 # Secrets
 .env
 *.pem
