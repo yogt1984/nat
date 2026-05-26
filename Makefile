@@ -243,6 +243,22 @@ serve_all: release release_api
 	@tmux attach -t nat
 
 # =============================================================================
+# FRONTEND
+# =============================================================================
+
+# Start frontend dev server (hot reload)
+web_dev:
+	cd web && npm run dev
+
+# Production build
+web_build:
+	cd web && npm run build
+
+# Install frontend dependencies
+web_install:
+	cd web && npm install
+
+# =============================================================================
 # DOCKER
 # =============================================================================
 
