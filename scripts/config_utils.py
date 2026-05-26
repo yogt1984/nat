@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 _ROOT = Path(__file__).resolve().parent.parent
 
 _SYMBOLS_PATH = _ROOT / "config" / "symbols.toml"
+_AGENT_TOML_PATH = _ROOT / "config" / "agent.toml"
 
 # Cache after first load (immutable at runtime)
 _symbols_cache: list[str] | None = None
@@ -59,3 +60,21 @@ def load_symbols(path: str | Path | None = None) -> list[str]:
 
     log.debug("Loaded %d symbols from %s", len(symbols), resolved)
     return list(symbols)
+
+
+def load_cost_config(path: str | Path | None = None) -> dict[str, float]:
+    """Load cost model defaults from config/agent.toml [defaults.costs].
+
+    Returns:
+        Dict with 'fee_bps' and 'slippage_bps' keys.
+    """
+    resolved = Path(path) if path else _AGENT_TOML_PATH
+
+    with open(resolved, "rb") as f:
+        data = tomllib.load(f)
+
+    costs = data.get("defaults", {}).get("costs", {})
+    return {
+        "fee_bps": float(costs.get("fee_bps", 3.5)),
+        "slippage_bps": float(costs.get("slippage_bps", 2.0)),
+    }

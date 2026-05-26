@@ -43,6 +43,10 @@ consecutive_days_limit = 14
 [defaults.paths]
 data_dir = "data/features"
 
+[defaults.costs]
+fee_bps = 3.5               # one-way fee (Hyperliquid taker)
+slippage_bps = 2.0           # one-way slippage estimate
+
 [defaults.retention]
 max_age_days = 90           # research output older than this is deleted
 cleanup_json = true         # also remove stale JSON files from data/research/
