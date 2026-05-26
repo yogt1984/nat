@@ -55,6 +55,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/research/signals", get(routes::research::list_signals))
         .route("/api/research/stats", get(routes::research::get_stats))
         .route("/api/research/heatmap", get(routes::research::get_heatmap))
+        .route("/api/research/network", get(routes::research::get_network))
         // WebSocket streaming
         .route("/ws/stream/:symbol", get(routes::ws::websocket_handler))
         .route("/ws/alerts", get(routes::ws::alerts_websocket_handler))

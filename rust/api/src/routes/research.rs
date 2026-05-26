@@ -388,6 +388,223 @@ pub async fn get_heatmap(
 }
 
 // ---------------------------------------------------------------------------
+// Network endpoint — feature interaction graph from IT engine + hypotheses
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct NetworkNode {
+    pub id: String,
+    pub category: String,
+    pub mi: std::collections::HashMap<String, f64>,
+    pub cmi: std::collections::HashMap<String, f64>,
+    pub interaction: f64,
+    pub cost_viable: bool,
+    pub hypothesis_count: usize,
+    pub selected: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NetworkEdge {
+    pub source: String,
+    pub target: String,
+    pub weight: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NetworkMeta {
+    pub symbol: String,
+    pub n_samples: u64,
+    pub last_updated: String,
+    pub total_features: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NetworkResponse {
+    pub nodes: Vec<NetworkNode>,
+    pub edges: Vec<NetworkEdge>,
+    pub meta: NetworkMeta,
+}
+
+/// Derive a category from feature name prefix.
+fn feature_category(name: &str) -> &'static str {
+    if name.starts_with("spread_") { return "spread"; }
+    if name.starts_with("depth_") { return "depth"; }
+    if name.starts_with("imb_") { return "imbalance"; }
+    if name.starts_with("flow_") { return "flow"; }
+    if name.starts_with("vol_") || name.starts_with("volatility_") { return "volatility"; }
+    if name.starts_with("ent_") { return "entropy"; }
+    if name.starts_with("trend_") { return "trend"; }
+    if name.starts_with("illiq_") { return "illiquidity"; }
+    if name.starts_with("tox_") { return "toxicity"; }
+    if name.starts_with("whale_") { return "whale"; }
+    if name.starts_with("liquidation_") || name.starts_with("largest_position")
+        || name.starts_with("nearest_cluster") || name.starts_with("positions_at_risk") { return "liquidation"; }
+    if name.starts_with("top") || name.starts_with("herfindahl_") || name.starts_with("gini_")
+        || name.starts_with("theil_") { return "concentration"; }
+    if name.starts_with("ctx_") { return "context"; }
+    if name.starts_with("raw_") { return "raw"; }
+    if name.starts_with("regime_") || name.starts_with("gmm_") { return "regime"; }
+    if name.starts_with("cross_") { return "cross_symbol"; }
+    if name.starts_with("derived_") { return "derived"; }
+    "other"
+}
+
+/// Read IT engine state file for a symbol.
+fn read_it_engine_state(dir: &std::path::Path, symbol: &str) -> Option<serde_json::Value> {
+    let path = dir.join(format!("state_{}.json", symbol));
+    let data = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
+/// Build network graph from IT engine state and hypothesis data.
+fn build_network(it_state: &serde_json::Value, hypotheses: &[serde_json::Value]) -> NetworkResponse {
+    let mi_matrix = it_state.get("mi_matrix").and_then(|v| v.as_object());
+    let cmi_matrix = it_state.get("cmi_matrix").and_then(|v| v.as_object());
+    let interaction_map = it_state.get("interaction").and_then(|v| v.as_object());
+    let cost_viable_map = it_state.get("cost_viable").and_then(|v| v.as_object());
+    let selected_features: Vec<&str> = it_state
+        .get("selected_features")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect())
+        .unwrap_or_default();
+
+    // Count hypotheses per feature
+    let mut feature_hyp_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    // Track co-occurrence pairs
+    let mut cooccurrence: std::collections::HashMap<(String, String), usize> = std::collections::HashMap::new();
+
+    for h in hypotheses {
+        let feats: Vec<String> = h
+            .get("features")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+
+        for f in &feats {
+            *feature_hyp_count.entry(f.clone()).or_default() += 1;
+        }
+        // Co-occurrence edges (undirected, sorted pair)
+        for i in 0..feats.len() {
+            for j in (i + 1)..feats.len() {
+                let (a, b) = if feats[i] < feats[j] {
+                    (feats[i].clone(), feats[j].clone())
+                } else {
+                    (feats[j].clone(), feats[i].clone())
+                };
+                *cooccurrence.entry((a, b)).or_default() += 1;
+            }
+        }
+    }
+
+    // Build nodes from MI matrix keys
+    let mut nodes = Vec::new();
+    if let Some(mi) = mi_matrix {
+        for (feature, mi_val) in mi {
+            let mi_horizons: std::collections::HashMap<String, f64> = mi_val
+                .as_object()
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| v.as_f64().map(|f| (k.clone(), f)))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let cmi_horizons: std::collections::HashMap<String, f64> = cmi_matrix
+                .and_then(|c| c.get(feature))
+                .and_then(|v| v.as_object())
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| v.as_f64().map(|f| (k.clone(), f)))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            let interaction = interaction_map
+                .and_then(|m| m.get(feature))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+
+            let cost_viable = cost_viable_map
+                .and_then(|m| m.get(feature))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let hypothesis_count = feature_hyp_count.get(feature.as_str()).copied().unwrap_or(0);
+            let selected = selected_features.contains(&feature.as_str());
+
+            nodes.push(NetworkNode {
+                id: feature.clone(),
+                category: feature_category(feature).to_string(),
+                mi: mi_horizons,
+                cmi: cmi_horizons,
+                interaction,
+                cost_viable,
+                hypothesis_count,
+                selected,
+            });
+        }
+    }
+
+    // Sort nodes by category then name for stable output
+    nodes.sort_by(|a, b| a.category.cmp(&b.category).then(a.id.cmp(&b.id)));
+
+    // Build edges
+    let edges: Vec<NetworkEdge> = cooccurrence
+        .into_iter()
+        .map(|((source, target), weight)| NetworkEdge { source, target, weight })
+        .collect();
+
+    let meta = NetworkMeta {
+        symbol: it_state
+            .get("symbol")
+            .and_then(|v| v.as_str())
+            .unwrap_or("BTC")
+            .to_string(),
+        n_samples: it_state
+            .get("n_samples")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0),
+        last_updated: it_state
+            .get("last_updated")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        total_features: nodes.len(),
+    };
+
+    NetworkResponse { nodes, edges, meta }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NetworkQuery {
+    pub symbol: Option<String>,
+}
+
+/// GET /api/research/network
+/// Feature interaction graph from IT engine state + hypothesis co-occurrence.
+pub async fn get_network(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<NetworkQuery>,
+) -> Result<Json<NetworkResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let symbol = q.symbol.as_deref().unwrap_or("BTC");
+    let it_dir = PathBuf::from(&state.config.it_engine_data_dir);
+
+    let it_state = read_it_engine_state(&it_dir, symbol).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse {
+                error: format!("No IT engine state for symbol: {}", symbol),
+            }),
+        )
+    })?;
+
+    let (hypotheses, _) = ensure_cache(&state).await;
+    let network = build_network(&it_state, &hypotheses);
+
+    Ok(Json(network))
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -894,6 +1111,147 @@ mod tests {
         let cyc_dir = tmp.path().join("cycles");
         assert!(read_json_dir(&hyp_dir).is_empty());
         assert!(read_json_dir(&cyc_dir).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Network / feature_category
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_feature_category() {
+        assert_eq!(feature_category("spread_best_bid_ask"), "spread");
+        assert_eq!(feature_category("depth_total_bid"), "depth");
+        assert_eq!(feature_category("imb_size_ratio"), "imbalance");
+        assert_eq!(feature_category("flow_vwap_5s"), "flow");
+        assert_eq!(feature_category("vol_realized_10s"), "volatility");
+        assert_eq!(feature_category("ent_book_shape"), "entropy");
+        assert_eq!(feature_category("trend_ema_short"), "trend");
+        assert_eq!(feature_category("illiq_amihud"), "illiquidity");
+        assert_eq!(feature_category("tox_vpin"), "toxicity");
+        assert_eq!(feature_category("whale_net_flow_1h"), "whale");
+        assert_eq!(feature_category("liquidation_intensity"), "liquidation");
+        assert_eq!(feature_category("top5_concentration"), "concentration");
+        assert_eq!(feature_category("herfindahl_index"), "concentration");
+        assert_eq!(feature_category("gini_coefficient"), "concentration");
+        assert_eq!(feature_category("ctx_open_interest"), "context");
+        assert_eq!(feature_category("raw_microprice"), "raw");
+        assert_eq!(feature_category("unknown_feature"), "other");
+    }
+
+    #[test]
+    fn test_build_network_basic() {
+        let it_state = serde_json::json!({
+            "mi_matrix": {
+                "spread_ba": {"10t": 0.05, "50t": 0.03},
+                "depth_bid": {"10t": 0.02, "50t": 0.01},
+                "ent_shape": {"10t": 0.0, "50t": 0.0}
+            },
+            "cmi_matrix": {
+                "spread_ba": {"10t": 0.04, "50t": 0.02},
+                "depth_bid": {"10t": 0.01, "50t": 0.005},
+                "ent_shape": {"10t": 0.0, "50t": 0.0}
+            },
+            "interaction": {
+                "spread_ba": 0.003,
+                "depth_bid": -0.001,
+                "ent_shape": 0.0
+            },
+            "cost_viable": {
+                "spread_ba": true,
+                "depth_bid": false,
+                "ent_shape": false
+            },
+            "selected_features": ["spread_ba"],
+            "symbol": "BTC",
+            "n_samples": 6000,
+            "last_updated": "2026-05-21T11:00:00",
+            "cycle_count": 1
+        });
+
+        let hypotheses = vec![
+            serde_json::json!({"features": ["spread_ba", "depth_bid"], "status": "replicated"}),
+            serde_json::json!({"features": ["spread_ba", "ent_shape"], "status": "failed"}),
+            serde_json::json!({"features": ["spread_ba"], "status": "replicated"}),
+        ];
+
+        let net = build_network(&it_state, &hypotheses);
+
+        assert_eq!(net.nodes.len(), 3);
+        assert_eq!(net.meta.symbol, "BTC");
+        assert_eq!(net.meta.n_samples, 6000);
+        assert_eq!(net.meta.total_features, 3);
+
+        let spread_node = net.nodes.iter().find(|n| n.id == "spread_ba").unwrap();
+        assert_eq!(spread_node.category, "spread");
+        assert!(spread_node.cost_viable);
+        assert!(spread_node.selected);
+        assert_eq!(spread_node.hypothesis_count, 3);
+        assert!((spread_node.mi["10t"] - 0.05).abs() < 1e-9);
+        assert!((spread_node.interaction - 0.003).abs() < 1e-9);
+
+        let depth_node = net.nodes.iter().find(|n| n.id == "depth_bid").unwrap();
+        assert_eq!(depth_node.hypothesis_count, 1);
+        assert!(!depth_node.selected);
+
+        // Edges: spread_ba-depth_bid (1), spread_ba-ent_shape (1)
+        assert_eq!(net.edges.len(), 2);
+    }
+
+    #[test]
+    fn test_build_network_no_hypotheses() {
+        let it_state = serde_json::json!({
+            "mi_matrix": {"spread_ba": {"10t": 0.05}},
+            "cmi_matrix": {},
+            "interaction": {},
+            "cost_viable": {},
+            "selected_features": [],
+            "symbol": "ETH",
+            "n_samples": 1000,
+            "last_updated": "2026-05-20",
+            "cycle_count": 0
+        });
+        let net = build_network(&it_state, &[]);
+        assert_eq!(net.nodes.len(), 1);
+        assert_eq!(net.nodes[0].hypothesis_count, 0);
+        assert!(net.edges.is_empty());
+        assert_eq!(net.meta.symbol, "ETH");
+    }
+
+    #[test]
+    fn test_build_network_empty_state() {
+        let it_state = serde_json::json!({
+            "mi_matrix": {},
+            "symbol": "SOL",
+            "n_samples": 0,
+            "last_updated": ""
+        });
+        let net = build_network(&it_state, &[]);
+        assert!(net.nodes.is_empty());
+        assert!(net.edges.is_empty());
+        assert_eq!(net.meta.total_features, 0);
+    }
+
+    #[test]
+    fn test_read_it_engine_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = serde_json::json!({
+            "mi_matrix": {"feat_a": {"10t": 0.1}},
+            "symbol": "BTC",
+            "n_samples": 100,
+            "last_updated": "2026-05-25"
+        });
+        fs::write(
+            tmp.path().join("state_BTC.json"),
+            serde_json::to_string(&state).unwrap(),
+        ).unwrap();
+
+        let loaded = read_it_engine_state(tmp.path(), "BTC");
+        assert!(loaded.is_some());
+        assert_eq!(loaded.unwrap()["symbol"], "BTC");
+
+        // Missing symbol returns None
+        let missing = read_it_engine_state(tmp.path(), "ETH");
+        assert!(missing.is_none());
     }
 
     #[test]
