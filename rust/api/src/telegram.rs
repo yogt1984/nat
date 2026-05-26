@@ -209,7 +209,10 @@ pub async fn run_alert_service(
     ).await
 }
 
-/// Multi-channel alert service — subscribes to market alerts + research events.
+/// Multi-channel alert service — subscribes to market alerts (Pub/Sub) + research events (Stream).
+///
+/// Market alerts use Pub/Sub (fire-and-forget, ephemeral).
+/// Research events use Redis Streams (reliable delivery, replay on restart).
 pub async fn run_multi_channel_alert_service(
     redis_url: &str,
     telegram_token: String,
@@ -218,77 +221,134 @@ pub async fn run_multi_channel_alert_service(
     research_events: &[String],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let client = redis::Client::open(redis_url)?;
-    let mut pubsub = client.get_async_pubsub().await?;
+    let conn = redis::aio::ConnectionManager::new(client.clone()).await?;
 
-    for channel in channels {
-        pubsub.subscribe(channel).await?;
-        info!("Subscribed to Redis channel: {}", channel);
+    // Subscribe to market alert channels via Pub/Sub
+    let alert_channels: Vec<&String> = channels
+        .iter()
+        .filter(|c| *c != "nat:research:events")
+        .collect();
+    let mut pubsub = client.get_async_pubsub().await?;
+    for channel in &alert_channels {
+        pubsub.subscribe(channel.as_str()).await?;
+        info!("Subscribed to Redis Pub/Sub channel: {}", channel);
     }
+
+    // Set up consumer group for research stream
+    let research_stream = "nat:research:stream";
+    let research_group = "nat-alerts";
+    let consumer_name = "alert-service";
+    {
+        let mut c = conn.clone();
+        let result: redis::RedisResult<()> = redis::cmd("XGROUP")
+            .arg("CREATE")
+            .arg(research_stream)
+            .arg(research_group)
+            .arg("$")
+            .arg("MKSTREAM")
+            .query_async(&mut c)
+            .await;
+        match result {
+            Ok(_) | Err(_) => {} // ignore BUSYGROUP
+        }
+    }
+    info!("Listening on research stream: {}", research_stream);
 
     let bot = TelegramBot::new(telegram_token, telegram_chat_id);
 
     bot.send_message(&format!(
-        "\u{1f7e2} <b>NAT Alert Service Started</b>\n\nChannels: {}",
-        channels.join(", ")
+        "\u{1f7e2} <b>NAT Alert Service Started</b>\n\nAlerts: {}\nResearch: stream",
+        alert_channels.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
     ))
     .await
     .ok();
 
-    let research_channel = "nat:research:events";
     let allowed_events: std::collections::HashSet<&str> =
         research_events.iter().map(|s| s.as_str()).collect();
 
-    let mut stream = pubsub.on_message();
+    let mut alert_stream = pubsub.on_message();
 
-    while let Some(msg) = stream.next().await {
-        let channel: String = msg.get_channel_name().to_string();
-        let payload: String = msg.get_payload().unwrap_or_default();
-
-        if channel == research_channel {
-            // Research event
-            match serde_json::from_str::<serde_json::Value>(&payload) {
-                Ok(event) => {
-                    let event_type = event.get("event").and_then(|v| v.as_str()).unwrap_or("");
-                    if !allowed_events.is_empty() && !allowed_events.contains(event_type) {
-                        continue;
-                    }
-                    if let Some(text) = format_research_event(&event) {
-                        if let Err(e) = bot.send_message(&text).await {
-                            error!("Failed to send research event to Telegram: {}", e);
+    loop {
+        tokio::select! {
+            // Market alerts via Pub/Sub
+            msg = alert_stream.next() => {
+                let Some(msg) = msg else { break };
+                let payload: String = msg.get_payload().unwrap_or_default();
+                match serde_json::from_str::<serde_json::Value>(&payload) {
+                    Ok(alert_json) => {
+                        let alert = AlertMessage {
+                            timestamp_ms: alert_json["timestamp_ms"].as_u64().unwrap_or(0),
+                            symbol: alert_json["symbol"]
+                                .as_str()
+                                .unwrap_or("UNKNOWN")
+                                .to_string(),
+                            alert_type: extract_alert_type(&alert_json["alert_type"]),
+                            severity: extract_severity(&alert_json["severity"]),
+                            message: alert_json["message"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string(),
+                            data: alert_json["data"].clone(),
+                        };
+                        if let Err(e) = bot.send_alert(&alert).await {
+                            error!("Failed to send Telegram alert: {}", e);
                         }
                     }
-                }
-                Err(e) => {
-                    warn!("Failed to parse research event: {} - {}", e, &payload[..payload.len().min(200)]);
-                }
-            }
-        } else {
-            // Market alert
-            match serde_json::from_str::<serde_json::Value>(&payload) {
-                Ok(alert_json) => {
-                    let alert = AlertMessage {
-                        timestamp_ms: alert_json["timestamp_ms"].as_u64().unwrap_or(0),
-                        symbol: alert_json["symbol"]
-                            .as_str()
-                            .unwrap_or("UNKNOWN")
-                            .to_string(),
-                        alert_type: extract_alert_type(&alert_json["alert_type"]),
-                        severity: extract_severity(&alert_json["severity"]),
-                        message: alert_json["message"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string(),
-                        data: alert_json["data"].clone(),
-                    };
-
-                    if let Err(e) = bot.send_alert(&alert).await {
-                        error!("Failed to send Telegram alert: {}", e);
+                    Err(e) => {
+                        warn!("Failed to parse alert JSON: {} - {}", e, &payload[..payload.len().min(200)]);
                     }
                 }
-                Err(e) => {
-                    warn!("Failed to parse alert JSON: {} - {}", e, &payload[..payload.len().min(200)]);
-                }
             }
+            // Research events via Redis Stream
+            _ = async {
+                let mut c = conn.clone();
+                let result: redis::RedisResult<redis::Value> = redis::cmd("XREADGROUP")
+                    .arg("GROUP").arg(research_group).arg(consumer_name)
+                    .arg("COUNT").arg(10)
+                    .arg("BLOCK").arg(2000)
+                    .arg("STREAMS").arg(research_stream).arg(">")
+                    .query_async(&mut c)
+                    .await;
+                match result {
+                    Ok(value) => {
+                        let messages = crate::redis_client::parse_xread_response(value);
+                        let mut ack_ids = Vec::new();
+                        for (id, payload) in &messages {
+                            match serde_json::from_str::<serde_json::Value>(payload) {
+                                Ok(event) => {
+                                    let event_type = event.get("event").and_then(|v| v.as_str()).unwrap_or("");
+                                    if !allowed_events.is_empty() && !allowed_events.contains(event_type) {
+                                        ack_ids.push(id.clone());
+                                        continue;
+                                    }
+                                    if let Some(text) = format_research_event(&event) {
+                                        if let Err(e) = bot.send_message(&text).await {
+                                            error!("Failed to send research event to Telegram: {}", e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("Failed to parse research event: {}", e);
+                                }
+                            }
+                            ack_ids.push(id.clone());
+                        }
+                        // ACK all processed
+                        if !ack_ids.is_empty() {
+                            let mut cmd = redis::cmd("XACK");
+                            cmd.arg(research_stream).arg(research_group);
+                            for id in &ack_ids {
+                                cmd.arg(id.as_str());
+                            }
+                            let _: redis::RedisResult<()> = cmd.query_async(&mut c).await;
+                        }
+                    }
+                    Err(e) => {
+                        warn!("XREADGROUP error in alert service: {}", e);
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                    }
+                }
+            } => {}
         }
     }
 

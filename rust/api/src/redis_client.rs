@@ -100,4 +100,114 @@ impl RedisClient {
         self.conn.clone()
     }
 
+    /// Ensure a consumer group exists for a stream (create if missing).
+    /// Uses MKSTREAM to create the stream itself if it doesn't exist.
+    pub async fn ensure_consumer_group(
+        &self,
+        stream: &str,
+        group: &str,
+    ) -> Result<(), redis::RedisError> {
+        let mut conn = self.conn.clone();
+        // XGROUP CREATE <stream> <group> $ MKSTREAM — idempotent via BUSYGROUP check
+        let result: redis::RedisResult<()> = redis::cmd("XGROUP")
+            .arg("CREATE")
+            .arg(stream)
+            .arg(group)
+            .arg("$")
+            .arg("MKSTREAM")
+            .query_async(&mut conn)
+            .await;
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) if e.to_string().contains("BUSYGROUP") => Ok(()), // already exists
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Read new messages from a stream consumer group (blocking, timeout_ms=0 blocks forever).
+    /// Returns Vec of (message_id, payload_field_value).
+    pub async fn xread_group(
+        &self,
+        group: &str,
+        consumer: &str,
+        stream: &str,
+        count: usize,
+        block_ms: usize,
+    ) -> Result<Vec<(String, String)>, redis::RedisError> {
+        let mut conn = self.conn.clone();
+        let result: redis::Value = redis::cmd("XREADGROUP")
+            .arg("GROUP")
+            .arg(group)
+            .arg(consumer)
+            .arg("COUNT")
+            .arg(count)
+            .arg("BLOCK")
+            .arg(block_ms)
+            .arg("STREAMS")
+            .arg(stream)
+            .arg(">")
+            .query_async(&mut conn)
+            .await?;
+
+        Ok(parse_xread_response(result))
+    }
+
+    /// Acknowledge messages after processing.
+    pub async fn xack(
+        &self,
+        stream: &str,
+        group: &str,
+        ids: &[String],
+    ) -> Result<(), redis::RedisError> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.conn.clone();
+        let mut cmd = redis::cmd("XACK");
+        cmd.arg(stream).arg(group);
+        for id in ids {
+            cmd.arg(id.as_str());
+        }
+        cmd.query_async(&mut conn).await
+    }
+}
+
+/// Parse XREADGROUP response into (id, event_payload) pairs.
+pub fn parse_xread_response(value: redis::Value) -> Vec<(String, String)> {
+    let mut results = Vec::new();
+    // Response shape: [[stream_name, [[id, [field, value, ...]], ...]]]
+    if let redis::Value::Bulk(streams) = value {
+        for stream_entry in streams {
+            if let redis::Value::Bulk(parts) = stream_entry {
+                if parts.len() >= 2 {
+                    if let redis::Value::Bulk(messages) = &parts[1] {
+                        for msg in messages {
+                            if let redis::Value::Bulk(msg_parts) = msg {
+                                if msg_parts.len() >= 2 {
+                                    let id = match &msg_parts[0] {
+                                        redis::Value::Data(b) => {
+                                            String::from_utf8_lossy(b).to_string()
+                                        }
+                                        _ => continue,
+                                    };
+                                    // Fields: [field_name, field_value, ...]
+                                    if let redis::Value::Bulk(fields) = &msg_parts[1] {
+                                        // We only have one field "event"
+                                        if fields.len() >= 2 {
+                                            if let redis::Value::Data(b) = &fields[1] {
+                                                let payload =
+                                                    String::from_utf8_lossy(b).to_string();
+                                                results.push((id, payload));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    results
 }

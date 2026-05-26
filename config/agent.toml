@@ -175,8 +175,9 @@ cascade_horizon_ticks = 3000
 # telegram_chat_id  = ""       # target chat / group (prefer env var)
 redis_url = "redis://127.0.0.1:6379"
 
-# Which Redis channels to subscribe to
-channels = ["nat:alerts", "nat:research:events"]
+# Which Redis Pub/Sub channels to subscribe to (market alerts only)
+# Research events now use Redis Streams (nat:research:stream), not Pub/Sub
+channels = ["nat:alerts"]
 
 # Research event types to forward (empty = all)
 research_events = ["hypothesis_registered", "cycle_completed"]

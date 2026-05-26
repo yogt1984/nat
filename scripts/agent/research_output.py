@@ -32,8 +32,8 @@ log = logging.getLogger("nat.agent")
 # Lazy-initialized StateStore for SQLite writes
 _state_store = None
 
-# Redis channel for real-time research events
-_RESEARCH_CHANNEL = "nat:research:events"
+# Redis stream for real-time research events (upgraded from Pub/Sub)
+_RESEARCH_STREAM = "nat:research:stream"
 
 # Lazy-initialized Redis connection for publishing
 _redis_conn = None
@@ -57,7 +57,11 @@ def _get_redis():
 
 
 def publish_research_event(event_type: str, payload: dict) -> bool:
-    """Publish a research event to Redis for WebSocket streaming.
+    """Publish a research event to Redis Stream for WebSocket streaming.
+
+    Uses XADD to append to a capped stream (maxlen ~10000). Consumers
+    can replay missed events on reconnect — unlike Pub/Sub which is
+    fire-and-forget.
 
     Event types: hypothesis_started, gate_passed, gate_failed,
                  hypothesis_registered, cycle_completed
@@ -69,7 +73,7 @@ def publish_research_event(event_type: str, payload: dict) -> bool:
         return False
     msg = json.dumps({"event": event_type, **payload}, default=str)
     try:
-        conn.publish(_RESEARCH_CHANNEL, msg)
+        conn.xadd(_RESEARCH_STREAM, {"event": msg}, maxlen=10000, approximate=True)
         return True
     except Exception:
         log.debug("Failed to publish research event: %s", event_type)
