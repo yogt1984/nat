@@ -19,6 +19,8 @@ export interface HypothesisStartedEvent {
   agent: string;
   claim: string;
   generator: string;
+  cycle_id?: string;
+  hypothesis_id?: string;
 }
 
 export interface GatePassedEvent {
@@ -26,6 +28,8 @@ export interface GatePassedEvent {
   id: string;
   gate: string;
   msg: string;
+  cycle_id?: string;
+  hypothesis_id?: string;
 }
 
 export interface GateFailedEvent {
@@ -33,6 +37,8 @@ export interface GateFailedEvent {
   id: string;
   gate: string;
   reason: string;
+  cycle_id?: string;
+  hypothesis_id?: string;
 }
 
 export interface HypothesisRegisteredEvent {
@@ -40,6 +46,8 @@ export interface HypothesisRegisteredEvent {
   id: string;
   agent: string;
   ic: number | null;
+  cycle_id?: string;
+  hypothesis_id?: string;
 }
 
 export interface CycleCompletedEvent {
@@ -48,6 +56,7 @@ export interface CycleCompletedEvent {
   tested: number;
   passed: number;
   cycle: number;
+  cycle_id?: string;
 }
 
 export type ResearchEvent =
@@ -91,6 +100,11 @@ export function useResearchWs(options: UseResearchWsOptions = {}) {
     ws.onmessage = (msg) => {
       try {
         const data = JSON.parse(msg.data) as ResearchEvent;
+        if (process.env.NODE_ENV === "development") {
+          const cid = "cycle_id" in data ? data.cycle_id : "-";
+          const hid = "hypothesis_id" in data ? data.hypothesis_id : ("id" in data ? data.id : "-");
+          console.debug(`[ws] ${data.event} cycle=${cid} hyp=${hid}`);
+        }
         setLastEvent(data);
         onEventRef.current?.(data);
       } catch {

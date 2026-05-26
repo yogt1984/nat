@@ -193,7 +193,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 
 ---
 
-### 3.2 Cross-Service Correlation IDs
+### 3.2 Cross-Service Correlation IDs ✅
 
 **Problem:** No tracing from "hypothesis generated in Python" through "JSON written" → "cache refreshed in Rust" → "WebSocket event delivered to browser". Python has `cycle_id` and `hypothesis_id` in structured logs, but Rust doesn't propagate them.
 

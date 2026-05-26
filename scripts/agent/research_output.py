@@ -51,7 +51,7 @@ def _get_redis():
         _redis_conn.ping()
         return _redis_conn
     except Exception:
-        log.debug("Redis not available, research events will not be published")
+        log.warning("Redis not available, research events will not be published")
         _redis_conn = None
         return None
 
