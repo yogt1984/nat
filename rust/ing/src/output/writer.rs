@@ -23,6 +23,8 @@ pub struct ParquetWriter {
     buffer: FeatureBuffer,
     current_file: Option<ArrowWriter<File>>,
     current_file_path: Option<PathBuf>,
+    /// Temporary path for atomic writes; renamed to current_file_path on close.
+    current_tmp_path: Option<PathBuf>,
     current_hour: Option<u32>,
     rows_written: usize,
     file_opened_at: Option<std::time::Instant>,
@@ -146,6 +148,7 @@ impl ParquetWriter {
             buffer: FeatureBuffer::new(config.row_group_size),
             current_file: None,
             current_file_path: None,
+            current_tmp_path: None,
             current_hour: None,
             rows_written: 0,
             file_opened_at: None,
@@ -239,12 +242,13 @@ impl ParquetWriter {
         fs::create_dir_all(&date_dir)?;
 
         let filename = format!("{}.parquet", now.format("%Y%m%d_%H%M%S"));
-        let file_path = date_dir.join(filename);
+        let file_path = date_dir.join(&filename);
+        let tmp_path = date_dir.join(format!("{}.tmp", filename));
 
         info!(path = ?file_path, "Opening new Parquet file");
 
-        // Create writer
-        let file = File::create(&file_path)?;
+        // Write to .tmp file; will be renamed to final path on close
+        let file = File::create(&tmp_path)?;
         let schema = super::schema::create_schema_with_alg_features(&self.alg_feature_names);
 
         let compression = match self.config.compression.as_str() {
@@ -262,6 +266,7 @@ impl ParquetWriter {
 
         self.current_file = Some(writer);
         self.current_file_path = Some(file_path);
+        self.current_tmp_path = Some(tmp_path);
         self.rows_written = 0;
         self.file_opened_at = Some(std::time::Instant::now());
         self.last_progress_pct = 0;
@@ -276,9 +281,19 @@ impl ParquetWriter {
 
         if let Some(writer) = self.current_file.take() {
             writer.close()?;
-            if let Some(path) = &self.current_file_path {
+
+            // Atomic rename: .tmp → final path
+            if let (Some(tmp), Some(final_path)) = (self.current_tmp_path.take(), &self.current_file_path) {
+                if tmp.exists() {
+                    fs::rename(&tmp, final_path)?;
+                    info!(path = ?final_path, rows = self.rows_written, "Closed Parquet file");
+                }
+            } else if let Some(path) = &self.current_file_path {
+                // Fallback: no tmp path (shouldn't happen, but be safe)
                 info!(path = ?path, rows = self.rows_written, "Closed Parquet file");
             }
+        } else {
+            self.current_tmp_path = None;
         }
 
         self.current_file_path = None;

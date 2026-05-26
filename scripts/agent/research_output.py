@@ -433,9 +433,11 @@ def _extract_features_from_thresholds(thresholds: dict) -> list[str]:
 
 
 def _write_record(directory: Path, name: str, data: dict) -> None:
-    """Write a JSON record to disk."""
+    """Write a JSON record to disk atomically (write-then-rename)."""
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{name}.json"
-    with open(path, "w") as f:
+    tmp = directory / f"{name}.json.tmp"
+    with open(tmp, "w") as f:
         json.dump(data, f, indent=2, default=str)
+    tmp.rename(path)  # atomic on POSIX
     log.debug("Wrote research record: %s", path)

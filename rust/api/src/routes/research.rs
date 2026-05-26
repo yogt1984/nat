@@ -200,16 +200,10 @@ fn read_json_dir(dir: &std::path::Path) -> Vec<serde_json::Value> {
     let mut items: Vec<serde_json::Value> = entries
         .filter_map(|e| e.ok())
         .filter(|e| {
+            // Only process .json files; .json.tmp (atomic write in-progress) excluded naturally
             e.path()
                 .extension()
                 .map(|ext| ext == "json")
-                .unwrap_or(false)
-        })
-        .filter(|e| {
-            // Skip .tmp files (atomic write pattern)
-            !e.path()
-                .file_stem()
-                .map(|s| s.to_string_lossy().ends_with(".json"))
                 .unwrap_or(false)
         })
         .filter_map(|e| {
