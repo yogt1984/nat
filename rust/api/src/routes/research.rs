@@ -12,6 +12,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
+use tracing::debug;
 
 use crate::routes::features::ErrorResponse;
 use crate::state::AppState;
@@ -175,6 +176,47 @@ fn paginate(items: Vec<serde_json::Value>, offset: usize, limit: usize) -> Pagin
 }
 
 // ---------------------------------------------------------------------------
+// Cache helpers
+// ---------------------------------------------------------------------------
+
+/// Ensure the research cache is fresh, reloading from disk if stale.
+async fn ensure_cache(state: &AppState) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
+    // Fast path: read lock, check freshness
+    {
+        let cache = state.research_cache.read().await;
+        if !cache.is_stale() {
+            return (cache.hypotheses.clone(), cache.cycles.clone());
+        }
+    }
+
+    // Slow path: write lock, reload from disk
+    let mut cache = state.research_cache.write().await;
+    // Double-check after acquiring write lock (another request may have refreshed)
+    if !cache.is_stale() {
+        return (cache.hypotheses.clone(), cache.cycles.clone());
+    }
+
+    let hyp_dir = research_dir(state).join("hypotheses");
+    let cyc_dir = research_dir(state).join("cycles");
+    cache.hypotheses = read_json_dir(&hyp_dir);
+    cache.cycles = read_json_dir(&cyc_dir);
+    cache.loaded_at = std::time::Instant::now();
+    debug!(
+        hypotheses = cache.hypotheses.len(),
+        cycles = cache.cycles.len(),
+        "Research cache refreshed"
+    );
+
+    (cache.hypotheses.clone(), cache.cycles.clone())
+}
+
+/// Invalidate the cache (called after research events).
+pub async fn invalidate_cache(state: &AppState) {
+    let mut cache = state.research_cache.write().await;
+    cache.loaded_at = std::time::Instant::now() - cache.ttl - std::time::Duration::from_secs(1);
+}
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
@@ -184,8 +226,7 @@ pub async fn list_hypotheses(
     State(state): State<Arc<AppState>>,
     Query(q): Query<HypothesisQuery>,
 ) -> Result<Json<PaginatedResponse<serde_json::Value>>, (StatusCode, Json<ErrorResponse>)> {
-    let dir = research_dir(&state).join("hypotheses");
-    let all = read_json_dir(&dir);
+    let (all, _) = ensure_cache(&state).await;
     let filtered = filter_hypotheses(&all, &q);
     let offset = q.offset.unwrap_or(0);
     let limit = q.limit.unwrap_or(50).min(200);
@@ -198,6 +239,12 @@ pub async fn get_hypothesis(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    // Single hypothesis: check cache first, fall back to direct read
+    let (all, _) = ensure_cache(&state).await;
+    if let Some(h) = all.iter().find(|h| h.get("id").and_then(|v| v.as_str()) == Some(&id)) {
+        return Ok(Json(h.clone()));
+    }
+    // Not in cache — try direct file read (may be very new)
     let path = research_dir(&state).join("hypotheses").join(format!("{}.json", id));
     let data = std::fs::read_to_string(&path).map_err(|_| {
         (
@@ -224,8 +271,7 @@ pub async fn list_cycles(
     State(state): State<Arc<AppState>>,
     Query(q): Query<CycleQuery>,
 ) -> Result<Json<PaginatedResponse<serde_json::Value>>, (StatusCode, Json<ErrorResponse>)> {
-    let dir = research_dir(&state).join("cycles");
-    let all = read_json_dir(&dir);
+    let (_, all) = ensure_cache(&state).await;
     let filtered = filter_cycles(&all, &q);
     let offset = q.offset.unwrap_or(0);
     let limit = q.limit.unwrap_or(50).min(200);
@@ -237,8 +283,7 @@ pub async fn list_cycles(
 pub async fn list_signals(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, Json<ErrorResponse>)> {
-    let dir = research_dir(&state).join("hypotheses");
-    let all = read_json_dir(&dir);
+    let (all, _) = ensure_cache(&state).await;
     let signals: Vec<serde_json::Value> = all
         .into_iter()
         .filter(|h| h.get("status").and_then(|v| v.as_str()) == Some("replicated"))
@@ -251,10 +296,7 @@ pub async fn list_signals(
 pub async fn get_stats(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<ResearchStats>, (StatusCode, Json<ErrorResponse>)> {
-    let hyp_dir = research_dir(&state).join("hypotheses");
-    let cyc_dir = research_dir(&state).join("cycles");
-    let hypotheses = read_json_dir(&hyp_dir);
-    let cycles = read_json_dir(&cyc_dir);
+    let (hypotheses, cycles) = ensure_cache(&state).await;
 
     let mut by_status: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut by_agent: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
@@ -286,8 +328,7 @@ pub async fn get_stats(
 pub async fn get_heatmap(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<HeatmapResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let dir = research_dir(&state).join("hypotheses");
-    let all = read_json_dir(&dir);
+    let (all, _) = ensure_cache(&state).await;
 
     let mut entries = Vec::new();
     let mut features_set = std::collections::BTreeSet::new();
@@ -865,5 +906,48 @@ mod tests {
         assert_eq!(result.total, 3);
         assert_eq!(result.items.len(), 3);
         assert_eq!(result.limit, 100);
+    }
+
+    // -----------------------------------------------------------------------
+    // Cache tests
+    // -----------------------------------------------------------------------
+
+    use crate::state::ResearchCache;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn test_cache_starts_stale() {
+        let cache = ResearchCache::new(Duration::from_secs(30));
+        assert!(cache.is_stale());
+        assert!(cache.hypotheses.is_empty());
+        assert!(cache.cycles.is_empty());
+    }
+
+    #[test]
+    fn test_cache_fresh_after_load() {
+        let mut cache = ResearchCache::new(Duration::from_secs(30));
+        cache.hypotheses = vec![serde_json::json!({"id": "H1"})];
+        cache.loaded_at = Instant::now();
+        assert!(!cache.is_stale());
+        assert_eq!(cache.hypotheses.len(), 1);
+    }
+
+    #[test]
+    fn test_cache_stale_after_ttl() {
+        let mut cache = ResearchCache::new(Duration::from_millis(1));
+        cache.loaded_at = Instant::now() - Duration::from_millis(10);
+        assert!(cache.is_stale());
+    }
+
+    #[test]
+    fn test_cache_invalidation() {
+        let mut cache = ResearchCache::new(Duration::from_secs(30));
+        cache.hypotheses = vec![serde_json::json!({"id": "H1"})];
+        cache.loaded_at = Instant::now();
+        assert!(!cache.is_stale());
+
+        // Invalidate by pushing loaded_at back past TTL
+        cache.loaded_at = Instant::now() - cache.ttl - Duration::from_secs(1);
+        assert!(cache.is_stale());
     }
 }
