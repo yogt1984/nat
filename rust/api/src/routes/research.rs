@@ -17,6 +17,64 @@ use crate::routes::features::ErrorResponse;
 use crate::state::AppState;
 
 // ---------------------------------------------------------------------------
+// Schema versioning
+// ---------------------------------------------------------------------------
+
+/// Current expected schema version for research output records.
+const CURRENT_SCHEMA_VERSION: u64 = 1;
+
+/// Normalize a research output record: ensure schema_version is present,
+/// backfill missing fields for old records, warn on unknown versions.
+fn normalize_record(mut record: serde_json::Value) -> serde_json::Value {
+    let obj = match record.as_object_mut() {
+        Some(o) => o,
+        None => return record,
+    };
+
+    let version = obj
+        .get("schema_version")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    if version == 0 {
+        // Pre-versioning record: backfill defaults
+        obj.entry("schema_version").or_insert(serde_json::json!(1));
+        obj.entry("gates").or_insert(serde_json::json!([]));
+        obj.entry("features").or_insert(serde_json::json!([]));
+        obj.entry("math").or_insert(serde_json::json!(""));
+        obj.entry("failure_reason").or_insert(serde_json::Value::Null);
+        obj.entry("parent_id").or_insert(serde_json::Value::Null);
+
+        // Normalize timestamps: old records may have flat completed/created fields
+        if obj.get("timestamps").is_none() {
+            let created = obj.get("created").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let completed = obj.get("completed").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if !created.is_empty() || !completed.is_empty() {
+                obj.insert("timestamps".to_string(), serde_json::json!({
+                    "created": created,
+                    "completed": completed,
+                }));
+            }
+        }
+
+        debug!(id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("?"), "Normalized v0 record to v1");
+    } else if version > CURRENT_SCHEMA_VERSION {
+        warn!(
+            version,
+            id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
+            "Unknown schema version — record may contain unrecognized fields"
+        );
+    }
+
+    record
+}
+
+/// Apply normalization to a batch of records.
+fn normalize_batch(items: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    items.into_iter().map(normalize_record).collect()
+}
+
+// ---------------------------------------------------------------------------
 // Query parameters
 // ---------------------------------------------------------------------------
 
@@ -148,7 +206,7 @@ async fn query_db(
         })
         .unwrap_or_default();
 
-    Some((items, total))
+    Some((normalize_batch(items), total))
 }
 
 /// Get a single record by ID from SQLite.
@@ -161,7 +219,7 @@ async fn get_db_record(state: &AppState, id: &str) -> Option<serde_json::Value> 
         |row| row.get::<_, String>(0),
     );
     match result {
-        Ok(payload) => serde_json::from_str(&payload).ok(),
+        Ok(payload) => serde_json::from_str(&payload).ok().map(normalize_record),
         Err(_) => None,
     }
 }
@@ -179,7 +237,7 @@ async fn get_all_db(state: &AppState, kind: &str) -> Option<Vec<serde_json::Valu
         .filter_map(|r| r.ok())
         .filter_map(|p| serde_json::from_str(&p).ok())
         .collect();
-    Some(items)
+    Some(normalize_batch(items))
 }
 
 // ---------------------------------------------------------------------------
@@ -208,7 +266,8 @@ fn read_json_dir(dir: &std::path::Path) -> Vec<serde_json::Value> {
         })
         .filter_map(|e| {
             let data = std::fs::read_to_string(e.path()).ok()?;
-            serde_json::from_str(&data).ok()
+            let value: serde_json::Value = serde_json::from_str(&data).ok()?;
+            Some(normalize_record(value))
         })
         .collect();
 
@@ -349,7 +408,7 @@ pub async fn get_hypothesis(
             }),
         )
     })?;
-    Ok(Json(value))
+    Ok(Json(normalize_record(value)))
 }
 
 /// GET /api/research/cycles
@@ -999,6 +1058,82 @@ mod tests {
             .filter_map(|r| r.ok())
             .filter_map(|p| serde_json::from_str(&p).ok())
             .collect()
+    }
+
+    // -----------------------------------------------------------------------
+    // Schema normalization tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_normalize_v0_record_backfills_defaults() {
+        let record = serde_json::json!({
+            "id": "H-OLD-001",
+            "agent": "micro",
+            "status": "failed",
+            "created": "2026-01-01T00:00:00",
+            "completed": "2026-01-01T00:01:00"
+        });
+        let normalized = normalize_record(record);
+        assert_eq!(normalized["schema_version"], 1);
+        assert!(normalized["gates"].is_array());
+        assert!(normalized["features"].is_array());
+        assert_eq!(normalized["math"], "");
+        assert!(normalized["failure_reason"].is_null());
+        assert!(normalized["parent_id"].is_null());
+        // Timestamps normalized from flat fields
+        assert_eq!(normalized["timestamps"]["created"], "2026-01-01T00:00:00");
+        assert_eq!(normalized["timestamps"]["completed"], "2026-01-01T00:01:00");
+    }
+
+    #[test]
+    fn test_normalize_v1_record_unchanged() {
+        let record = serde_json::json!({
+            "schema_version": 1,
+            "id": "H1",
+            "agent": "micro",
+            "gates": [{"name": "IC", "passed": true}],
+            "features": ["ent_book_shape"],
+            "timestamps": {"created": "t1", "completed": "t2"}
+        });
+        let normalized = normalize_record(record.clone());
+        assert_eq!(normalized, record);
+    }
+
+    #[test]
+    fn test_normalize_future_version_preserved() {
+        let record = serde_json::json!({
+            "schema_version": 99,
+            "id": "H-FUTURE",
+            "new_field": "future data"
+        });
+        let normalized = normalize_record(record.clone());
+        // Should pass through unchanged (with a warning logged)
+        assert_eq!(normalized["schema_version"], 99);
+        assert_eq!(normalized["new_field"], "future data");
+    }
+
+    #[test]
+    fn test_normalize_v0_preserves_existing_timestamps() {
+        // If timestamps block already exists, don't overwrite from flat fields
+        let record = serde_json::json!({
+            "id": "H1",
+            "timestamps": {"created": "orig", "completed": "orig"},
+            "created": "flat",
+            "completed": "flat"
+        });
+        let normalized = normalize_record(record);
+        assert_eq!(normalized["timestamps"]["created"], "orig");
+    }
+
+    #[test]
+    fn test_normalize_batch() {
+        let items = vec![
+            serde_json::json!({"id": "H1", "agent": "micro"}),
+            serde_json::json!({"schema_version": 1, "id": "H2", "agent": "micro"}),
+        ];
+        let normalized = normalize_batch(items);
+        assert_eq!(normalized[0]["schema_version"], 1); // backfilled
+        assert_eq!(normalized[1]["schema_version"], 1); // already present
     }
 
     // -----------------------------------------------------------------------
