@@ -83,6 +83,36 @@ export interface HeatmapResponse {
   horizons: number[];
 }
 
+export interface NetworkNode {
+  id: string;
+  category: string;
+  mi: Record<string, number>;
+  cmi: Record<string, number>;
+  interaction: number;
+  cost_viable: boolean;
+  hypothesis_count: number;
+  selected: boolean;
+}
+
+export interface NetworkEdge {
+  source: string;
+  target: string;
+  weight: number;
+}
+
+export interface NetworkMeta {
+  symbol: string;
+  n_samples: number;
+  last_updated: string;
+  total_features: number;
+}
+
+export interface NetworkResponse {
+  nodes: NetworkNode[];
+  edges: NetworkEdge[];
+  meta: NetworkMeta;
+}
+
 export interface PaginatedResponse<T> {
   items: T[];
   total: number;
@@ -152,4 +182,10 @@ export async function listSignals(): Promise<Hypothesis[]> {
 
 export async function getHeatmap(): Promise<HeatmapResponse> {
   return fetchJson(`${BASE}/api/research/heatmap`);
+}
+
+export async function getNetwork(symbol?: string): Promise<NetworkResponse> {
+  const p: Record<string, string> = {};
+  if (symbol) p.symbol = symbol;
+  return fetchJson(`${BASE}/api/research/network`, p);
 }
