@@ -2,8 +2,39 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { getHypothesis } from "@/lib/api";
 import type { Hypothesis } from "@/lib/api";
+import { GateWaterfall } from "@/components/gate-waterfall";
+import { MathPanel } from "@/components/math-panel";
+
+const STATUS_STYLE: Record<string, string> = {
+  replicated: "bg-emerald-900/40 text-emerald-400 border-emerald-700",
+  discovery_passed: "bg-blue-900/40 text-blue-400 border-blue-700",
+  no_effect: "bg-red-900/40 text-red-400 border-red-700",
+  no_replication: "bg-red-900/40 text-red-400 border-red-700",
+  redundant: "bg-amber-900/40 text-amber-400 border-amber-700",
+  fdr_rejected: "bg-orange-900/40 text-orange-400 border-orange-700",
+  command_error: "bg-red-900/40 text-red-400 border-red-700",
+};
+
+const AGENT_STYLE: Record<string, string> = {
+  microstructure: "bg-violet-900/40 text-violet-400 border-violet-700",
+  medium_freq: "bg-blue-900/40 text-blue-400 border-blue-700",
+  macro: "bg-cyan-900/40 text-cyan-400 border-cyan-700",
+};
+
+function Badge({ label, style }: { label: string; style?: string }) {
+  return (
+    <span
+      className={`inline-block px-2 py-0.5 text-xs font-medium rounded border ${
+        style || "bg-zinc-800 text-zinc-300 border-zinc-700"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
 
 export default function HypothesisDetailPage() {
   const params = useParams<{ id: string }>();
@@ -31,59 +62,124 @@ export default function HypothesisDetailPage() {
         <div className="animate-pulse space-y-4">
           <div className="h-6 w-48 bg-zinc-800 rounded" />
           <div className="h-4 w-96 bg-zinc-800 rounded" />
+          <div className="h-48 bg-zinc-800 rounded" />
         </div>
       </div>
     );
   }
 
-  const STATUS_COLOR: Record<string, string> = {
-    replicated: "text-emerald-400",
-    no_effect: "text-red-400",
-    no_replication: "text-red-400",
-    redundant: "text-amber-400",
-  };
-
   return (
-    <div className="space-y-6 max-w-4xl">
+    <div className="space-y-6 max-w-5xl">
+      {/* Back link */}
+      <Link
+        href="/explorer"
+        className="text-xs text-zinc-500 hover:text-zinc-300"
+      >
+        &larr; Back to Explorer
+      </Link>
+
+      {/* Header */}
       <div>
-        <h2 className="text-xl font-bold">{hypothesis.id}</h2>
-        <p className="text-zinc-400 mt-1">{hypothesis.claim}</p>
+        <div className="flex items-center gap-3 flex-wrap">
+          <h2 className="text-xl font-bold font-mono">{hypothesis.id}</h2>
+          <Badge
+            label={hypothesis.status}
+            style={STATUS_STYLE[hypothesis.status]}
+          />
+          <Badge
+            label={hypothesis.agent}
+            style={AGENT_STYLE[hypothesis.agent]}
+          />
+          <Badge label={hypothesis.generator} />
+        </div>
+        <p className="text-zinc-400 text-sm mt-2">{hypothesis.claim}</p>
       </div>
 
-      <div className="grid grid-cols-3 gap-4 text-xs">
-        <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-3">
-          <span className="text-zinc-500">Agent</span>
-          <p className="text-zinc-200 mt-1">{hypothesis.agent}</p>
-        </div>
-        <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-3">
-          <span className="text-zinc-500">Generator</span>
-          <p className="text-zinc-200 mt-1">{hypothesis.generator}</p>
-        </div>
-        <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-3">
-          <span className="text-zinc-500">Status</span>
-          <p className={`mt-1 font-medium ${STATUS_COLOR[hypothesis.status] || "text-zinc-200"}`}>
-            {hypothesis.status}
-          </p>
-        </div>
+      {/* Metadata row */}
+      <div className="flex gap-4 flex-wrap text-xs">
+        {hypothesis.horizon_s != null && (
+          <MetaChip label="Horizon" value={formatHorizon(hypothesis.horizon_s)} />
+        )}
+        {hypothesis.regime_gate && (
+          <MetaChip label="Regime gate" value={hypothesis.regime_gate} />
+        )}
+        {hypothesis.features.length > 0 && (
+          <MetaChip label="Features" value={String(hypothesis.features.length)} />
+        )}
+        {hypothesis.parent_id && (
+          <MetaChip label="Parent" value={hypothesis.parent_id} link={`/explorer/${hypothesis.parent_id}`} />
+        )}
       </div>
 
-      {/* Gate results */}
-      {hypothesis.gates.length > 0 && (
+      {/* Two-column layout: waterfall + gates text */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        {/* Gate waterfall chart */}
+        <GateWaterfall gates={hypothesis.gates} />
+
+        {/* Gate results text */}
+        {hypothesis.gates.length > 0 && (
+          <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
+            <h3 className="text-sm font-semibold mb-3">Gate Results</h3>
+            <div className="space-y-2">
+              {hypothesis.gates.map((gate, i) => (
+                <div key={i} className="flex items-start gap-3 text-xs">
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 mt-1 ${
+                      gate.passed ? "bg-emerald-500" : "bg-red-500"
+                    }`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-zinc-300 font-medium">{gate.name}</span>
+                      {gate.p_value != null && (
+                        <span className="text-zinc-600 font-mono">
+                          p={gate.p_value.toFixed(4)}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-zinc-500 mt-0.5">{gate.message}</p>
+                    {gate.metric != null && gate.threshold != null && (
+                      <p className="text-zinc-600 font-mono mt-0.5">
+                        {gate.metric.toFixed(4)} vs {gate.threshold.toFixed(4)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Math derivation */}
+      {hypothesis.math && <MathPanel latex={hypothesis.math} />}
+
+      {/* Features list */}
+      {hypothesis.features.length > 0 && (
         <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
-          <h3 className="text-sm font-semibold mb-3">Gate Results</h3>
-          <div className="space-y-2">
-            {hypothesis.gates.map((gate, i) => (
-              <div key={i} className="flex items-center gap-3 text-xs">
-                <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${
-                    gate.passed ? "bg-emerald-500" : "bg-red-500"
-                  }`}
-                />
-                <span className="w-28 text-zinc-400 font-medium">{gate.name}</span>
-                <span className="text-zinc-300 flex-1">{gate.message}</span>
-                {gate.metric != null && (
-                  <span className="text-zinc-500 font-mono">{gate.metric.toFixed(4)}</span>
-                )}
+          <h3 className="text-sm font-semibold mb-3">Features</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {hypothesis.features.map((f) => (
+              <span
+                key={f}
+                className="px-2 py-0.5 text-xs font-mono bg-zinc-800 text-zinc-300 rounded border border-zinc-700"
+              >
+                {f}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Thresholds */}
+      {Object.keys(hypothesis.thresholds).length > 0 && (
+        <div className="bg-zinc-900 rounded-lg border border-zinc-800 p-4">
+          <h3 className="text-sm font-semibold mb-3">Thresholds</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+            {Object.entries(hypothesis.thresholds).map(([k, v]) => (
+              <div key={k} className="font-mono">
+                <span className="text-zinc-500">{k}: </span>
+                <span className="text-zinc-300">{String(v)}</span>
               </div>
             ))}
           </div>
@@ -91,13 +187,44 @@ export default function HypothesisDetailPage() {
       )}
 
       {/* Timestamps */}
-      <div className="text-xs text-zinc-500 space-y-1">
+      <div className="text-xs text-zinc-500 space-y-1 border-t border-zinc-800 pt-4">
         <p>Created: {hypothesis.timestamps.created}</p>
         {hypothesis.timestamps.completed && (
           <p>Completed: {hypothesis.timestamps.completed}</p>
         )}
-        {hypothesis.parent_id && <p>Parent: {hypothesis.parent_id}</p>}
       </div>
     </div>
   );
+}
+
+function MetaChip({
+  label,
+  value,
+  link,
+}: {
+  label: string;
+  value: string;
+  link?: string;
+}) {
+  const inner = (
+    <span className="inline-flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1">
+      <span className="text-zinc-500">{label}</span>
+      <span className="text-zinc-200 font-mono">{value}</span>
+    </span>
+  );
+  if (link) {
+    return (
+      <Link href={link} className="hover:opacity-80">
+        {inner}
+      </Link>
+    );
+  }
+  return inner;
+}
+
+function formatHorizon(s: number): string {
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.round(s / 60)}min`;
+  if (s < 86400) return `${Math.round(s / 3600)}h`;
+  return `${Math.round(s / 86400)}d`;
 }
