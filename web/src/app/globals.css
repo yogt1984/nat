@@ -5,6 +5,35 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* Animations — real-time visual feedback                             */
+/* ------------------------------------------------------------------ */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes flash-border {
+  0% { box-shadow: 0 0 0 0 var(--flash-color, rgba(59, 130, 246, 0.5)); }
+  50% { box-shadow: 0 0 12px 2px var(--flash-color, rgba(59, 130, 246, 0.4)); }
+  100% { box-shadow: 0 0 0 0 var(--flash-color, rgba(59, 130, 246, 0)); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+.animate-flash-border {
+  animation: flash-border 1.5s ease-out;
+}
+
+/* ------------------------------------------------------------------ */
 /* Print styles — PDF export via window.print()                       */
 /* ------------------------------------------------------------------ */
 
