@@ -1019,7 +1019,10 @@ class ResearchAgent(ABC):
         self.state.transition(AgentPhase.MONITOR, "checking registered signals")
         self.run_monitor()
 
-        # 5. Update cycle counter
+        # 5. Retention cleanup
+        self._cleanup_retention()
+
+        # 6. Update cycle counter
         cycle_num = self.state.get("cycle_count", 0) + 1
         self.state.set("cycle_count", cycle_num)
         self.state.set("last_cycle_at", datetime.now(timezone.utc).isoformat())
@@ -1030,6 +1033,25 @@ class ResearchAgent(ABC):
         log.info("Cycle complete: %d experiments, queue depth=%d",
                  n_run, self.queue.depth)
         clear_context()
+
+    def _cleanup_retention(self) -> None:
+        """Delete research output older than configured max_age_days."""
+        retention = self.config.get("retention", {})
+        max_age = retention.get("max_age_days")
+        if not max_age:
+            return
+        try:
+            n_db = self._store.delete_old_research_output(max_age)
+            n_json = 0
+            if retention.get("cleanup_json", True) and self.research_output_root:
+                from data.state import StateStore
+                n_json = StateStore.cleanup_old_json(
+                    self.research_output_root, max_age,
+                )
+            if n_db or n_json:
+                log.info("Retention cleanup: %d DB rows, %d JSON files removed", n_db, n_json)
+        except Exception as e:
+            log.debug("Retention cleanup failed: %s", e)
 
     def _publish_event(self, event_type: str, payload: dict) -> None:
         """Publish a research event to Redis (best-effort, never throws).

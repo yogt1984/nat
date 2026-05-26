@@ -168,7 +168,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 
 ## Priority 3 — Messaging & Observability
 
-### 3.1 Upgrade Redis Pub/Sub to Streams
+### 3.1 Upgrade Redis Pub/Sub to Streams ✅
 
 **Problem:** Redis Pub/Sub is fire-and-forget. Messages published with no subscribers are lost permanently. If the API restarts during an agent cycle, all events during downtime are gone. No replay capability.
 
@@ -212,7 +212,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 
 ---
 
-### 3.3 Research Data Retention Policy
+### 3.3 Research Data Retention Policy ✅
 
 **Problem:** Hypothesis JSON files and cycle summaries accumulate indefinitely in `data/research/`. No cleanup, no archival. With agents running continuously, this becomes thousands of files within weeks.
 
@@ -347,9 +347,9 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 | 2.1 | Centralize symbols | P2 | ~2h | Single source of truth for asset config |
 | 2.2 | API contract tests | P2 | ~2-4h | Catches frontend/backend drift before deploy |
 | 2.3 | Remove JSON fallback | P2 | ~1.5h | Halves state management code paths |
-| 3.1 | Redis Streams | P3 | ~3h | Reliable event delivery with replay |
-| 3.2 | Correlation IDs | P3 | ~2h | End-to-end tracing across services |
-| 3.3 | Retention policy | P3 | ~1h | Prevents unbounded file/data growth |
+| 3.1 | Redis Streams ✅ | P3 | ~3h | Reliable event delivery with replay |
+| 3.2 | Correlation IDs ✅ | P3 | ~2h | End-to-end tracing across services |
+| 3.3 | Retention policy ✅ | P3 | ~1h | Prevents unbounded file/data growth |
 | 4.1 | Dependency injection | P4 | ~2h | Testable agents without mock.patch |
 | 4.2 | Gate strategy pattern | P4 | ~3h | Composable, reorderable gate protocol |
 | 4.3 | Meta-agent coordination | P4 | ~3h | Agents respect cross-agent budget/directives |

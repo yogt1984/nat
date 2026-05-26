@@ -19,6 +19,7 @@ import sqlite3
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -782,3 +783,72 @@ class TestResearchOutput:
         store.insert_research_output({"agent": "micro"}, kind="hypothesis")
         items, total = store.query_research_output(kind="hypothesis")
         assert total == 0
+
+
+# ===========================================================================
+# Retention / cleanup
+# ===========================================================================
+
+class TestRetention:
+    def test_delete_old_research_output(self, store):
+        """Records older than max_age_days are deleted; recent ones survive."""
+        from datetime import timedelta
+
+        now = datetime.now(timezone.utc)
+        old = (now - timedelta(days=100)).isoformat()
+        recent = (now - timedelta(days=10)).isoformat()
+
+        store.insert_research_output(
+            {"id": "OLD-001", "agent": "micro", "status": "failed",
+             "timestamps": {"completed": old}},
+            kind="hypothesis",
+        )
+        store.insert_research_output(
+            {"id": "NEW-001", "agent": "micro", "status": "replicated",
+             "timestamps": {"completed": recent}},
+            kind="hypothesis",
+        )
+        assert store.query_research_output()[1] == 2
+
+        deleted = store.delete_old_research_output(max_age_days=90)
+        assert deleted == 1
+        items, total = store.query_research_output()
+        assert total == 1
+        assert items[0]["id"] == "NEW-001"
+
+    def test_delete_nothing_when_all_recent(self, store):
+        now = datetime.now(timezone.utc).isoformat()
+        store.insert_research_output(
+            {"id": "H1", "agent": "micro", "timestamps": {"completed": now}},
+            kind="hypothesis",
+        )
+        assert store.delete_old_research_output(max_age_days=90) == 0
+        assert store.query_research_output()[1] == 1
+
+    def test_cleanup_old_json(self, tmp_path):
+        """JSON files with old timestamps are removed; recent ones survive."""
+        from datetime import timedelta
+
+        hyp_dir = tmp_path / "hypotheses"
+        hyp_dir.mkdir()
+        now = datetime.now(timezone.utc)
+
+        old_record = {"id": "OLD", "timestamps": {"completed": (now - timedelta(days=100)).isoformat()}}
+        (hyp_dir / "OLD.json").write_text(json.dumps(old_record))
+
+        new_record = {"id": "NEW", "timestamps": {"completed": now.isoformat()}}
+        (hyp_dir / "NEW.json").write_text(json.dumps(new_record))
+
+        removed = StateStore.cleanup_old_json(tmp_path, max_age_days=90)
+        assert removed == 1
+        assert not (hyp_dir / "OLD.json").exists()
+        assert (hyp_dir / "NEW.json").exists()
+
+    def test_cleanup_json_skips_malformed(self, tmp_path):
+        """Malformed JSON files are skipped, not deleted."""
+        hyp_dir = tmp_path / "hypotheses"
+        hyp_dir.mkdir()
+        (hyp_dir / "bad.json").write_text("{invalid json")
+        removed = StateStore.cleanup_old_json(tmp_path, max_age_days=90)
+        assert removed == 0
+        assert (hyp_dir / "bad.json").exists()

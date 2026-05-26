@@ -454,6 +454,54 @@ class StateStore:
         return None
 
     # -----------------------------------------------------------------------
+    # Retention / cleanup
+    # -----------------------------------------------------------------------
+
+    def delete_old_research_output(self, max_age_days: int) -> int:
+        """Delete research_output rows older than *max_age_days*. Returns count."""
+        cutoff = datetime.now(timezone.utc) - __import__("datetime").timedelta(
+            days=max_age_days,
+        )
+        cutoff_iso = cutoff.isoformat()
+        with self._conn:
+            cur = self._conn.execute(
+                "DELETE FROM research_output WHERE created_at < ?",
+                (cutoff_iso,),
+            )
+            return cur.rowcount
+
+    @staticmethod
+    def cleanup_old_json(research_dir: Path, max_age_days: int) -> int:
+        """Remove hypothesis/cycle JSON files older than *max_age_days*.
+
+        Reads each file's timestamp field to determine age. Returns count.
+        """
+        cutoff = datetime.now(timezone.utc) - __import__("datetime").timedelta(
+            days=max_age_days,
+        )
+        removed = 0
+        for subdir in ("hypotheses", "cycles"):
+            d = research_dir / subdir
+            if not d.is_dir():
+                continue
+            for f in d.glob("*.json"):
+                try:
+                    record = json.loads(f.read_text())
+                    ts = (
+                        record.get("timestamps", {}).get("completed")
+                        or record.get("completed")
+                        or record.get("created_at")
+                    )
+                    if not ts:
+                        continue
+                    if datetime.fromisoformat(ts) < cutoff:
+                        f.unlink()
+                        removed += 1
+                except (json.JSONDecodeError, OSError, ValueError):
+                    continue
+        return removed
+
+    # -----------------------------------------------------------------------
     # Cross-agent queries
     # -----------------------------------------------------------------------
 
