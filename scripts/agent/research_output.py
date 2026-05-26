@@ -56,6 +56,12 @@ def _get_redis():
         return None
 
 
+def set_redis(conn) -> None:
+    """Inject a Redis connection (for testing). Pass None to reset."""
+    global _redis_conn
+    _redis_conn = conn
+
+
 def publish_research_event(event_type: str, payload: dict) -> bool:
     """Publish a research event to Redis Stream for WebSocket streaming.
 

@@ -19,6 +19,7 @@ import sqlite3
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -782,3 +783,130 @@ class TestResearchOutput:
         store.insert_research_output({"agent": "micro"}, kind="hypothesis")
         items, total = store.query_research_output(kind="hypothesis")
         assert total == 0
+
+
+# ===========================================================================
+# Retention / cleanup
+# ===========================================================================
+
+class TestRetention:
+    def test_delete_old_research_output(self, store):
+        """Records older than max_age_days are deleted; recent ones survive."""
+        from datetime import timedelta
+
+        now = datetime.now(timezone.utc)
+        old = (now - timedelta(days=100)).isoformat()
+        recent = (now - timedelta(days=10)).isoformat()
+
+        store.insert_research_output(
+            {"id": "OLD-001", "agent": "micro", "status": "failed",
+             "timestamps": {"completed": old}},
+            kind="hypothesis",
+        )
+        store.insert_research_output(
+            {"id": "NEW-001", "agent": "micro", "status": "replicated",
+             "timestamps": {"completed": recent}},
+            kind="hypothesis",
+        )
+        assert store.query_research_output()[1] == 2
+
+        deleted = store.delete_old_research_output(max_age_days=90)
+        assert deleted == 1
+        items, total = store.query_research_output()
+        assert total == 1
+        assert items[0]["id"] == "NEW-001"
+
+    def test_delete_nothing_when_all_recent(self, store):
+        now = datetime.now(timezone.utc).isoformat()
+        store.insert_research_output(
+            {"id": "H1", "agent": "micro", "timestamps": {"completed": now}},
+            kind="hypothesis",
+        )
+        assert store.delete_old_research_output(max_age_days=90) == 0
+        assert store.query_research_output()[1] == 1
+
+    def test_cleanup_old_json(self, tmp_path):
+        """JSON files with old timestamps are removed; recent ones survive."""
+        from datetime import timedelta
+
+        hyp_dir = tmp_path / "hypotheses"
+        hyp_dir.mkdir()
+        now = datetime.now(timezone.utc)
+
+        old_record = {"id": "OLD", "timestamps": {"completed": (now - timedelta(days=100)).isoformat()}}
+        (hyp_dir / "OLD.json").write_text(json.dumps(old_record))
+
+        new_record = {"id": "NEW", "timestamps": {"completed": now.isoformat()}}
+        (hyp_dir / "NEW.json").write_text(json.dumps(new_record))
+
+        removed = StateStore.cleanup_old_json(tmp_path, max_age_days=90)
+        assert removed == 1
+        assert not (hyp_dir / "OLD.json").exists()
+        assert (hyp_dir / "NEW.json").exists()
+
+    def test_cleanup_json_skips_malformed(self, tmp_path):
+        """Malformed JSON files are skipped, not deleted."""
+        hyp_dir = tmp_path / "hypotheses"
+        hyp_dir.mkdir()
+        (hyp_dir / "bad.json").write_text("{invalid json")
+        removed = StateStore.cleanup_old_json(tmp_path, max_age_days=90)
+        assert removed == 0
+        assert (hyp_dir / "bad.json").exists()
+
+
+# ===========================================================================
+# Budget & directives
+# ===========================================================================
+
+class TestBudget:
+    def test_set_and_get_budget(self, store):
+        store.set_budget("micro", 8, 0.45)
+        b = store.get_budget("micro")
+        assert b is not None
+        assert b["max_hypotheses_per_cycle"] == 8
+        assert b["compute_share"] == pytest.approx(0.45)
+        assert "updated_at" in b
+
+    def test_get_budget_returns_none_if_unset(self, store):
+        assert store.get_budget("nonexistent") is None
+
+    def test_set_budget_upserts(self, store):
+        store.set_budget("micro", 5, 0.3)
+        store.set_budget("micro", 10, 0.6)
+        b = store.get_budget("micro")
+        assert b["max_hypotheses_per_cycle"] == 10
+        assert b["compute_share"] == pytest.approx(0.6)
+
+
+class TestDirectives:
+    def test_add_and_consume(self, store):
+        d_id = store.add_directive("micro", "pause_generator",
+                                   {"generator": "spectral"})
+        assert d_id > 0
+
+        pending = store.consume_directives("micro")
+        assert len(pending) == 1
+        assert pending[0]["action"] == "pause_generator"
+        assert pending[0]["payload"]["generator"] == "spectral"
+
+    def test_consume_marks_consumed(self, store):
+        store.add_directive("micro", "retest_hypothesis",
+                            {"hypothesis_id": "HYP-001"})
+        store.consume_directives("micro")
+        # Second consume should return empty
+        assert store.consume_directives("micro") == []
+
+    def test_directives_isolated_per_agent(self, store):
+        store.add_directive("micro", "pause_generator", {"generator": "x"})
+        store.add_directive("macro", "pause_generator", {"generator": "y"})
+        micro = store.consume_directives("micro")
+        assert len(micro) == 1
+        assert micro[0]["payload"]["generator"] == "x"
+
+    def test_consume_empty(self, store):
+        assert store.consume_directives("micro") == []
+
+    def test_directive_without_payload(self, store):
+        store.add_directive("micro", "some_action")
+        pending = store.consume_directives("micro")
+        assert pending[0]["payload"] is None

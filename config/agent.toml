@@ -43,6 +43,10 @@ consecutive_days_limit = 14
 [defaults.paths]
 data_dir = "data/features"
 
+[defaults.retention]
+max_age_days = 90           # research output older than this is deleted
+cleanup_json = true         # also remove stale JSON files from data/research/
+
 # ─────────────────────────────────────────────────────────────
 # Microstructure Agent (tick-level, <1min horizons)
 # ─────────────────────────────────────────────────────────────

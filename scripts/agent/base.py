@@ -706,17 +706,19 @@ class BaseRunner(ABC):
 
     # --- Helpers ----------------------------------------------------------
 
+    def discovery_gates(self) -> list:
+        """Gate instances for discovery checks. Override to customise."""
+        from .gates import DISCOVERY_GATES
+        return list(DISCOVERY_GATES)
+
     def _check_gates(self, report: dict) -> tuple[bool, str]:
-        """Run IC and dIC gate checks against hypothesis thresholds."""
-        checks = [
-            ("IC", check_ic_gate(report, self.h.thresholds)),
-            ("dIC", check_dIC_gate(report, self.h.thresholds)),
-        ]
+        """Run discovery gate checks against hypothesis thresholds."""
         msgs = []
-        for name, (passed, msg) in checks:
-            msgs.append(msg)
-            if not passed:
-                return False, f"{name}: {msg}"
+        for gate in self.discovery_gates():
+            result = gate.evaluate(report, self.h.thresholds)
+            msgs.append(result.message)
+            if not result.passed:
+                return False, f"{result.name}: {result.message}"
         return True, " | ".join(msgs)
 
     def _extract_features(self) -> list[str]:
@@ -794,7 +796,7 @@ class ResearchAgent(ABC):
     _rolling_ic_feature_suffixes: tuple[str, ...] = ("",)
     _rolling_ic_use_gated_signal: bool = False
 
-    def __init__(self, config: dict | None = None, *, store=None):
+    def __init__(self, config: dict | None = None, *, store=None, redis=None):
         self.config = config or self.load_config()
         self.config.setdefault("generators_enabled", list(self.default_generators))
         # SQLite state store — auto-created or injected for testing
@@ -803,6 +805,10 @@ class ResearchAgent(ABC):
         self.queue = HypothesisQueue(store=self._store, agent=self.agent_type)
         self.gen_stats = self._load_gen_stats()
         self._shutdown = False
+        # Inject Redis connection for research events (None = lazy-connect)
+        if redis is not None:
+            from .research_output import set_redis
+            set_redis(redis)
         signal_mod.signal(signal_mod.SIGTERM, self._handle_signal)
         signal_mod.signal(signal_mod.SIGINT, self._handle_signal)
 
@@ -914,6 +920,9 @@ class ResearchAgent(ABC):
         set_context(cycle_id=cycle_id, agent=self.agent_type)
         cycle_start = time.monotonic()
 
+        # 0. Process pending directives from meta-agent
+        self._process_directives()
+
         # 1. Update manifest
         self.state.transition(AgentPhase.MANIFEST, "scanning data")
         manifest = self.build_manifest()
@@ -926,7 +935,7 @@ class ResearchAgent(ABC):
         self.state.transition(AgentPhase.EXECUTE, "running experiments")
         n_run = 0
         n_registered = 0
-        max_run = self.config["max_experiments_per_cycle"]
+        max_run = self._effective_max_experiments()
         max_time = self.config["max_cycle_runtime_s"]
         cycle_hypotheses = []
 
@@ -1019,7 +1028,10 @@ class ResearchAgent(ABC):
         self.state.transition(AgentPhase.MONITOR, "checking registered signals")
         self.run_monitor()
 
-        # 5. Update cycle counter
+        # 5. Retention cleanup
+        self._cleanup_retention()
+
+        # 6. Update cycle counter
         cycle_num = self.state.get("cycle_count", 0) + 1
         self.state.set("cycle_count", cycle_num)
         self.state.set("last_cycle_at", datetime.now(timezone.utc).isoformat())
@@ -1030,6 +1042,64 @@ class ResearchAgent(ABC):
         log.info("Cycle complete: %d experiments, queue depth=%d",
                  n_run, self.queue.depth)
         clear_context()
+
+    def _effective_max_experiments(self) -> int:
+        """Read per-cycle budget from meta-agent, fall back to config."""
+        try:
+            budget = self._store.get_budget(self.agent_type)
+            if budget:
+                return budget["max_hypotheses_per_cycle"]
+        except Exception:
+            pass
+        return self.config["max_experiments_per_cycle"]
+
+    def _process_directives(self) -> None:
+        """Consume pending directives from the meta-agent."""
+        try:
+            directives = self._store.consume_directives(self.agent_type)
+        except Exception:
+            return
+        for d in directives:
+            action = d["action"]
+            payload = d.get("payload") or {}
+            if action == "pause_generator":
+                gen = payload.get("generator")
+                if gen:
+                    enabled = self.config.get("generators_enabled", [])
+                    if gen in enabled:
+                        enabled.remove(gen)
+                        log.info("Directive: paused generator %s", gen)
+            elif action == "retest_hypothesis":
+                hyp_id = payload.get("hypothesis_id")
+                if hyp_id:
+                    log.info("Directive: retest %s (queued)", hyp_id)
+            elif action == "adjust_threshold":
+                key = payload.get("key")
+                value = payload.get("value")
+                if key and value is not None:
+                    self.config[key] = value
+                    log.info("Directive: set %s = %s", key, value)
+            else:
+                log.warning("Unknown directive action: %s", action)
+
+    def _cleanup_retention(self) -> None:
+        """Delete research output older than configured max_age_days."""
+        retention = self.config.get("retention", {})
+        max_age = retention.get("max_age_days")
+        if not max_age:
+            return
+        try:
+            n_db = self._store.delete_old_research_output(max_age)
+            n_json = 0
+            if retention.get("cleanup_json", True) and self.research_output_root:
+                from data.state import StateStore
+                n_json = StateStore.cleanup_old_json(
+                    self.research_output_root, max_age,
+                )
+            if n_db or n_json:
+                log.info("Retention cleanup: %d DB rows, %d JSON files removed", n_db, n_json)
+        except Exception as e:
+            log.debug("Retention cleanup failed: %s", e)
 
     def _publish_event(self, event_type: str, payload: dict) -> None:
         """Publish a research event to Redis (best-effort, never throws).

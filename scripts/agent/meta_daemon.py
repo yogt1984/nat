@@ -222,24 +222,55 @@ class MetaAgent:
     # --- Step 2: Budget allocation -------------------------------------------
 
     def allocate_budget(self, agent_stats: dict[str, dict]) -> dict[str, float]:
-        """Thompson sampling at agent level → normalized compute shares."""
+        """Thompson sampling at agent level → normalized compute shares.
+
+        Writes per-agent budget to SQLite so research agents can read it.
+        """
         if not agent_stats:
             n = len(self.AGENTS)
-            return {a: round(1.0 / n, 4) for a in self.AGENTS}
+            shares = {a: round(1.0 / n, 4) for a in self.AGENTS}
+        else:
+            weights = {}
+            for agent_name in self.AGENTS:
+                stats = agent_stats.get(agent_name, {})
+                weights[agent_name] = stats.get("weight", 0.5)
 
-        weights = {}
-        for agent_name in self.AGENTS:
-            stats = agent_stats.get(agent_name, {})
-            weights[agent_name] = stats.get("weight", 0.5)
+            total = sum(weights.values())
+            if total <= 0:
+                n = len(self.AGENTS)
+                shares = {a: round(1.0 / n, 4) for a in self.AGENTS}
+            else:
+                shares = {a: round(w / total, 4) for a, w in weights.items()}
 
-        total = sum(weights.values())
-        if total <= 0:
-            n = len(self.AGENTS)
-            return {a: round(1.0 / n, 4) for a in self.AGENTS}
+        # Write to budget table — agents read this at cycle start
+        total_budget = sum(
+            self._load_agent_max_experiments(a) for a in self.AGENTS
+        )
+        for agent_name, share in shares.items():
+            max_hyps = max(1, round(share * total_budget))
+            self._store.set_budget(agent_name, max_hyps, share)
 
-        budget = {a: round(w / total, 4) for a, w in weights.items()}
-        log.info("Budget allocation: %s", budget)
-        return budget
+        log.info("Budget allocation: %s", shares)
+        return shares
+
+    def _load_agent_max_experiments(self, agent_name: str) -> int:
+        """Read configured max_experiments_per_cycle for an agent."""
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib  # type: ignore[no-redef]
+        section_map = {
+            "microstructure": "agent",
+            "medium_freq": "agent_mf",
+            "macro": "agent_macro",
+        }
+        section = section_map.get(agent_name, "agent")
+        config_path = ROOT / "config" / "agent.toml"
+        if config_path.exists():
+            with open(config_path, "rb") as f:
+                raw = tomllib.load(f)
+            return raw.get(section, {}).get("max_experiments_per_cycle", 10)
+        return 10
 
     # --- Step 3: Cross-agent correlation -------------------------------------
 
