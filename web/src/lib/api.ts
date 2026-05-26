@@ -64,14 +64,10 @@ export interface Signal {
 
 export interface ResearchStats {
   total_hypotheses: number;
-  total_registered: number;
-  total_graveyard: number;
-  agents: Record<string, {
-    phase: string;
-    cycle_count: number;
-    last_cycle_at: string | null;
-    queue_depth: number;
-  }>;
+  total_cycles: number;
+  by_status: Record<string, number>;
+  by_agent: Record<string, number>;
+  by_generator: Record<string, number>;
 }
 
 export interface HeatmapEntry {
@@ -82,10 +78,10 @@ export interface HeatmapEntry {
 }
 
 export interface PaginatedResponse<T> {
-  data: T[];
+  items: T[];
   total: number;
-  page: number;
-  per_page: number;
+  offset: number;
+  limit: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,16 +111,18 @@ export async function getStats(): Promise<ResearchStats> {
 }
 
 export async function listHypotheses(params?: {
-  page?: number;
-  per_page?: number;
+  offset?: number;
+  limit?: number;
   agent?: string;
   status?: string;
+  generator?: string;
 }): Promise<PaginatedResponse<Hypothesis>> {
   const p: Record<string, string> = {};
-  if (params?.page) p.page = String(params.page);
-  if (params?.per_page) p.per_page = String(params.per_page);
+  if (params?.offset != null) p.offset = String(params.offset);
+  if (params?.limit != null) p.limit = String(params.limit);
   if (params?.agent) p.agent = params.agent;
   if (params?.status) p.status = params.status;
+  if (params?.generator) p.generator = params.generator;
   return fetchJson(`${BASE}/api/research/hypotheses`, p);
 }
 
@@ -133,12 +131,12 @@ export async function getHypothesis(id: string): Promise<Hypothesis> {
 }
 
 export async function listCycles(params?: {
-  page?: number;
-  per_page?: number;
+  offset?: number;
+  limit?: number;
 }): Promise<PaginatedResponse<CycleSummary>> {
   const p: Record<string, string> = {};
-  if (params?.page) p.page = String(params.page);
-  if (params?.per_page) p.per_page = String(params.per_page);
+  if (params?.offset != null) p.offset = String(params.offset);
+  if (params?.limit != null) p.limit = String(params.limit);
   return fetchJson(`${BASE}/api/research/cycles`, p);
 }
 
