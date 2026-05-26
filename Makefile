@@ -1293,6 +1293,9 @@ help:
 	@echo "  test_alg1_paper         Paper trader batch + watch mode"
 	@echo "  test_alg1_live          LIVE mode (requires HL_PRIVATE_KEY)"
 	@echo "  test_oos30              30-day OOS validation (5 winning algos)"
+	@echo "  oos_validate            Run OOS validation (4 winning algos) + terminal report"
+	@echo "  oos_watch               Watch mode: poll for new data, re-run, refresh"
+	@echo "  oos_report              Terminal dashboard from existing state"
 	@echo ""
 
 # =============================================================================
@@ -1336,3 +1339,18 @@ test_oos30:
 	$(PYTHON) scripts/alpha/paper_trader_surprise.py batch --save
 	@echo ""
 	@echo "Done. Reports saved to reports/"
+
+# =============================================================================
+# OOS VALIDATION
+# =============================================================================
+
+oos_validate:
+	@echo "Running OOS validation (4 winning algos)..."
+	$(PYTHON) scripts/oos_validate.py batch
+
+oos_watch:
+	@echo "Starting OOS validation watcher..."
+	$(PYTHON) scripts/oos_validate.py watch
+
+oos_report:
+	$(PYTHON) scripts/oos_terminal.py

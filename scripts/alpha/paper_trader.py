@@ -470,6 +470,8 @@ def main():
     p_batch.add_argument("--data-dir", default="data/features")
     p_batch.add_argument("--symbols", nargs="+", default=["BTC", "ETH", "SOL"])
     p_batch.add_argument("--save", action="store_true", help="Save trade logs + report")
+    p_batch.add_argument("--json-output", type=str, default=None,
+                         help="Write structured results JSON to this path")
 
     # Watch mode
     p_watch = sub.add_parser("watch", help="Continuously monitor for new data")
@@ -488,7 +490,13 @@ def main():
         sys.exit(1)
 
     if args.mode == "batch":
-        run_batch(data_dir, args.symbols, save=args.save)
+        all_results = run_batch(data_dir, args.symbols, save=args.save)
+        if args.json_output and all_results:
+            out = Path(args.json_output)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with open(out, "w") as f:
+                json.dump(all_results, f, indent=2, default=_json_default)
+            print(f"JSON output saved: {out}")
     elif args.mode == "watch":
         run_watch(data_dir, args.symbol, poll_seconds=args.poll)
 

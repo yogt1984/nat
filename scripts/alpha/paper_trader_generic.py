@@ -322,8 +322,12 @@ def _json_default(obj):
 
 
 def run_algorithm(algo_name: str, data_dir: Path, symbols: list[str],
-                  save: bool = False) -> dict:
-    """Run walk-forward paper trading for one algorithm."""
+                  save: bool = False, return_trades: bool = False) -> dict:
+    """Run walk-forward paper trading for one algorithm.
+
+    If return_trades=True, result[symbol] includes a "trades" key with the
+    flat list of PaperTrade dicts (for continuous testing / visualization).
+    """
     config = ALGO_CONFIG.get(algo_name)
     if config is None:
         print(f"  No config for '{algo_name}', skipping")
@@ -378,6 +382,7 @@ def run_algorithm(algo_name: str, data_dir: Path, symbols: list[str],
             continue
 
         daily_summaries = []
+        all_trades = [] if return_trades else None
 
         for i in range(TRAIN_WINDOW, len(date_bars)):
             train_bar_list = [b for _, b in date_bars[i - TRAIN_WINDOW:i]]
@@ -391,6 +396,8 @@ def run_algorithm(algo_name: str, data_dir: Path, symbols: list[str],
             trades = generate_trades(scored, test_date_str, symbol)
             summary = summarize_day(trades, test_date_str, symbol)
             daily_summaries.append(summary)
+            if return_trades:
+                all_trades.extend(trades)
 
             tag = "+" if summary.total_net_bps > 0 else " "
             print(f"    {test_date_str}: {summary.n_trades:3d} trades | "
@@ -410,7 +417,7 @@ def run_algorithm(algo_name: str, data_dir: Path, symbols: list[str],
                   f"Sharpe {sharpe:+.1f} | total {total_pnl:+.0f} bps | "
                   f"WR {n_positive}/{len(daily_summaries)}")
 
-            all_results[symbol] = {
+            result = {
                 "n_oos_dates": len(daily_summaries),
                 "n_trades": total_trades,
                 "net_bps_per_trade": round(total_pnl / total_trades, 3) if total_trades else 0,
@@ -418,7 +425,11 @@ def run_algorithm(algo_name: str, data_dir: Path, symbols: list[str],
                 "total_pnl_bps": round(total_pnl, 1),
                 "daily_win_rate": round(n_positive / len(daily_summaries), 2),
                 "max_daily_loss_bps": round(float(np.min(daily_pnl)), 1),
+                "daily": [asdict(s) for s in daily_summaries],
             }
+            if return_trades:
+                result["trades"] = [asdict(t) for t in all_trades]
+            all_results[symbol] = result
 
     return all_results
 
@@ -430,6 +441,8 @@ def main():
     parser.add_argument("--data-dir", default="data/features")
     parser.add_argument("--symbols", nargs="+", default=["BTC", "ETH", "SOL"])
     parser.add_argument("--save", action="store_true", help="Save report JSON")
+    parser.add_argument("--json-output", type=str, default=None,
+                        help="Write structured results JSON to this path")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -493,6 +506,13 @@ def main():
         with open(out, "w") as f:
             json.dump(report, f, indent=2, default=_json_default)
         print(f"Report saved: {out}")
+
+    if args.json_output and master_results:
+        out2 = Path(args.json_output)
+        out2.parent.mkdir(parents=True, exist_ok=True)
+        with open(out2, "w") as f:
+            json.dump(master_results, f, indent=2, default=_json_default)
+        print(f"JSON output saved: {out2}")
 
 
 if __name__ == "__main__":

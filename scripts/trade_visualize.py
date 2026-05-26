@@ -138,6 +138,9 @@ def _aggregate_to_bars(ticks: pd.DataFrame) -> pd.DataFrame:
     ticks["bar_id"] = ticks["timestamp_ns"].values // bar_ns
     agg = {
         "timestamp_ns": ("timestamp_ns", "first"),
+        "midprice_open": ("raw_midprice", "first"),
+        "midprice_high": ("raw_midprice", "max"),
+        "midprice_low": ("raw_midprice", "min"),
         "midprice_last": ("raw_midprice", "last"),
         "spread_bps_last": ("raw_spread_bps", "last"),
         "depth_5_std": ("raw_ask_depth_5", "std"),
