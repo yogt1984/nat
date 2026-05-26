@@ -29,6 +29,9 @@ from typing import Optional
 
 log = logging.getLogger("nat.agent")
 
+# Lazy-initialized StateStore for SQLite writes
+_state_store = None
+
 # Redis channel for real-time research events
 _RESEARCH_CHANNEL = "nat:research:events"
 
@@ -74,6 +77,30 @@ def publish_research_event(event_type: str, payload: dict) -> bool:
 
 # Default output root
 _OUTPUT_ROOT = Path(__file__).resolve().parent.parent.parent / "data" / "research"
+
+# Default database path
+_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "nat.db"
+
+
+def _get_store():
+    """Lazy-initialize StateStore for research output writes."""
+    global _state_store
+    if _state_store is not None:
+        return _state_store
+    try:
+        from scripts.data.state import StateStore
+        _state_store = StateStore(_DB_PATH)
+        return _state_store
+    except Exception:
+        try:
+            import sys
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+            from data.state import StateStore
+            _state_store = StateStore(_DB_PATH)
+            return _state_store
+        except Exception:
+            log.debug("StateStore not available, research output will use JSON only")
+            return None
 
 # LaTeX derivations per generator type
 GENERATOR_MATH = {
@@ -314,6 +341,14 @@ def build_hypothesis_record(
     if output_root is not None:
         _write_record(output_root / "hypotheses", h.id, record)
 
+    # Write to SQLite
+    store = _get_store()
+    if store:
+        try:
+            store.insert_research_output(record, kind="hypothesis")
+        except Exception as e:
+            log.debug("Failed to write hypothesis to SQLite: %s", e)
+
     return record
 
 
@@ -374,6 +409,14 @@ def build_cycle_summary(
 
     if output_root is not None:
         _write_record(output_root / "cycles", cycle_id, summary)
+
+    # Write to SQLite
+    store = _get_store()
+    if store:
+        try:
+            store.insert_research_output(summary, kind="cycle")
+        except Exception as e:
+            log.debug("Failed to write cycle summary to SQLite: %s", e)
 
     return summary
 
