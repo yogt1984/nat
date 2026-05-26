@@ -36,7 +36,7 @@ Actionable fixes for structural weaknesses in the Python codebase. Ordered by de
 
 ---
 
-### 1.2 Organize Root-Level Scripts
+### 1.2 Organize Root-Level Scripts ✅
 
 **Problem:** 42 `.py` files in `scripts/` root. Mix of:
 - **Production services:** `pipeline_runner.py`, `discovery_orchestrator.py`, `agent_dashboard.py`, `logging_config.py`, `config_utils.py`
@@ -164,7 +164,7 @@ A hypothesis can show Sharpe 2.0 in backtest (7 bps costs) and Sharpe 4.0 in pap
 | # | Item | Priority | Effort | Impact |
 |---|------|----------|--------|--------|
 | 1.1 | pyproject.toml + __init__.py ✅ | P1 | ~3h | Eliminates 133 sys.path hacks, enables proper imports |
-| 1.2 | Organize root scripts | P1 | ~2h | Clear boundary between production and exploration |
+| 1.2 | Organize root scripts ✅ | P1 | ~2h | Clear boundary between production and exploration |
 | 2.1 | Split base.py | P2 | ~3h | 1550 → ~400 lines, navigable after 3 months away |
 | 2.2 | Unify cost model | P2 | ~2h | Consistent fee assumptions across backtest/paper/live |
 | 3.1 | Data provenance | P3 | ~2h | Reproducibility, stale hypothesis detection |

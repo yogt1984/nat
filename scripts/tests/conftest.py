@@ -11,3 +11,8 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
+
+# Exploration scripts moved from root — tests still import them by name
+EXPLORATION_DIR = SCRIPTS_DIR / "exploration"
+if str(EXPLORATION_DIR) not in sys.path:
+    sys.path.insert(0, str(EXPLORATION_DIR))
