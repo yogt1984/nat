@@ -98,19 +98,12 @@ def _get_store():
     if _state_store is not None:
         return _state_store
     try:
-        from scripts.data.state import StateStore
+        from data.state import StateStore
         _state_store = StateStore(_DB_PATH)
         return _state_store
     except Exception:
-        try:
-            import sys
-            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-            from data.state import StateStore
-            _state_store = StateStore(_DB_PATH)
-            return _state_store
-        except Exception:
-            log.debug("StateStore not available, research output will use JSON only")
-            return None
+        log.debug("StateStore not available, research output will use JSON only")
+        return None
 
 # LaTeX derivations per generator type
 GENERATOR_MATH = {

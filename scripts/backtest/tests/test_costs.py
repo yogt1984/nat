@@ -169,7 +169,7 @@ class TestCostPresets:
     def test_hyperliquid_taker_costs(self):
         """Hyperliquid taker preset should match expected values."""
         model = hyperliquid_taker()
-        assert model.fee_bps == 5.0, "Taker fee should be 5 bps"
+        assert model.fee_bps == 3.5, "Taker fee should be 3.5 bps"
         assert model.slippage_bps == 2.0, "Default slippage should be 2 bps"
 
     def test_hyperliquid_maker_cheaper_than_taker(self):

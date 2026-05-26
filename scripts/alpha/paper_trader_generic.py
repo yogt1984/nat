@@ -33,6 +33,8 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from algorithms import get_algorithm, list_algorithms, discover_all
+from backtest.costs import CostModel
+from config_utils import load_cost_config
 
 # ── Config ────────────────────────────────────────────────────────────────
 
@@ -40,7 +42,10 @@ BAR_SECONDS = 300
 HORIZON_BARS = 20  # 100min
 TRAIN_WINDOW = 3
 MIN_BARS_PER_DATE = 12
-FEE_BPS = 1.61
+
+# Load cost model from config/agent.toml [defaults.costs]
+_cost_cfg = load_cost_config()
+COST_MODEL = CostModel(fee_bps=_cost_cfg["fee_bps"], slippage_bps=_cost_cfg["slippage_bps"])
 
 # Per-algorithm: which feature to use as primary signal, and signal polarity.
 # "high_long" = high z-score → long (e.g., momentum).
@@ -259,11 +264,13 @@ def apply_signal(bars: pd.DataFrame, params: dict) -> pd.DataFrame:
 
 # ── Trade generation ─────────────────────────────────────────────────────
 
-def generate_trades(bars: pd.DataFrame, date_str: str, symbol: str) -> list[PaperTrade]:
+def generate_trades(bars: pd.DataFrame, date_str: str, symbol: str,
+                    cost_model: CostModel = COST_MODEL) -> list[PaperTrade]:
     prices = bars["midprice_last"].values
     directions = bars["direction"].values
     composites = bars["composite"].values
     n = len(prices)
+    rt_cost = cost_model.round_trip_cost_bps
     trades = []
 
     for i in range(n - HORIZON_BARS):
@@ -276,7 +283,7 @@ def generate_trades(bars: pd.DataFrame, date_str: str, symbol: str) -> list[Pape
             continue
         ret_bps = (exit_p - entry_p) / entry_p * 1e4
         gross = d * ret_bps
-        net = gross - FEE_BPS
+        net = gross - rt_cost
 
         trades.append(PaperTrade(
             date=date_str, bar_idx=i, symbol=symbol, direction=d,
@@ -344,7 +351,8 @@ def run_algorithm(algo_name: str, data_dir: Path, symbols: list[str],
     print(f"\n{'═' * 60}")
     print(f"  Algorithm: {algo_name}")
     print(f"  Primary feature: {primary} | Polarity: {polarity}")
-    print(f"  Horizon: {HORIZON_BARS * BAR_SECONDS // 60}min | Fee: {FEE_BPS} bps RT")
+    print(f"  Horizon: {HORIZON_BARS * BAR_SECONDS // 60}min | Cost: {COST_MODEL.round_trip_cost_bps} bps RT "
+          f"(fee={COST_MODEL.fee_bps}+slip={COST_MODEL.slippage_bps} one-way)")
     print(f"  Dates: {len(all_dates)} ({all_dates[0]} to {all_dates[-1]})")
     print(f"{'═' * 60}")
 
@@ -498,7 +506,7 @@ def main():
             "title": "Generic Paper Trade — Algorithm Comparison",
             "generated": datetime.now(timezone.utc).isoformat(),
             "horizon_min": HORIZON_BARS * BAR_SECONDS // 60,
-            "fee_bps_rt": FEE_BPS,
+            "fee_bps_rt": COST_MODEL.round_trip_cost_bps,
             "algorithms": master_results,
         }
         out = ROOT / "reports" / "algo_paper_trade_comparison.json"

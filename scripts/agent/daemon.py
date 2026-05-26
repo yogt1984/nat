@@ -13,18 +13,16 @@ Usage:
 from __future__ import annotations
 
 import logging
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
-from agent.base import (  # noqa: E402
+from agent.base import (
     ResearchAgent, BaseRunner, AgentPhase, AgentState,  # re-export for compat
     cli_main, load_agent_config,
 )
-from agent.hypothesis import Hypothesis, GeneratorStats  # noqa: E402
-from agent.hypothesis_queue import HypothesisQueue  # noqa: E402
+from agent.hypothesis import Hypothesis, GeneratorStats
+from agent.hypothesis_queue import HypothesisQueue
 
 log = logging.getLogger("nat.agent")
 

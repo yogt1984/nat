@@ -192,12 +192,12 @@ class CostModel:
 
 def hyperliquid_taker() -> CostModel:
     """Hyperliquid taker fees with conservative slippage."""
-    return CostModel(fee_bps=5.0, slippage_bps=2.0)
+    return CostModel(fee_bps=3.5, slippage_bps=2.0)
 
 
 def hyperliquid_maker() -> CostModel:
     """Hyperliquid maker fees (optimistic - assumes limit orders fill)."""
-    return CostModel(fee_bps=2.5, slippage_bps=0.5)
+    return CostModel(fee_bps=0.2, slippage_bps=0.5)
 
 
 def conservative() -> CostModel:

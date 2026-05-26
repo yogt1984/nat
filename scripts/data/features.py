@@ -331,6 +331,40 @@ def data_health(data_dir: Optional[Path] = None) -> dict:
     }
 
 
+def compute_data_version(data_dir: Optional[Path] = None) -> str:
+    """Compute a fingerprint of the current data state.
+
+    Combines git HEAD SHA, sorted parquet file list, and schema column names
+    into a 16-char hex digest. Used for hypothesis provenance tracking.
+    """
+    import hashlib
+    import subprocess
+
+    root = Path(data_dir) if data_dir else DATA_DIR
+    files = sorted(str(f.relative_to(root)) for f in _discover_files(root))
+
+    # Git HEAD
+    try:
+        git_sha = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root.parent, stderr=subprocess.DEVNULL,
+        ).decode().strip()
+    except Exception:
+        git_sha = "unknown"
+
+    # Schema from first available file
+    schema_cols = ""
+    for f in _discover_files(root):
+        try:
+            schema_cols = ",".join(pq.read_schema(str(f)).names)
+            break
+        except Exception:
+            continue
+
+    payload = f"{git_sha}:{files}:{schema_cols}"
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
 def reset_validation_cache() -> None:
     """Reset the per-session schema validation cache.
 

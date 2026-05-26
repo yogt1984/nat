@@ -30,19 +30,17 @@ import signal as signal_mod
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-import sys
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
-from agent.hypothesis import GeneratorStats  # noqa: E402
-from agent.meta_portfolio import (  # noqa: E402
+from agent.hypothesis import GeneratorStats
+from agent.meta_portfolio import (
     compute_risk_parity_weights,
     compute_portfolio_metrics,
     filter_redundant_signals,
     evaluate_promotion,
 )
-from data.state import StateStore  # noqa: E402
+from data.state import StateStore
 
 log = logging.getLogger("nat.meta_agent")
 
