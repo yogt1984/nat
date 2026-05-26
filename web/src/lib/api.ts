@@ -146,7 +146,7 @@ export async function listCycles(params?: {
   return fetchJson(`${BASE}/api/research/cycles`, p);
 }
 
-export async function listSignals(): Promise<Signal[]> {
+export async function listSignals(): Promise<Hypothesis[]> {
   return fetchJson(`${BASE}/api/research/signals`);
 }
 
