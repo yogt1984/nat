@@ -242,7 +242,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 
 ## Priority 4 — Code Quality & Testability
 
-### 4.1 Dependency Injection for Python Agents
+### 4.1 Dependency Injection for Python Agents ✅
 
 **Problem:** `StateStore`, `ReportCache`, Redis connections, and generator modules are created inside agent constructors. Unit testing requires `unittest.mock.patch` on import paths, making tests brittle and tightly coupled.
 
@@ -350,7 +350,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 | 3.1 | Redis Streams ✅ | P3 | ~3h | Reliable event delivery with replay |
 | 3.2 | Correlation IDs ✅ | P3 | ~2h | End-to-end tracing across services |
 | 3.3 | Retention policy ✅ | P3 | ~1h | Prevents unbounded file/data growth |
-| 4.1 | Dependency injection | P4 | ~2h | Testable agents without mock.patch |
+| 4.1 | Dependency injection ✅ | P4 | ~2h | Testable agents without mock.patch |
 | 4.2 | Gate strategy pattern | P4 | ~3h | Composable, reorderable gate protocol |
 | 4.3 | Meta-agent coordination | P4 | ~3h | Agents respect cross-agent budget/directives |
 

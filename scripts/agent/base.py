@@ -794,7 +794,7 @@ class ResearchAgent(ABC):
     _rolling_ic_feature_suffixes: tuple[str, ...] = ("",)
     _rolling_ic_use_gated_signal: bool = False
 
-    def __init__(self, config: dict | None = None, *, store=None):
+    def __init__(self, config: dict | None = None, *, store=None, redis=None):
         self.config = config or self.load_config()
         self.config.setdefault("generators_enabled", list(self.default_generators))
         # SQLite state store — auto-created or injected for testing
@@ -803,6 +803,10 @@ class ResearchAgent(ABC):
         self.queue = HypothesisQueue(store=self._store, agent=self.agent_type)
         self.gen_stats = self._load_gen_stats()
         self._shutdown = False
+        # Inject Redis connection for research events (None = lazy-connect)
+        if redis is not None:
+            from .research_output import set_redis
+            set_redis(redis)
         signal_mod.signal(signal_mod.SIGTERM, self._handle_signal)
         signal_mod.signal(signal_mod.SIGINT, self._handle_signal)
 
