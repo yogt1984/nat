@@ -60,7 +60,7 @@ No way to tell which scripts are active vs abandoned without reading each one.
 
 ## Priority 2 — Module Structure
 
-### 2.1 Split base.py (1,550 lines → 3 modules)
+### 2.1 Split base.py (1,550 lines → 3 modules) ✅
 
 **Problem:** `scripts/agent/base.py` owns the cycle loop, state machine, gate functions, config loading, FDR control, hypothesis chaining, monitoring, and research output emission. After 3 months away, this file is the first one that becomes opaque.
 
@@ -165,7 +165,7 @@ A hypothesis can show Sharpe 2.0 in backtest (7 bps costs) and Sharpe 4.0 in pap
 |---|------|----------|--------|--------|
 | 1.1 | pyproject.toml + __init__.py ✅ | P1 | ~3h | Eliminates 133 sys.path hacks, enables proper imports |
 | 1.2 | Organize root scripts ✅ | P1 | ~2h | Clear boundary between production and exploration |
-| 2.1 | Split base.py | P2 | ~3h | 1550 → ~400 lines, navigable after 3 months away |
+| 2.1 | Split base.py ✅ | P2 | ~3h | 1620 → 1251 lines + state_machine.py + gates.py extended |
 | 2.2 | Unify cost model | P2 | ~2h | Consistent fee assumptions across backtest/paper/live |
 | 3.1 | Data provenance | P3 | ~2h | Reproducibility, stale hypothesis detection |
 
