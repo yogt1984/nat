@@ -232,21 +232,20 @@ class TestCorrelationCheck:
 # ===========================================================================
 
 class TestCheckGates:
-    @patch("agent.base.check_ic_gate", return_value=(True, "IC=0.20 PASS"))
-    @patch("agent.base.check_dIC_gate", return_value=(True, "dIC skipped"))
-    def test_passes_when_both_pass(self, mock_dIC, mock_ic):
+    def test_passes_when_both_pass(self):
         from agent.mf_runner import MediumFrequencyRunner
         runner = _make_runner(MediumFrequencyRunner)
-        passed, msg = runner._check_gates({"some": "report"})
+        report = {"baseline_ic_filt_5s": 0.20, "n_rows": 500}
+        passed, msg = runner._check_gates(report)
         assert passed is True
-        assert "IC=0.20 PASS" in msg
+        assert "IC=0.20" in msg
+        assert "PASS" in msg
 
-    @patch("agent.base.check_ic_gate", return_value=(False, "IC=0.01 FAIL"))
-    @patch("agent.base.check_dIC_gate", return_value=(True, "dIC skipped"))
-    def test_fails_when_ic_fails(self, mock_dIC, mock_ic):
+    def test_fails_when_ic_fails(self):
         from agent.mf_runner import MediumFrequencyRunner
         runner = _make_runner(MediumFrequencyRunner)
-        passed, msg = runner._check_gates({"some": "report"})
+        report = {"baseline_ic_filt_5s": 0.01, "n_rows": 500}
+        passed, msg = runner._check_gates(report)
         assert passed is False
         assert "FAIL" in msg
 
@@ -557,3 +556,61 @@ class TestRunnerBackwardCompat:
                 assert result == []
             finally:
                 cls.REGISTRY_PATH = orig
+
+
+# ===========================================================================
+# Gate protocol
+# ===========================================================================
+
+class TestGateProtocol:
+    def test_ic_gate_passes(self):
+        from agent.gates import ICGate
+        gate = ICGate()
+        result = gate.evaluate(
+            {"baseline_ic_filt_5s": 0.15, "n_rows": 500},
+            {"min_ic": 0.10},
+        )
+        assert result.passed is True
+        assert result.name == "IC"
+        assert result.metric == pytest.approx(0.15)
+        assert result.threshold == 0.10
+        assert result.p_value is not None
+
+    def test_ic_gate_fails(self):
+        from agent.gates import ICGate
+        result = ICGate().evaluate(
+            {"baseline_ic_filt_5s": 0.02, "n_rows": 500},
+            {"min_ic": 0.10},
+        )
+        assert result.passed is False
+        assert "FAIL" in result.message
+
+    def test_dIC_gate_skips_without_regime(self):
+        from agent.gates import DeltaICGate
+        result = DeltaICGate().evaluate({}, {})
+        assert result.passed is True
+        assert "skipped" in result.message
+
+    def test_cost_gate_passes(self):
+        from agent.gates import CostGate
+        result = CostGate().evaluate(
+            {"thresholds": [{"avg_return_per_trade_bps": 0.5,
+                             "net_sharpe_maker": 1.2, "threshold": 0.5}]},
+            {"min_avg_return_bps": 0.1},
+        )
+        assert result.passed is True
+        assert result.metric == pytest.approx(0.5)
+
+    def test_walkforward_gate_fails_empty(self):
+        from agent.gates import WalkforwardGate
+        result = WalkforwardGate().evaluate({}, {})
+        assert result.passed is False
+
+    def test_discovery_gates_used_by_check_gates(self):
+        """_check_gates uses discovery_gates() — overridable per runner."""
+        from agent.mf_runner import MediumFrequencyRunner
+        runner = _make_runner(MediumFrequencyRunner)
+        gates = runner.discovery_gates()
+        assert len(gates) == 2
+        assert gates[0].name == "IC"
+        assert gates[1].name == "dIC"

@@ -270,7 +270,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 
 ---
 
-### 4.2 Extract Gate Protocol as Strategy Pattern
+### 4.2 Extract Gate Protocol as Strategy Pattern ✅
 
 **Problem:** Gate logic lives inside `BaseRunner` methods. Adding domain-specific gates requires subclassing the runner. Gate composition and reordering requires changing `steps()` return list.
 
@@ -351,7 +351,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 | 3.2 | Correlation IDs ✅ | P3 | ~2h | End-to-end tracing across services |
 | 3.3 | Retention policy ✅ | P3 | ~1h | Prevents unbounded file/data growth |
 | 4.1 | Dependency injection ✅ | P4 | ~2h | Testable agents without mock.patch |
-| 4.2 | Gate strategy pattern | P4 | ~3h | Composable, reorderable gate protocol |
+| 4.2 | Gate strategy pattern ✅ | P4 | ~3h | Composable, reorderable gate protocol |
 | 4.3 | Meta-agent coordination | P4 | ~3h | Agents respect cross-agent budget/directives |
 
 **Total:** ~25-27h across 12 items.

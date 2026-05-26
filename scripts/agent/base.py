@@ -706,17 +706,19 @@ class BaseRunner(ABC):
 
     # --- Helpers ----------------------------------------------------------
 
+    def discovery_gates(self) -> list:
+        """Gate instances for discovery checks. Override to customise."""
+        from .gates import DISCOVERY_GATES
+        return list(DISCOVERY_GATES)
+
     def _check_gates(self, report: dict) -> tuple[bool, str]:
-        """Run IC and dIC gate checks against hypothesis thresholds."""
-        checks = [
-            ("IC", check_ic_gate(report, self.h.thresholds)),
-            ("dIC", check_dIC_gate(report, self.h.thresholds)),
-        ]
+        """Run discovery gate checks against hypothesis thresholds."""
         msgs = []
-        for name, (passed, msg) in checks:
-            msgs.append(msg)
-            if not passed:
-                return False, f"{name}: {msg}"
+        for gate in self.discovery_gates():
+            result = gate.evaluate(report, self.h.thresholds)
+            msgs.append(result.message)
+            if not result.passed:
+                return False, f"{result.name}: {result.message}"
         return True, " | ".join(msgs)
 
     def _extract_features(self) -> list[str]:
