@@ -1,0 +1,8 @@
+# Canonical symbol list — single source of truth.
+# All config files and scripts should reference this file
+# instead of hardcoding symbol lists.
+#
+# Python:  from scripts.config_utils import load_symbols
+# Rust:    symbols_file = "../config/symbols.toml" in [symbols] section of ing.toml
+
+symbols = ["BTC", "ETH", "SOL"]

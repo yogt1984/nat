@@ -44,6 +44,9 @@ pub struct WebSocketConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SymbolsConfig {
     pub assets: Vec<String>,
+    /// Path to config/symbols.toml. If set, overrides `assets`.
+    #[serde(default)]
+    pub symbols_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -129,6 +132,22 @@ impl Default for AlgorithmsConfig {
     }
 }
 
+/// Read symbols list from an external TOML file (config/symbols.toml).
+fn load_symbols_toml(path: &Path) -> Result<Vec<String>> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read symbols file: {:?}", path))?;
+    let table: toml::Table = content.parse()
+        .with_context(|| format!("Failed to parse symbols file: {:?}", path))?;
+    let symbols = table.get("symbols")
+        .and_then(|v| v.as_array())
+        .with_context(|| "symbols file missing 'symbols' array")?;
+    symbols.iter()
+        .map(|v| v.as_str()
+            .map(|s| s.to_string())
+            .with_context(|| "symbols array must contain strings"))
+        .collect()
+}
+
 // Default values
 fn default_log_level() -> String { "info".to_string() }
 fn default_ws_url() -> String { "wss://api.hyperliquid.xyz/ws".to_string() }
@@ -155,6 +174,22 @@ impl Config {
 
         let mut config: Config = toml::from_str(&content)
             .with_context(|| "Failed to parse config file")?;
+
+        // Load symbols from external file if symbols_file is set
+        if let Some(ref symbols_file) = config.symbols.symbols_file {
+            let symbols_path = path.parent()
+                .unwrap_or(Path::new("."))
+                .join(symbols_file);
+            match load_symbols_toml(&symbols_path) {
+                Ok(symbols) => {
+                    tracing::info!(?symbols_path, n = symbols.len(), "Loaded symbols from symbols_file");
+                    config.symbols.assets = symbols;
+                }
+                Err(e) => {
+                    tracing::warn!(?symbols_path, %e, "Failed to load symbols_file, using inline assets");
+                }
+            }
+        }
 
         // Allow environment variable override for dashboard
         if let Ok(val) = std::env::var("ING_DASHBOARD_ENABLED") {
@@ -204,6 +239,7 @@ impl Default for Config {
             },
             symbols: SymbolsConfig {
                 assets: vec!["BTC".to_string(), "ETH".to_string(), "SOL".to_string()],
+                symbols_file: None,
             },
             features: FeaturesConfig {
                 emission_interval_ms: default_emission_interval(),

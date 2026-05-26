@@ -244,6 +244,7 @@ def load_agent_config(config_path: Path, section: str,
 
     Deep-merges nested subsections (gates, decay, symbols, paths) so that
     a section only needs to override the keys that differ from [defaults].
+    Injects symbols.primary from config/symbols.toml if not set.
     """
     if not config_path.exists():
         return dict(base_config)
@@ -257,6 +258,14 @@ def load_agent_config(config_path: Path, section: str,
     section_cfg = raw.get(section, {})
     merged = _deep_merge(dict(base_config), defaults)
     merged = _deep_merge(merged, section_cfg)
+
+    # Inject canonical symbols if not provided by TOML
+    if "symbols" not in merged or "primary" not in merged.get("symbols", {}):
+        try:
+            from scripts.config_utils import load_symbols
+        except ImportError:
+            from config_utils import load_symbols
+        merged.setdefault("symbols", {})["primary"] = load_symbols()
 
     for w in validate_config(merged, section):
         log.warning("Config: %s", w)
@@ -605,7 +614,11 @@ class BaseRunner(ABC):
         from .runner import run_nat_cached
 
         primary_sym = self._extract_symbol(self.h.test_protocol[0])
-        other_symbols = [s for s in ["BTC", "ETH", "SOL"] if s != primary_sym]
+        try:
+            from scripts.config_utils import load_symbols
+        except ImportError:
+            from config_utils import load_symbols
+        other_symbols = [s for s in load_symbols() if s != primary_sym]
 
         n_pass = 0
         passed_symbols = [primary_sym]

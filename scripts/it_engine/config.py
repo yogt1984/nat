@@ -12,6 +12,11 @@ try:
 except ImportError:
     import tomli as tomllib
 
+try:
+    from scripts.config_utils import load_symbols
+except ImportError:
+    from config_utils import load_symbols
+
 
 @dataclass
 class CostConfig:
@@ -48,7 +53,7 @@ class ITEngineConfig:
     ])
 
     # Symbols
-    symbols: list[str] = field(default_factory=lambda: ["BTC", "ETH", "SOL"])
+    symbols: list[str] = field(default_factory=load_symbols)
 
     # Transfer entropy
     te_top_n: int = 20  # compute TE for top-N features by MI

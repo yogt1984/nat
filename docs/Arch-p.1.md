@@ -6,7 +6,7 @@ Prioritized fixes for structural weaknesses identified in the NAT platform. Orde
 
 ## Priority 1 — Data Integrity & Scalability
 
-### 1.1 Replace Directory Scanning with SQLite for Research Data
+### 1.1 Replace Directory Scanning with SQLite for Research Data ✅
 
 **Problem:** The Rust API scans `data/research/hypotheses/` and `data/research/cycles/` on every cache refresh. This is O(n) per scan and degrades as hypotheses accumulate into thousands. No cleanup policy — files grow forever. The 30s TTL cache means newly written hypotheses can be invisible for up to 30s.
 
@@ -48,7 +48,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 
 ---
 
-### 1.2 Atomic File Writes (Write-Then-Rename)
+### 1.2 Atomic File Writes (Write-Then-Rename) ✅
 
 **Problem:** Python writes hypothesis JSON and Parquet files that Rust reads concurrently. If a read hits a partially-written file, it gets corrupted data or a parse error. Currently masked by small file sizes but not guaranteed safe.
 
@@ -68,7 +68,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 
 ---
 
-### 1.3 Schema Versioning on Research Output
+### 1.3 Schema Versioning on Research Output ✅
 
 **Problem:** Hypothesis JSON has no version marker. Schema changes (new gate type, renamed field) break silently — the Rust API uses `serde_json::Value` (untyped), so missing fields become null without error.
 
@@ -95,7 +95,7 @@ Python agent → INSERT into SQLite → Rust API reads SQLite (WAL mode) → ser
 
 ## Priority 2 — Configuration & Contracts
 
-### 2.1 Centralize Symbol Configuration
+### 2.1 Centralize Symbol Configuration ✅
 
 **Problem:** `["BTC", "ETH", "SOL"]` is hardcoded independently in 7 config files. Changing the symbol set requires editing every file, and forgetting one causes silent divergence.
 

@@ -20,7 +20,8 @@ min_hours = 336     # 2 weeks
 min_trades = 50000
 
 # Symbol selection
-symbols = ["BTC", "ETH"]  # Start with 2 most liquid
+# symbols: loaded from config/symbols.toml via load_symbols()
+# (hypothesis tests may use a subset — filter downstream)
 require_all_symbols = false  # Can proceed with 1 if both unavailable
 
 # Time period filtering

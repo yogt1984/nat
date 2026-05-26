@@ -64,7 +64,11 @@ P_LONG = 80
 P_SHORT = 20
 
 CYCLE_SECONDS = 300  # check every 5 min (1 bar)
-SYMBOLS = ["BTC", "ETH", "SOL"]
+try:
+    from scripts.config_utils import load_symbols
+except ImportError:
+    from config_utils import load_symbols
+SYMBOLS = load_symbols()
 
 LOAD_COLUMNS = [
     "timestamp_ns", "symbol", "raw_midprice",

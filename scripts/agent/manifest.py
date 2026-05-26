@@ -8,11 +8,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from scripts.config_utils import load_symbols
+except ImportError:
+    from config_utils import load_symbols
+
 log = logging.getLogger(__name__)
 
 FEATURES_DIR = Path("data/features")
 MANIFEST_PATH = Path("data/agent/manifest.json")
-SYMBOLS = ["BTC", "ETH", "SOL"]
+SYMBOLS = load_symbols()
 ROWS_PER_HOUR = 36_000  # 10 Hz * 3600s
 
 

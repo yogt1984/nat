@@ -37,7 +37,8 @@ ic_decay_ratio = 0.5
 consecutive_days_limit = 14
 
 [defaults.symbols]
-primary = ["BTC", "ETH", "SOL"]
+# primary: loaded from config/symbols.toml via load_symbols()
+# To override per-agent, set symbols = [...] in that agent's section.
 
 [defaults.paths]
 data_dir = "data/features"
