@@ -3,3 +3,165 @@
 @theme inline {
   --font-mono: var(--font-geist-mono);
 }
+
+/* ------------------------------------------------------------------ */
+/* Print styles — PDF export via window.print()                       */
+/* ------------------------------------------------------------------ */
+
+@media print {
+  /* Force light theme */
+  body {
+    background: white !important;
+    color: #1a1a1a !important;
+    font-size: 11pt !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide sidebar and navigation */
+  aside {
+    display: none !important;
+  }
+
+  /* Hide elements marked as no-print */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Main content fills the page */
+  main {
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Remove flex layout that constrains content */
+  body > div,
+  body > div > div {
+    display: block !important;
+  }
+
+  /* Card sections — light border, white bg */
+  .bg-zinc-900 {
+    background: #fafafa !important;
+    border-color: #d4d4d8 !important;
+  }
+
+  .bg-zinc-800 {
+    background: #e4e4e7 !important;
+  }
+
+  /* Text colors for readability on white */
+  .text-zinc-100,
+  .text-zinc-200,
+  .text-zinc-300 {
+    color: #1a1a1a !important;
+  }
+
+  .text-zinc-400,
+  .text-zinc-500 {
+    color: #52525b !important;
+  }
+
+  .text-zinc-600 {
+    color: #71717a !important;
+  }
+
+  /* Status badges — keep colored but ensure contrast */
+  [class*="bg-emerald-900"] { background: #d1fae5 !important; color: #065f46 !important; border-color: #6ee7b7 !important; }
+  [class*="bg-blue-900"] { background: #dbeafe !important; color: #1e40af !important; border-color: #93c5fd !important; }
+  [class*="bg-red-900"] { background: #fee2e2 !important; color: #991b1b !important; border-color: #fca5a5 !important; }
+  [class*="bg-amber-900"] { background: #fef3c7 !important; color: #92400e !important; border-color: #fcd34d !important; }
+  [class*="bg-orange-900"] { background: #ffedd5 !important; color: #9a3412 !important; border-color: #fdba74 !important; }
+  [class*="bg-violet-900"] { background: #ede9fe !important; color: #5b21b6 !important; border-color: #c4b5fd !important; }
+  [class*="bg-cyan-900"] { background: #cffafe !important; color: #155e75 !important; border-color: #67e8f9 !important; }
+
+  /* Feature tags */
+  .font-mono[class*="bg-zinc-800"][class*="border-zinc-700"] {
+    background: #f4f4f5 !important;
+    border-color: #d4d4d8 !important;
+    color: #27272a !important;
+  }
+
+  /* Gate status dots */
+  .bg-emerald-500 { background: #10b981 !important; }
+  .bg-red-500 { background: #ef4444 !important; }
+
+  /* Borders */
+  .border-zinc-800 {
+    border-color: #d4d4d8 !important;
+  }
+
+  .border-zinc-700 {
+    border-color: #d4d4d8 !important;
+  }
+
+  /* Plotly chart — ensure readable on white */
+  .js-plotly-plot .plotly .main-svg {
+    background: transparent !important;
+  }
+
+  /* KaTeX — dark text on white */
+  .katex,
+  .katex .mord,
+  .katex .mop,
+  .katex .mrel,
+  .katex .mbin,
+  .katex .mopen,
+  .katex .mclose,
+  .katex .mpunct {
+    color: #1a1a1a !important;
+  }
+
+  /* Two-column grid → single column in print */
+  .grid.lg\:grid-cols-2 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Page break management */
+  h2, h3 {
+    page-break-after: avoid;
+  }
+
+  .rounded-lg {
+    page-break-inside: avoid;
+  }
+
+  /* Print header — shown only in print */
+  .print-header {
+    display: block !important;
+    text-align: center;
+    padding-bottom: 16pt;
+    margin-bottom: 16pt;
+    border-bottom: 1pt solid #d4d4d8;
+  }
+
+  .print-header h1 {
+    font-size: 14pt;
+    font-weight: bold;
+    color: #1a1a1a;
+    margin: 0;
+  }
+
+  .print-header p {
+    font-size: 9pt;
+    color: #71717a;
+    margin: 4pt 0 0;
+  }
+
+  /* Print footer */
+  .print-footer {
+    display: block !important;
+    text-align: center;
+    padding-top: 12pt;
+    margin-top: 16pt;
+    border-top: 1pt solid #d4d4d8;
+    font-size: 8pt;
+    color: #a1a1aa;
+  }
+
+  /* Link styling — show as plain text */
+  a {
+    color: inherit !important;
+    text-decoration: none !important;
+  }
+}
