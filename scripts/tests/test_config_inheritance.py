@@ -236,7 +236,7 @@ max_experiments_per_cycle = 10
         assert cfg["max_experiments_per_cycle"] == 10    # section wins
         assert cfg["cycle_interval_s"] == 42             # base preserved
 
-    def test_empty_toml_returns_base(self, tmp_path):
+    def test_empty_toml_returns_base_plus_symbols(self, tmp_path):
         toml_file = tmp_path / "agent.toml"
         toml_file.write_bytes(b"")
         base = {
@@ -244,7 +244,11 @@ max_experiments_per_cycle = 10
             "max_experiments_per_cycle": 5,
             "generators_enabled": ["test"],
         }
-        assert load_agent_config(toml_file, "agent", base) == base
+        cfg = load_agent_config(toml_file, "agent", base)
+        assert cfg["cycle_interval_s"] == 42
+        assert cfg["max_experiments_per_cycle"] == 5
+        # symbols.primary injected from config/symbols.toml
+        assert cfg["symbols"]["primary"] == ["BTC", "ETH", "SOL"]
 
     def test_missing_section_still_gets_defaults(self, tmp_path):
         """If [agent_mf] doesn't exist, we still get [defaults]."""

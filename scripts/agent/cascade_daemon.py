@@ -52,7 +52,7 @@ DEFAULT_CONFIG = {
     "max_orthogonality_r2": 0.30,
     "cascade_price_thresh": 0.03,
     "cascade_horizon_ticks": 3000,
-    "symbols": ["BTC", "ETH", "SOL"],
+    "symbols": None,  # loaded from config/symbols.toml at runtime
 }
 
 DB_PATH = ROOT / "data" / "nat.db"
@@ -376,7 +376,11 @@ class CascadeRunner:
         """G4: Cross-symbol — all symbols pass G1, beta cosine > 0.6."""
         import numpy as np
 
-        symbols = self.config.get("symbols", ["BTC", "ETH", "SOL"])
+        try:
+            from scripts.config_utils import load_symbols
+        except ImportError:
+            from config_utils import load_symbols
+        symbols = self.config.get("symbols") or load_symbols()
         symbol_results = {}
         betas = {}
 

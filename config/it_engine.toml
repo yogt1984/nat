@@ -8,7 +8,7 @@ max_features_greedy = 10    # greedy forward selection limit
 te_top_n = 20               # compute transfer entropy for top-N features
 te_lag = 1                  # TE source lags
 te_order = 1                # TE target AR order
-symbols = ["BTC", "ETH", "SOL"]
+# symbols: loaded from config/symbols.toml via load_symbols()
 
 # Entropy features used as conditioning variable Z in CMI(f; r | Z)
 entropy_conditioning = [

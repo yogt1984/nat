@@ -12,7 +12,9 @@ max_reconnect_delay_ms = 30000
 ping_interval_ms = 30000
 
 [symbols]
-# Assets to ingest
+# Canonical symbol list — loaded from symbols_file at startup.
+# Inline 'assets' is used as fallback if symbols_file is missing.
+symbols_file = "../config/symbols.toml"
 assets = ["BTC", "ETH", "SOL"]
 
 [features]
