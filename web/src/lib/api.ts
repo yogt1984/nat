@@ -72,9 +72,15 @@ export interface ResearchStats {
 
 export interface HeatmapEntry {
   feature: string;
-  horizon: string;
+  horizon_s: number;
   ic: number;
-  p_value: number | null;
+  status: string;
+}
+
+export interface HeatmapResponse {
+  entries: HeatmapEntry[];
+  features: string[];
+  horizons: number[];
 }
 
 export interface PaginatedResponse<T> {
@@ -144,6 +150,6 @@ export async function listSignals(): Promise<Signal[]> {
   return fetchJson(`${BASE}/api/research/signals`);
 }
 
-export async function getHeatmap(): Promise<HeatmapEntry[]> {
+export async function getHeatmap(): Promise<HeatmapResponse> {
   return fetchJson(`${BASE}/api/research/heatmap`);
 }
