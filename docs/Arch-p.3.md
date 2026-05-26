@@ -87,7 +87,7 @@ agent/
 
 ---
 
-### 2.2 Unify Cost Model Across Backtest and Paper Trading
+### 2.2 Unify Cost Model Across Backtest and Paper Trading ✅
 
 **Problem:** Three independently implemented fill/cost models:
 - `backtest/costs.py`: `CostModel(fee_bps=5.0, slippage_bps=2.0)` — taker, conservative
@@ -132,7 +132,7 @@ A hypothesis can show Sharpe 2.0 in backtest (7 bps costs) and Sharpe 4.0 in pap
 
 ## Priority 3 — Research Integrity
 
-### 3.1 Feature-Data Provenance Tracking
+### 3.1 Feature-Data Provenance Tracking ✅
 
 **Problem:** When a runner tests a hypothesis, it calls `load_features()` which reads Parquet files by date/symbol. The hypothesis record stores only thresholds and IC results — not which data it tested against. If you change a feature formula in Rust and re-ingest, old hypotheses are tested against different data than new ones. No mechanism to detect this or flag affected hypotheses.
 
@@ -166,8 +166,8 @@ A hypothesis can show Sharpe 2.0 in backtest (7 bps costs) and Sharpe 4.0 in pap
 | 1.1 | pyproject.toml + __init__.py ✅ | P1 | ~3h | Eliminates 133 sys.path hacks, enables proper imports |
 | 1.2 | Organize root scripts ✅ | P1 | ~2h | Clear boundary between production and exploration |
 | 2.1 | Split base.py ✅ | P2 | ~3h | 1620 → 1251 lines + state_machine.py + gates.py extended |
-| 2.2 | Unify cost model | P2 | ~2h | Consistent fee assumptions across backtest/paper/live |
-| 3.1 | Data provenance | P3 | ~2h | Reproducibility, stale hypothesis detection |
+| 2.2 | Unify cost model ✅ | P2 | ~2h | Consistent fee assumptions across backtest/paper/live |
+| 3.1 | Data provenance ✅ | P3 | ~2h | Reproducibility, stale hypothesis detection |
 
 **Total:** ~12h across 5 items.
 
