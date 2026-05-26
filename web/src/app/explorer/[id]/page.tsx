@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getHypothesis } from "@/lib/api";
@@ -48,6 +48,14 @@ export default function HypothesisDetailPage() {
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"));
   }, [params.id]);
 
+  const handleExportPdf = useCallback(() => {
+    if (!hypothesis) return;
+    const originalTitle = document.title;
+    document.title = `NAT-${hypothesis.id}`;
+    window.print();
+    document.title = originalTitle;
+  }, [hypothesis]);
+
   if (error) {
     return (
       <div className="p-6">
@@ -70,10 +78,16 @@ export default function HypothesisDetailPage() {
 
   return (
     <div className="space-y-6 max-w-5xl">
+      {/* Print header — hidden on screen, shown in print */}
+      <div className="print-header hidden">
+        <h1>NAT Research Report</h1>
+        <p>Hypothesis {hypothesis.id} &mdash; Generated {new Date().toLocaleDateString()}</p>
+      </div>
+
       {/* Back link */}
       <Link
         href="/explorer"
-        className="text-xs text-zinc-500 hover:text-zinc-300"
+        className="text-xs text-zinc-500 hover:text-zinc-300 no-print"
       >
         &larr; Back to Explorer
       </Link>
@@ -91,6 +105,13 @@ export default function HypothesisDetailPage() {
             style={AGENT_STYLE[hypothesis.agent]}
           />
           <Badge label={hypothesis.generator} />
+          <button
+            onClick={handleExportPdf}
+            className="no-print ml-auto px-3 py-1 text-xs font-medium rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
+            title="Export as PDF"
+          >
+            Export PDF
+          </button>
         </div>
         <p className="text-zinc-400 text-sm mt-2">{hypothesis.claim}</p>
       </div>
@@ -192,6 +213,11 @@ export default function HypothesisDetailPage() {
         {hypothesis.timestamps.completed && (
           <p>Completed: {hypothesis.timestamps.completed}</p>
         )}
+      </div>
+
+      {/* Print footer — hidden on screen, shown in print */}
+      <div className="print-footer hidden">
+        NAT Research Platform &mdash; {hypothesis.id} &mdash; {hypothesis.agent}/{hypothesis.generator}
       </div>
     </div>
   );
