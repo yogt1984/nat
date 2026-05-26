@@ -1,0 +1,93 @@
+\documentclass[9pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1.2cm]{geometry}
+\usepackage{amsmath}
+\usepackage{longtable}
+\usepackage{multicol}
+
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{2pt}
+\setlength{\columnsep}{12pt}
+
+% Compact sections
+\makeatletter
+\renewcommand\section{\@startsection{section}{1}{\z@}%
+  {-4pt plus -1pt minus -1pt}{2pt plus 1pt}{\normalfont\normalsize\bfseries}}
+\renewcommand\subsection{\@startsection{subsection}{2}{\z@}%
+  {-3pt plus -1pt minus -1pt}{1pt plus 1pt}{\normalfont\small\bfseries}}
+\makeatother
+
+\begin{document}
+
+\begin{center}
+{\large\bfseries PhD Application Guide --- One-Page Summary}\\[2pt]
+{\small Onat Y{\i}lmaz $\cdot$ May 2026 $\cdot$ Preprint: \textit{Event-Aligned SVD for Pattern Kernel Discovery in Crypto Perpetual Futures}}
+\end{center}
+
+\vspace{-2pt}
+\hrule
+\vspace{4pt}
+
+\begin{multicols}{2}
+
+\section*{Publishing Platforms}
+
+\textbf{SSRN} (ssrn.com) --- No affiliation required. Free. Upload PDF, get permanent link in 1--3 days. Standard venue for finance preprints. Use \textit{Capital Markets: Market Microstructure} e-journal.
+
+\textbf{arXiv} (arxiv.org) --- No affiliation required but needs endorsement from existing author (spam filter, not peer review). Categories: \texttt{q-fin.TR}, \texttt{q-fin.ST}, \texttt{stat.ML}.
+
+\textbf{Strategy:} SSRN first (no barriers) $\to$ email professors with link $\to$ get arXiv endorsement $\to$ cross-post.
+
+\section*{ETH Z\"urich}
+
+\textbf{Josef Teichmann} -- D-MATH. ML in finance, deep hedging, rough analysis. \textit{Best overall fit.} Pitch: latent structure discovery in LOB dynamics via SVD.
+
+\textbf{Beatrice Acciaio} -- D-MATH, SFI. Optimal transport, robust finance. Pitch: Wasserstein regime detection on order book distributions.
+
+\textbf{Patrick Cheridito} -- D-MATH. Deep learning for optimal stopping, approximation theory. Pitch: approximation bounds on SVD-extracted features.
+
+\textbf{Peter B\"uhlmann} -- D-MATH Statistics. High-dim inference, stability selection, FDR. Pitch: replicability guarantees for microstructure signals.
+
+\textbf{Helmut B\"olcskei} -- D-ITET. Signal processing, harmonic analysis, ML theory. \textit{Best methods fit.} Pitch: info-theoretic limits of pattern recovery from noisy LOB data.
+
+\textbf{Walter Farkas} -- D-MATH + UZH. Director MSc Quant Finance. Crypto theses supervised. Pitch: empirical microstructure of crypto perpetuals.
+
+\textbf{Markus Leippold} -- UZH/SFI. NLP in finance, crypto markets. Most direct crypto expertise in Zurich. Co-supervision with ETH feasible.
+
+\section*{EPFL Lausanne}
+
+PhD via EDFI program (SFI). Deadlines: \textbf{Jan 15} and \textbf{Mar 31}.
+
+\textbf{Pierre Collin-Dufresne} -- SFI. Microstructure, informed trading, order flow. \textit{Best microstructure fit.} Ex-Goldman. Pitch: SVD detection of informed trading patterns.
+
+\textbf{Julien Hugonnier} -- SFI. Derivatives, OTC microstructure. Published ``Perpetual Futures Pricing'' (Math Finance 2025). Pitch: empirical microstructure grounded in perp pricing theory.
+
+\textbf{Semyon Malamud} -- SFI. ML + asset pricing, ``AI Pricing Theory'' (w/ Bryan Kelly). Pitch: SVD factors as inputs to learned pricing kernels.
+
+\textbf{Damir Filipovic} -- Swissquote Chair. Stochastic processes, ML in quant finance. Ex-Princeton, PhD ETH. Pitch: regime-switching models with SVD state variables.
+
+\textbf{Lenka Zdeborova} -- SPOC Lab. Statistical physics of ML, phase transitions, signal recovery. Pitch: phase transitions in microstructure signal recovery. Needs SFI co-advisor.
+
+\textbf{Florent Krzakala} -- IdePHICS Lab. Random matrix theory, spiked models, compressed sensing. Pitch: spiked matrix models for LOB feature matrices. Needs SFI co-advisor.
+
+\textbf{Daniel Kuhn} -- RAO Lab. Distributionally robust optimization. 2024 Farkas Prize. Pitch: robust execution/sizing for pattern-based strategies.
+
+\section*{Top Pairings}
+
+\begin{tabular}{@{}ll@{}}
+Finance + Methods: & Teichmann + B\"olcskei (ETH) \\
+Microstructure + RMT: & Collin-Dufresne + Krzakala (EPFL) \\
+ML pricing + Physics: & Malamud + Zdeborova (EPFL) \\
+\end{tabular}
+
+\section*{Email Template (Key Lines)}
+
+\textit{Subject:} Prospective PhD --- Microstructure Pattern Discovery via SVD
+
+Mention: (1) embedded systems + quant trading background, (2) preprint on SSRN with link, (3) key result: 6 significant kernels from 158 candidates after BH-FDR, turtle-soup/trap IC $\in [0.20, 0.36]$, (4) bridge to professor's specific work, (5) offer to share codebase.
+
+\end{multicols}
+
+\end{document}

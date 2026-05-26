@@ -1,0 +1,288 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{longtable}
+
+\geometry{margin=2.5cm}
+
+% Minimal URL command without hyperref
+\newcommand{\url}[1]{\texttt{#1}}
+
+\begin{document}
+
+% ============================================================
+% TITLE
+% ============================================================
+\begin{center}
+{\LARGE\bfseries PhD Application Guide}\\[0.3cm]
+{\Large Preprint Publication Platforms \& Target Supervisors}\\[0.3cm]
+{\large ETH Z\"urich \& EPFL Lausanne}\\[0.5cm]
+{\large Onat Y{\i}lmaz --- May 2026}
+\end{center}
+
+\bigskip
+\tableofcontents
+\newpage
+
+% ============================================================
+\part{Publishing Preprints as an Independent Researcher}
+% ============================================================
+
+\section{SSRN (Social Science Research Network)}
+
+\begin{itemize}
+  \item \textbf{URL:} \url{https://www.ssrn.com}
+  \item \textbf{Affiliation required:} No. Select ``Independent Researcher'' when creating your author profile.
+  \item \textbf{Cost:} Free.
+  \item \textbf{Process:}
+    \begin{enumerate}
+      \item Create a free account at \url{https://hq.ssrn.com/login/pubSignInJoin.cfm}.
+      \item Upload your PDF and fill in title, abstract, keywords, and JEL codes.
+      \item The paper is reviewed by SSRN staff within 1--3 business days (not peer review --- just formatting and spam checks).
+      \item Once approved, you receive a permanent URL: \texttt{ssrn.com/abstract=XXXXXXX}.
+    \end{enumerate}
+  \item \textbf{Why use it:} SSRN is the standard venue for finance and economics preprints. Professors in quantitative finance check SSRN regularly. Having a paper there signals seriousness and gives you a clean, citable link for emails.
+  \item \textbf{Recommended networks:} Submit to the \textit{Capital Markets: Market Microstructure} and \textit{Financial Engineering} e-journals for visibility.
+\end{itemize}
+
+\section{arXiv}
+
+\begin{itemize}
+  \item \textbf{URL:} \url{https://arxiv.org}
+  \item \textbf{Affiliation required:} No, but new authors need an \textit{endorsement} from an existing arXiv author in the target category. This is not peer review --- it is a spam filter.
+  \item \textbf{Cost:} Free.
+  \item \textbf{Relevant categories:}
+    \begin{itemize}
+      \item \texttt{q-fin.TR} --- Trading and Market Microstructure
+      \item \texttt{q-fin.ST} --- Statistical Finance
+      \item \texttt{q-fin.CP} --- Computational Finance
+      \item \texttt{stat.ML} --- Machine Learning (Statistics)
+    \end{itemize}
+  \item \textbf{Endorsement process:} If you do not know an existing author, you can request endorsement after creating an account. arXiv will suggest potential endorsers. Alternatively, once your paper is on SSRN and you have citations or correspondence with professors, ask one to endorse you.
+  \item \textbf{Why use it:} arXiv is the standard for technical/quantitative papers. Professors in signal processing, information theory, and ML check arXiv daily. Cross-listing on both SSRN and arXiv maximizes visibility.
+\end{itemize}
+
+\section{Recommended Strategy}
+
+\begin{enumerate}
+  \item Upload to \textbf{SSRN first} (no barriers, instant).
+  \item Email target professors with the SSRN link and attached PDF.
+  \item Once you obtain an arXiv endorsement (possibly from a professor who responds positively), cross-post to arXiv under \texttt{q-fin.TR}.
+  \item Update your emails and CV with both links.
+\end{enumerate}
+
+\newpage
+
+% ============================================================
+\part{Target Supervisors}
+% ============================================================
+
+The following professors are selected for alignment with the research directions in the convolver preprint: SVD-based pattern discovery in order book microstructure, information-theoretic feature selection, regime detection, and cryptocurrency perpetual futures.
+
+% ============================================================
+\section{ETH Z\"urich}
+% ============================================================
+
+\subsection{Josef Teichmann}
+\begin{itemize}
+  \item \textbf{Department:} D-MATH (Insurance Mathematics and Stochastic Finance); Chair of the Department of Mathematics
+  \item \textbf{Research:} Machine learning in finance, deep hedging, stochastic finance, rough analysis, neural network approximation for financial models
+  \item \textbf{Relevance:} Leading figure at ETH for ML-meets-finance. His group works on deep hedging, neural SDE approximation, and nonlinear function approximation for financial applications. SVD decomposition of order book dynamics maps well onto his interest in learning latent structure from financial data. Teaches \textit{Machine Learning in Finance} annually.
+  \item \textbf{Pitch angle:} Data-driven latent structure discovery in limit order book dynamics; extending SVD-based pattern extraction to continuous-time stochastic models.
+\end{itemize}
+
+\subsection{Beatrice Acciaio}
+\begin{itemize}
+  \item \textbf{Department:} D-MATH; Swiss Finance Institute member
+  \item \textbf{Research:} Optimal transport in finance, model uncertainty / robust finance, arbitrage quantification, neural network implicit regularisation
+  \item \textbf{Relevance:} Stochastic optimal transport provides a framework for comparing order book state distributions across regimes. Her interest in model uncertainty connects to signal robustness across market conditions.
+  \item \textbf{Pitch angle:} Wasserstein-distance regime detection on order book distributions; robustness guarantees for extracted microstructure signals.
+\end{itemize}
+
+\subsection{Patrick Cheridito}
+\begin{itemize}
+  \item \textbf{Department:} D-MATH (Insurance Mathematics and Stochastic Finance)
+  \item \textbf{Research:} Deep learning for optimal stopping, derivative pricing with neural networks, high-dimensional approximation theory, risk measures
+  \item \textbf{Relevance:} Neural network approximation of high-dimensional financial functions is methodologically close to SVD-based dimensionality reduction. If research evolves toward theoretical guarantees for pattern extraction from order books (approximation theory, sample complexity), his group is well-positioned.
+  \item \textbf{Pitch angle:} Approximation-theoretic bounds on SVD-extracted features; sample complexity of microstructure pattern recovery.
+\end{itemize}
+
+\subsection{Peter B\"uhlmann}
+\begin{itemize}
+  \item \textbf{Department:} D-MATH (Seminar for Statistics)
+  \item \textbf{Research:} High-dimensional statistical inference, causal inference, graphical models, stability selection, post-selection inference
+  \item \textbf{Relevance:} The feature screening pipeline (FDR control, signal discovery from 209 features) is essentially high-dimensional inference --- B\"uhlmann's core expertise. He developed stability selection and has deep results on when signals extracted from high-dimensional data can be trusted. Not a finance specialist, but has supervised applied PhDs.
+  \item \textbf{Pitch angle:} Stability and replicability guarantees for microstructure alpha signals; post-selection inference for SVD-discovered patterns.
+\end{itemize}
+
+\subsection{Helmut B\"olcskei}
+\begin{itemize}
+  \item \textbf{Department:} D-ITET (Information Technology and Electrical Engineering); Professor of Mathematical Information Science
+  \item \textbf{Research:} ML theory, mathematical signal processing, applied harmonic analysis, approximation theory, deep neural network expressiveness
+  \item \textbf{Relevance:} The most direct signal processing / information theory fit at ETH. His group works on the mathematical foundations of extracting structure from high-dimensional data via decompositions (SVD, sparse representations). Could provide the theoretical backbone for why SVD-based pattern discovery works in order book data.
+  \item \textbf{Pitch angle:} Information-theoretic limits of pattern recovery from noisy order book data; harmonic analysis of multi-scale microstructure signals.
+\end{itemize}
+
+\subsection{Walter Farkas}
+\begin{itemize}
+  \item \textbf{Department:} D-MATH (ETH) + Department of Banking and Finance (UZH); Director of MSc Quantitative Finance (joint ETH/UZH)
+  \item \textbf{Research:} Quantitative finance, derivatives pricing, financial risk management, applied mathematics
+  \item \textbf{Relevance:} Gatekeeper for the quant finance ecosystem across ETH and UZH. His group has supervised theses on cryptocurrency topics. A PhD with him gives access to both departments.
+  \item \textbf{Pitch angle:} Empirical microstructure of cryptocurrency perpetual futures; data-driven risk management via learned patterns.
+\end{itemize}
+
+\subsection{Markus Leippold (UZH / Swiss Finance Institute)}
+\begin{itemize}
+  \item \textbf{Department:} UZH Department of Finance (Chair of Financial Engineering); SFI faculty, closely affiliated with ETH
+  \item \textbf{Research:} NLP in finance, asset pricing, cryptocurrency markets, climate finance, ML for financial text
+  \item \textbf{Relevance:} Actively publishes on cryptocurrency markets --- the most direct crypto expertise in the Zurich ecosystem. Tightly integrated via the joint MSc program and SFI. Co-supervision with an ETH professor (e.g., Teichmann) is feasible.
+  \item \textbf{Pitch angle:} Multi-modal alpha extraction in crypto markets (text signals + microstructure signals); empirical asset pricing for perpetual futures.
+\end{itemize}
+
+% ============================================================
+\section{EPFL Lausanne}
+% ============================================================
+
+\textit{Note:} The EPFL finance PhD is run through EDFI (Doctoral Program in Finance), part of the Swiss Finance Institute Leman-area program jointly with University of Geneva and University of Lausanne. Application deadlines: \textbf{January 15} and \textbf{March 31} for September entry. URL: \url{https://www.epfl.ch/education/phd/edfi-finance/}
+
+\subsection{Pierre Collin-Dufresne}
+\begin{itemize}
+  \item \textbf{Department:} Swiss Finance Institute at EPFL (Full Professor)
+  \item \textbf{Lab:} \url{https://www.epfl.ch/labs/sfi-pcd/}
+  \item \textbf{Research:} Market microstructure, informed trading, order flow analysis, asset pricing with asymmetric information
+  \item \textbf{Key work:} ``Do Prices Reveal the Presence of Informed Trading?'' (\textit{Journal of Finance}, 2015)
+  \item \textbf{Relevance:} The strongest direct microstructure fit at EPFL. His work on information extraction from order flow and the failure of standard adverse selection proxies is directly adjacent to SVD-based signal discovery. Former Goldman Sachs quant. Teaches FIN-608 ``Information and Asset Pricing.''
+  \item \textbf{Pitch angle:} Data-driven detection of informed trading patterns via SVD; connecting analytical event types to adverse selection theory.
+\end{itemize}
+
+\subsection{Julien Hugonnier}
+\begin{itemize}
+  \item \textbf{Department:} Swiss Finance Institute at EPFL (Full Professor)
+  \item \textbf{Lab:} \url{https://www.epfl.ch/labs/sfi-jh/}
+  \item \textbf{Research:} Derivatives pricing, OTC market microstructure, incomplete markets, financial frictions
+  \item \textbf{Key work:} ``Perpetual Futures Pricing'' (\textit{Mathematical Finance}, 2025) with Ackerer and Jermann --- derives no-arbitrage pricing for perpetual contracts in discrete and continuous time, motivated by crypto markets.
+  \item \textbf{Relevance:} Actively publishing on the exact instrument class traded on Hyperliquid (perpetual futures). His theoretical work could frame empirical microstructure findings in rigorous pricing theory.
+  \item \textbf{Pitch angle:} Empirical microstructure of crypto perpetuals grounded in no-arbitrage pricing theory; connecting event-aligned patterns to theoretical funding rate dynamics.
+\end{itemize}
+
+\subsection{Semyon Malamud}
+\begin{itemize}
+  \item \textbf{Department:} Swiss Finance Institute at EPFL (Associate Professor, SFI Senior Chair)
+  \item \textbf{Lab:} \url{https://www.epfl.ch/labs/sfi-sm/}
+  \item \textbf{Research:} Asset pricing with heterogeneous agents, ML in finance, liquidity
+  \item \textbf{Key work:} ``Artificial Intelligence Pricing Theory'' (SSRN, 2025, with Bryan Kelly et al.) --- transformer-based stochastic discount factor for cross-asset pricing. Teaches FIN-407 ``Machine Learning in Finance.''
+  \item \textbf{Relevance:} His ML-meets-asset-pricing agenda is the closest to the SVD/signal-processing approach applied to alpha discovery. AIPT explicitly addresses high-dimensional factor structures, connecting to SVD decomposition of order book features. PhD from ETH Z\"urich (math).
+  \item \textbf{Pitch angle:} SVD-discovered microstructure factors as inputs to learned pricing kernels; bridging high-frequency pattern extraction and equilibrium asset pricing.
+\end{itemize}
+
+\subsection{Damir Filipovic}
+\begin{itemize}
+  \item \textbf{Department:} Swissquote Chair in Quantitative Finance, EPFL (Full Professor)
+  \item \textbf{Lab:} \url{https://www.epfl.ch/labs/csf/}
+  \item \textbf{Research:} Term structure modelling, stochastic processes, risk management, ML in quantitative finance
+  \item \textbf{Relevance:} Mathematical rigour in stochastic modelling with a recent pivot toward ML applications. Could accommodate a thesis combining stochastic process theory with data-driven signal extraction. Former Princeton faculty, PhD from ETH Z\"urich.
+  \item \textbf{Pitch angle:} Stochastic modelling of order book dynamics with learned basis functions; regime-switching models informed by SVD-extracted state variables.
+\end{itemize}
+
+\subsection{Lenka Zdeborova}
+\begin{itemize}
+  \item \textbf{Department:} SPOC Lab (Statistical Physics of Computation), School of Engineering, EPFL
+  \item \textbf{Lab:} \url{https://www.epfl.ch/labs/spoc/}
+  \item \textbf{Research:} Statistical physics methods for ML, signal processing, high-dimensional inference, phase transitions in learning
+  \item \textbf{Key work:} ERC Advanced Grant on statistical physics of attention and transformers.
+  \item \textbf{Relevance:} SVD-based pattern discovery in noisy order book data is fundamentally a signal recovery problem in high dimensions --- exactly her domain. Could provide theoretical framework (phase transitions, information-theoretic limits) for when and why SVD pattern extraction works. Not finance-specific; would need a co-advisor from SFI.
+  \item \textbf{Pitch angle:} Phase transitions in microstructure signal recovery; information-theoretic limits of alpha extraction from finite order book samples.
+\end{itemize}
+
+\subsection{Florent Krzakala}
+\begin{itemize}
+  \item \textbf{Department:} IdePHICS Lab (Information, Learning \& Physics), School of Engineering, EPFL
+  \item \textbf{Lab:} \url{https://www.epfl.ch/labs/idephics/}
+  \item \textbf{Research:} Random matrix theory, signal recovery, compressed sensing, high-dimensional statistics, approximate message passing
+  \item \textbf{Key work:} Optimal spectral methods for phase retrieval; spiked random matrix models.
+  \item \textbf{Relevance:} Random matrix theory is the natural tool for understanding SVD applied to financial correlation matrices. His work on spiked matrix models --- detecting low-rank signals in noisy matrices --- maps directly onto the question ``which singular vectors carry real alpha vs.\ noise?'' Would need a co-supervision arrangement with an SFI professor.
+  \item \textbf{Pitch angle:} Spiked matrix models for order book feature matrices; optimal spectral methods for separating microstructure signal from noise.
+\end{itemize}
+
+\subsection{Daniel Kuhn}
+\begin{itemize}
+  \item \textbf{Department:} Chair of Risk Analytics and Optimization (RAO), College of Management of Technology, EPFL
+  \item \textbf{Lab:} \url{https://www.epfl.ch/labs/rao/}
+  \item \textbf{Research:} Distributionally robust optimisation, stochastic programming, decision-making under uncertainty. 2024 Farkas Prize winner.
+  \item \textbf{Relevance:} Position sizing and portfolio construction under regime uncertainty are optimisation-under-uncertainty problems. His distributionally robust methods could formalise regime-dependent portfolio allocation.
+  \item \textbf{Pitch angle:} Distributionally robust execution and sizing for microstructure alpha strategies; worst-case guarantees for pattern-based trading under regime shifts.
+\end{itemize}
+
+\newpage
+
+% ============================================================
+\part{Recommended Combinations}
+% ============================================================
+
+\section{Top Matches by Research Alignment}
+
+\begin{longtable}{@{} p{3.5cm} p{3.5cm} p{7cm} @{}}
+\hline
+\textbf{Professor} & \textbf{Institution} & \textbf{Why} \\
+\hline
+Josef Teichmann & ETH D-MATH & Best overall fit: ML + finance, latent structure discovery \\
+Collin-Dufresne & EPFL SFI & Best microstructure fit: order flow, informed trading \\
+Hugonnier & EPFL SFI & Publishes on perpetual futures pricing (exact instrument) \\
+Semyon Malamud & EPFL SFI & ML + asset pricing; high-dimensional factor structures \\
+Helmut B\"olcskei & ETH D-ITET & Best signal processing / information theory fit \\
+\hline
+\end{longtable}
+
+\section{Ideal Co-Supervision Pairings}
+
+These pairings combine a finance domain expert with a methods expert:
+
+\begin{enumerate}
+  \item \textbf{Teichmann (ETH) + B\"olcskei (ETH):} Finance domain (ML in finance) + signal processing theory. Frame thesis as ``mathematical signal processing for latent microstructure pattern discovery.''
+  \item \textbf{Collin-Dufresne (EPFL) + Krzakala (EPFL):} Microstructure domain + random matrix theory. Frame thesis as ``information-theoretic limits of alpha extraction from order book microstructure.''
+  \item \textbf{Malamud (EPFL) + Zdeborova (EPFL):} ML asset pricing + statistical physics of learning. Frame thesis as ``phase transitions in high-dimensional microstructure factor models.''
+\end{enumerate}
+
+\newpage
+
+% ============================================================
+\part{Email Template}
+% ============================================================
+
+\noindent\textbf{Subject:} Prospective PhD Inquiry --- Microstructure Pattern Discovery via SVD
+
+\bigskip
+
+\noindent Dear Professor [Name],
+
+\medskip
+
+I am writing to express my interest in pursuing a PhD under your supervision at [ETH Z\"urich / EPFL]. My background is in embedded systems engineering and quantitative trading, and I have spent the past year building a real-time research platform for cryptocurrency perpetual futures microstructure.
+
+\medskip
+
+As part of this work, I have written a preprint titled \textit{``Event-Aligned Singular Value Decomposition for Data-Driven Pattern Kernel Discovery in Cryptocurrency Perpetual Futures,''} available at [SSRN link]. The paper proposes a pipeline that analytically defines market events (breakouts, false breakouts, traps), extracts aligned OHLCV windows, and applies SVD to discover predictive multi-candle shapes --- with FDR-controlled significance testing. On BTC tick data (7.2\,M ticks), the method identifies 6 significant kernels after multiple testing correction, with the strongest signals ($|\text{IC}| \in [0.20, 0.36]$) arising from turtle-soup and trap events rather than classical breakouts.
+
+\medskip
+
+I am particularly drawn to your work on [specific paper/topic], which connects to my findings on [bridge to their research].
+
+\medskip
+
+I would welcome the opportunity to discuss how this line of research might develop into a doctoral project. I am happy to share the full codebase or additional technical reports upon request.
+
+\medskip
+
+\noindent Thank you for your time.
+
+\medskip
+
+\noindent Best regards,\\
+Onat Y{\i}lmaz\\
+\texttt{yogt1984@gmail.com}
+
+\end{document}

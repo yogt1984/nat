@@ -1,0 +1,52 @@
+[
+  {
+    "id": "HYP-SYS-8b705473",
+    "claim": "imb_l1 gated by ent<P20 predicts 5s returns [symbol-specific: BTC,ETH]",
+    "generator": "systematic",
+    "priority": 0.35,
+    "test_protocol": [
+      "spannung regime --data data/features/2026-05-12 --symbol BTC"
+    ],
+    "thresholds": {
+      "regime_gate": "ent<P20",
+      "min_ic": 0.1,
+      "min_dIC": 0.05,
+      "min_symbols": 2,
+      "symbols_override": [
+        "BTC",
+        "ETH"
+      ]
+    },
+    "status": "queued",
+    "failure_reason": null,
+    "parent_id": "HYP-SYS-c4228c2f",
+    "results": null,
+    "created": "2026-05-15T19:57:23.828843+00:00",
+    "completed": null
+  },
+  {
+    "id": "HYP-SYS-5cc16c5d",
+    "claim": "sig gated by g<P20 predicts 5s returns [symbol-specific: BTC,ETH]",
+    "generator": "systematic",
+    "priority": 0.35,
+    "test_protocol": [
+      "spannung regime --data data/features/2026-05-12 --symbol BTC"
+    ],
+    "thresholds": {
+      "regime_gate": "g<P20",
+      "min_ic": 0.1,
+      "min_dIC": 0.05,
+      "min_symbols": 2,
+      "symbols_override": [
+        "BTC",
+        "ETH"
+      ]
+    },
+    "status": "queued",
+    "failure_reason": null,
+    "parent_id": "HYP-SYS-62a1aea5",
+    "results": null,
+    "created": "2026-05-15T19:57:23.840149+00:00",
+    "completed": null
+  }
+]
