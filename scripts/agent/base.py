@@ -475,9 +475,13 @@ class BaseRunner(ABC):
         ]
 
     def _publish_event(self, event_type: str, payload: dict) -> None:
-        """Publish a research event to Redis (best-effort)."""
+        """Publish a research event to Redis (best-effort).
+
+        Automatically injects hypothesis_id for cross-service correlation.
+        """
         try:
             from .research_output import publish_research_event
+            payload.setdefault("hypothesis_id", self.h.id)
             publish_research_event(event_type, payload)
         except Exception:
             pass
@@ -906,6 +910,7 @@ class ResearchAgent(ABC):
         from logging_config import set_context, clear_context
         import uuid
         cycle_id = f"CYC-{uuid.uuid4().hex[:8]}"
+        self._cycle_id = cycle_id
         set_context(cycle_id=cycle_id, agent=self.agent_type)
         cycle_start = time.monotonic()
 
@@ -1027,9 +1032,14 @@ class ResearchAgent(ABC):
         clear_context()
 
     def _publish_event(self, event_type: str, payload: dict) -> None:
-        """Publish a research event to Redis (best-effort, never throws)."""
+        """Publish a research event to Redis (best-effort, never throws).
+
+        Automatically injects cycle_id for cross-service correlation.
+        """
         try:
             from .research_output import publish_research_event
+            if hasattr(self, "_cycle_id") and self._cycle_id:
+                payload.setdefault("cycle_id", self._cycle_id)
             publish_research_event(event_type, payload)
         except Exception:
             pass

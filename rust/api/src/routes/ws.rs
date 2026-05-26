@@ -225,6 +225,21 @@ async fn handle_research_stream(socket: WebSocket, state: Arc<AppState>) {
                     Ok(msgs) if !msgs.is_empty() => {
                         let mut ack_ids = Vec::new();
                         for (id, payload) in &msgs {
+                            // Extract correlation IDs for structured logging
+                            if let Ok(event) = serde_json::from_str::<serde_json::Value>(payload) {
+                                let event_type = event.get("event").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                let hypothesis_id = event.get("hypothesis_id")
+                                    .or_else(|| event.get("id"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("-");
+                                let cycle_id = event.get("cycle_id").and_then(|v| v.as_str()).unwrap_or("-");
+                                debug!(
+                                    event = event_type,
+                                    hypothesis_id = hypothesis_id,
+                                    cycle_id = cycle_id,
+                                    "forwarding research event to WebSocket"
+                                );
+                            }
                             if sender.send(Message::Text(payload.clone())).await.is_err() {
                                 return; // client disconnected
                             }
