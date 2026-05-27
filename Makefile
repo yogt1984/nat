@@ -1296,6 +1296,7 @@ help:
 	@echo "  oos_validate            Run OOS validation (4 winning algos) + terminal report"
 	@echo "  oos_watch               Watch mode: poll for new data, re-run, refresh"
 	@echo "  oos_report              Terminal dashboard from existing state"
+	@echo "  monitor                 Unified terminal monitor (3 tabs: health/agent/features)"
 	@echo ""
 
 # =============================================================================
@@ -1354,3 +1355,6 @@ oos_watch:
 
 oos_report:
 	$(PYTHON) scripts/oos_terminal.py
+
+monitor:
+	$(PYTHON) scripts/monitor.py
