@@ -70,6 +70,7 @@ generators_enabled = [
     "cross_asset",
     "recycler",
     "ensemble",
+    "llm_ideation",
 ]
 
 [agent.gates]
@@ -189,3 +190,25 @@ channels = ["nat:alerts"]
 
 # Research event types to forward (empty = all)
 research_events = ["hypothesis_registered", "cycle_completed"]
+
+# ─────────────────────────────────────────────────────────────
+# LLM Integration (Claude API)
+# ─────────────────────────────────────────────────────────────
+
+[agent.llm]
+enabled = true
+model = "claude-sonnet-4-20250514"
+max_calls_per_cycle = 3           # cost control: shared across all LLM tracks
+max_tokens_per_call = 4096
+temperature = 0.7
+api_key_env = "ANTHROPIC_API_KEY"  # env var name (never store key in config)
+
+# arXiv integration
+arxiv_enabled = true
+arxiv_scan_every_n_cycles = 168   # ~weekly at 1h cycle interval
+arxiv_max_papers_per_scan = 5
+
+# Code synthesis (opt-in — disabled by default)
+code_synth_enabled = false
+code_synth_max_attempts_per_cycle = 1
+code_synth_smoke_test_timeout_s = 30

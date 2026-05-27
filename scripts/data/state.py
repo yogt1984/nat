@@ -184,6 +184,38 @@ class StateStore:
         migrations = [
             ("add_data_version_to_hypotheses",
              "ALTER TABLE hypotheses ADD COLUMN data_version TEXT"),
+            ("create_llm_calls", """
+                CREATE TABLE IF NOT EXISTS llm_calls (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    agent TEXT NOT NULL,
+                    tag TEXT NOT NULL DEFAULT '',
+                    system TEXT NOT NULL,
+                    user_msg TEXT NOT NULL,
+                    response TEXT,
+                    model TEXT NOT NULL DEFAULT '',
+                    input_tokens INTEGER DEFAULT 0,
+                    output_tokens INTEGER DEFAULT 0,
+                    latency_ms INTEGER DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )
+             """),
+            ("create_llm_calls_index",
+             "CREATE INDEX IF NOT EXISTS idx_llm_agent ON llm_calls(agent, created_at DESC)"),
+            ("create_arxiv_papers", """
+                CREATE TABLE IF NOT EXISTS arxiv_papers (
+                    arxiv_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    abstract TEXT NOT NULL,
+                    published TEXT NOT NULL,
+                    categories TEXT NOT NULL DEFAULT '[]',
+                    ideas TEXT,
+                    processed INTEGER NOT NULL DEFAULT 0,
+                    processed_at TEXT,
+                    created_at TEXT NOT NULL
+                )
+             """),
+            ("create_arxiv_index",
+             "CREATE INDEX IF NOT EXISTS idx_arxiv_processed ON arxiv_papers(processed)"),
         ]
         for name, sql in migrations:
             already = self._conn.execute(

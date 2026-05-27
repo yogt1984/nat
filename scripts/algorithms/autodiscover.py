@@ -34,5 +34,17 @@ def discover_all() -> int:
         except Exception:
             pass  # Skip broken modules silently
 
+    # Also scan generated/ subdirectory for LLM-synthesized algorithms
+    generated_dir = pkg_dir / "generated"
+    if generated_dir.exists():
+        for info in pkgutil.iter_modules([str(generated_dir)]):
+            if info.name.startswith("_") or info.ispkg:
+                continue
+            try:
+                importlib.import_module(f".generated.{info.name}", package="algorithms")
+                count += 1
+            except Exception:
+                pass  # Skip broken generated modules silently
+
     _discovered = True
     return count
