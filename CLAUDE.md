@@ -105,6 +105,34 @@ Key files:
 - `scripts/agent_dashboard.py` — Agent web dashboard with IC heatmap
 - `config/agent.toml` — Gate thresholds, promotion criteria, generator config (`[agent]` + `[agent_mf]` + `[agent_macro]` + `[meta_agent]`)
 
+### Algorithm Contract (`scripts/algorithms/`)
+
+Every algorithm must implement `MicrostructureAlgorithm` ABC from `scripts/algorithms/base.py`:
+
+```python
+class MyAlgorithm(MicrostructureAlgorithm):
+    def name(self) -> str: ...                              # unique identifier
+    def alg_features(self) -> list[AlgorithmFeature]: ...   # output descriptors
+    def required_columns(self) -> list[str]: ...            # input feature names
+    def step(self, tick: dict[str, float]) -> dict[str, float]: ...  # one tick
+    def reset(self) -> None: ...                            # clear internal state
+    # Optional: override run_batch(df) for vectorized path
+```
+
+**Rules:**
+- Register via `@register` decorator from `scripts/algorithms/registry.py`
+- `step()` must return exactly the keys from `alg_features()` — no more, no less
+- Handle NaN inputs gracefully: if any required column is NaN, return NaN for all outputs
+- Feature names must start with `alg_` prefix
+- Include a docstring with mathematical formulation and references
+- `run_batch()` default iterates rows; override with vectorized numpy/pandas for performance
+- Warmup period: first `warmup` rows of `run_batch()` output are NaN-blanked automatically
+- Parameters should be configurable via `config/algorithms.toml`
+
+**Verification:** `pytest scripts/tests/test_algorithm_smoke.py -k <name>`, then `nat algorithm evaluate --algorithm <name> --symbol BTC` on real data.
+
+**Current winners (tested via `nat oos30`):** `jump_detector` (Lee-Mykland), `optimal_entry` (SPRT/Kalman), `funding_reversion`, `surprise_signal` (entropy), `3f_liquidity` (composite).
+
 ## Cargo Workspace
 
 Two crates in `rust/`:
