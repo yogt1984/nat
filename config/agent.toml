@@ -197,11 +197,12 @@ research_events = ["hypothesis_registered", "cycle_completed"]
 
 [agent.llm]
 enabled = true
+mode = "cli"                      # "cli" = claude CLI (Max subscription, free), "api" = anthropic SDK (per-token)
 model = "claude-sonnet-4-20250514"
 max_calls_per_cycle = 3           # cost control: shared across all LLM tracks
 max_tokens_per_call = 4096
 temperature = 0.7
-api_key_env = "ANTHROPIC_API_KEY"  # env var name (never store key in config)
+api_key_env = "ANTHROPIC_API_KEY"  # env var name (only needed for mode = "api")
 
 # arXiv integration
 arxiv_enabled = true
