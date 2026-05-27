@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from algorithms import get_algorithm, list_algorithms, discover_all
-from backtest.costs import CostModel
+from backtest.costs import CostModel, hyperliquid_taker, hyperliquid_maker, conservative
 from config_utils import load_cost_config
 
 # ── Config ────────────────────────────────────────────────────────────────
@@ -43,9 +43,17 @@ HORIZON_BARS = 20  # 100min
 TRAIN_WINDOW = 3
 MIN_BARS_PER_DATE = 12
 
-# Load cost model from config/agent.toml [defaults.costs]
+# Named cost presets
+COST_PRESETS: dict[str, CostModel] = {
+    "taker": hyperliquid_taker(),
+    "maker": hyperliquid_maker(),
+    "conservative": conservative(),
+}
+
+# Default: load from config/agent.toml [defaults.costs]
 _cost_cfg = load_cost_config()
-COST_MODEL = CostModel(fee_bps=_cost_cfg["fee_bps"], slippage_bps=_cost_cfg["slippage_bps"])
+COST_PRESETS["config"] = CostModel(fee_bps=_cost_cfg["fee_bps"], slippage_bps=_cost_cfg["slippage_bps"])
+COST_MODEL = COST_PRESETS["config"]
 
 # Per-algorithm: which feature to use as primary signal, and signal polarity.
 # "high_long" = high z-score → long (e.g., momentum).
@@ -329,7 +337,8 @@ def _json_default(obj):
 
 
 def run_algorithm(algo_name: str, data_dir: Path, symbols: list[str],
-                  save: bool = False, return_trades: bool = False) -> dict:
+                  save: bool = False, return_trades: bool = False,
+                  cost_model: CostModel = COST_MODEL) -> dict:
     """Run walk-forward paper trading for one algorithm.
 
     If return_trades=True, result[symbol] includes a "trades" key with the
@@ -351,8 +360,8 @@ def run_algorithm(algo_name: str, data_dir: Path, symbols: list[str],
     print(f"\n{'═' * 60}")
     print(f"  Algorithm: {algo_name}")
     print(f"  Primary feature: {primary} | Polarity: {polarity}")
-    print(f"  Horizon: {HORIZON_BARS * BAR_SECONDS // 60}min | Cost: {COST_MODEL.round_trip_cost_bps} bps RT "
-          f"(fee={COST_MODEL.fee_bps}+slip={COST_MODEL.slippage_bps} one-way)")
+    print(f"  Horizon: {HORIZON_BARS * BAR_SECONDS // 60}min | Cost: {cost_model.round_trip_cost_bps} bps RT "
+          f"(fee={cost_model.fee_bps}+slip={cost_model.slippage_bps} one-way)")
     print(f"  Dates: {len(all_dates)} ({all_dates[0]} to {all_dates[-1]})")
     print(f"{'═' * 60}")
 
@@ -401,7 +410,7 @@ def run_algorithm(algo_name: str, data_dir: Path, symbols: list[str],
                 continue
 
             scored = apply_signal(test_bars, params)
-            trades = generate_trades(scored, test_date_str, symbol)
+            trades = generate_trades(scored, test_date_str, symbol, cost_model=cost_model)
             summary = summarize_day(trades, test_date_str, symbol)
             daily_summaries.append(summary)
             if return_trades:
@@ -451,7 +460,13 @@ def main():
     parser.add_argument("--save", action="store_true", help="Save report JSON")
     parser.add_argument("--json-output", type=str, default=None,
                         help="Write structured results JSON to this path")
+    parser.add_argument("--cost-mode", choices=list(COST_PRESETS.keys()),
+                        default="config",
+                        help="Cost model preset: taker (11bps RT), maker (1.4bps RT), "
+                             "conservative (25bps RT), config (from agent.toml)")
     args = parser.parse_args()
+
+    cost_model = COST_PRESETS[args.cost_mode]
 
     data_dir = Path(args.data_dir)
     if not data_dir.exists():
@@ -467,11 +482,13 @@ def main():
         sys.exit(1)
 
     print(f"Testing {len(algo_names)} algorithms: {', '.join(algo_names)}")
+    print(f"Cost mode: {args.cost_mode} → {cost_model}")
 
     master_results = {}
     for algo_name in algo_names:
         t0 = time.time()
-        results = run_algorithm(algo_name, data_dir, args.symbols, save=args.save)
+        results = run_algorithm(algo_name, data_dir, args.symbols, save=args.save,
+                               cost_model=cost_model)
         elapsed = time.time() - t0
         if results:
             master_results[algo_name] = {
@@ -506,7 +523,8 @@ def main():
             "title": "Generic Paper Trade — Algorithm Comparison",
             "generated": datetime.now(timezone.utc).isoformat(),
             "horizon_min": HORIZON_BARS * BAR_SECONDS // 60,
-            "fee_bps_rt": COST_MODEL.round_trip_cost_bps,
+            "cost_mode": args.cost_mode,
+            "fee_bps_rt": cost_model.round_trip_cost_bps,
             "algorithms": master_results,
         }
         out = ROOT / "reports" / "algo_paper_trade_comparison.json"
