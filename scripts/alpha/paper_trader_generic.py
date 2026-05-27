@@ -139,6 +139,11 @@ ALGO_CONFIG = {
         "polarity": "low_long",  # divergence = contrarian
         "bar_agg": "mean",
     },
+    "surprise_signal": {
+        "primary": "alg_entropy_surprise",
+        "polarity": "low_long",  # low entropy surprise → stable regime → long
+        "bar_agg": "mean",
+    },
 }
 
 P_LONG_HIGH = 80  # for high_long polarity
