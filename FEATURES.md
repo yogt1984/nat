@@ -1,12 +1,12 @@
 # Feature Manifest
 
-209 features extracted from Hyperliquid WebSocket market data at 100ms intervals.
+212 features extracted from Hyperliquid WebSocket market data at 100ms intervals.
 
 ## Overview
 
 - **Base features** (138): Always computed from order book, trades, and market context.
 - **Optional features** (71): Require additional data sources or warmup. Padded with NaN when absent.
-- **Data contract**: `Features::to_vec()` returns exactly 209 elements. `Features::names_all()` returns matching column names. Parquet schema built from `names_all()` in `output/schema.rs`.
+- **Data contract**: `Features::to_vec()` returns exactly 212 elements. `Features::names_all()` returns matching column names. Parquet schema built from `names_all()` in `output/schema.rs`.
 - **Emission rate**: ~10 rows/sec per symbol (30 rows/sec for 3 symbols). Buffer flushes every 10,000 rows (~5.5 min).
 
 ## Summary
@@ -17,7 +17,7 @@
 | 2 | Imbalance | 8 | `imbalance_` | `features/imbalance.rs` | All working | Cont, Stoikov & Talreja (2010) |
 | 3 | Flow | 12 | `flow_` | `features/flow.rs` | All working | — |
 | 4 | Volatility | 9 | `vol_` | `features/volatility.rs` | All working | Parkinson (1980), Garman & Klass (1980) |
-| 5 | Entropy | 24 | `ent_` | `features/entropy.rs` | All warmup-dependent | Bandt & Pompe (2002) |
+| 5 | Entropy | 27 | `ent_` | `features/entropy.rs` | All warmup-dependent | Bandt & Pompe (2002) |
 | 6 | Context | 9 | `ctx_` | `features/context.rs` | All working | — |
 | 7 | Trend | 15 | `trend_` | `features/trend.rs` | All working | Jegadeesh & Titman (1993) |
 | 8 | Illiquidity | 12 | `illiq_` | `features/illiquidity.rs` | All working | Kyle (1985), Amihud (2002) |
@@ -102,7 +102,7 @@ Realized and range-based volatility. Module: `features/volatility.rs`. Refs: Par
 | `vol_ratio_short_long` | vol_1m / vol_5m | [0, +inf) | >1 = accelerating |
 | `vol_zscore` | (vol_1m − mean_1h) / std_1h, clamped ±10 | (−inf, +inf) | Working — >2 = vol spike, <−2 = unusually calm |
 
-## 5. Entropy (24 features)
+## 5. Entropy (27 features)
 
 Information content and predictability. Module: `features/entropy.rs`.
 Refs: Bandt & Pompe (2002), Shannon (1948), Zunino et al. (2009).
@@ -115,6 +115,9 @@ Refs: Bandt & Pompe (2002), Shannon (1948), Zunino et al. (2009).
 | `ent_permutation_returns_16` | Same, last 16 returns | [0, 1] | Medium horizon |
 | `ent_permutation_returns_32` | Same, last 32 returns | [0, 1] | Longer horizon |
 | `ent_permutation_imbalance_16` | Ordinal patterns of L1 imbalance | [0, 1] | Low = persistent imbalance |
+| `ent_perm_m5_8` | Permutation entropy m=5, 8-tick window (120 patterns) | [0, 1] | Richer temporal complexity than m=3 |
+| `ent_perm_m5_16` | Permutation entropy m=5, 16-tick window | [0, 1] | Captures complex ordinal dynamics |
+| `ent_perm_m5_32` | Permutation entropy m=5, 32-tick window | [0, 1] | Long-range ordinal pattern entropy |
 | `ent_spread_dispersion` | Shannon entropy, binned spreads (10 bins) | [0, 1] | Low = tight clustering |
 | `ent_volume_dispersion` | Shannon entropy, binned trade sizes (10 bins) | [0, 1] | Low = uniform sizes |
 | `ent_book_shape` | Shannon entropy of depth proportions | [0, 1] | Low = concentrated depth |
@@ -326,7 +329,7 @@ GMM input features: [kyle_lambda, vpin, absorption_zscore, hurst, whale_net_flow
 
 ## Warmup-Dependent Features
 
-All 209 features are fully implemented. Some return 0.0 during warmup until their buffers fill:
+All 212 features are fully implemented. Some return 0.0 during warmup until their buffers fill:
 
 - `vol_zscore` — requires ≥120 vol_1m samples (~12 seconds at 100ms) before producing meaningful z-scores
 - Several entropy features (`ent_permutation_imbalance_16`, `ent_spread_dispersion`, `ent_rate_of_change_5s`, `ent_zscore_1m`) — require sufficient buffer data

@@ -5,7 +5,7 @@
 //! strategies work; high entropy signals efficient/random markets favouring
 //! mean-reversion.
 //!
-//! # Features (24 total: 10 distribution/permutation + 7 tick + 7 volume-tick)
+//! # Features (27 total: 13 distribution/permutation + 7 tick + 7 volume-tick)
 //!
 //! | Feature | Description | Range | Interpretation |
 //! |---------|-------------|-------|----------------|
@@ -45,18 +45,24 @@
 
 use crate::state::{OrderBook, TradeBuffer, RingBuffer};
 
-/// Entropy features (24 features: 10 original + 14 tick entropy)
+/// Entropy features (27 features: 13 original + 14 tick entropy)
 #[derive(Debug, Clone, Default)]
 pub struct EntropyFeatures {
-    // === Original permutation/distribution entropy (10 features) ===
-    /// Permutation entropy of returns, length 8
+    // === Permutation/distribution entropy (13 features) ===
+    /// Permutation entropy of returns, length 8, order 3 (6 patterns)
     pub permutation_returns_8: f64,
-    /// Permutation entropy of returns, length 16
+    /// Permutation entropy of returns, length 16, order 3
     pub permutation_returns_16: f64,
-    /// Permutation entropy of returns, length 32
+    /// Permutation entropy of returns, length 32, order 3
     pub permutation_returns_32: f64,
-    /// Permutation entropy of imbalance series
+    /// Permutation entropy of imbalance series, order 3
     pub permutation_imbalance_16: f64,
+    /// Permutation entropy of returns, length 8, order 5 (120 patterns)
+    pub perm_m5_returns_8: f64,
+    /// Permutation entropy of returns, length 16, order 5
+    pub perm_m5_returns_16: f64,
+    /// Permutation entropy of returns, length 32, order 5
+    pub perm_m5_returns_32: f64,
     /// Entropy of spread distribution
     pub spread_dispersion: f64,
     /// Entropy of volume distribution
@@ -104,7 +110,7 @@ pub struct EntropyFeatures {
 }
 
 impl EntropyFeatures {
-    pub fn count() -> usize { 24 }
+    pub fn count() -> usize { 27 }
 
     pub fn names() -> Vec<&'static str> {
         vec![
@@ -113,6 +119,9 @@ impl EntropyFeatures {
             "ent_permutation_returns_16",
             "ent_permutation_returns_32",
             "ent_permutation_imbalance_16",
+            "ent_perm_m5_8",
+            "ent_perm_m5_16",
+            "ent_perm_m5_32",
             "ent_spread_dispersion",
             "ent_volume_dispersion",
             "ent_book_shape",
@@ -145,6 +154,9 @@ impl EntropyFeatures {
             self.permutation_returns_16,
             self.permutation_returns_32,
             self.permutation_imbalance_16,
+            self.perm_m5_returns_8,
+            self.perm_m5_returns_16,
+            self.perm_m5_returns_32,
             self.spread_dispersion,
             self.volume_dispersion,
             self.book_shape,
@@ -197,6 +209,23 @@ pub fn compute(
 
     let permutation_returns_32 = if returns.len() >= 32 {
         permutation_entropy(&returns[returns.len()-32..], 3)
+    } else {
+        0.0
+    };
+
+    // Permutation entropy m=5 (120 ordinal patterns, richer temporal structure)
+    let perm_m5_returns_8 = if returns.len() >= 8 {
+        permutation_entropy(&returns[returns.len()-8..], 5)
+    } else {
+        0.0
+    };
+    let perm_m5_returns_16 = if returns.len() >= 16 {
+        permutation_entropy(&returns[returns.len()-16..], 5)
+    } else {
+        0.0
+    };
+    let perm_m5_returns_32 = if returns.len() >= 32 {
+        permutation_entropy(&returns[returns.len()-32..], 5)
     } else {
         0.0
     };
@@ -286,6 +315,9 @@ pub fn compute(
         permutation_returns_16,
         permutation_returns_32,
         permutation_imbalance_16,
+        perm_m5_returns_8,
+        perm_m5_returns_16,
+        perm_m5_returns_32,
         spread_dispersion,
         volume_dispersion,
         book_shape,
@@ -556,9 +588,9 @@ mod tests {
 
     #[test]
     fn test_entropy_features_count() {
-        assert_eq!(EntropyFeatures::count(), 24);
-        assert_eq!(EntropyFeatures::names().len(), 24);
-        assert_eq!(EntropyFeatures::default().to_vec().len(), 24);
+        assert_eq!(EntropyFeatures::count(), 27);
+        assert_eq!(EntropyFeatures::names().len(), 27);
+        assert_eq!(EntropyFeatures::default().to_vec().len(), 27);
     }
 
     #[test]
