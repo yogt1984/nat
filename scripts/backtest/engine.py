@@ -156,6 +156,7 @@ def run_backtest(
     cost_model: CostModel,
     initial_capital: float = 10000.0,
     allow_multiple_positions: bool = False,
+    seed: int | None = None,
 ) -> BacktestResult:
     """
     Run backtest on feature dataframe.
@@ -238,6 +239,9 @@ def run_backtest(
     entry_signals = np.array(entry_signals, dtype=bool)
     exit_signals = np.array(exit_signals, dtype=bool)
 
+    # RNG for stochastic fill modeling
+    rng = np.random.RandomState(seed) if seed is not None else np.random.RandomState()
+
     # State tracking
     trades: List[Trade] = []
     equity_curve = [initial_capital]
@@ -251,6 +255,11 @@ def run_backtest(
         if position is None:
             # Not in position - check for entry
             if entry_signals[i]:
+                # Stochastic fill rejection for maker cost models
+                if cost_model.fill_probability < 1.0:
+                    if rng.random() > cost_model.fill_probability:
+                        equity_curve.append(capital)
+                        continue
                 entry_price_eff = cost_model.apply_entry_cost(
                     current_price, strategy.direction
                 )

@@ -37,12 +37,15 @@ class CostModel:
     fee_bps: float = 5.0  # Taker fee
     slippage_bps: float = 2.0  # Conservative slippage estimate
     funding_enabled: bool = False
+    fill_probability: float = 1.0  # Probability an order fills (1.0 = always)
 
     def __post_init__(self):
         if self.fee_bps < 0:
             raise ValueError(f"fee_bps must be non-negative, got {self.fee_bps}")
         if self.slippage_bps < 0:
             raise ValueError(f"slippage_bps must be non-negative, got {self.slippage_bps}")
+        if not 0.0 < self.fill_probability <= 1.0:
+            raise ValueError(f"fill_probability must be in (0, 1], got {self.fill_probability}")
 
     @property
     def one_way_cost_bps(self) -> float:
@@ -214,11 +217,14 @@ class CostModel:
         return self.round_trip_cost_bps / 100
 
     def __repr__(self) -> str:
-        return (
-            f"CostModel(fee={self.fee_bps}bps, "
-            f"slippage={self.slippage_bps}bps, "
-            f"round_trip={self.round_trip_cost_bps}bps)"
-        )
+        parts = [
+            f"fee={self.fee_bps}bps",
+            f"slippage={self.slippage_bps}bps",
+            f"round_trip={self.round_trip_cost_bps}bps",
+        ]
+        if self.fill_probability < 1.0:
+            parts.append(f"fill={self.fill_probability:.0%}")
+        return f"CostModel({', '.join(parts)})"
 
 
 # =============================================================================
@@ -232,8 +238,13 @@ def hyperliquid_taker() -> CostModel:
 
 
 def hyperliquid_maker() -> CostModel:
-    """Hyperliquid maker fees (optimistic - assumes limit orders fill)."""
-    return CostModel(fee_bps=0.2, slippage_bps=0.5)
+    """Hyperliquid maker fees with realistic fill rate (~40%)."""
+    return CostModel(fee_bps=0.2, slippage_bps=0.5, fill_probability=0.4)
+
+
+def hyperliquid_maker_conservative() -> CostModel:
+    """Hyperliquid maker fees with conservative fill rate (~30%)."""
+    return CostModel(fee_bps=0.2, slippage_bps=0.5, fill_probability=0.3)
 
 
 def conservative() -> CostModel:
