@@ -3,6 +3,9 @@
 #
 # Covers: cluster pipeline, backtesting, exploration, model serving, and testing.
 # Subsystem-specific requirements files still exist for isolated installs.
+#
+# For CI/production, use requirements.lock (pinned versions).
+# Regenerate lock: pip install -r requirements.txt && pip freeze > requirements.lock
 
 # ============================================================================
 # Core (required by all subsystems)
