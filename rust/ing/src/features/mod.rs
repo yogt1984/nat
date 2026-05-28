@@ -1,6 +1,6 @@
 //! Feature Computation Module
 //!
-//! Extracts 217 features from Hyperliquid WebSocket market data across 20 categories.
+//! Extracts 220 features from Hyperliquid WebSocket market data across 20 categories.
 //! See `FEATURES.md` at the project root for the full feature manifest with formulas,
 //! interpretation, and paper references.
 //!
@@ -34,7 +34,7 @@
 //!
 //! # Data Contract
 //!
-//! `Features::to_vec()` always returns exactly `count_all()` = 217 elements.
+//! `Features::to_vec()` always returns exactly `count_all()` = 220 elements.
 //! `Features::names_all()` returns the corresponding column names.
 //! The Parquet schema is built from `names_all()` in `output/schema.rs`.
 
