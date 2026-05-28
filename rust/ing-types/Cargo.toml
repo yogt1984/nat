@@ -1,0 +1,12 @@
+[package]
+name = "ing-types"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Shared data types for NAT ingestor — WS messages, order book, trade buffer, ring buffer"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+ordered-float = { workspace = true }
