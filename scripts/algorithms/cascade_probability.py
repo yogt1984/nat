@@ -89,16 +89,20 @@ class CascadeProbability(MicrostructureAlgorithm):
         lr: float = 0.01,
         lr_decay: float = 0.9999,
         l2_reg: float = 1e-3,
+        max_class_weight: float = 50.0,
     ):
         self._lr0 = lr
         self._lr = lr
         self._lr_decay = lr_decay
         self._l2 = l2_reg
+        self._max_class_weight = max_class_weight
         self._d = 11  # 8 heatmap + 3 interactions
         self._beta: np.ndarray | None = None
         self._beta0: float = 0.0
         self._normalizer: WelfordNormalizer | None = None
         self._tick_count: int = 0
+        self._n_pos: int = 0
+        self._n_neg: int = 0
 
         # Delayed target buffer: (features, midprice, timestamp)
         self._buffer: deque[tuple[np.ndarray, float, int]] = deque()
@@ -202,9 +206,21 @@ class CascadeProbability(MicrostructureAlgorithm):
             # (liquidation volume not available in tick data — use price threshold as proxy)
             y = 1.0 if abs(log_return) > self.CASCADE_PRICE_THRESH else 0.0
 
+            # Track class counts for inverse-frequency weighting
+            if y > 0.5:
+                self._n_pos += 1
+            else:
+                self._n_neg += 1
+
             # SGD step on cross-entropy loss with L2
             p_old = _sigmoid(self._beta0 + float(np.dot(self._beta, x_old)))
-            grad = p_old - y  # dL/dz for cross-entropy
+
+            # Inverse-frequency class weight: upweight rare cascade events
+            if y > 0.5 and self._n_pos > 0:
+                w_class = min(self._n_neg / self._n_pos, self._max_class_weight)
+            else:
+                w_class = 1.0
+            grad = w_class * (p_old - y)  # dL/dz for weighted cross-entropy
 
             self._beta -= self._lr * (grad * x_old + self._l2 * self._beta)
             self._beta0 -= self._lr * grad
@@ -228,6 +244,8 @@ class CascadeProbability(MicrostructureAlgorithm):
         self._normalizer = None
         self._lr = self._lr0
         self._tick_count = 0
+        self._n_pos = 0
+        self._n_neg = 0
         self._buffer.clear()
 
     def run_batch(self, df: "pd.DataFrame") -> "pd.DataFrame":
