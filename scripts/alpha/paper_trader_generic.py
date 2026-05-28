@@ -286,6 +286,18 @@ def generate_trades(bars: pd.DataFrame, date_str: str, symbol: str,
     rt_cost = cost_model.round_trip_cost_bps
     trades = []
 
+    # Funding rate (optional)
+    has_funding = (
+        cost_model.funding_enabled
+        and "ctx_funding_rate_mean" in bars.columns
+    )
+    if has_funding:
+        funding_rates = bars["ctx_funding_rate_mean"].values
+    else:
+        funding_rates = np.zeros(n)
+
+    holding_hours = HORIZON_BARS * BAR_SECONDS / 3600.0
+
     for i in range(n - HORIZON_BARS):
         d = directions[i]
         if d == 0:
@@ -296,7 +308,16 @@ def generate_trades(bars: pd.DataFrame, date_str: str, symbol: str,
             continue
         ret_bps = (exit_p - entry_p) / entry_p * 1e4
         gross = d * ret_bps
-        net = gross - rt_cost
+
+        # Funding cost
+        funding_cost = 0.0
+        if has_funding:
+            avg_funding = np.nanmean(funding_rates[i:i + HORIZON_BARS])
+            if np.isfinite(avg_funding):
+                funding_bps = avg_funding * 10000 * (holding_hours / 8.0)
+                funding_cost = d * funding_bps
+
+        net = gross - rt_cost - funding_cost
 
         trades.append(PaperTrade(
             date=date_str, bar_idx=i, symbol=symbol, direction=d,
