@@ -29,6 +29,7 @@ class SpreadDecomp(MicrostructureAlgorithm):
         self._regime_percentile = regime_percentile
         self._ema_adverse = np.nan
         self._adverse_buffer: list[float] = []
+        self._prev_realized: float = np.nan
 
     def name(self) -> str:
         return "spread_decomp"
@@ -53,8 +54,13 @@ class SpreadDecomp(MicrostructureAlgorithm):
         if not (np.isfinite(eff) and np.isfinite(real)):
             return {f.name: np.nan for f in self.alg_features()}
 
-        # Adverse selection component
-        adverse = eff - real
+        # Adverse selection: use *lagged* realized spread to avoid causality
+        # violation (realized spread at time t is only known after the trade)
+        if np.isnan(self._prev_realized):
+            adverse = 0.0  # first tick: no prior realized available
+        else:
+            adverse = eff - self._prev_realized
+        self._prev_realized = real
 
         # EMA trend
         if np.isnan(self._ema_adverse):
@@ -86,6 +92,7 @@ class SpreadDecomp(MicrostructureAlgorithm):
     def reset(self) -> None:
         self._ema_adverse = np.nan
         self._adverse_buffer.clear()
+        self._prev_realized = np.nan
 
     def run_batch(self, df: "pd.DataFrame") -> "pd.DataFrame":
         """Vectorized override."""
@@ -94,7 +101,12 @@ class SpreadDecomp(MicrostructureAlgorithm):
         eff = df["toxic_effective_spread"].values.astype(np.float64)
         real = df["toxic_realized_spread"].values.astype(np.float64)
 
-        adverse = eff - real
+        # Lag realized spread by 1 tick to avoid causality violation
+        real_lagged = np.empty_like(real)
+        real_lagged[0] = np.nan
+        real_lagged[1:] = real[:-1]
+
+        adverse = eff - real_lagged
         trend = pd.Series(adverse).ewm(span=self._ema_span, min_periods=1).mean().values
 
         # Rolling percentile for regime
