@@ -1,0 +1,11 @@
+[package]
+name = "ing-features"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Feature extraction engine for NAT ingestor (212 features across 19 categories)"
+
+[dependencies]
+ing-types = { path = "../ing-types" }
+serde = { workspace = true }

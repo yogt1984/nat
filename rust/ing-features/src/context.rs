@@ -24,7 +24,7 @@
 //! Note: OI change uses a 60-sample lookback (~5 min at ~5s context updates).
 //! Funding momentum uses 8h lookback (Hyperliquid settlement cycle).
 
-use crate::state::MarketContext;
+use ing_types::MarketContext;
 
 /// Context features (12 features)
 #[derive(Debug, Clone, Default)]

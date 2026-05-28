@@ -27,7 +27,7 @@
 //!
 //! - Gatheral & Oomen (2010) - Zero-intelligence realized variance estimation
 
-use crate::state::OrderBook;
+use ing_types::OrderBook;
 
 /// Raw order book features (10 features)
 #[derive(Debug, Clone, Default)]

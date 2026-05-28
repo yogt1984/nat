@@ -19,7 +19,7 @@
 //! 30s: medium-term directional conviction. These correspond to typical market-maker
 //! quote update frequencies (1-5s) and informed trader execution horizons (30s+).
 
-use crate::state::TradeBuffer;
+use ing_types::TradeBuffer;
 
 /// Trade flow features (12 features)
 #[derive(Debug, Clone, Default)]

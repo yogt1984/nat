@@ -27,7 +27,7 @@
 //!
 //! - Cont, Stoikov & Talreja (2010) - A stochastic model for order book dynamics
 
-use crate::state::OrderBook;
+use ing_types::OrderBook;
 
 /// Imbalance features (8 features)
 #[derive(Debug, Clone, Default)]

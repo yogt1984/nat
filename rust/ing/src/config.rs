@@ -49,21 +49,7 @@ pub struct SymbolsConfig {
     pub symbols_file: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct FeaturesConfig {
-    #[serde(default = "default_emission_interval")]
-    pub emission_interval_ms: u64,
-    #[serde(default = "default_trade_buffer_seconds")]
-    pub trade_buffer_seconds: u64,
-    #[serde(default = "default_book_levels")]
-    pub book_levels: usize,
-    #[serde(default = "default_price_buffer_size")]
-    pub price_buffer_size: usize,
-    /// Path to trained GMM regime classifier model (JSON)
-    /// If not set, GMM classification features will not be computed
-    #[serde(default)]
-    pub gmm_model_path: Option<String>,
-}
+pub use ing_types::FeaturesConfig;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct OutputConfig {
@@ -157,10 +143,6 @@ fn default_ws_url() -> String { "wss://api.hyperliquid.xyz/ws".to_string() }
 fn default_reconnect_delay() -> u64 { 1000 }
 fn default_max_reconnect_delay() -> u64 { 30000 }
 fn default_ping_interval() -> u64 { 30000 }
-fn default_emission_interval() -> u64 { 100 }
-fn default_trade_buffer_seconds() -> u64 { 60 }
-fn default_book_levels() -> usize { 10 }
-fn default_price_buffer_size() -> usize { 1000 }
 fn default_format() -> String { "parquet".to_string() }
 fn default_row_group_size() -> usize { 10000 }
 fn default_compression() -> String { "zstd".to_string() }
@@ -245,10 +227,10 @@ impl Default for Config {
                 symbols_file: None,
             },
             features: FeaturesConfig {
-                emission_interval_ms: default_emission_interval(),
-                trade_buffer_seconds: default_trade_buffer_seconds(),
-                book_levels: default_book_levels(),
-                price_buffer_size: default_price_buffer_size(),
+                emission_interval_ms: 100,
+                trade_buffer_seconds: 60,
+                book_levels: 10,
+                price_buffer_size: 1000,
                 gmm_model_path: None,
             },
             output: OutputConfig {

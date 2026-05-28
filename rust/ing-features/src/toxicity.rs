@@ -17,7 +17,7 @@
 //! - Glosten & Milgrom (1985) - Bid, Ask and Transaction Prices
 //! - Kyle (1985) - Continuous Auctions and Insider Trading
 
-use crate::state::{TradeBuffer, Trade};
+use ing_types::{TradeBuffer, Trade};
 
 /// Minimum trades required for reliable computation
 const MIN_TRADES: usize = 20;

@@ -21,7 +21,7 @@
 //!
 //! - Bacry, Mastromatteo & Muzy (2015) — Hawkes processes in finance
 
-use crate::state::TradeBuffer;
+use ing_types::TradeBuffer;
 
 /// Hawkes process parameters (fixed calibration)
 const ALPHA: f64 = 0.5;  // Excitation amplitude per trade (per second)
