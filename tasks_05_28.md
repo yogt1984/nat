@@ -19,6 +19,13 @@ Remaining work from the state_05_26.md critique remediation and new items surfac
 - [x] **Python daemon PID files** — All daemons now write PID files via `_write_pid_file()` (commit `640a28d`)
 - [x] **Config duplication cleanup** — Scanner/profiler load taker_bps from costs.toml (commit `7e2bd7c`)
 
+## New — Surfaced During Gap Audit
+
+- [x] **Rust unwrap() safety** — Replaced 8 production `unwrap()` calls with `unwrap_or(Ordering::Equal)` / `expect` / `?` across whales/, hypothesis/, bins (commit `c94fec3`)
+- [x] **Alpha fee consolidation** — 4 alpha scripts (screener, paper_trader, paper_trader_surprise, paper_trader_daily) now load fees from `config/costs.toml` via `scripts/utils/costs.py` (commit `c94fec3`)
+- [x] **Stale .pyc cleanup** — Removed `online_ridge.pyc` and `multi_level_imb.pyc` from `__pycache__/` (commit `c94fec3`)
+- [x] **State report update** — Updated `state_05_28.md` scorecard to 31/31, corrected 6 stale claims (commit `c94fec3`)
+
 ## Completed (state_05_28.md)
 
 - [x] Makefile split into make/*.mk (commit `2e8af10`)
