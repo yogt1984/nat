@@ -158,6 +158,55 @@ def compute_rolling_ic(
     return np.array(ic_values)
 
 
+def compute_expanding_ic(
+    feature: np.ndarray,
+    forward_returns: np.ndarray,
+    min_obs: int = 50,
+    step: int | None = None,
+) -> np.ndarray:
+    """
+    Compute expanding-window Spearman IC (anchored at t=0, expanding forward).
+
+    Avoids lookahead bias: IC at each expansion point uses only data
+    available up to that point. Returns array of IC values, one per
+    expansion step.
+
+    Parameters
+    ----------
+    feature : array of feature values
+    forward_returns : array of forward returns (same length)
+    min_obs : minimum observations before first IC (default 50)
+    step : expansion step size (default n // 20)
+    """
+    n = len(feature)
+    if step is None:
+        step = max(n // 20, 1)
+
+    valid = ~(np.isnan(feature) | np.isnan(forward_returns))
+    ic_values = []
+
+    boundary = min_obs
+    while boundary <= n:
+        mask = valid[:boundary]
+        n_valid = mask.sum()
+
+        if n_valid >= min_obs:
+            f_win = feature[:boundary][mask]
+            r_win = forward_returns[:boundary][mask]
+
+            if np.std(f_win) < 1e-15 or np.std(r_win) < 1e-15:
+                ic_values.append(0.0)
+            else:
+                rho, _ = stats.spearmanr(f_win, r_win)
+                ic_values.append(0.0 if np.isnan(rho) else rho)
+        else:
+            ic_values.append(np.nan)
+
+        boundary += step
+
+    return np.array(ic_values)
+
+
 def compute_turnover(feature: np.ndarray) -> float:
     """
     Compute signal turnover: mean|f(t) - f(t-1)| / std(f).
@@ -353,7 +402,6 @@ def screen_features(
 
     # Get forward horizons for this timeframe
     horizons = FORWARD_HORIZONS.get(timeframe, {"4h": 4, "1d": 24})
-    ic_window = IC_WINDOW_BARS.get(timeframe, 7 * 24)
 
     all_results: List[FeatureAlpha] = []
     n_bars_per_symbol: Dict[str, int] = {}
@@ -402,18 +450,18 @@ def screen_features(
                 fr = fwd_returns[h_name]
                 vol_r = vol_returns[h_name]
 
-                # Adaptive window: use smaller window if not enough data
-                window = min(ic_window, n_bars // 3)
-                if window < 30:
-                    window = 30
-
-                ic_series = compute_rolling_ic(feat_vals, fr, window)
+                # Expanding-window IC: anchor at t=0, expand forward
+                # Avoids lookahead bias present in fixed rolling windows
+                ic_series = compute_expanding_ic(feat_vals, fr, min_obs=50)
                 valid_ics = ic_series[~np.isnan(ic_series)]
 
                 if len(valid_ics) < 2:
                     continue
 
-                ic_mean = float(np.mean(valid_ics))
+                # Use recent expansion points for stability metrics
+                # (early points have few samples, late points are most reliable)
+                recent_ics = valid_ics[-min(len(valid_ics), 10):]
+                ic_mean = float(np.mean(recent_ics))
                 ic_std = float(np.std(valid_ics))
                 ic_ir = ic_mean / ic_std if ic_std > 1e-15 else 0.0
                 n_windows = len(valid_ics)
@@ -440,9 +488,12 @@ def screen_features(
                 breakeven = compute_breakeven_bps(ic_mean, vol_r, turnover)
 
                 # Annualized IC IR (for comparability across timeframes)
+                # Scale by sqrt(observations per year / expansion steps)
                 bars_per_year = {"15min": 96 * 365, "1h": 24 * 365, "4h": 6 * 365}
                 bpy = bars_per_year.get(timeframe, 24 * 365)
-                ann_ic_ir = ic_ir * np.sqrt(bpy / window) if window > 0 else 0.0
+                # Each expansion step covers n_bars/n_windows bars
+                bars_per_step = n_bars / n_windows if n_windows > 0 else n_bars
+                ann_ic_ir = ic_ir * np.sqrt(bpy / bars_per_step) if bars_per_step > 0 else 0.0
 
                 all_results.append(FeatureAlpha(
                     feature=feat_col,
