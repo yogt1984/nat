@@ -48,7 +48,8 @@ MIN_BARS_PER_DATE = 12
 P_LONG = 20   # Long when surprise < P20 (ordering = negative surprise)
 P_SHORT = 80  # Short when surprise > P80 (disordering = positive surprise)
 
-FEE_BPS = 1.61  # Binance VIP9 taker RT
+from utils.costs import binance_vip9_rt_bps as _vip9_bps
+FEE_BPS = _vip9_bps()  # Binance VIP9 taker RT, from config/costs.toml
 
 LOAD_COLUMNS = [
     "timestamp_ns", "symbol", "raw_midprice",

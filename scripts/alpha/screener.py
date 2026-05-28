@@ -37,9 +37,10 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = ROOT / "data" / "features"
 REPORT_DIR = ROOT / "reports"
 
-# Hyperliquid fee structure
-TAKER_FEE_BPS = 3.5
-MAKER_FEE_BPS = 1.0
+# Hyperliquid fee structure (loaded from config/costs.toml)
+from utils.costs import taker_bps as _taker_bps, maker_bps as _maker_bps
+TAKER_FEE_BPS = _taker_bps()
+MAKER_FEE_BPS = _maker_bps()
 
 # Minimum bars for meaningful IC computation
 MIN_BARS_FOR_IC = 50

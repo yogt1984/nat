@@ -43,7 +43,7 @@ impl WhaleConcentration {
             .collect();
 
         // Sort descending for top N calculation
-        positions.sort_by(|a, b| b.partial_cmp(a).unwrap());
+        positions.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
 
         // Top 10 concentration
         let top10_position: f64 = positions.iter().take(10).sum();
@@ -268,7 +268,7 @@ impl WhaleSkillAnalysis {
         let avg_pnl = pnls.iter().sum::<f64>() / pnls.len() as f64;
 
         // Median
-        pnls.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        pnls.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let median_pnl = if pnls.len() % 2 == 0 {
             (pnls[pnls.len() / 2 - 1] + pnls[pnls.len() / 2]) / 2.0
         } else {
@@ -311,7 +311,7 @@ fn calculate_gini(values: &[f64]) -> f64 {
 
     // Sort values
     let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     // Calculate Gini using the formula: G = (2 * sum(i * x_i) - (n+1) * sum(x_i)) / (n * sum(x_i))
     let sum_x: f64 = sorted.iter().sum();
