@@ -1,3 +1,6 @@
+# PID files
+.ing.pid
+
 # Rust
 /target/
 rust/target/
