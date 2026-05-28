@@ -32,7 +32,11 @@ SERVER_TMUX = "nat-dashboard"
 DASHBOARD_PORT = 8050
 
 
-def _run(cmd: str, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
+def _run(cmd: str | list[str], check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
+    """Run a command. Lists use safe exec; strings use shell (for tmux/pipes)."""
+    if isinstance(cmd, list):
+        return subprocess.run(cmd, check=check, capture_output=capture, text=True)
+    # shell=True only for commands requiring shell features (tmux quoting, pipes, redirects)
     return subprocess.run(cmd, shell=True, check=check, capture_output=capture, text=True)
 
 
@@ -42,7 +46,7 @@ def _tmux_exists() -> bool:
 
 
 def _ingestor_pid() -> int | None:
-    r = _run("pgrep -x ing", check=False, capture=True)
+    r = _run(["pgrep", "-x", "ing"], check=False, capture=True)
     if r.returncode == 0 and r.stdout.strip():
         return int(r.stdout.strip().split("\n")[0])
     return None
@@ -56,7 +60,7 @@ def _data_stats() -> dict:
     parquets = list(DATA_DIR.rglob("*.parquet"))
     stats["total_files"] = len(parquets)
 
-    r = _run(f"du -sh {DATA_DIR}", check=False, capture=True)
+    r = _run(["du", "-sh", str(DATA_DIR)], check=False, capture=True)
     if r.returncode == 0:
         stats["total_size"] = r.stdout.split()[0]
 
@@ -85,7 +89,7 @@ def cmd_start(args):
 
     if not BINARY.exists():
         print("[!] Binary not found. Building release...")
-        _run(f"cd {PROJECT_ROOT} && make release")
+        _run(["make", "-C", str(PROJECT_ROOT), "release"])
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     logfile = LOG_DIR / f"ingestor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -199,16 +203,16 @@ def cmd_check(args):
     """Daily validation check on recent data."""
     hours = args.hours if hasattr(args, "hours") else 24
     print(f"[..] Validating last {hours} hours of data...\n")
-    _run(f"cd {PROJECT_ROOT} && make validate_data_recent HOURS={hours}")
+    _run(["make", "-C", str(PROJECT_ROOT), "validate_data_recent", f"HOURS={hours}"])
 
 
 def cmd_midweek(args):
     """Mid-week deep validation."""
     print("[..] Running full validation...\n")
-    _run(f"cd {PROJECT_ROOT} && make validate_data")
+    _run(["make", "-C", str(PROJECT_ROOT), "validate_data"])
     print()
     print("[..] Scanning schema...\n")
-    _run(f"cd {PROJECT_ROOT} && make scan_schema")
+    _run(["make", "-C", str(PROJECT_ROOT), "scan_schema"])
 
 
 def cmd_analyze(args):
@@ -223,11 +227,11 @@ def cmd_analyze(args):
 
     # Step 2: Final validation
     print("\n[2/5] Running final validation...")
-    _run(f"cd {PROJECT_ROOT} && make validate_data", check=False)
+    _run(["make", "-C", str(PROJECT_ROOT), "validate_data"], check=False)
 
     # Step 3: Schema scan
     print("\n[3/5] Scanning schema...")
-    _run(f"cd {PROJECT_ROOT} && make scan_schema", check=False)
+    _run(["make", "-C", str(PROJECT_ROOT), "scan_schema"], check=False)
 
     # Step 4: Profile
     print("\n[4/5] Running profiling pipeline...")
