@@ -96,6 +96,14 @@ sprt_drift = 0.001           # drift under H1
 alpha_error = 0.05           # type-I error
 beta_error = 0.20            # type-II error
 
+# ── Group H: Cascade ─────────────────────────────────────────────
+
+[cascade_probability]
+lr = 0.01                    # SGD learning rate
+lr_decay = 0.9999            # per-update LR decay
+l2_reg = 0.001               # L2 regularization
+max_class_weight = 50.0      # cap on inverse-frequency class weight
+
 # ── Group I: Pattern Convolver ──────────────────────────────────
 
 [convolver]
