@@ -97,8 +97,8 @@ Full system map of the NAT quantitative research platform — from raw market da
                       │ │  funding_reversion│ │   │ │ Meta Agent       │    │
                       │ │  entropy_momentum │ │   │ │ (orchestrator)   │    │
                       │ │  optimal_entry    │ │   │ │ Budget, correl,  │    │
-                      │ │  online_ridge     │ │   │ │ portfolio        │    │
-                      │ │  ...              │ │   │ └──────────────────┘    │
+                      │ │  ...              │ │   │ │ portfolio        │    │
+                      │ │                   │ │   │ └──────────────────┘    │
                       │ └───────────────────┘ │   │                          │
                       └───────────┬───────────┘   └────────────┬───────────┘
                                   │                             │

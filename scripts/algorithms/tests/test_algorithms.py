@@ -168,7 +168,7 @@ class TestStepBatchConsistency:
     def test_step_vs_batch(self, algorithm_name):
         # Skip algorithms with known step/batch divergence due to EMA initialization,
         # rolling window boundary effects, or meta-algorithm non-determinism
-        skip_list = {"online_ridge", "regime_gated"}
+        skip_list = {"regime_gated"}
         if algorithm_name in skip_list:
             pytest.skip("Known step/batch divergence due to implementation strategy")
 
