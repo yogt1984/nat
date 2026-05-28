@@ -1204,6 +1204,14 @@ class ResearchAgent(ABC):
 # CLI helper — shared across all daemon subclasses
 # ---------------------------------------------------------------------------
 
+def _write_pid_file(pid_path: Path) -> None:
+    """Write current PID to file and register cleanup on exit."""
+    import atexit, os
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(str(os.getpid()))
+    atexit.register(lambda: pid_path.unlink(missing_ok=True))
+
+
 def cli_main(agent_class: type, description: str = "NAT Agent") -> None:
     """Standard CLI entry point for agent daemons."""
     import argparse
@@ -1219,6 +1227,8 @@ def cli_main(agent_class: type, description: str = "NAT Agent") -> None:
     agent = agent_class()
 
     if args.action == "start":
+        project_root = Path(__file__).resolve().parent.parent.parent
+        _write_pid_file(project_root / f".{agent.agent_type}_agent.pid")
         agent.run()
     elif args.action == "once":
         agent.run_cycle()

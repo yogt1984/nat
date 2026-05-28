@@ -729,6 +729,9 @@ def cmd_start(config: dict, state: DiscoveryState, log: logging.Logger) -> None:
     if state.current not in (Phase.IDLE, Phase.STOPPED, Phase.ERROR, Phase.SLEEPING):
         log.error("Cannot start — current phase is %s (use 'stop' first)", state.current.value)
         return
+    from agent.base import _write_pid_file
+    project_root = Path(__file__).resolve().parent.parent
+    _write_pid_file(project_root / ".discovery_agent.pid")
     state.transition(Phase.IDLE, "starting daemon")
     run_daemon(config, state, log)
 
