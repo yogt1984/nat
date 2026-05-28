@@ -81,6 +81,8 @@ class FeatureAlpha:
     breakeven_bps: float    # minimum fee to remain profitable
     ann_ic_ir: float        # annualized IC IR
     significant: bool       # passes FDR-corrected threshold
+    it_cost_viable: bool = False   # IT engine cost viability flag
+    it_mi_bits: float = 0.0        # MI from IT engine (max across horizons)
 
 
 @dataclass
@@ -96,6 +98,8 @@ class ScreenResult:
     total_tests: int
     fdr_threshold: float
     results: List[FeatureAlpha]
+    it_features_loaded: int = 0       # IT engine features available
+    it_cost_viable_count: int = 0     # IT engine cost-viable features
 
 
 def compute_forward_returns(
@@ -235,12 +239,20 @@ def screen_features(
     min_ic: float = 0.015,
     min_breakeven_bps: float = 2.0,
     price_col: str = "raw_midprice",
+    it_state_dir: Optional[str] = None,
+    it_boost_factor: float = 1.0,
+    it_prefilter: bool = False,
 ) -> ScreenResult:
     """
     Screen all features for predictive power against forward returns.
 
     This is the core function — it answers: "Which of the 191 features
     predict future returns after correcting for multiple testing?"
+
+    IT engine integration (optional):
+      - it_state_dir: load IT engine state for cost viability and MI scores
+      - it_boost_factor: multiply IC ranking for IT cost-viable features
+      - it_prefilter: restrict screening to IT-selected features only
     """
     # Lazy imports to avoid circular deps
     sys.path.insert(0, str(ROOT / "scripts"))
@@ -269,6 +281,29 @@ def screen_features(
         available_symbols = [s for s in available_symbols if s in symbols]
     logger.info(f"Symbols: {available_symbols}")
 
+    # --- Load IT engine state (optional) ---
+    it_states: Dict[str, "ITState"] = {}
+    it_features_loaded = 0
+    it_cost_viable_count = 0
+    if it_state_dir:
+        try:
+            from it_engine.state import ITState
+        except ImportError:
+            from scripts.it_engine.state import ITState
+        for sym in available_symbols:
+            state = ITState.load(sym, data_dir=it_state_dir)
+            if state.mi_matrix:
+                it_states[sym] = state
+                it_features_loaded += len(state.mi_matrix)
+                it_cost_viable_count += sum(
+                    1 for v in state.cost_viable.values() if v
+                )
+        if it_states:
+            logger.info(
+                "IT engine: loaded %d symbols, %d features, %d cost-viable",
+                len(it_states), it_features_loaded, it_cost_viable_count,
+            )
+
     # Identify feature columns (aggregated names like feat_mean, feat_std, feat_last)
     meta_cols = {"bar_start", "bar_end", "symbol", "tick_count"}
     feature_cols = [
@@ -276,6 +311,27 @@ def screen_features(
         if c not in meta_cols
         and bars[c].dtype in (np.float64, np.float32, np.int64, float, int)
     ]
+
+    # IT prefilter: restrict to IT cost-viable features only
+    if it_prefilter and it_states:
+        it_viable_bases = set()
+        for state in it_states.values():
+            it_viable_bases.update(state.selected_features)
+            it_viable_bases.update(
+                f for f, v in state.cost_viable.items() if v
+            )
+        # Match bar column names (e.g. "ofi_imbalance_mean") to IT feature bases
+        it_bar_cols = [
+            c for c in feature_cols
+            if any(c.startswith(base) for base in it_viable_bases)
+        ]
+        if it_bar_cols:
+            logger.info(
+                "IT prefilter: %d -> %d features",
+                len(feature_cols), len(it_bar_cols),
+            )
+            feature_cols = it_bar_cols
+
     logger.info(f"Feature columns: {len(feature_cols)}")
 
     # Find the price column in aggregated bars
@@ -421,8 +477,37 @@ def screen_features(
                 and r.breakeven_bps >= min_breakeven_bps
             )
 
-    # Sort by |IC| descending
-    all_results.sort(key=lambda r: abs(r.ic_mean), reverse=True)
+    # --- IT engine annotation and boost ---
+    if it_states:
+        for r in all_results:
+            it_state = it_states.get(r.symbol)
+            if it_state is None:
+                continue
+            # Match bar feature name to IT base feature name
+            # Bar names are like "ofi_imbalance_mean", IT names are "ofi_imbalance"
+            base_feat = None
+            for it_feat in it_state.mi_matrix:
+                if r.feature.startswith(it_feat):
+                    base_feat = it_feat
+                    break
+            if base_feat is None:
+                continue
+
+            # Annotate with IT metrics
+            r.it_cost_viable = it_state.cost_viable.get(base_feat, False)
+            mi_vals = it_state.mi_matrix.get(base_feat, {})
+            r.it_mi_bits = max(mi_vals.values()) if mi_vals else 0.0
+
+            # Boost ranking for IT cost-viable features
+            if r.it_cost_viable and it_boost_factor > 1.0:
+                r.ann_ic_ir *= it_boost_factor
+
+        n_it_boosted = sum(1 for r in all_results if r.it_cost_viable)
+        if n_it_boosted:
+            logger.info("IT boost: %d features boosted by %.1fx", n_it_boosted, it_boost_factor)
+
+    # Sort by annualized IC IR descending (incorporates IT boost)
+    all_results.sort(key=lambda r: abs(r.ann_ic_ir), reverse=True)
 
     n_significant = sum(1 for r in all_results if r.significant)
 
@@ -437,6 +522,8 @@ def screen_features(
         total_tests=len(all_results),
         fdr_threshold=fdr_alpha,
         results=all_results,
+        it_features_loaded=it_features_loaded,
+        it_cost_viable_count=it_cost_viable_count,
     )
 
 
@@ -549,6 +636,8 @@ def save_results(result: ScreenResult, output_dir: Path = REPORT_DIR) -> Path:
         "n_bars_per_symbol": result.n_bars_per_symbol,
         "total_tests": result.total_tests,
         "fdr_threshold": result.fdr_threshold,
+        "it_features_loaded": result.it_features_loaded,
+        "it_cost_viable_count": result.it_cost_viable_count,
         "results": [asdict(r) for r in result.results],
     }
 
@@ -588,6 +677,18 @@ def main():
         "--output-dir", type=str, default=str(REPORT_DIR),
         help="Directory for output JSON",
     )
+    parser.add_argument(
+        "--it-state-dir", type=str, default=None,
+        help="IT engine state directory (enables MI-based boosting)",
+    )
+    parser.add_argument(
+        "--it-boost", type=float, default=1.5,
+        help="Boost factor for IT cost-viable features",
+    )
+    parser.add_argument(
+        "--it-prefilter", action="store_true",
+        help="Only screen IT-selected features",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -601,6 +702,9 @@ def main():
         timeframe=args.timeframe,
         symbols=args.symbols,
         fdr_alpha=args.fdr_alpha,
+        it_state_dir=args.it_state_dir,
+        it_boost_factor=args.it_boost,
+        it_prefilter=args.it_prefilter,
     )
 
     print_screen_results(result, top_n=args.top_n)

@@ -328,6 +328,9 @@ def run_pipeline(
             min_ic=scr_cfg["min_ic"],
             min_breakeven_bps=scr_cfg["min_breakeven_bps"],
             price_col=scr_cfg.get("price_col", "raw_midprice"),
+            it_state_dir=scr_cfg.get("it_state_dir"),
+            it_boost_factor=scr_cfg.get("it_boost_factor", 1.0),
+            it_prefilter=scr_cfg.get("it_prefilter", False),
         )
         path = save_results(result, report_dir)
         ps.set_artifact("screen", str(path))

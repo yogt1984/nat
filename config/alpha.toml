@@ -20,6 +20,10 @@ fdr_alpha = 0.05               # Benjamini-Hochberg FDR threshold
 min_ic = 0.015                 # Minimum |IC| to be considered
 min_breakeven_bps = 2.0        # Minimum breakeven cost in bps
 price_col = "raw_midprice"
+# IT engine integration (optional — requires IT engine to have run first)
+it_state_dir = "data/it_engine" # Where IT state files live
+it_boost_factor = 1.5           # Multiply ranking score for IT cost-viable features
+it_prefilter = false            # If true, only screen IT-selected features
 
 # ── Step 2: Signal Combination ──
 [combiner]
