@@ -21,7 +21,5 @@ entropy_conditioning = [
     "ent_perm_8_std",
 ]
 
-[it_engine.costs]
-binance_vip9_rt_bps = 1.61
-binance_vip0_rt_bps = 3.50
-hyperliquid_rt_bps = 7.00
+# Costs: loaded from config/costs.toml (override here if needed)
+# [it_engine.costs]

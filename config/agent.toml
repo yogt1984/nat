@@ -43,9 +43,8 @@ consecutive_days_limit = 14
 [defaults.paths]
 data_dir = "data/features"
 
-[defaults.costs]
-fee_bps = 3.5               # one-way fee (Hyperliquid taker)
-slippage_bps = 2.0           # one-way slippage estimate
+# Costs: canonical values in config/costs.toml
+# [defaults.costs]
 
 [defaults.retention]
 max_age_days = 90           # research output older than this is deleted
@@ -81,8 +80,7 @@ min_coverage = 0.10
 min_walkforward_sign_consistency = 0.80
 
 [agent.cost]
-# Trading cost assumptions (bps, one-way)
-taker_fee_bps = 3.5
+# Fee: see config/costs.toml (taker_bps = 3.5)
 # Minimum net Sharpe after costs to pass cost gate
 min_net_sharpe = 0.5
 

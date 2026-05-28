@@ -18,7 +18,7 @@ report_dir = "reports"
 [screener]
 fdr_alpha = 0.05               # Benjamini-Hochberg FDR threshold
 min_ic = 0.015                 # Minimum |IC| to be considered
-min_breakeven_bps = 2.0        # Minimum breakeven cost in bps
+min_breakeven_bps = 2.0        # Minimum breakeven IC gate (see config/costs.toml for fee params)
 price_col = "raw_midprice"
 # IT engine integration (optional — requires IT engine to have run first)
 it_state_dir = "data/it_engine" # Where IT state files live

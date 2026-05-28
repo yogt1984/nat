@@ -1,0 +1,14 @@
+# Consolidated Trading Cost Configuration
+# Single source of truth for fee, slippage, and cost parameters.
+# All other configs reference these values or load from this file.
+
+[hyperliquid]
+taker_bps = 3.5             # one-way taker fee (0.035%)
+maker_bps = 0.2             # one-way maker rebate (0.002%)
+round_trip_taker_bps = 7.0  # taker_bps × 2
+slippage_bps = 2.0          # one-way slippage estimate
+funding_interval_hours = 8.0
+
+[binance]
+vip0_round_trip_bps = 3.50
+vip9_round_trip_bps = 1.61
