@@ -128,12 +128,42 @@ class CostModel:
             # Buying to close short: pay more
             return price * (1 + cost_mult)
 
+    def compute_funding_cost(
+        self,
+        holding_hours: float,
+        funding_rate_bps: float,
+        funding_interval_hours: float = 8.0,
+    ) -> float:
+        """
+        Compute accumulated funding cost for a position.
+
+        Parameters
+        ----------
+        holding_hours : float
+            Duration of the position in hours
+        funding_rate_bps : float
+            Average funding rate in basis points (per interval)
+        funding_interval_hours : float
+            Funding settlement interval (default 8h for Hyperliquid)
+
+        Returns
+        -------
+        float
+            Funding cost as percentage. Positive = cost for longs when
+            funding is positive (longs pay shorts).
+        """
+        if not self.funding_enabled or funding_interval_hours <= 0:
+            return 0.0
+        n_settlements = holding_hours / funding_interval_hours
+        return funding_rate_bps / 100 * n_settlements
+
     def compute_pnl(
         self,
         entry_price: float,
         exit_price: float,
         direction: Literal["long", "short"],
         include_costs: bool = True,
+        funding_cost_pct: float = 0.0,
     ) -> float:
         """
         Compute P&L percentage for a trade.
@@ -148,6 +178,9 @@ class CostModel:
             "long" or "short"
         include_costs : bool
             Whether to include transaction costs
+        funding_cost_pct : float
+            Funding cost as percentage (from compute_funding_cost).
+            Positive = cost for longs, income for shorts.
 
         Returns
         -------
@@ -162,9 +195,12 @@ class CostModel:
             eff_exit = exit_price
 
         if direction == "long":
-            return (eff_exit / eff_entry - 1) * 100
+            pnl = (eff_exit / eff_entry - 1) * 100
+            pnl -= funding_cost_pct  # longs pay positive funding
         else:
-            return (1 - eff_exit / eff_entry) * 100
+            pnl = (1 - eff_exit / eff_entry) * 100
+            pnl += funding_cost_pct  # shorts receive positive funding
+        return pnl
 
     def breakeven_move_pct(self) -> float:
         """

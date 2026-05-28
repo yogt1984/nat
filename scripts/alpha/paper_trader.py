@@ -52,11 +52,12 @@ MIN_BARS_PER_DATE = 12
 P_LONG = 80
 P_SHORT = 20
 
-FEE_BPS = 1.61  # Binance VIP9 taker RT
+FEE_BPS = 7.0  # Hyperliquid round-trip (taker)
 
 LOAD_COLUMNS = [
     "timestamp_ns", "symbol", "raw_midprice",
     "raw_spread_bps", "raw_ask_depth_5", "flow_vwap_deviation",
+    "ctx_funding_rate",
 ]
 
 BACKTEST_REFERENCE = {
@@ -190,6 +191,15 @@ def generate_trades(
     n = len(prices)
     trades = []
 
+    # Funding rate (optional)
+    has_funding = "ctx_funding_rate_mean" in bars.columns
+    if has_funding:
+        funding_rates = bars["ctx_funding_rate_mean"].values
+    else:
+        funding_rates = np.zeros(n)
+
+    holding_hours = HORIZON_BARS * BAR_SECONDS / 3600.0
+
     for i in range(n - HORIZON_BARS):
         d = directions[i]
         if d == 0:
@@ -200,7 +210,17 @@ def generate_trades(
             continue
         ret_bps = (exit_p - entry_p) / entry_p * 1e4
         gross = d * ret_bps
-        net = gross - FEE_BPS
+
+        # Funding cost: average rate over holding period, scaled to bps
+        avg_funding = np.nanmean(funding_rates[i:i + HORIZON_BARS])
+        if not np.isfinite(avg_funding):
+            avg_funding = 0.0
+        # funding_rate is a fraction; convert to bps, pro-rate to holding time
+        funding_bps = avg_funding * 10000 * (holding_hours / 8.0)
+        # Longs pay positive funding, shorts receive
+        funding_cost = d * funding_bps
+
+        net = gross - FEE_BPS - funding_cost
 
         trades.append(PaperTrade(
             date=date_str,

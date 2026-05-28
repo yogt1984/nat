@@ -199,6 +199,16 @@ def run_backtest(
     timestamps = df["timestamp_ms"].to_numpy().copy()
     n = len(prices)
 
+    # Load funding rate if available and enabled
+    has_funding = (
+        cost_model.funding_enabled
+        and "ctx_funding_rate" in df.columns
+    )
+    if has_funding:
+        funding_rates = df["ctx_funding_rate"].to_numpy().copy()
+    else:
+        funding_rates = np.zeros(n)
+
     # Validate prices
     if np.any(np.isnan(prices)) or np.any(prices <= 0):
         # Clean up invalid prices
@@ -286,12 +296,26 @@ def run_backtest(
                     current_price, strategy.direction
                 )
 
+                # Compute funding cost over holding period
+                funding_cost_pct = 0.0
+                if has_funding:
+                    avg_funding = np.nanmean(
+                        funding_rates[position.entry_idx:i + 1]
+                    )
+                    holding_ms = float(timestamps[i] - position.entry_time)
+                    holding_hours = holding_ms / 3.6e6
+                    # funding_rate is a fraction (e.g. 0.0001 = 1 bps)
+                    funding_cost_pct = cost_model.compute_funding_cost(
+                        holding_hours, avg_funding * 10000  # convert to bps
+                    )
+
                 # Final P&L including all costs
                 pnl_pct = cost_model.compute_pnl(
                     position.raw_entry_price,
                     current_price,
                     strategy.direction,
                     include_costs=True,
+                    funding_cost_pct=funding_cost_pct,
                 )
 
                 position.exit_idx = i
@@ -315,11 +339,22 @@ def run_backtest(
     # Close any open position at end of data
     if position is not None:
         exit_price_eff = cost_model.apply_exit_cost(prices[-1], strategy.direction)
+        funding_cost_pct = 0.0
+        if has_funding:
+            avg_funding = np.nanmean(
+                funding_rates[position.entry_idx:n]
+            )
+            holding_ms = float(timestamps[-1] - position.entry_time)
+            holding_hours = holding_ms / 3.6e6
+            funding_cost_pct = cost_model.compute_funding_cost(
+                holding_hours, avg_funding * 10000
+            )
         pnl_pct = cost_model.compute_pnl(
             position.raw_entry_price,
             prices[-1],
             strategy.direction,
             include_costs=True,
+            funding_cost_pct=funding_cost_pct,
         )
 
         position.exit_idx = n - 1
