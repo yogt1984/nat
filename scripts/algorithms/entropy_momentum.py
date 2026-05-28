@@ -21,10 +21,17 @@ from .registry import register
 class EntropyMomentum(MicrostructureAlgorithm):
     """Entropy-gated momentum: stronger signal when entropy is low."""
 
-    def __init__(self, low_entropy_pct: float = 30.0, momentum_window: int = 300):
+    def __init__(self, low_entropy_pct: float = 30.0, momentum_window: int = 300,
+                 enter_pct: float = 25.0, exit_pct: float = 35.0,
+                 ema_alpha: float = 0.1):
         self._low_entropy_pct = low_entropy_pct
         self._momentum_window = momentum_window
+        self._enter_pct = enter_pct
+        self._exit_pct = exit_pct
+        self._ema_alpha = ema_alpha
         self._entropy_buffer: list[float] = []
+        self._ema_entropy: float = np.nan
+        self._in_low_entropy: bool = False
 
     def name(self) -> str:
         return "entropy_momentum"
@@ -60,9 +67,20 @@ class EntropyMomentum(MicrostructureAlgorithm):
         # Composite momentum (blend short + long)
         momentum = 0.6 * mom60 + 0.4 * mom300
 
-        # Entropy gate
-        threshold = np.percentile(self._entropy_buffer, self._low_entropy_pct)
-        low_entropy = ent < threshold
+        # EMA-smoothed entropy for hysteresis
+        if np.isnan(self._ema_entropy):
+            self._ema_entropy = ent
+        else:
+            self._ema_entropy = self._ema_alpha * ent + (1 - self._ema_alpha) * self._ema_entropy
+
+        # Hysteresis gate: enter low-entropy at P25, exit at P35
+        enter_thresh = np.percentile(self._entropy_buffer, self._enter_pct)
+        exit_thresh = np.percentile(self._entropy_buffer, self._exit_pct)
+        if self._in_low_entropy:
+            low_entropy = self._ema_entropy < exit_thresh
+        else:
+            low_entropy = self._ema_entropy < enter_thresh
+        self._in_low_entropy = low_entropy
 
         gated_momentum = momentum if low_entropy else 0.0
 
@@ -78,7 +96,7 @@ class EntropyMomentum(MicrostructureAlgorithm):
 
         # Predictability score: fraction of recent window in low-entropy regime
         arr = np.array(self._entropy_buffer)
-        predictability = float(np.mean(arr < threshold))
+        predictability = float(np.mean(arr < exit_thresh))
 
         return {
             "alg_entropy_gated_momentum": gated_momentum,
@@ -88,6 +106,8 @@ class EntropyMomentum(MicrostructureAlgorithm):
 
     def reset(self) -> None:
         self._entropy_buffer.clear()
+        self._ema_entropy = np.nan
+        self._in_low_entropy = False
 
     def run_batch(self, df: "pd.DataFrame") -> "pd.DataFrame":
         """Vectorized override."""
@@ -100,13 +120,31 @@ class EntropyMomentum(MicrostructureAlgorithm):
         momentum = 0.6 * mom60 + 0.4 * mom300
 
         ent_s = pd.Series(ent)
-        rolling_thresh = ent_s.rolling(
-            self._momentum_window, min_periods=50
-        ).quantile(self._low_entropy_pct / 100.0).values
 
-        low_entropy = ent < rolling_thresh
+        # EMA-smoothed entropy
+        ent_ema = ent_s.ewm(alpha=self._ema_alpha, adjust=False).mean().values
+
+        # Hysteresis thresholds
+        enter_thresh = ent_s.rolling(
+            self._momentum_window, min_periods=50
+        ).quantile(self._enter_pct / 100.0).values
+        exit_thresh = ent_s.rolling(
+            self._momentum_window, min_periods=50
+        ).quantile(self._exit_pct / 100.0).values
+
+        # Apply hysteresis state machine
+        in_low = np.zeros(len(ent), dtype=bool)
+        for i in range(len(ent)):
+            if np.isnan(enter_thresh[i]):
+                continue
+            if i > 0 and in_low[i - 1]:
+                in_low[i] = ent_ema[i] < exit_thresh[i]
+            else:
+                in_low[i] = ent_ema[i] < enter_thresh[i]
+
+        low_entropy = in_low
         gated = np.where(low_entropy, momentum, 0.0)
-        gated[np.isnan(rolling_thresh)] = np.nan
+        gated[np.isnan(enter_thresh)] = np.nan
 
         # Continuous interaction via rolling min-max normalization
         rolling_min = ent_s.rolling(self._momentum_window, min_periods=50).min().values
@@ -122,7 +160,7 @@ class EntropyMomentum(MicrostructureAlgorithm):
         predictability = pd.Series(low_entropy.astype(np.float64)).rolling(
             self._momentum_window, min_periods=50
         ).mean().values.copy()
-        predictability[np.isnan(rolling_thresh)] = np.nan
+        predictability[np.isnan(enter_thresh)] = np.nan
 
         result = pd.DataFrame({
             "alg_entropy_gated_momentum": gated,
