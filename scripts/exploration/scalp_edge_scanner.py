@@ -79,9 +79,27 @@ _DEFAULT_CONFIG = {
 }
 
 
+def _load_taker_bps() -> float:
+    """Load taker_bps from config/costs.toml (single source of truth)."""
+    costs_path = ROOT.parent / "config" / "costs.toml"
+    if not costs_path.exists():
+        return 3.5
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        try:
+            import tomli as tomllib
+        except ModuleNotFoundError:
+            return 3.5
+    with open(costs_path, "rb") as f:
+        data = tomllib.load(f)
+    return data.get("hyperliquid", {}).get("taker_bps", 3.5)
+
+
 def load_scanner_config(toml_path: Optional[str] = None) -> dict:
     """Load [scanner] section from pipeline.toml, merged with defaults."""
     cfg = dict(_DEFAULT_CONFIG)
+    cfg["cost_bps"] = _load_taker_bps()
     if toml_path is None:
         toml_path = str(ROOT / "config" / "pipeline.toml")
     path = Path(toml_path)
