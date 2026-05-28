@@ -1,0 +1,49 @@
+# NAT Reverse Proxy
+#
+# Unified entry point for all NAT services on port 80.
+# Run: caddy run --config config/Caddyfile
+#
+# Routes:
+#   /                → Web frontend     (localhost:3001)
+#   /api/*           → REST API         (localhost:3000)
+#   /ws/*            → WebSocket API    (localhost:3000)
+#   /dashboard/*     → Ingestor dash    (localhost:8080)
+#   /pipeline/*      → Pipeline dash    (localhost:8050)
+#   /agent/*         → Agent dash       (localhost:8060)
+
+:80 {
+	# API — REST + WebSocket
+	handle /api/* {
+		reverse_proxy localhost:3000
+	}
+	handle /ws/* {
+		reverse_proxy localhost:3000
+	}
+
+	# Ingestor dashboard
+	handle_path /dashboard/* {
+		reverse_proxy localhost:8080
+	}
+
+	# Pipeline dashboard
+	handle_path /pipeline/* {
+		reverse_proxy localhost:8050
+	}
+
+	# Agent dashboard
+	handle_path /agent/* {
+		reverse_proxy localhost:8060
+	}
+
+	# Web frontend (catch-all)
+	handle {
+		reverse_proxy localhost:3001
+	}
+
+	log {
+		output file data/logs/caddy.log {
+			roll_size 10mb
+			roll_keep 3
+		}
+	}
+}

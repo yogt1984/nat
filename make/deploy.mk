@@ -9,7 +9,7 @@
         agent_watchdog_install agent_watchdog_remove \
         discovery_start discovery_once discovery_status discovery_stop \
         cascade_start cascade_once cascade_status cascade_stop cascade_report \
-        monitor
+        monitor proxy proxy_stop
 
 all: run
 
@@ -314,3 +314,20 @@ cascade_stop:
 
 cascade_report:
 	@$(PYTHON) scripts/agent/cascade_daemon.py report
+
+# --- Reverse proxy ---
+
+proxy:
+	@echo "Starting Caddy reverse proxy on :80..."
+	@mkdir -p data/logs
+	caddy start --config config/Caddyfile
+	@echo "Proxy running — all services at http://localhost"
+	@echo "  /          → Web frontend  (:3001)"
+	@echo "  /api/*     → REST API      (:3000)"
+	@echo "  /ws/*      → WebSocket     (:3000)"
+	@echo "  /dashboard → Ingestor      (:8080)"
+	@echo "  /pipeline  → Pipeline dash (:8050)"
+	@echo "  /agent     → Agent dash    (:8060)"
+
+proxy_stop:
+	@caddy stop 2>/dev/null && echo "Proxy stopped" || echo "Proxy not running"
