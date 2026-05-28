@@ -219,7 +219,7 @@ Scores update once per candle completion and are held constant between candle bo
 1. **Accumulate more data.** Target 50K+ candles (3-6 months at 60s resolution) for robust OOS validation.
 2. **Cross-symbol discovery.** Run on ETH and SOL to test universality of turtle/trap kernels.
 3. **Multi-horizon exploration.** Current analysis uses horizon=10 (10 minutes). Longer horizons (50, 100 candles) may reveal different predictive structures.
-4. **Integration with meta-learner.** Feed convolver features to the online ridge regression (`online_ridge`) alongside existing microstructure features.
+4. **Integration with meta-learner.** Feed convolver features to a portfolio-level ensemble alongside existing microstructure features.
 
 ---
 

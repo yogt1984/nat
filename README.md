@@ -270,8 +270,7 @@ nat backtest algorithm --algorithm weighted_ofi --symbol BTC
 | 15 | `oi_divergence` | Open interest vs price divergence | — |
 | 16 | `switching_ou` | Two-regime OU, Bayesian filtering | Elliott et al. (2005), Hamilton (1989) |
 | 17 | `optimal_entry` | SPRT on Kalman innovation | Wald (1947), Shiryaev (1978) |
-| 18 | `online_ridge` | Online ridge regression meta-algorithm | Hoerl & Kennard (1970) |
-| 19 | `convolver` | Kernel convolution feature discovery | Novel |
+| 18 | `convolver` | Kernel convolution feature discovery | Novel |
 | 20 | `cascade_probability` | Liquidation cascade prediction | — |
 | 21 | `spectral` | Spectral momentum extraction | — |
 | 22-27 | Various | Additional signal algorithms | See `scripts/algorithms/` |

@@ -90,14 +90,6 @@ sprt_drift = 0.001           # drift under H1
 alpha_error = 0.05           # type-I error
 beta_error = 0.20            # type-II error
 
-# ── Group H: Meta ────────────────────────────────────────────────
-
-[online_ridge]
-lambda_reg = 1.0             # L2 regularization
-learning_rate = 0.01         # step size for online update
-max_features = 20            # cap on input features
-update_interval = 10         # ticks between coefficient updates
-
 # ── Group I: Pattern Convolver ──────────────────────────────────
 
 [convolver]
