@@ -104,8 +104,9 @@ class Propagator(MicrostructureAlgorithm):
     """Transient impact model with power-law decay kernel."""
 
     def __init__(self, decay_exponent: float = 0.5, impact_window: int = 100,
-                 permanent_ema_span: int = 500):
+                 permanent_ema_span: int = 500, auto_tune: bool = True):
         self._decay_exp = decay_exponent
+        self._auto_tune = auto_tune
         self._window = impact_window
         self._perm_span = permanent_ema_span
         self._perm_alpha = 2.0 / (permanent_ema_span + 1)
@@ -191,6 +192,43 @@ class Propagator(MicrostructureAlgorithm):
         self._price_buffer.clear()
         self._ema_permanent = np.nan
 
+    @staticmethod
+    def estimate_decay_exponent(signed_vol: np.ndarray,
+                                max_lag: int = 100) -> float:
+        """Estimate power-law decay exponent from signed volume autocorrelation.
+
+        Fits log(ACF(tau)) = -alpha * log(tau) + const for tau in [1, max_lag].
+        Returns alpha clamped to [0.1, 0.9].
+        """
+        valid = signed_vol[np.isfinite(signed_vol)]
+        if len(valid) < max_lag * 2:
+            return 0.5
+
+        centered = valid - np.mean(valid)
+        var = np.dot(centered, centered)
+        if var < 1e-12:
+            return 0.5
+
+        # Compute autocorrelation at lags 1..max_lag
+        acf_vals = np.empty(max_lag)
+        for lag in range(1, max_lag + 1):
+            acf_vals[lag - 1] = np.dot(centered[:-lag], centered[lag:]) / var
+
+        # Filter positive values for log-log fit
+        lags = np.arange(1, max_lag + 1, dtype=np.float64)
+        pos = acf_vals > 0.01
+        if pos.sum() < 5:
+            return 0.5
+
+        log_lag = np.log(lags[pos])
+        log_acf = np.log(acf_vals[pos])
+
+        # Linear regression: log(ACF) = -alpha * log(tau) + c
+        coeffs = np.polyfit(log_lag, log_acf, 1)
+        alpha = -coeffs[0]
+
+        return float(np.clip(alpha, 0.1, 0.9))
+
     def run_batch(self, df: "pd.DataFrame") -> "pd.DataFrame":
         """Vectorized override using convolution with power-law kernel."""
         import pandas as pd
@@ -201,8 +239,15 @@ class Propagator(MicrostructureAlgorithm):
 
         signed_vol = (2 * agg - 1) * vol
 
+        # Auto-tune decay exponent from data
+        decay_exp = self._decay_exp
+        if self._auto_tune:
+            valid_sv = signed_vol[np.isfinite(signed_vol)]
+            if len(valid_sv) > 200:
+                decay_exp = self.estimate_decay_exponent(valid_sv)
+
         # Build decay kernel
-        kernel = np.arange(1, self._window + 1, dtype=np.float64) ** (-self._decay_exp)
+        kernel = np.arange(1, self._window + 1, dtype=np.float64) ** (-decay_exp)
         kernel = kernel[::-1]  # most recent has smallest τ (largest weight)
         kernel /= self._window
 
