@@ -6,28 +6,43 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 NAT is a quantitative research platform for extracting alpha signals from Hyperliquid perpetual futures. Rust handles real-time ingestion and feature computation; Python handles analysis, backtesting, and ML training.
 
+## CLI
+
+The `nat` command is the primary interface (214 commands). Run `nat help` for full docs, `nat commands` for a structured list, `nat commands --json` for machine-readable output.
+
+Key command groups: `start/stop/status`, `test`, `build`, `alpha`, `agent/mf-agent/macro-agent/meta-agent`, `discovery`, `backtest`, `algorithm`, `config`, `docker`.
+
+JSON output: `nat --json <command>` for programmatic use.
+
 ## Build & Run
 
 ```bash
-make build              # Debug build (faster iteration)
-make release            # Release build (all binaries, LTO enabled)
-make run                # Build release + start ingestor (kills stale processes first)
-make run_and_serve      # Ingestor + dashboard on http://localhost:8080
+nat start               # Start ingestor + watchdog + dashboard
+nat stop                # Stop everything
+nat status              # Health check (JSON)
+nat log                 # Tail ingestor log
+nat run serve           # Ingestor + dashboard on http://localhost:8080
+nat build               # Release build (all binaries, LTO enabled)
+nat build debug         # Debug build (faster iteration)
+
+# Cargo directly (for single-crate work):
+cd rust && cargo build --release        # equivalent to nat build
+cd rust && cargo build                  # equivalent to nat build debug
 ```
 
-`make run` does `cd rust && ./target/release/ing ../config/ing.toml`. All relative paths in config resolve from `rust/` — that's why `data_dir = "../data/features"` in `config/ing.toml`.
+Under the hood, the ingestor runs `cd rust && ./target/release/ing ../config/ing.toml`. All relative paths in config resolve from `rust/` — that's why `data_dir = "../data/features"` in `config/ing.toml`.
 
 ## Testing
 
 ```bash
-make test                               # Rust unit tests (cd rust && cargo test --package ing)
-make test_verbose                       # With --nocapture
-cd rust && cargo test -- test_name      # Single test
-make validate                           # Live API validation (4 binaries against Hyperliquid)
+nat test                                # Rust unit tests (cargo test --package ing)
+nat test verbose                        # With --nocapture
+cd rust && cargo test -- test_name      # Single Rust test
+nat test validate                       # Live API validation (4 binaries against Hyperliquid)
 pytest scripts/tests/                   # Python tests
-make test_dashboard                     # Dashboard endpoint tests
-make test_pipeline                      # Pipeline state machine tests
-make test_agent                         # Agent tests (350 tests: unit + integration + logging + research output)
+nat test dashboard                      # Dashboard endpoint tests
+nat test pipeline                       # Pipeline state machine tests
+nat test agent                          # Agent tests (350+ tests: unit + integration + logging + research output)
 ```
 
 ## Architecture
@@ -39,7 +54,7 @@ See `FEATURES.md` for the complete feature manifest with formulas, paper referen
 ```
 Hyperliquid WebSocket → HyperliquidClient (ws/client.rs)
     → MarketState (state/mod.rs) [OrderBook + TradeBuffer + MarketContext]
-    → FeatureComputer (features/*.rs) [212 features across 19 categories]
+    → FeatureComputer (features/*.rs) [220 features across 20 categories]
     → mpsc channel → ParquetWriter (output/writer.rs)
     → data/features/YYYY-MM-DD/*.parquet (rotated hourly)
 ```
@@ -48,7 +63,7 @@ Each symbol (BTC, ETH, SOL) runs in its own tokio task. Features are emitted eve
 
 ### Feature Vector Contract
 
-`Features` (features/mod.rs) has 13 base categories (always computed) + 6 optional categories (whale_flow, liquidation_risk, concentration, regime, gmm_classification, cross_symbol). `to_vec()` always returns exactly `count_all()` elements (212), padding NaN for missing optionals. `names_all()` must match `to_vec()` length exactly — the Parquet schema is built from `names_all()` in `output/schema.rs`.
+`Features` (features/mod.rs) has 13 base categories (always computed) + 7 optional categories (whale_flow, liquidation_risk, concentration, regime, gmm_classification, cross_symbol, heatmap). `to_vec()` always returns exactly `count_all()` elements (220), padding NaN for missing optionals. `names_all()` must match `to_vec()` length exactly — the Parquet schema is built from `names_all()` in `output/schema.rs`.
 
 When adding a new feature category:
 1. Create struct with `count()`, `names()`, `to_vec()` methods
@@ -74,13 +89,13 @@ When adding a new feature category:
 
 Steps: (1) feature screening with FDR, (2) signal combination, (3) position sizing, (4) walk-forward validation, (5) regime conditioning, (6) multi-frequency integration, (7) portfolio assembly, (8) paper trading simulation, (9) deployment readiness. Gate thresholds in `[gates]` section of config.
 
-CLI: `start`, `resume` (with `--force-gate`), `status`, `gates`, `run-step N`. Makefile targets: `alpha_pipeline`, `alpha_pipeline_resume`, `alpha_pipeline_force`, `alpha_pipeline_status`, `alpha_pipeline_gates`, `alpha_pipeline_step`.
+CLI: `nat pipeline start`, `nat pipeline resume` (with `--force-gate`), `nat pipeline status`, `nat pipeline gates`, `nat pipeline run-step N`.
 
 ### Alpha Discovery Orchestrator (Python)
 
 `scripts/discovery_orchestrator.py`: Continuous daemon that sweeps (symbol, horizon) combos for alpha signals, then pipelines winners through train → backtest → validate. All child scripts called via subprocess (not imported) to prevent OOM. Config in `config/discovery.toml`. State persisted in `data/discovery/orchestrator_state.json`.
 
-Cycle: DATA_HEALTH → SIGNAL_SWEEP → TRAINING → BACKTESTING → ALPHA_PIPELINE → REPORTING → SLEEPING. Signal sweep uses `phase1_signal_test.py --json-report` for structured output. Gates at each step (PASS/WEAK/FAIL). CLI: `start`, `once`, `status`, `stop`. Makefile targets: `discovery_start`, `discovery_once`, `discovery_status`, `discovery_stop`.
+Cycle: DATA_HEALTH → SIGNAL_SWEEP → TRAINING → BACKTESTING → ALPHA_PIPELINE → REPORTING → SLEEPING. Signal sweep uses `phase1_signal_test.py --json-report` for structured output. Gates at each step (PASS/WEAK/FAIL). CLI: `nat discovery start|once|status|stop`.
 
 ### Autonomous Research Agent (Python)
 
@@ -135,8 +150,10 @@ class MyAlgorithm(MicrostructureAlgorithm):
 
 ## Cargo Workspace
 
-Two crates in `rust/`:
-- `ing` — Main ingestor library + binary, plus validation binaries (validate_api, validate_positions, etc.)
+Four crates in `rust/` (dependency chain: `ing-types` → `ing-features` → `ing`):
+- `ing-types` — Shared data types (OrderBook, TradeBuffer, MarketContext, FeaturesConfig, Regime)
+- `ing-features` — Feature computation (26 files, 14.8K LOC). Depends on `ing-types`.
+- `ing` — Main ingestor binary + ML + WebSocket + hypothesis testing. Depends on `ing-features`. Includes validation binaries (validate_api, validate_positions, etc.)
 - `api` — REST/WebSocket API server (Axum on port 3000). Research endpoints (`/api/research/*`) read structured JSON from `data/research/`. Config: `NAT_RESEARCH_DIR` env var.
 
 Release profile: LTO, single codegen unit, panic=abort, stripped.
@@ -148,6 +165,12 @@ Release profile: LTO, single codegen unit, panic=abort, stripped.
 - `config/pipeline.toml` — Pipeline orchestration (ingestion duration, analysis thresholds)
 - `config/alpha.toml` — Alpha pipeline (gate thresholds G1-G8, step parameters, symbols)
 - `config/hypothesis_testing.toml` — Hypothesis test parameters
+- `config/costs.toml` — Fee parameters (taker/maker bps, slippage) — single source of truth
+- `config/algorithms.toml` — Algorithm parameters (per-algorithm tuning)
+- `config/symbols.toml` — Traded symbols list
+- `config/it_engine.toml` — IT engine (MI/CMI horizons, stride, conditioning, cost gate)
+- `config/discovery.toml` — Discovery orchestrator (sweep intervals, gates)
+- `config/llm.toml` — LLM client (model, endpoint, API key reference)
 
 Environment overrides: `RUST_LOG`, `REDIS_URL`, `ING_DASHBOARD_ENABLED`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
 
@@ -157,8 +180,8 @@ Environment overrides: `RUST_LOG`, `REDIS_URL`, `ING_DASHBOARD_ENABLED`, `TELEGR
 
 ## Multi-Machine Setup
 
-The ingestor runs on a second machine (su-35). `make run` kills stale processes before starting. Python defaults to `python3` (`PYTHON ?= python3` in Makefile). Data written to `data/features/` at project root.
+The ingestor runs on a second machine (su-35). `nat start` kills stale processes before starting. Data written to `data/features/` at project root.
 
 ## Docker
 
-`docker-compose.yml` runs: redis (6379), ingestor, api (3000), alerts. Build with `make docker_build`, run with `make docker_up`.
+`docker-compose.yml` runs: redis (6379), ingestor, api (3000), alerts. Build with `nat docker build`, run with `nat docker up`.
