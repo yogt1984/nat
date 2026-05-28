@@ -124,11 +124,6 @@ ALGO_CONFIG = {
         "polarity": "low_long",  # negative post-jump → expecting reversion up
         "bar_agg": "mean",
     },
-    "multi_level_imb": {
-        "primary": "alg_composite_imbalance",
-        "polarity": "high_long",
-        "bar_agg": "mean",
-    },
     "funding_reversion": {
         "primary": "alg_funding_signal",
         "polarity": "high_long",

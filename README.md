@@ -255,8 +255,7 @@ nat backtest algorithm --algorithm weighted_ofi --symbol BTC
 |---|-----------|--------|-----------|
 | 1 | `kalman_imbalance` | OU Kalman filter on L1 imbalance | — |
 | 2 | `regime_gated` | Entropy percentile gating | Bandt & Pompe (2002) |
-| 3 | `multi_level_imb` | Weighted L1/L5/L10 composite | — |
-| 4 | `weighted_ofi` | Depth-decay weighted OFI | Cont, Kukanov & Stoikov (2014) |
+| 3 | `weighted_ofi` | Depth-decay weighted OFI | Cont, Kukanov & Stoikov (2014) |
 | 5 | `trade_through` | Queue depletion probability | Cont & de Larrard (2013) |
 | 6 | `propagator` | Transient impact, power-law kernel | Bouchaud et al. (2004) |
 | 7 | `hawkes_intensity` | Self-exciting trade arrival | Bacry, Mastromatteo & Muzy (2015) |

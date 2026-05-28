@@ -50,7 +50,7 @@ rotate_interval = "1h"
 
 [algorithms]
 # Microstructure algorithms (dummy impls, real logic in Python)
-# enabled = ["regime_gated", "kalman_imbalance", "multi_level_imb"]
+# enabled = ["regime_gated", "kalman_imbalance"]
 enabled = []
 
 [redis]
