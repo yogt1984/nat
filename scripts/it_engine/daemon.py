@@ -108,8 +108,15 @@ class ITEngine:
             len(self._feature_cols), len(self._entropy_cols), self.symbol,
         )
 
-    def _compute_forward_returns(self, df: pd.DataFrame, horizon: int) -> np.ndarray:
-        """Compute forward returns at tick horizon."""
+    def _compute_forward_returns(
+        self, df: pd.DataFrame, horizon: int, stride: int = 1
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Compute forward returns at tick horizon with stride subsampling.
+
+        Returns (fwd_returns, indices) where indices are the row positions
+        of the subsampled points. Striding breaks the overlap autocorrelation
+        that inflates MI estimates at long horizons.
+        """
         if "raw_midprice" in df.columns:
             mid = df["raw_midprice"].values
         elif "raw_microprice" in df.columns:
@@ -118,14 +125,19 @@ class ITEngine:
             # Fallback: first price-like column
             price_cols = [c for c in df.columns if "price" in c.lower()]
             if not price_cols:
-                return np.full(len(df), np.nan)
+                idx = np.arange(0, len(df), stride)
+                return np.full(len(idx), np.nan), idx
             mid = df[price_cols[0]].values
 
-        fwd = np.full(len(mid), np.nan)
-        valid = len(mid) - horizon
-        if valid > 0:
-            fwd[:valid] = (mid[horizon:] - mid[:valid]) / mid[:valid] * 10000  # bps
-        return fwd
+        n = len(mid)
+        valid = n - horizon
+        if valid <= 0:
+            idx = np.arange(0, n, stride)
+            return np.full(len(idx), np.nan), idx
+
+        indices = np.arange(0, valid, stride)
+        fwd = (mid[indices + horizon] - mid[indices]) / mid[indices] * 10000  # bps
+        return fwd, indices
 
     def cycle(self):
         """Run one IT computation cycle."""
@@ -151,20 +163,22 @@ class ITEngine:
 
         for horizon in self.config.horizons:
             h_label = f"{horizon}t"
-            fwd_ret = self._compute_forward_returns(df, horizon)
+            stride = max(1, horizon // self.config.stride_divisor)
+            fwd_ret, indices = self._compute_forward_returns(df, horizon, stride)
             valid_mask = np.isfinite(fwd_ret)
 
             if valid_mask.sum() < 50:
                 continue
 
             r = fwd_ret[valid_mask]
+            valid_idx = indices[valid_mask]
             sigma_r = float(np.std(r))
 
             for feat in self._feature_cols:
                 if feat in _META_COLUMNS:
                     continue
 
-                f_vals = df[feat].values[valid_mask]
+                f_vals = df[feat].values[valid_idx]
                 if np.std(f_vals) < 1e-12:
                     continue  # constant feature
 
@@ -174,7 +188,7 @@ class ITEngine:
 
                 # CMI and interaction info (if entropy columns available)
                 if Z is not None and Z.shape[1] > 0:
-                    z_valid = Z[valid_mask]
+                    z_valid = Z[valid_idx]
                     cmi_val = cmi(f_vals, r, z_valid, k=k)
                     cmi_matrix.setdefault(feat, {})[h_label] = cmi_val
 
@@ -194,13 +208,17 @@ class ITEngine:
 
             # Use longest horizon for TE (most samples)
             max_horizon = max(self.config.horizons)
-            fwd_ret = self._compute_forward_returns(df, max_horizon)
+            te_stride = max(1, max_horizon // self.config.stride_divisor)
+            fwd_ret, te_indices = self._compute_forward_returns(
+                df, max_horizon, te_stride
+            )
             valid_mask = np.isfinite(fwd_ret)
 
             if valid_mask.sum() > 50:
                 r = fwd_ret[valid_mask]
+                valid_idx = te_indices[valid_mask]
                 for feat in top_feats:
-                    f_vals = df[feat].values[valid_mask]
+                    f_vals = df[feat].values[valid_idx]
                     if np.std(f_vals) < 1e-12:
                         continue
                     te_val = linear_te(
@@ -212,7 +230,7 @@ class ITEngine:
 
                     # Also compute TE from entropy to returns
                     for ec in z_cols[:3]:
-                        e_vals = df[ec].values[valid_mask]
+                        e_vals = df[ec].values[valid_idx]
                         if np.std(e_vals) < 1e-12:
                             continue
                         te_ent = linear_te(
@@ -238,16 +256,20 @@ class ITEngine:
         selected = []
         if best_horizon is not None:
             h_label = f"{best_horizon}t"
-            fwd_ret = self._compute_forward_returns(df, best_horizon)
+            gs_stride = max(1, best_horizon // self.config.stride_divisor)
+            fwd_ret, gs_indices = self._compute_forward_returns(
+                df, best_horizon, gs_stride
+            )
             valid_mask = np.isfinite(fwd_ret)
             if valid_mask.sum() > 50:
                 r = fwd_ret[valid_mask]
+                valid_idx = gs_indices[valid_mask]
                 sigma_r = float(np.std(r))
                 feat_arrays = {
-                    feat: df[feat].values[valid_mask]
+                    feat: df[feat].values[valid_idx]
                     for feat in mi_matrix
                     if feat in df.columns
-                    and np.std(df[feat].values[valid_mask]) > 1e-12
+                    and np.std(df[feat].values[valid_idx]) > 1e-12
                 }
                 selected = greedy_select(
                     features=feat_arrays,
@@ -263,7 +285,10 @@ class ITEngine:
         for feat, horizons in mi_matrix.items():
             for h_label, mi_val in horizons.items():
                 h_ticks = int(h_label.rstrip("t"))
-                fwd_ret = self._compute_forward_returns(df, h_ticks)
+                cv_stride = max(1, h_ticks // self.config.stride_divisor)
+                fwd_ret, _ = self._compute_forward_returns(
+                    df, h_ticks, cv_stride
+                )
                 sigma_r = float(np.nanstd(fwd_ret))
                 if sigma_r > 0:
                     threshold = min_info_bits(

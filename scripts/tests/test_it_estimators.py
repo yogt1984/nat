@@ -213,5 +213,54 @@ class TestCostThreshold:
         assert i1 < i2 < i3
 
 
+class TestOverlapBias:
+    """Verify that strided MI is not inflated by overlapping returns."""
+
+    def test_strided_independent_near_zero(self):
+        """For independent data, strided MI should stay near zero."""
+        np.random.seed(42)
+        n = 5000
+        x = np.random.randn(n)
+        y = np.random.randn(n)  # independent
+
+        # Overlapping: create pseudo-returns with horizon overlap
+        horizon = 500
+        r_overlap = np.cumsum(y)
+        r_overlap = r_overlap[horizon:] - r_overlap[:n - horizon]
+        f_overlap = x[:n - horizon]
+
+        # Strided
+        stride = 100
+        idx = np.arange(0, n - horizon, stride)
+        r_strided = r_overlap[idx]
+        f_strided = f_overlap[idx]
+
+        mi_overlap = ksg_mi(f_overlap, r_overlap, k=5)
+        mi_strided = ksg_mi(f_strided, r_strided, k=5)
+
+        # Both should be near zero, but strided is a more honest estimate
+        assert mi_strided < 0.1, f"Strided MI too high: {mi_strided}"
+
+    def test_strided_correlated_lower_than_overlap(self):
+        """For correlated data, strided MI should be lower than overlapping MI."""
+        np.random.seed(123)
+        n = 6000
+        horizon = 500
+        # Correlated: x drives returns
+        x = np.random.randn(n)
+        prices = np.cumsum(0.01 * x + np.random.randn(n) * 0.1)
+        r_all = (prices[horizon:] - prices[:n - horizon]) / (1 + np.abs(prices[:n - horizon])) * 100
+        f_all = x[:n - horizon]
+
+        mi_overlap = ksg_mi(f_all, r_all, k=5)
+
+        stride = 100
+        idx = np.arange(0, n - horizon, stride)
+        mi_strided = ksg_mi(f_all[idx], r_all[idx], k=5)
+
+        # Strided should be lower — overlap inflates the estimate
+        assert mi_strided <= mi_overlap + 0.02
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
