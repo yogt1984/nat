@@ -13,11 +13,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
-import sys
 from pathlib import Path
 
 # Add scripts to path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from strategies.base import Strategy, StrategyMeta
 from strategies.funding_reversion import FundingReversion

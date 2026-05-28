@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from dataclasses import asdict, dataclass
@@ -30,7 +29,6 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from algorithms import get_algorithm, list_algorithms, discover_all
 from backtest.costs import CostModel, hyperliquid_taker, hyperliquid_maker, conservative

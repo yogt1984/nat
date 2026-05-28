@@ -1,11 +1,15 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run stop run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent validate-config show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner dashboard test_dashboard signal_test signal_test_all exp_start exp_stop exp_status exp_check exp_midweek exp_analyze eamm_run eamm_regime eamm_backtest eamm_test eamm_test_integration 15m 15m_offline 15m_viz test_15m agent_start agent_stop agent_status agent_report agent_dashboard test_agent agent_watchdog_install agent_watchdog_remove alpha_pipeline alpha_pipeline_resume alpha_pipeline_force alpha_pipeline_status alpha_pipeline_gates alpha_pipeline_step trade_viz
+.PHONY: all run stop run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent validate-config setup-python show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner dashboard test_dashboard signal_test signal_test_all exp_start exp_stop exp_status exp_check exp_midweek exp_analyze eamm_run eamm_regime eamm_backtest eamm_test eamm_test_integration 15m 15m_offline 15m_viz test_15m agent_start agent_stop agent_status agent_report agent_dashboard test_agent agent_watchdog_install agent_watchdog_remove alpha_pipeline alpha_pipeline_resume alpha_pipeline_force alpha_pipeline_status alpha_pipeline_gates alpha_pipeline_step trade_viz
 
 # Python interpreter — prefer 'python' (often conda/venv) over system 'python3'.
 # Override with: make PYTHON=/usr/bin/python3
 PYTHON ?= $(shell command -v python 2>/dev/null || command -v python3 2>/dev/null || echo python3)
+
+# Install Python packages in editable mode
+setup-python:
+	pip install -e scripts/
 
 # Default target: run the main ingestor
 all: run

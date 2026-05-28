@@ -33,7 +33,6 @@ from rich.table import Table
 from rich.text import Text
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from oos_terminal import (
     load_state as load_oos_state,

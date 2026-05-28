@@ -41,10 +41,8 @@ import hashlib
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Any
-import sys
 
 # Add scripts to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.model_io import ModelMetadata
 

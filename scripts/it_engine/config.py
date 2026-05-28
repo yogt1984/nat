@@ -13,7 +13,7 @@ except ImportError:
     import tomli as tomllib
 
 try:
-    from scripts.config_utils import load_symbols
+    from config_utils import load_symbols
 except ImportError:
     from config_utils import load_symbols
 

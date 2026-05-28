@@ -4,13 +4,11 @@ Tests data readers (pure functions) and HTTP handler separately.
 """
 
 import json
-import sys
 import threading
 import time
 import urllib.request
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 from agent_dashboard import (

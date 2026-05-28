@@ -17,7 +17,6 @@ Usage:
 """
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -26,7 +25,6 @@ import lightgbm as lgb
 from sklearn.metrics import accuracy_score, classification_report
 
 # Add scripts to path for cluster_pipeline imports
-sys.path.insert(0, str(Path(__file__).parent))
 
 from cluster_pipeline.loader import load_parquet
 

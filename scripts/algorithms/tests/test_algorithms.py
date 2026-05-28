@@ -10,7 +10,6 @@ Tests:
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -18,7 +17,6 @@ import pandas as pd
 import pytest
 
 # Ensure algorithms package is importable
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from algorithms.autodiscover import discover_all
 discover_all()

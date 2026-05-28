@@ -5,14 +5,12 @@ Verifies experiment registration and linking of artifacts.
 """
 
 import pytest
-import sys
 import tempfile
 import json
 from pathlib import Path
 from datetime import datetime
 
 # Add scripts to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from experiment_tracking import ExperimentTracker
 

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +24,6 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from algorithms import get_algorithm
 from algorithms.surprise_signal import SurpriseSignal

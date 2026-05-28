@@ -113,7 +113,6 @@ References
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -121,7 +120,6 @@ import numpy as np
 from .base import AlgorithmFeature, MicrostructureAlgorithm
 from .registry import register
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 from kalman.ou_filter import OUKalmanFilter
 
 

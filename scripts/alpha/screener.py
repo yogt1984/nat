@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -304,7 +303,6 @@ def screen_features(
       - it_prefilter: restrict screening to IT-selected features only
     """
     # Lazy imports to avoid circular deps
-    sys.path.insert(0, str(ROOT / "scripts"))
     from cluster_pipeline.loader import load_parquet
     from cluster_pipeline.preprocess import aggregate_bars
     from cluster_pipeline.config import META_COLUMNS
@@ -338,7 +336,7 @@ def screen_features(
         try:
             from it_engine.state import ITState
         except ImportError:
-            from scripts.it_engine.state import ITState
+            from it_engine.state import ITState
         for sym in available_symbols:
             state = ITState.load(sym, data_dir=it_state_dir)
             if state.mi_matrix:

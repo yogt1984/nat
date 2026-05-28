@@ -23,7 +23,6 @@ Output:
 from __future__ import annotations
 
 import json
-import sys
 import warnings
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -34,7 +33,6 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 warnings.filterwarnings("ignore")
 
 from cluster_pipeline.loader import load_parquet

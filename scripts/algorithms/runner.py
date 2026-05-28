@@ -4,7 +4,6 @@ Algorithm execution engine — batch and parquet modes.
 
 from __future__ import annotations
 
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,7 +64,6 @@ class AlgorithmRunner:
     ) -> AlgorithmResult:
         """Load parquet data and run algorithm."""
         # Import loader here to avoid circular dependency
-        sys.path.insert(0, str(Path(__file__).parent.parent))
         from cluster_pipeline.loader import load_parquet
 
         # Determine columns to load

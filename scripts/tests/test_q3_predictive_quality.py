@@ -1,13 +1,11 @@
 """Tests for q3_predictive_quality.py — forward return computation and Q3 config."""
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from q3_predictive_quality import compute_forward_returns, CONFIGS, Q3_THRESHOLDS
 

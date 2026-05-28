@@ -1,11 +1,9 @@
 """Tests for alpha.deployer — kill switches, position limits, readiness."""
 
 import json
-import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
 import pytest

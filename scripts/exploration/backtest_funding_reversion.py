@@ -8,13 +8,11 @@ and reports Sharpe, edge, and net P&L after Hyperliquid maker fees.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).parent))
 
 from cluster_pipeline.loader import load_parquet
 from cluster_pipeline.preprocess import aggregate_bars

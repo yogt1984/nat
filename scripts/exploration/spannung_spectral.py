@@ -25,7 +25,6 @@ Output:
 from __future__ import annotations
 
 import json
-import sys
 import time
 import warnings
 from dataclasses import asdict, dataclass, field
@@ -40,7 +39,6 @@ from scipy import stats
 from scipy.optimize import curve_fit
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 warnings.filterwarnings("ignore")
 
 from cluster_pipeline.loader import load_parquet

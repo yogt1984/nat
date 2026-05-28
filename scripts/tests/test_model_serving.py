@@ -26,7 +26,6 @@ def test_model_serving_module_exists():
     scripts_dir = Path(__file__).parent.parent
     model_serving_file = scripts_dir / "model_serving.py"
     assert model_serving_file.exists(), f"model_serving.py not found at {model_serving_file}"
-    sys.path.insert(0, str(scripts_dir))
 
 
 def test_can_import_model_serving():
@@ -34,7 +33,6 @@ def test_can_import_model_serving():
     try:
         import sys
         scripts_dir = Path(__file__).parent.parent
-        sys.path.insert(0, str(scripts_dir))
         import model_serving
     except ImportError as e:
         pytest.fail(f"Cannot import model_serving: {e}")

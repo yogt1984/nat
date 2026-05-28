@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -26,7 +25,6 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from alpha.screener import compute_rolling_ic, FORWARD_HORIZONS
 from alpha.combiner import (
     FeatureSpec,

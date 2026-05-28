@@ -12,10 +12,9 @@ import sys, json
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, ".")
-from scripts.cluster_pipeline.loader import load_parquet
-from scripts.cluster_pipeline.preprocess import aggregate_bars, preprocess
-from scripts.cluster_pipeline.cluster import fit_gmm, predictive_quality
+from cluster_pipeline.loader import load_parquet
+from cluster_pipeline.preprocess import aggregate_bars, preprocess
+from cluster_pipeline.cluster import fit_gmm, predictive_quality
 
 # Q1+Q2 winners from sweep
 CONFIGS = [

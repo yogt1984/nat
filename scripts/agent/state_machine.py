@@ -168,7 +168,7 @@ def load_agent_config(config_path: Path, section: str,
     # Inject canonical symbols if not provided by TOML
     if "symbols" not in merged or "primary" not in merged.get("symbols", {}):
         try:
-            from scripts.config_utils import load_symbols
+            from config_utils import load_symbols
         except ImportError:
             from config_utils import load_symbols
         merged.setdefault("symbols", {})["primary"] = load_symbols()

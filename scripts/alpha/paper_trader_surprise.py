@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 import time
 from dataclasses import asdict, dataclass
@@ -37,7 +36,6 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 TRADE_DIR = ROOT / "data" / "paper_trades_surprise"
 
 # Add algorithms to path
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from algorithms.surprise_signal import SurpriseSignal
 

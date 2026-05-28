@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import tempfile
 from pathlib import Path
 
@@ -19,7 +18,6 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from scalp_edge_scanner import (
     ConjunctionSetup,

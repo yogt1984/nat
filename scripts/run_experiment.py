@@ -16,7 +16,6 @@ import argparse
 import os
 import signal
 import subprocess
-import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -186,7 +185,6 @@ def cmd_status(args):
     # Row count (quick, only if loader available)
     print()
     try:
-        sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
         from cluster_pipeline.loader import load_parquet
         df = load_parquet(str(DATA_DIR))
         print(f"  Total rows:   {len(df):,}")
@@ -235,7 +233,6 @@ def cmd_analyze(args):
 
     # Step 4: Profile
     print("\n[4/5] Running profiling pipeline...")
-    sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
     try:
         import numpy as np

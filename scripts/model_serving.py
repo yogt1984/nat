@@ -57,7 +57,6 @@ from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
 
 # Add scripts to path
-sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.model_io import (
     load_sklearn_model,

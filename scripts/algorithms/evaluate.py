@@ -14,14 +14,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from kalman.analysis import compute_ic, compute_forward_returns
 from kalman.fill_sim import MakerFillSimulator

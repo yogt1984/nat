@@ -5,7 +5,6 @@ Tests verify the integration works end-to-end.
 """
 
 import pytest
-import sys
 import numpy as np
 import polars as pl
 from pathlib import Path
@@ -13,7 +12,6 @@ import tempfile
 from datetime import datetime
 
 # Add scripts directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def test_script_exists():

@@ -6,7 +6,6 @@ Tests derived from algo_mathematical_foundations.md.
 Each test verifies that the implementation matches the closed-form math.
 """
 
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +13,6 @@ import pandas as pd
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from algorithms.jump_detector import JumpDetector
 from algorithms.optimal_entry import OptimalEntry

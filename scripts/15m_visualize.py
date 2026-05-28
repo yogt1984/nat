@@ -32,7 +32,6 @@ import numpy as np
 import pandas as pd
 
 # Allow imports from scripts/
-sys.path.insert(0, str(Path(__file__).parent))
 from cluster_pipeline.config import META_COLUMNS
 from cluster_pipeline.loader import load_parquet, get_symbols
 from cluster_pipeline.preprocess import aggregate_bars
