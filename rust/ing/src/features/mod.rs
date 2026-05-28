@@ -381,7 +381,13 @@ impl FeatureComputer {
         let context = context::compute(market_context);
         let trend = trend::compute(price_buffer);
         let illiquidity = illiquidity::compute(trade_buffer);
-        let toxicity = toxicity::compute(trade_buffer);
+        // Use previous mid-price for causal realized spread (Huang & Stoll 1997)
+        let prev_mid = if self.midprice_buffer.len() >= 2 {
+            self.midprice_buffer.get(self.midprice_buffer.len() - 2).copied()
+        } else {
+            None
+        };
+        let toxicity = toxicity::compute(trade_buffer, prev_mid);
 
         // Compute derived features from base features
         let derived = derived::compute(

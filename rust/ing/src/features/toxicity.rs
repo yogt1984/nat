@@ -92,8 +92,12 @@ impl ToxicityFeatures {
     }
 }
 
-/// Compute toxicity features from trade buffer
-pub fn compute(trade_buffer: &TradeBuffer) -> ToxicityFeatures {
+/// Compute toxicity features from trade buffer.
+///
+/// `prev_mid_price`: mid-price from the previous emission window, used for
+/// causal realized spread computation (Huang & Stoll 1997). If `None`, falls
+/// back to intra-window VWAP proxy.
+pub fn compute(trade_buffer: &TradeBuffer, prev_mid_price: Option<f64>) -> ToxicityFeatures {
     let trades: Vec<_> = trade_buffer.iter().collect();
     let trade_count = trades.len();
 
@@ -116,7 +120,7 @@ pub fn compute(trade_buffer: &TradeBuffer) -> ToxicityFeatures {
 
     // Adverse selection measures
     let adverse_selection = compute_adverse_selection(&trade_data);
-    let (effective_spread, realized_spread) = compute_spread_components(&trade_data);
+    let (effective_spread, realized_spread) = compute_spread_components(&trade_data, prev_mid_price);
 
     // Order flow imbalance
     let (flow_imbalance, flow_imbalance_abs) = compute_flow_imbalance(&trade_data);
@@ -327,17 +331,21 @@ fn compute_adverse_selection(data: &TradeData) -> f64 {
     }
 }
 
-/// Compute effective and realized spread components
+/// Compute effective and realized spread components (Huang & Stoll 1997).
 ///
 /// Effective spread: 2 * |trade_price - midpoint| (using VWAP as proxy)
-/// Realized spread: effective spread - price impact
-fn compute_spread_components(data: &TradeData) -> (f64, f64) {
+/// Realized spread: 2 * direction * (trade_price - reference_mid)
+///
+/// When `prev_mid` is available, uses the previous emission window's mid-price
+/// as the reference point — this is fully causal. Falls back to intra-window
+/// VWAP if no previous mid is available.
+fn compute_spread_components(data: &TradeData, prev_mid: Option<f64>) -> (f64, f64) {
     let n = data.prices.len();
     if n < 10 {
         return (0.0, 0.0);
     }
 
-    // Use VWAP as midpoint proxy
+    // Use VWAP as midpoint proxy for effective spread
     let total_notional: f64 = data.prices.iter().zip(&data.volumes).map(|(p, v)| p * v).sum();
     let total_volume: f64 = data.volumes.iter().sum();
 
@@ -351,31 +359,18 @@ fn compute_spread_components(data: &TradeData) -> (f64, f64) {
     let sum_deviation: f64 = data.prices.iter().map(|p| (p - vwap).abs()).sum();
     let effective_spread = 2.0 * sum_deviation / n as f64;
 
-    // Compute realized spread using 5-trade price reversal
-    let lookahead = 5.min(n / 4);
-    if lookahead == 0 {
-        return (effective_spread, 0.0);
-    }
+    // Realized spread: use previous emission mid-price as causal reference.
+    // This avoids the lookahead bias of using intra-window future trade prices.
+    let ref_mid = prev_mid.unwrap_or(vwap);
 
     let mut sum_realized = 0.0;
-    let mut count = 0;
-
-    for i in 0..(n - lookahead) {
+    for i in 0..n {
         let direction = data.directions[i] as f64;
         let trade_price = data.prices[i];
-        let future_price = data.prices[i + lookahead];
-
-        // Realized spread = direction * (trade_price - future_price) * 2
-        // Positive if price reverts (market maker profit)
-        sum_realized += direction * (trade_price - future_price) * 2.0;
-        count += 1;
+        // Positive realized spread = market maker earns the spread (price reverts)
+        sum_realized += direction * (trade_price - ref_mid) * 2.0;
     }
-
-    let realized_spread = if count > 0 {
-        sum_realized / count as f64
-    } else {
-        0.0
-    };
+    let realized_spread = sum_realized / n as f64;
 
     (effective_spread, realized_spread)
 }
