@@ -429,32 +429,41 @@ fn factorial(n: usize) -> usize {
     (1..=n).product()
 }
 
-/// Compute entropy of a distribution
+/// Compute entropy of a distribution using quantile-based (equal-frequency) binning.
 ///
-/// Discretizes continuous values into bins and computes Shannon entropy.
+/// Sorts data by rank and assigns each datum to bin `(rank * n_bins) / n`.
+/// This ensures each bin has approximately equal samples, making the entropy
+/// estimate robust to fat tails and outliers (unlike equal-width binning).
 fn distribution_entropy(data: &[f64], n_bins: usize) -> f64 {
     if data.is_empty() || n_bins == 0 {
         return 0.0;
     }
 
+    let n = data.len();
+
     let min = data.iter().cloned().fold(f64::INFINITY, f64::min);
     let max = data.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
     if (max - min).abs() < 1e-10 {
-        return 0.0;  // All values the same
+        return 0.0; // All values the same
     }
 
-    let bin_width = (max - min) / n_bins as f64;
-    let mut counts = vec![0u64; n_bins];
+    // Sort indices by value for rank-based bin assignment
+    let mut indices: Vec<usize> = (0..n).collect();
+    indices.sort_by(|&a, &b| {
+        data[a].partial_cmp(&data[b]).unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-    for &value in data {
-        let bin = ((value - min) / bin_width).floor() as usize;
+    // Assign each datum to a bin based on its rank
+    let mut counts = vec![0u64; n_bins];
+    for (rank, _idx) in indices.iter().enumerate() {
+        let bin = (rank * n_bins) / n;
         let bin = bin.min(n_bins - 1);
         counts[bin] += 1;
     }
 
-    // Compute entropy
-    let total = data.len() as f64;
+    // Compute Shannon entropy
+    let total = n as f64;
     let mut entropy = 0.0;
 
     for count in &counts {
@@ -464,7 +473,7 @@ fn distribution_entropy(data: &[f64], n_bins: usize) -> f64 {
         }
     }
 
-    // Normalize
+    // Normalize by max entropy
     let max_entropy = (n_bins as f64).ln();
     if max_entropy > 0.0 {
         entropy / max_entropy
@@ -554,6 +563,16 @@ mod tests {
         let data = vec![1.0, 1.0, 1.0, 1.0, 1.0];
         let de = distribution_entropy(&data, 5);
         assert!(de < 0.1, "Constant should have low entropy: {}", de);
+    }
+
+    #[test]
+    fn test_distribution_entropy_heavy_tail() {
+        // Heavy-tailed data: quantile binning should still produce high entropy
+        // because each bin gets ~equal samples regardless of value spread
+        let data = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 100.0, 1000.0];
+        let de = distribution_entropy(&data, 5);
+        // With quantile bins: ranks are evenly distributed → high entropy
+        assert!(de > 0.8, "Heavy-tail with quantile bins should have high entropy: {}", de);
     }
 
     #[test]
