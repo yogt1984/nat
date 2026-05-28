@@ -189,6 +189,7 @@ channels = ["nat:alerts"]
 
 # Research event types to forward (empty = all)
 research_events = ["hypothesis_registered", "cycle_completed"]
+alert_log_path = "data/alerts/alerts.jsonl"
 
 # ─────────────────────────────────────────────────────────────
 # LLM Integration (Claude API)
