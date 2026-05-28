@@ -41,6 +41,10 @@ class ITEngineConfig:
     # Horizons (tick-level)
     horizons: list[int] = field(default_factory=lambda: [10, 50, 500])
 
+    # Stride divisor: stride = max(1, horizon // stride_divisor)
+    # Breaks overlapping-return autocorrelation for MI estimation
+    stride_divisor: int = 5
+
     # Bar horizons (medium-frequency)
     bar_horizons: list[str] = field(default_factory=lambda: ["5min", "25min", "50min"])
 
