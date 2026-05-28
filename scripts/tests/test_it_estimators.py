@@ -213,6 +213,19 @@ class TestCostThreshold:
         i3 = min_info_bits(fee_rt_bps=7.0, sigma_r_bps=30.0)
         assert i1 < i2 < i3
 
+    def test_leptokurtic_raises_threshold(self):
+        """Fat-tailed returns should require more information than Gaussian."""
+        gaussian = min_info_bits(fee_rt_bps=1.61, sigma_r_bps=30.0, kurtosis=3.0)
+        leptokurtic = min_info_bits(fee_rt_bps=1.61, sigma_r_bps=30.0, kurtosis=9.0)
+        assert leptokurtic > gaussian, "Heavier tails should raise I_min"
+        assert abs(leptokurtic / gaussian - 3.0) < 0.01, "κ=9 should be 3× Gaussian I_min"
+
+    def test_kurtosis_default_backward_compatible(self):
+        """Default kurtosis=3.0 should match original Gaussian formula."""
+        original = -0.5 * np.log2(1.0 - (1.61 / 30.0) ** 2)
+        with_default = min_info_bits(fee_rt_bps=1.61, sigma_r_bps=30.0)
+        assert abs(with_default - original) < 1e-10
+
 
 class TestOverlapBias:
     """Verify that strided MI is not inflated by overlapping returns."""
