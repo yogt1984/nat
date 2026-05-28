@@ -22,12 +22,14 @@ class FundingReversion(MicrostructureAlgorithm):
     """Funding rate mean-reversion signal with premium divergence."""
 
     def __init__(self, zscore_entry: float = 2.0, momentum_span: int = 100,
-                 premium_weight: float = 0.3):
+                 premium_weight: float = 0.3, halflife_window: int = 200):
         self._zscore_entry = zscore_entry
         self._momentum_span = momentum_span
         self._premium_weight = premium_weight
+        self._halflife_window = halflife_window
         self._ema_alpha = 2.0 / (momentum_span + 1)
         self._ema_funding = np.nan
+        self._zscore_buffer: list[float] = []
 
     def name(self) -> str:
         return "funding_reversion"
@@ -40,6 +42,8 @@ class FundingReversion(MicrostructureAlgorithm):
                              description="EMA of funding rate (trend detection)"),
             AlgorithmFeature("alg_premium_divergence", warmup=10,
                              description="Weighted combo: funding_zscore vs premium_bps"),
+            AlgorithmFeature("alg_funding_halflife_ticks", warmup=100,
+                             description="OU half-life from lag-1 AR on funding z-score"),
         ]
 
     def required_columns(self) -> list[str]:
@@ -70,14 +74,35 @@ class FundingReversion(MicrostructureAlgorithm):
         premium_z = premium / 10.0  # rough scaling
         divergence = (1 - self._premium_weight) * zscore + self._premium_weight * premium_z
 
+        # OU half-life via lag-1 AR(1) on z-score buffer
+        self._zscore_buffer.append(zscore)
+        if len(self._zscore_buffer) > self._halflife_window:
+            self._zscore_buffer.pop(0)
+
+        halflife = np.nan
+        if len(self._zscore_buffer) >= 50:
+            z = np.array(self._zscore_buffer)
+            z_lag, z_now = z[:-1], z[1:]
+            denom = np.var(z_lag)
+            if denom > 1e-12:
+                rho = np.mean((z_lag - z_lag.mean()) * (z_now - z_now.mean())) / denom
+                if 0 < rho < 1:
+                    halflife = -np.log(2) / np.log(rho)
+                elif rho <= 0:
+                    halflife = 0.0  # anti-persistent: instant reversion
+                else:
+                    halflife = 1e6  # trending / random walk: no reversion
+
         return {
             "alg_funding_signal": signal,
             "alg_funding_momentum": self._ema_funding,
             "alg_premium_divergence": divergence,
+            "alg_funding_halflife_ticks": halflife,
         }
 
     def reset(self) -> None:
         self._ema_funding = np.nan
+        self._zscore_buffer.clear()
 
     def run_batch(self, df: "pd.DataFrame") -> "pd.DataFrame":
         """Vectorized override."""
@@ -99,10 +124,24 @@ class FundingReversion(MicrostructureAlgorithm):
         premium_z = premium / 10.0
         divergence = (1 - self._premium_weight) * zscore + self._premium_weight * premium_z
 
+        # Rolling OU half-life: lag-1 autocorrelation on z-score
+        z_s = pd.Series(zscore)
+        z_lag = z_s.shift(1)
+        roll_cov = z_s.rolling(self._halflife_window, min_periods=50).cov(z_lag).values
+        roll_var = z_lag.rolling(self._halflife_window, min_periods=50).var().values
+        rho = roll_cov / (roll_var + 1e-12)
+        # half-life = -ln(2)/ln(ρ): mean-reverting when 0 < ρ < 1
+        halflife = np.full_like(rho, np.nan)
+        mr = (rho > 0) & (rho < 1)
+        halflife[mr] = -np.log(2) / np.log(rho[mr])
+        halflife[rho <= 0] = 0.0      # anti-persistent
+        halflife[rho >= 1] = 1e6      # trending / random walk
+
         result = pd.DataFrame({
             "alg_funding_signal": signal,
             "alg_funding_momentum": momentum,
             "alg_premium_divergence": divergence,
+            "alg_funding_halflife_ticks": halflife,
         }, index=df.index)
 
         warmup = self.warmup
