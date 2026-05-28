@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 from .config import ITEngineConfig
-from .estimators import ksg_mi, cmi, interaction_info, linear_te, min_info_bits
+from .estimators import ksg_mi, cmi, interaction_info, linear_te, ksg_te, min_info_bits
 from .feature_selector import greedy_select
 from .state import ITState
 
@@ -157,8 +157,14 @@ class ITEngine:
         cmi_matrix = {}
         ii_dict = {}
 
-        # Build entropy conditioning matrix Z
+        # Build entropy conditioning matrix Z (cap dimensionality)
         z_cols = [c for c in self._entropy_cols if c in df.columns]
+        if len(z_cols) > self.config.cmi_max_z_dims:
+            # Keep top columns by variance
+            z_vars = {c: float(np.nanvar(df[c].values)) for c in z_cols}
+            z_cols = sorted(z_vars, key=z_vars.get, reverse=True)[
+                :self.config.cmi_max_z_dims
+            ]
         Z = df[z_cols].values if z_cols else None
 
         for horizon in self.config.horizons:
@@ -188,6 +194,13 @@ class ITEngine:
 
                 # CMI and interaction info (if entropy columns available)
                 if Z is not None and Z.shape[1] > 0:
+                    if len(f_vals) < self.config.cmi_min_samples:
+                        log.debug(
+                            "Skipping CMI for %s at %s: %d samples (need %d)",
+                            feat, h_label, len(f_vals),
+                            self.config.cmi_min_samples,
+                        )
+                        continue
                     z_valid = Z[valid_idx]
                     cmi_val = cmi(f_vals, r, z_valid, k=k)
                     cmi_matrix.setdefault(feat, {})[h_label] = cmi_val
@@ -217,15 +230,18 @@ class ITEngine:
             if valid_mask.sum() > 50:
                 r = fwd_ret[valid_mask]
                 valid_idx = te_indices[valid_mask]
+                te_func = ksg_te if self.config.te_method == "ksg" else linear_te
+                te_kwargs = dict(
+                    lag=self.config.te_lag,
+                    order=self.config.te_order,
+                )
+                if self.config.te_method == "ksg":
+                    te_kwargs["k"] = k
                 for feat in top_feats:
                     f_vals = df[feat].values[valid_idx]
                     if np.std(f_vals) < 1e-12:
                         continue
-                    te_val = linear_te(
-                        f_vals, r,
-                        lag=self.config.te_lag,
-                        order=self.config.te_order,
-                    )
+                    te_val = te_func(f_vals, r, **te_kwargs)
                     te_dict.setdefault(feat, {})["returns"] = te_val
 
                     # Also compute TE from entropy to returns
@@ -233,11 +249,7 @@ class ITEngine:
                         e_vals = df[ec].values[valid_idx]
                         if np.std(e_vals) < 1e-12:
                             continue
-                        te_ent = linear_te(
-                            e_vals, r,
-                            lag=self.config.te_lag,
-                            order=self.config.te_order,
-                        )
+                        te_ent = te_func(e_vals, r, **te_kwargs)
                         te_dict.setdefault(ec, {})["returns"] = te_ent
 
         # --- Phase 3: Greedy feature selection ---
