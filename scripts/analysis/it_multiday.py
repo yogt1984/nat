@@ -26,7 +26,6 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 # Reuse estimators from IT engine
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from it_engine.estimators import ksg_mi, cmi, interaction_info, linear_te, min_info_bits
 from it_engine.feature_selector import greedy_select
 

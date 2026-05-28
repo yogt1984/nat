@@ -18,7 +18,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -26,7 +25,6 @@ import pandas as pd
 from scipy import stats
 
 # Add scripts to path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from cluster_pipeline.loader import load_parquet
 
 

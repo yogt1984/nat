@@ -10,12 +10,9 @@ Validates against analytical results for known distributions:
 
 import numpy as np
 import pytest
-import sys
-import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from scripts.it_engine.estimators import (
+from it_engine.estimators import (
     ksg_mi,
     cmi,
     interaction_info,

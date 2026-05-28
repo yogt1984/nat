@@ -1,12 +1,10 @@
 """Tests for backtest_funding_reversion.py — backtest_signal function."""
 
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backtest_funding_reversion import backtest_signal, MAKER_FEE, TAKER_FEE, COST_PER_TRADE
 

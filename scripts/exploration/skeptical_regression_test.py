@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -37,7 +36,6 @@ import polars as pl
 import lightgbm as lgb
 from scipy import stats
 
-sys.path.insert(0, str(Path(__file__).parent))
 
 from phase1_signal_test import load_all_data, create_target, get_feature_columns
 

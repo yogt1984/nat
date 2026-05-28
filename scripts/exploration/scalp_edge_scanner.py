@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from itertools import combinations
@@ -36,7 +35,6 @@ from scipy import stats
 # ---------------------------------------------------------------------------
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from cluster_pipeline.config import FEATURE_VECTORS
 from cluster_pipeline.loader import load_parquet, filter_symbol

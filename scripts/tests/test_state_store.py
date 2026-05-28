@@ -16,13 +16,11 @@ Tests cover:
 
 import json
 import sqlite3
-import sys
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 from data.state import StateStore

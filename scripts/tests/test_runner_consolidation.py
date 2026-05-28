@@ -13,11 +13,9 @@ preserves identical behavior. Tests focus on:
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 from agent.base import BaseRunner

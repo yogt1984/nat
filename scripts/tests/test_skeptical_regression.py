@@ -10,7 +10,6 @@ Tests cover:
 - Edge cases
 """
 
-import sys
 import tempfile
 import shutil
 from pathlib import Path
@@ -19,7 +18,6 @@ import numpy as np
 import polars as pl
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from skeptical_regression_test import (
     TestResult,

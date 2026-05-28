@@ -17,11 +17,9 @@ Tests verify:
 import json
 import numpy as np
 import pytest
-import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from eamm.train import train_eamm, predict_spread, TrainResult
 from eamm.export import (

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from scripts.config_utils import load_symbols
+    from config_utils import load_symbols
 except ImportError:
     from config_utils import load_symbols
 

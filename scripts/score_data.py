@@ -12,7 +12,6 @@ Usage:
 """
 
 import argparse
-import sys
 import numpy as np
 import polars as pl
 from pathlib import Path
@@ -20,7 +19,6 @@ from datetime import datetime
 from typing import Tuple, Optional
 
 # Add scripts to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.model_io import (
     load_sklearn_model,

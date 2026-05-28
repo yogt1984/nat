@@ -15,7 +15,6 @@ import numpy as np
 import polars as pl
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from eamm.simulator import simulate_mm, pnl_to_bps, DEFAULT_SPREAD_LEVELS_BPS
 from eamm.features import extract_context, context_to_numpy, CONTEXT_FEATURE_NAMES

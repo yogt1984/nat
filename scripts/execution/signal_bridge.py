@@ -29,7 +29,6 @@ import argparse
 import json
 import logging
 import os
-import sys
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -39,7 +38,6 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from alpha.deployer import (
     ScaleSchedule,
@@ -65,7 +63,7 @@ P_SHORT = 20
 
 CYCLE_SECONDS = 300  # check every 5 min (1 bar)
 try:
-    from scripts.config_utils import load_symbols
+    from config_utils import load_symbols
 except ImportError:
     from config_utils import load_symbols
 SYMBOLS = load_symbols()

@@ -846,7 +846,6 @@ class TestIntegrationVisualization:
             from visualize_hierarchy import plot_hierarchy_overview
         except ImportError:
             import sys, os
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
             from visualize_hierarchy import plot_hierarchy_overview
         import matplotlib
         matplotlib.use("Agg")
@@ -861,7 +860,6 @@ class TestIntegrationVisualization:
             from visualize_hierarchy import plot_derivative_pca
         except ImportError:
             import sys, os
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
             from visualize_hierarchy import plot_derivative_pca
         import matplotlib
         matplotlib.use("Agg")
@@ -876,7 +874,6 @@ class TestIntegrationVisualization:
             from visualize_hierarchy import plot_transition_graph
         except ImportError:
             import sys, os
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
             from visualize_hierarchy import plot_transition_graph
         import matplotlib
         matplotlib.use("Agg")
@@ -891,7 +888,6 @@ class TestIntegrationVisualization:
             from visualize_hierarchy import plot_drift_dashboard
         except ImportError:
             import sys, os
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
             from visualize_hierarchy import plot_drift_dashboard
         import matplotlib
         matplotlib.use("Agg")

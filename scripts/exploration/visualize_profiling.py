@@ -23,9 +23,9 @@ from pathlib import Path
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 
-from scripts.cluster_pipeline.preprocess import preprocess, aggregate_bars
-from scripts.cluster_pipeline.loader import load_parquet
-from scripts.cluster_pipeline.cluster import (
+from cluster_pipeline.preprocess import preprocess, aggregate_bars
+from cluster_pipeline.loader import load_parquet
+from cluster_pipeline.cluster import (
     k_sweep, cluster_quality, bootstrap_stability, temporal_stability
 )
 

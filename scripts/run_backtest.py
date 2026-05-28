@@ -13,7 +13,6 @@ import sys
 from pathlib import Path
 
 # Add scripts directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
 
 from backtest.data_loader import load_features, validate_features_for_strategy
 from backtest.strategy import get_strategy, get_all_strategies

@@ -15,8 +15,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
@@ -27,7 +25,6 @@ import pandas as pd
 # Setup path
 SCRIPTS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPTS_DIR.parent
-sys.path.insert(0, str(SCRIPTS_DIR))
 
 DATA_DIR = PROJECT_ROOT / "data" / "features"
 REPORT_DIR = PROJECT_ROOT / "reports"

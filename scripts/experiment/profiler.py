@@ -19,11 +19,6 @@ from .state import ProfilingSnapshot
 
 logger = logging.getLogger(__name__)
 
-# Add scripts to path for cluster_pipeline imports
-_scripts_dir = Path(__file__).resolve().parent.parent
-if str(_scripts_dir) not in sys.path:
-    sys.path.insert(0, str(_scripts_dir))
-
 DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "features"
 
 

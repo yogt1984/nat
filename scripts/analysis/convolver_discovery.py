@@ -33,7 +33,6 @@ import numpy as np
 from scipy import stats
 
 # Ensure scripts/ is on path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from algorithms.convolver_kernels import (
     EVENT_TYPES,

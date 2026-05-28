@@ -19,11 +19,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Add scripts to path
-_scripts_dir = Path(__file__).resolve().parent.parent
-if str(_scripts_dir) not in sys.path:
-    sys.path.insert(0, str(_scripts_dir))
-
 from experiment.state import ExperimentState, ExperimentInfo, load_state, save_state, DEFAULT_STATE_PATH
 from experiment.metrics import collect_data_metrics, check_health, DEFAULT_DATA_DIR
 from experiment.profiler import quick_profile

@@ -24,7 +24,6 @@ import lightgbm as lgb
 from typing import Tuple
 
 # Add scripts to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.model_io import (
     ModelMetadata,

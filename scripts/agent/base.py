@@ -219,7 +219,7 @@ class BaseRunner(ABC):
 
         primary_sym = self._extract_symbol(self.h.test_protocol[0])
         try:
-            from scripts.config_utils import load_symbols
+            from config_utils import load_symbols
         except ImportError:
             from config_utils import load_symbols
         other_symbols = [s for s in load_symbols() if s != primary_sym]

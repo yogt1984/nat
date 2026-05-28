@@ -5,7 +5,6 @@ Verifies ML prediction loading, strategy creation, and backtest integration.
 """
 
 import pytest
-import sys
 import tempfile
 import numpy as np
 import polars as pl
@@ -13,7 +12,6 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 # Add scripts to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backtest.ml_strategy import (
     load_predictions,

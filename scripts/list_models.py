@@ -10,12 +10,10 @@ Usage:
 """
 
 import argparse
-import sys
 from pathlib import Path
 from tabulate import tabulate
 
 # Add scripts to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.model_io import list_models
 

@@ -19,7 +19,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -38,7 +37,6 @@ from scipy import stats
 # ---------------------------------------------------------------------------
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from scalp_edge_scanner import (
     ConjunctionSetup,

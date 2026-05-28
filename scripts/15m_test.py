@@ -28,7 +28,6 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 # Allow imports from scripts/
-sys.path.insert(0, str(Path(__file__).parent))
 from cluster_pipeline.config import FEATURE_VECTORS, META_COLUMNS
 from cluster_pipeline.loader import (
     get_duration_seconds,

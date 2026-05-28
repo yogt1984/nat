@@ -318,7 +318,6 @@ def health_check(data_dir: str, max_gap: int, log: logging.Logger) -> Dict[str, 
 
 def collect_data(data_dir: str, log: logging.Logger) -> Dict[str, Any]:
     """Validate and summarize collected data after ingestion stops."""
-    sys.path.insert(0, str(Path(__file__).parent))
 
     from cluster_pipeline.loader import scan_schema, validate_schema, load_parquet
 
@@ -371,7 +370,6 @@ def run_analysis(
     This mirrors the notebook logic but runs non-interactively,
     saving figures and a JSON report to report_dir.
     """
-    sys.path.insert(0, str(Path(__file__).parent))
 
     import numpy as np
     import matplotlib

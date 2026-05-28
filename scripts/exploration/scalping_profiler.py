@@ -77,7 +77,6 @@ import argparse
 import datetime
 import json
 import logging
-import sys
 import time
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -90,7 +89,6 @@ import numpy as np
 import pandas as pd
 from scipy import stats as sp_stats
 
-sys.path.insert(0, str(Path(__file__).parent))
 
 from cluster_pipeline.config import FEATURE_VECTORS, META_COLUMNS
 from cluster_pipeline.loader import load_parquet, filter_symbol

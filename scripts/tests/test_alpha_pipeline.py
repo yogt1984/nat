@@ -22,7 +22,6 @@ from unittest.mock import patch, MagicMock, PropertyMock
 from dataclasses import dataclass, field
 from typing import List, Dict
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
 import pytest

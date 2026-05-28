@@ -5,7 +5,6 @@ Verifies scoring functionality works correctly.
 """
 
 import pytest
-import sys
 import tempfile
 import numpy as np
 import polars as pl
@@ -15,7 +14,6 @@ from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 
 # Add scripts to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.model_io import ModelMetadata, save_sklearn_model
 

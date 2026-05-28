@@ -9,10 +9,8 @@ Tests cover:
 """
 
 import json
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 from agent.base import _deep_merge, validate_config, load_agent_config

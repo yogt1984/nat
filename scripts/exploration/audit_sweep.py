@@ -21,12 +21,10 @@ import argparse
 import datetime
 import json
 import logging
-import sys
 import time
 from pathlib import Path
 from typing import List
 
-sys.path.insert(0, str(Path(__file__).parent))
 
 from scalping_profiler import (
     ScalpingProfilerProcess,

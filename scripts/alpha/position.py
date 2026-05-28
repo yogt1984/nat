@@ -16,14 +16,12 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from backtest.costs import CostModel, hyperliquid_taker
 
 log = logging.getLogger(__name__)

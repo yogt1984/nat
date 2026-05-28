@@ -25,8 +25,6 @@ from unittest.mock import patch
 import pytest
 
 # Import the dashboard module
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from dashboard import (
     read_state,
     read_log_tail,

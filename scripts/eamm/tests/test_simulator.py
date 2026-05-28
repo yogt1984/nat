@@ -3,10 +3,8 @@
 import numpy as np
 import polars as pl
 import pytest
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from eamm.simulator import simulate_mm, pnl_to_bps, SimulationResult
 
 

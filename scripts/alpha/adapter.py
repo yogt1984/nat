@@ -24,7 +24,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
@@ -32,7 +31,6 @@ from typing import Optional
 import numpy as np
 import polars as pl
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from backtest.costs import CostModel, hyperliquid_taker
 from backtest.engine import run_backtest
 from backtest.strategy import Strategy

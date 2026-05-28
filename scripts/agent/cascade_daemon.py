@@ -370,7 +370,7 @@ class CascadeRunner:
         import numpy as np
 
         try:
-            from scripts.config_utils import load_symbols
+            from config_utils import load_symbols
         except ImportError:
             from config_utils import load_symbols
         symbols = self.config.get("symbols") or load_symbols()

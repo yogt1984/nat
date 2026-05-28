@@ -6,7 +6,6 @@ Every test verifies a property that MUST hold for the pipeline to work correctly
 on both synthetic and live data.
 """
 
-import os
 import sys
 import tempfile
 import shutil
@@ -18,7 +17,6 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from cluster_pipeline.config import (
     COMPOSITE_VECTORS,

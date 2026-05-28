@@ -2,10 +2,8 @@
 
 import numpy as np
 import pytest
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from eamm.regime_analysis import assign_regimes, analyze_regimes, REGIME_NAMES, LN3
 
 

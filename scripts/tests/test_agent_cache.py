@@ -5,12 +5,10 @@ handling, key stability, and integration with the runner.
 """
 
 import json
-import sys
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 from agent.cache import ReportCache, _cache_key, _is_cacheable, CACHEABLE_PREFIXES

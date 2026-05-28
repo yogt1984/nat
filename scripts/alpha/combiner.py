@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -24,7 +23,6 @@ import numpy as np
 import polars as pl
 from scipy import stats
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from alpha.screener import compute_rolling_ic, compute_turnover, FORWARD_HORIZONS
 from cluster_pipeline.loader import load_parquet
 from cluster_pipeline.preprocess import aggregate_bars

@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sys
 import time
 import urllib.request
 import urllib.parse
@@ -225,7 +224,6 @@ def main():
 
     args = parser.parse_args()
 
-    sys.path.insert(0, str(ROOT / "scripts"))
     from data.state import StateStore
 
     store = StateStore(str(ROOT / "data" / "nat.db"))

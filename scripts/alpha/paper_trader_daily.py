@@ -25,7 +25,6 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from algorithms import get_algorithm, discover_all
 from alpha.paper_trader_generic import (

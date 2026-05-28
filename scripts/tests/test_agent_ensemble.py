@@ -7,11 +7,9 @@ Tests cover:
 """
 
 import json
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 from agent.hypothesis import Hypothesis

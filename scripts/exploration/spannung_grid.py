@@ -35,7 +35,6 @@ from scipy import stats
 
 # Project root
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from cluster_pipeline.loader import load_parquet
 

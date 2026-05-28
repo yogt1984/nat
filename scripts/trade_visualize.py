@@ -18,8 +18,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -34,7 +32,6 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 # Allow imports from scripts/
-sys.path.insert(0, str(Path(__file__).parent))
 from viz.features import STYLE, COLORS, apply_style
 
 log = logging.getLogger("trade_viz")

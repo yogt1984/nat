@@ -12,7 +12,6 @@ synthetic parquet data. Covers:
 from __future__ import annotations
 
 import json
-import sys
 import threading
 import time
 import warnings
@@ -25,7 +24,6 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.base import (
     ResearchAgent, BaseRunner, AgentPhase, AgentState,
