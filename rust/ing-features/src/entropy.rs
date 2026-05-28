@@ -43,7 +43,7 @@
 //! - Shannon (1948) - A mathematical theory of communication
 //! - Zunino et al. (2009) - Forbidden patterns, permutation entropy, stock market inefficiency
 
-use crate::state::{OrderBook, TradeBuffer, RingBuffer};
+use ing_types::{OrderBook, TradeBuffer, RingBuffer};
 
 /// Entropy features (27 features: 13 original + 14 tick entropy)
 #[derive(Debug, Clone, Default)]
@@ -524,7 +524,7 @@ fn compute_book_shape_entropy(order_book: &OrderBook) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::TradeBuffer;
+    use ing_types::TradeBuffer;
 
     #[test]
     fn test_permutation_entropy_constant() {

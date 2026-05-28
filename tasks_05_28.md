@@ -6,8 +6,8 @@ Remaining work from the state_05_26.md critique remediation and new items surfac
 
 ## Open from Original Critique
 
-- [ ] **Dashboard reverse proxy** — Add Caddyfile for unified routing (:80 → :8050/:8060/:3000). Low priority; multi-port works for single-user dev.
-- [ ] **Full ing-features crate extraction** — Extract `features/` (13.6K LOC, 26 files) into `ing-features` workspace crate. Requires untangling deep coupling with state/, ws/, ml/, config/. Dedicated session.
+- [x] **Dashboard reverse proxy** — Caddyfile on :80 routing to all services (commit `80be779`)
+- [x] **Full ing-features crate extraction** — Extracted into 3-crate chain: `ing-types` → `ing-features` → `ing`. 26 feature files + regime types moved. 521 tests pass.
 
 ## New — Surfaced During Remediation
 

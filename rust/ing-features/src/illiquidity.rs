@@ -17,7 +17,7 @@
 //! - Amihud (2002) - Illiquidity and stock returns
 //! - Hasbrouck (2009) - Trading costs and returns for US equities
 
-use crate::state::{TradeBuffer, Trade};
+use ing_types::{TradeBuffer, Trade};
 
 /// Minimum observations required for reliable computation
 const MIN_OBSERVATIONS: usize = 20;
@@ -725,7 +725,7 @@ pub mod skeptical_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{TradeBuffer, Trade};
+    use ing_types::{TradeBuffer, Trade};
 
     fn create_test_buffer_with_trades(trades: Vec<Trade>) -> TradeBuffer {
         let mut buffer = TradeBuffer::new(300); // 5 minute window

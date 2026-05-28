@@ -16,7 +16,7 @@
 //!
 //! - OBI dynamics: Biais, Hillion & Spatt (1995) — inflection in imbalance velocity
 
-use crate::state::{OrderBook, TradeBuffer, RingBuffer};
+use ing_types::{OrderBook, TradeBuffer, RingBuffer};
 
 /// Microstructure features (5 features)
 #[derive(Debug, Clone, Default)]

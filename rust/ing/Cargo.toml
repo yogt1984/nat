@@ -45,6 +45,7 @@ path = "src/bin/test_hypotheses.rs"
 [dependencies]
 # Internal
 ing-types = { path = "../ing-types" }
+ing-features = { path = "../ing-features" }
 
 # Workspace dependencies
 tokio.workspace = true

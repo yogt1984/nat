@@ -18,7 +18,7 @@
 //! - Moskowitz et al. (2012) - Time Series Momentum
 //! - Mandelbrot (1971) - Hurst exponent and long-range dependence
 
-use crate::state::RingBuffer;
+use ing_types::RingBuffer;
 
 /// Trend features computed at multiple windows
 /// Total: 15 features (5 base features × 3 windows: 60, 300, 600 ticks)

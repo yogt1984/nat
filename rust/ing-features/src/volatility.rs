@@ -49,7 +49,7 @@
 //! - Parkinson (1980) - The extreme value method for estimating the variance of the rate of return
 //! - Garman & Klass (1980) - On the estimation of security price volatilities from historical data
 
-use crate::state::{OrderBook, RingBuffer};
+use ing_types::{OrderBook, RingBuffer};
 
 /// Volatility features (9 features)
 #[derive(Debug, Clone, Default)]
@@ -302,20 +302,20 @@ fn std_dev(values: &[f64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{OrderBook, RingBuffer};
+    use ing_types::{OrderBook, RingBuffer};
 
     // ---------- helpers ----------
 
     fn make_order_book(bid: f64, ask: f64) -> OrderBook {
         let mut ob = OrderBook::new(10);
-        let book = crate::ws::WsBook {
+        let book = ing_types::WsBook {
             coin: "BTC".to_string(),
             levels: (
                 vec![
-                    crate::ws::WsLevel { px: format!("{:.1}", bid), sz: "1.0".to_string(), n: 1 },
+                    ing_types::WsLevel { px: format!("{:.1}", bid), sz: "1.0".to_string(), n: 1 },
                 ],
                 vec![
-                    crate::ws::WsLevel { px: format!("{:.1}", ask), sz: "1.0".to_string(), n: 1 },
+                    ing_types::WsLevel { px: format!("{:.1}", ask), sz: "1.0".to_string(), n: 1 },
                 ],
             ),
             time: 1000,
