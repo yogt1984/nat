@@ -17,20 +17,22 @@ from .registry import register
 
 # Import existing Kalman filter
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from kalman.ou_filter import OUKalmanFilter, estimate_ou_params
+from kalman.ou_filter import OUKalmanFilter, estimate_ou_params, auto_tune_filter
 
 
 @register
 class KalmanImbalance(MicrostructureAlgorithm):
     """OU Kalman filter on L1 imbalance."""
 
-    def __init__(self, theta: float = 0.1, r_mult: float = 1.0, dt: float = 0.1):
+    def __init__(self, theta: float = 0.1, r_mult: float = 1.0, dt: float = 0.1,
+                 auto_tune: bool = True):
         self._theta = theta
         self._r_mult = r_mult
         self._dt = dt
+        self._auto_tune = auto_tune
         self._kf = OUKalmanFilter(
             theta=theta,
-            sigma_process=0.01,  # will be overridden by auto-tune if available
+            sigma_process=0.01,
             sigma_obs=0.1 * r_mult,
             dt=dt,
         )
@@ -77,13 +79,25 @@ class KalmanImbalance(MicrostructureAlgorithm):
 
         obs = df["imbalance_qty_l1"].values.astype(np.float64)
 
-        # Auto-tune from data if using defaults
-        kf = OUKalmanFilter(
-            theta=self._theta,
-            sigma_process=0.01,
-            sigma_obs=0.1 * self._r_mult,
-            dt=self._dt,
-        )
+        # Auto-tune filter parameters from data
+        if self._auto_tune:
+            valid_obs = obs[np.isfinite(obs)]
+            if len(valid_obs) > 200:
+                kf = auto_tune_filter(valid_obs, dt=self._dt)
+            else:
+                kf = OUKalmanFilter(
+                    theta=self._theta,
+                    sigma_process=0.01,
+                    sigma_obs=0.1 * self._r_mult,
+                    dt=self._dt,
+                )
+        else:
+            kf = OUKalmanFilter(
+                theta=self._theta,
+                sigma_process=0.01,
+                sigma_obs=0.1 * self._r_mult,
+                dt=self._dt,
+            )
 
         # filter_series_full handles the loop in Python but it's a tight
         # numeric loop (no dict/DataFrame overhead per tick)

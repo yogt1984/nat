@@ -128,10 +128,11 @@ class HawkesIntensity(MicrostructureAlgorithm):
     """
 
     def __init__(self, baseline_window: int = 300, decay_beta: float = 0.1,
-                 alpha_fraction: float = 0.5):
+                 alpha_fraction: float = 0.5, auto_tune: bool = True):
         self._baseline_window = baseline_window
         self._beta = decay_beta
         self._alpha = alpha_fraction
+        self._auto_tune = auto_tune
         # Recursive state
         self._A_total = 0.0
         self._A_bid = 0.0
@@ -222,6 +223,41 @@ class HawkesIntensity(MicrostructureAlgorithm):
         self._baseline_buffer.clear()
         self._tick_count = 0
 
+    @staticmethod
+    def estimate_params(count_series: np.ndarray, dt: float = 0.1,
+                        window: int = 1000) -> dict:
+        """Estimate Hawkes parameters via method of moments.
+
+        Uses the dispersion index (var/mean) as a proxy for the branching
+        ratio, and lag-1 autocorrelation to estimate the decay rate beta.
+        """
+        valid = count_series[np.isfinite(count_series)]
+        if len(valid) < window:
+            return {"decay_beta": 0.1, "alpha_fraction": 0.5}
+
+        mean_count = float(np.mean(valid))
+        variance = float(np.var(valid))
+
+        if mean_count < 1e-12:
+            return {"decay_beta": 0.1, "alpha_fraction": 0.5}
+
+        # Branching ratio from dispersion index
+        branching = max(0.0, min(0.95, variance / mean_count - 1))
+
+        # Beta from lag-1 autocorrelation decay
+        autocorr = float(np.corrcoef(valid[:-1], valid[1:])[0, 1])
+        if np.isfinite(autocorr) and autocorr > 0.01:
+            beta = -np.log(autocorr) / dt
+        else:
+            beta = 0.1
+
+        alpha = branching * beta
+
+        return {
+            "decay_beta": float(np.clip(beta, 0.01, 10.0)),
+            "alpha_fraction": float(np.clip(alpha, 0.01, 5.0)),
+        }
+
     def run_batch(self, df: "pd.DataFrame") -> "pd.DataFrame":
         """Vectorized via loop (recursive state prevents full vectorization)."""
         import pandas as pd
@@ -231,8 +267,17 @@ class HawkesIntensity(MicrostructureAlgorithm):
         p_bid = df["imbalance_pressure_bid"].values.astype(np.float64)
         p_ask = df["imbalance_pressure_ask"].values.astype(np.float64)
 
+        # Auto-tune parameters from data
+        if self._auto_tune:
+            params = self.estimate_params(count, dt=self._dt)
+            beta = params["decay_beta"]
+            alpha = params["alpha_fraction"]
+        else:
+            beta = self._beta
+            alpha = self._alpha
+
         n = len(df)
-        decay = np.exp(-self._beta * self._dt)
+        decay = np.exp(-beta * self._dt)
 
         # Pre-compute bid/ask fractions
         total_p = np.abs(p_bid) + np.abs(p_ask) + 1e-12
@@ -260,11 +305,11 @@ class HawkesIntensity(MicrostructureAlgorithm):
             self._baseline_window, min_periods=10
         ).mean().values
 
-        lambda_total = mu + self._alpha * A_total
-        lambda_bid = mu / 2 + self._alpha * A_bid
-        lambda_ask = mu / 2 + self._alpha * A_ask
+        lambda_total = mu + alpha * A_total
+        lambda_bid = mu / 2 + alpha * A_bid
+        lambda_ask = mu / 2 + alpha * A_ask
 
-        excitement = (self._alpha * A_total) / (lambda_total + 1e-12)
+        excitement = (alpha * A_total) / (lambda_total + 1e-12)
         hawkes_imb = (lambda_ask - lambda_bid) / (lambda_ask + lambda_bid + 1e-12)
 
         result = pd.DataFrame({

@@ -22,6 +22,7 @@ aggressor_window = 50        # ticks for aggressor ratio smoothing
 decay_exponent = 0.5         # power-law exponent (Bouchaud 2004)
 impact_window = 100          # ticks for impact estimation
 permanent_ema_span = 500     # EMA span for permanent component
+auto_tune = true             # estimate decay_exponent from ACF
 
 # ── Group B: Hawkes ──────────────────────────────────────────────
 
@@ -29,6 +30,11 @@ permanent_ema_span = 500     # EMA span for permanent component
 baseline_window = 300        # ticks for baseline estimation
 decay_beta = 0.1             # exponential decay rate
 alpha_fraction = 0.5         # branching ratio (must be < 1)
+auto_tune = true             # estimate alpha/beta from count data
+
+[kalman_imbalance]
+theta = 0.1                  # OU mean-reversion speed
+auto_tune = true             # estimate sigma_process/sigma_obs from data
 
 # ── Group C: Volatility & Jump ───────────────────────────────────
 
