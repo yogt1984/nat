@@ -57,6 +57,7 @@ enabled = []
 url = "redis://127.0.0.1:6379"
 # channel_prefix = "nat"
 # cache_ttl_seconds = 60
+publish_interval_ms = 500
 
 [metrics]
 # Prometheus metrics endpoint (optional)

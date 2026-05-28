@@ -108,6 +108,8 @@ pub struct RedisTomlConfig {
     pub channel_prefix: Option<String>,
     #[serde(default)]
     pub cache_ttl_seconds: Option<u64>,
+    #[serde(default)]
+    pub publish_interval_ms: Option<u64>,
 }
 
 impl Default for RedisTomlConfig {
@@ -116,6 +118,7 @@ impl Default for RedisTomlConfig {
             url: default_redis_url(),
             channel_prefix: None,
             cache_ttl_seconds: None,
+            publish_interval_ms: None,
         }
     }
 }

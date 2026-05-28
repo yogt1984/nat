@@ -9,6 +9,9 @@
 //! Cache keys:
 //! - `nat:latest:{symbol}` - Latest feature snapshot (for REST API)
 
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+
 use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
 use serde::Serialize;
@@ -130,6 +133,7 @@ pub struct RedisConfig {
     pub channel_prefix: String,
     pub cache_ttl_seconds: u64,
     pub enabled: bool,
+    pub publish_interval_ms: u64,
 }
 
 impl Default for RedisConfig {
@@ -139,6 +143,7 @@ impl Default for RedisConfig {
             channel_prefix: "nat".to_string(),
             cache_ttl_seconds: 60,
             enabled: true,
+            publish_interval_ms: 500,
         }
     }
 }
@@ -151,7 +156,13 @@ impl RedisConfig {
 
     /// Load from environment variables, falling back to toml config URL
     pub fn from_env_with_toml_url(toml_url: Option<&str>) -> Self {
+        Self::from_env_with_toml(toml_url, None)
+    }
+
+    /// Load from environment variables, falling back to TOML config values
+    pub fn from_env_with_toml(toml_url: Option<&str>, toml_interval_ms: Option<u64>) -> Self {
         let default_url = toml_url.unwrap_or("redis://127.0.0.1:6379");
+        let default_interval = toml_interval_ms.unwrap_or(500);
         Self {
             url: std::env::var("REDIS_URL")
                 .unwrap_or_else(|_| default_url.to_string()),
@@ -164,14 +175,20 @@ impl RedisConfig {
             enabled: std::env::var("REDIS_ENABLED")
                 .map(|s| s.to_lowercase() != "false" && s != "0")
                 .unwrap_or(true),
+            publish_interval_ms: std::env::var("REDIS_PUBLISH_INTERVAL_MS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(default_interval),
         }
     }
 }
 
-/// Redis feature publisher
+/// Redis feature publisher with per-symbol rate limiting
 pub struct RedisPublisher {
     conn: ConnectionManager,
     config: RedisConfig,
+    last_publish: HashMap<String, Instant>,
+    min_interval: Duration,
 }
 
 impl RedisPublisher {
@@ -179,10 +196,19 @@ impl RedisPublisher {
     pub async fn new(config: RedisConfig) -> Result<Self, redis::RedisError> {
         let client = redis::Client::open(config.url.as_str())?;
         let conn = ConnectionManager::new(client).await?;
+        let min_interval = Duration::from_millis(config.publish_interval_ms);
 
-        info!("Redis publisher connected to {}", config.url);
+        info!(
+            "Redis publisher connected to {} (publish interval: {}ms)",
+            config.url, config.publish_interval_ms
+        );
 
-        Ok(Self { conn, config })
+        Ok(Self {
+            conn,
+            config,
+            last_publish: HashMap::new(),
+            min_interval,
+        })
     }
 
     /// Try to create publisher, return None if connection fails
@@ -220,19 +246,27 @@ impl RedisPublisher {
         self.publish(&snapshot).await
     }
 
-    /// Publish feature snapshot
+    /// Publish feature snapshot (rate-limited Pub/Sub, always updates cache)
     async fn publish(&mut self, snapshot: &FeatureSnapshot) -> Result<(), redis::RedisError> {
-        let channel = format!("{}:features:{}", self.config.channel_prefix, snapshot.symbol);
         let json = serde_json::to_string(snapshot).unwrap_or_default();
 
-        // Publish to channel (for real-time subscribers)
-        let _: () = self.conn.publish(&channel, &json).await?;
-
-        // Also cache latest value (for REST API)
+        // Always update cache (REST API needs latest value)
         let cache_key = format!("{}:latest:{}", self.config.channel_prefix, snapshot.symbol);
         let _: () = self.conn.set_ex(&cache_key, &json, self.config.cache_ttl_seconds).await?;
 
-        debug!("Published features for {} to Redis", snapshot.symbol);
+        // Rate-limit Pub/Sub publish per symbol
+        let now = Instant::now();
+        let should_publish = match self.last_publish.get(&snapshot.symbol) {
+            Some(last) => now.duration_since(*last) >= self.min_interval,
+            None => true,
+        };
+
+        if should_publish {
+            let channel = format!("{}:features:{}", self.config.channel_prefix, snapshot.symbol);
+            let _: () = self.conn.publish(&channel, &json).await?;
+            self.last_publish.insert(snapshot.symbol.clone(), now);
+            debug!("Published features for {} to Redis", snapshot.symbol);
+        }
 
         Ok(())
     }
@@ -294,6 +328,7 @@ mod tests {
         assert_eq!(config.url, "redis://127.0.0.1:6379");
         assert_eq!(config.channel_prefix, "nat");
         assert!(config.enabled);
+        assert_eq!(config.publish_interval_ms, 500);
     }
 
     #[test]
