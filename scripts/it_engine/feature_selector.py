@@ -51,8 +51,11 @@ def greedy_select(
         cost_viable   : whether cumulative MI > I_min
     """
     excluded = excluded or set()
-    i_min = min_info_bits(fee_rt_bps, sigma_r_bps)
     r = np.asarray(returns, dtype=np.float64)
+    # Compute sample kurtosis for fat-tail correction of cost threshold
+    from scipy.stats import kurtosis as _kurtosis
+    kurt = float(_kurtosis(r[np.isfinite(r)], fisher=False)) if np.isfinite(r).sum() > 30 else 3.0
+    i_min = min_info_bits(fee_rt_bps, sigma_r_bps, kurtosis=kurt)
 
     candidates = {
         name: arr for name, arr in features.items()

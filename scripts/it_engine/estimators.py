@@ -236,11 +236,17 @@ def linear_te(source: np.ndarray, target: np.ndarray,
 # Cost Threshold in Bits
 # ---------------------------------------------------------------------------
 
-def min_info_bits(fee_rt_bps: float, sigma_r_bps: float) -> float:
+def min_info_bits(fee_rt_bps: float, sigma_r_bps: float,
+                  kurtosis: float = 3.0) -> float:
     """Minimum MI (bits) needed to overcome transaction costs.
 
-    Under Gaussian returns:
+    Base formula (Gaussian returns):
         I_min = -0.5 × log₂(1 - (fee_RT / σ_r)²)
+
+    Kurtosis correction: the Gaussian rate-distortion bound underestimates
+    the information needed for leptokurtic distributions (crypto returns
+    typically have kurtosis 5-15). Scale by κ/3 so that fat-tailed returns
+    require proportionally more information to overcome costs.
 
     If fee ≥ σ_r, returns inf (no amount of information suffices).
 
@@ -248,6 +254,8 @@ def min_info_bits(fee_rt_bps: float, sigma_r_bps: float) -> float:
     ----------
     fee_rt_bps  : round-trip fee in basis points
     sigma_r_bps : return standard deviation in basis points at the target horizon
+    kurtosis    : sample kurtosis (Fisher=False, i.e. Gaussian=3.0). Default 3.0
+                  preserves backward-compatible Gaussian behavior.
 
     Returns
     -------
@@ -258,7 +266,10 @@ def min_info_bits(fee_rt_bps: float, sigma_r_bps: float) -> float:
     ratio = fee_rt_bps / sigma_r_bps
     if abs(ratio) >= 1.0:
         return float('inf')
-    return -0.5 * np.log2(1.0 - ratio ** 2)
+    gaussian_bits = -0.5 * np.log2(1.0 - ratio ** 2)
+    # Scale by kurtosis ratio: heavier tails → higher information requirement
+    kurt_factor = max(kurtosis, 3.0) / 3.0
+    return gaussian_bits * kurt_factor
 
 
 # ---------------------------------------------------------------------------
