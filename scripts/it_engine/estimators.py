@@ -132,6 +132,55 @@ def interaction_info(x: np.ndarray, y: np.ndarray, z: np.ndarray,
 # Linear Transfer Entropy  TE(source → target)
 # ---------------------------------------------------------------------------
 
+def ksg_te(source: np.ndarray, target: np.ndarray,
+           lag: int = 1, order: int = 1, k: int = 5) -> float:
+    """Nonparametric transfer entropy TE(source→target) via KSG CMI.
+
+    Uses the identity:
+        TE(X→Y) = I(X_past; Y_present | Y_past)
+
+    where I(·;·|·) is estimated by the KSG-based CMI estimator.
+
+    Parameters
+    ----------
+    source, target : 1-D arrays of shape (N,)
+    lag   : how many lags of source to include (default 1)
+    order : AR order for target history (default 1)
+    k     : number of nearest neighbors for KSG (default 5)
+
+    Returns
+    -------
+    Transfer entropy in bits. Clamped to ≥ 0.
+    """
+    source = np.asarray(source, dtype=np.float64).ravel()
+    target = np.asarray(target, dtype=np.float64).ravel()
+    n = len(target)
+    max_lag = max(order, lag)
+    if n <= max_lag + 1:
+        return 0.0
+
+    # X_past: lagged source values (may be multi-column if lag > 1)
+    x_past = np.column_stack([
+        source[max_lag - i - 1: n - i - 1] for i in range(lag)
+    ])
+    if x_past.ndim == 1:
+        x_past = x_past.ravel()
+    elif x_past.shape[1] == 1:
+        x_past = x_past.ravel()
+
+    # Y_present: target at current time
+    y_present = target[max_lag:]
+
+    # Y_past: lagged target values (conditioning variable)
+    y_past = np.column_stack([
+        target[max_lag - i - 1: n - i - 1] for i in range(order)
+    ])
+
+    # TE = CMI(X_past; Y_present | Y_past)
+    te_bits = cmi(x_past, y_present, y_past, k=k)
+    return max(te_bits, 0.0)
+
+
 def linear_te(source: np.ndarray, target: np.ndarray,
               lag: int = 1, order: int = 1) -> float:
     """Estimate linear (Gaussian) transfer entropy TE(source→target) in bits.

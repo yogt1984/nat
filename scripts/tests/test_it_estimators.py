@@ -20,6 +20,7 @@ from scripts.it_engine.estimators import (
     cmi,
     interaction_info,
     linear_te,
+    ksg_te,
     min_info_bits,
 )
 
@@ -260,6 +261,48 @@ class TestOverlapBias:
 
         # Strided should be lower — overlap inflates the estimate
         assert mi_strided <= mi_overlap + 0.02
+
+
+class TestKsgTE:
+    """Tests for nonparametric (KSG-based) transfer entropy."""
+
+    def test_coupled_ar1_positive(self):
+        """TE from driver to target should be positive for coupled AR(1)."""
+        np.random.seed(42)
+        n = 2000
+        x = np.random.randn(n)
+        y = np.zeros(n)
+        for t in range(1, n):
+            y[t] = 0.5 * y[t - 1] + 0.4 * x[t - 1] + 0.3 * np.random.randn()
+        te = ksg_te(x, y, lag=1, order=1, k=5)
+        assert te > 0.01, f"KSG TE too low for coupled process: {te}"
+
+    def test_independent_near_zero(self):
+        """TE between independent processes should be near zero."""
+        np.random.seed(123)
+        n = 2000
+        x = np.random.randn(n)
+        y = np.cumsum(0.1 * np.random.randn(n))  # independent random walk
+        te = ksg_te(x, y, lag=1, order=1, k=5)
+        assert te < 0.15, f"KSG TE too high for independent processes: {te}"
+
+    def test_asymmetric_causality(self):
+        """TE(X→Y) should exceed TE(Y→X) when X drives Y."""
+        np.random.seed(456)
+        n = 2000
+        x = np.random.randn(n)
+        y = np.zeros(n)
+        for t in range(1, n):
+            y[t] = 0.3 * y[t - 1] + 0.5 * x[t - 1] + 0.2 * np.random.randn()
+        te_xy = ksg_te(x, y, lag=1, order=1, k=5)
+        te_yx = ksg_te(y, x, lag=1, order=1, k=5)
+        assert te_xy > te_yx, f"TE(X→Y)={te_xy} should exceed TE(Y→X)={te_yx}"
+
+    def test_short_series_returns_zero(self):
+        """Very short series should return 0 gracefully."""
+        x = np.array([1.0, 2.0])
+        y = np.array([3.0, 4.0])
+        assert ksg_te(x, y) == 0.0
 
 
 if __name__ == "__main__":

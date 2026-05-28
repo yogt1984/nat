@@ -63,6 +63,11 @@ class ITEngineConfig:
     te_top_n: int = 20  # compute TE for top-N features by MI
     te_lag: int = 1
     te_order: int = 1
+    te_method: str = "ksg"  # "ksg" (nonparametric) or "linear" (Gaussian AR)
+
+    # CMI sample guard
+    cmi_min_samples: int = 200  # minimum N for reliable CMI estimation
+    cmi_max_z_dims: int = 5     # cap Z dimensionality to prevent curse of dimensionality
 
     # Redis
     redis_url: str = "redis://localhost:6379"
