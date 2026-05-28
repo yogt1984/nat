@@ -209,11 +209,9 @@ min_holding_seconds = 60      # 1 minute minimum
 max_holding_seconds = 3600    # 1 hour maximum
 timeout_exit = true
 
-# Transaction costs (realistic)
+# Transaction costs — canonical values in config/costs.toml
+# Hypothesis tests use doubled taker (round-trip) for conservative modelling
 [strategy.costs]
-taker_fee_bps = 6.0   # 0.06% (Hyperliquid taker)
-maker_fee_bps = 2.0   # 0.02% (maker rebate)
-slippage_bps = 2.0    # Assume 2bps slippage
 model_as = "taker"    # conservative assumption
 
 # =============================================================================

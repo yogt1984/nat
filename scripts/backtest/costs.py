@@ -47,6 +47,35 @@ class CostModel:
         if not 0.0 < self.fill_probability <= 1.0:
             raise ValueError(f"fill_probability must be in (0, 1], got {self.fill_probability}")
 
+    @classmethod
+    def from_config(cls, path: str = "config/costs.toml",
+                    venue: str = "hyperliquid",
+                    role: str = "taker") -> "CostModel":
+        """Load from shared costs.toml.
+
+        Parameters
+        ----------
+        path : config file path
+        venue : "hyperliquid" or "binance"
+        role : "taker" or "maker"
+        """
+        import os
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+
+        if not os.path.exists(path):
+            return cls()  # defaults
+
+        with open(path, "rb") as f:
+            raw = tomllib.load(f)
+
+        section = raw.get(venue, {})
+        fee = section.get(f"{role}_bps", 3.5)
+        slip = section.get("slippage_bps", 2.0)
+        return cls(fee_bps=fee, slippage_bps=slip)
+
     @property
     def one_way_cost_bps(self) -> float:
         """Total cost for a single trade (entry OR exit)."""
@@ -234,7 +263,7 @@ class CostModel:
 
 def hyperliquid_taker() -> CostModel:
     """Hyperliquid taker fees with conservative slippage."""
-    return CostModel(fee_bps=3.5, slippage_bps=2.0)
+    return CostModel.from_config(role="taker")
 
 
 def hyperliquid_maker() -> CostModel:

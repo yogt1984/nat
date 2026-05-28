@@ -18,11 +18,31 @@ except ImportError:
     from config_utils import load_symbols
 
 
+def _load_costs_toml(path: str = "config/costs.toml") -> dict:
+    """Load the shared costs config if it exists."""
+    if not os.path.exists(path):
+        return {}
+    with open(path, "rb") as f:
+        return tomllib.load(f)
+
+
 @dataclass
 class CostConfig:
     binance_vip9_rt_bps: float = 1.61
     binance_vip0_rt_bps: float = 3.50
     hyperliquid_rt_bps: float = 7.00
+
+    @classmethod
+    def from_shared(cls, costs_path: str = "config/costs.toml") -> "CostConfig":
+        """Load from shared costs.toml."""
+        raw = _load_costs_toml(costs_path)
+        hl = raw.get("hyperliquid", {})
+        bn = raw.get("binance", {})
+        return cls(
+            binance_vip9_rt_bps=bn.get("vip9_round_trip_bps", 1.61),
+            binance_vip0_rt_bps=bn.get("vip0_round_trip_bps", 3.50),
+            hyperliquid_rt_bps=hl.get("round_trip_taker_bps", 7.00),
+        )
 
     @property
     def default_fee_rt_bps(self) -> float:
@@ -77,8 +97,8 @@ class ITEngineConfig:
     # State
     state_dir: str = "data/it_engine"
 
-    # Costs
-    costs: CostConfig = field(default_factory=CostConfig)
+    # Costs — loaded from shared config/costs.toml, overridable in it_engine.toml
+    costs: CostConfig = field(default_factory=lambda: CostConfig.from_shared())
 
     @classmethod
     def load(cls, path: str = "config/it_engine.toml") -> "ITEngineConfig":
@@ -97,6 +117,7 @@ class ITEngineConfig:
             if hasattr(config, key):
                 setattr(config, key, val)
 
+        # Local overrides on top of shared costs
         if costs_raw:
             for key, val in costs_raw.items():
                 if hasattr(config.costs, key):
