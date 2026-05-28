@@ -1,1122 +1,86 @@
 # NAT Project Makefile
 # Hyperliquid Market Data Ingestor
 
-.PHONY: all run stop run_and_serve tunnel test test_verbose test_hypotheses build release clean validate validate_all validate_api validate_positions validate_whales validate_entropy validate_data validate_data_recent validate-config setup-python show show_fast show_hft explore help fmt lint check api test_api test_redis test_integration alerts serve_all docker_build docker_up docker_down docker_logs train_gmm train_gmm_auto test_cluster_quality test_cluster_quality_cov analyze_clusters analyze_clusters_gmm analyze_all_symbols train_baseline list_models score_data score_and_save backtest backtest_validate backtest_ml backtest_ml_validate backtest_ml_quantile experiments_list experiments_list_stage experiments_get experiments_compare experiments_best run_ml_workflow backtest_ml_tracked serve_models serve_models_dev serve_best test_serving scan_schema test_pipeline test_pipeline_cov pipeline_start pipeline_resume pipeline_analyze pipeline_stop pipeline_status test_pipeline_runner dashboard test_dashboard signal_test signal_test_all exp_start exp_stop exp_status exp_check exp_midweek exp_analyze eamm_run eamm_regime eamm_backtest eamm_test eamm_test_integration 15m 15m_offline 15m_viz test_15m agent_start agent_stop agent_status agent_report agent_dashboard test_agent agent_watchdog_install agent_watchdog_remove alpha_pipeline alpha_pipeline_resume alpha_pipeline_force alpha_pipeline_status alpha_pipeline_gates alpha_pipeline_step trade_viz
-
 # Python interpreter — prefer 'python' (often conda/venv) over system 'python3'.
 # Override with: make PYTHON=/usr/bin/python3
 PYTHON ?= $(shell command -v python 2>/dev/null || command -v python3 2>/dev/null || echo python3)
 
-# Install Python packages in editable mode
-setup-python:
-	pip install -e scripts/
-
-# Default target: run the main ingestor
-all: run
-
-# =============================================================================
-# MAIN TARGETS
-# =============================================================================
-
-# Build debug version
-build:
-	@echo "Building debug version..."
-	cd rust && cargo build --bin ing
-
-# Build release version (all binaries)
-release:
-	@echo "Building release version..."
-	cd rust && cargo build --release --bin ing --bin validate_api --bin validate_positions --bin validate_whales --bin validate_entropy --bin show_features --bin test_hypotheses
-
-# Stop the ingestor by PID file (safe, no false matches)
-stop:
-	@if [ -f .ing.pid ]; then \
-		PID=$$(cat .ing.pid); \
-		if kill -0 $$PID 2>/dev/null; then \
-			echo "Stopping ingestor (PID $$PID)..."; \
-			kill $$PID; \
-			sleep 2; \
-			kill -0 $$PID 2>/dev/null && kill -9 $$PID; \
-		fi; \
-		rm -f .ing.pid; \
-	else \
-		echo "No .ing.pid file found — ingestor may not be running"; \
-	fi
-
-# Run the main ingestor (requires config/ing.toml)
-run: release
-	@$(MAKE) stop
-	@echo "Running ingestor..."
-	cd rust && ./target/release/ing ../config/ing.toml & echo $$! > ../.ing.pid
-	@echo "Ingestor started (PID $$(cat .ing.pid))"
-
-# Run the ingestor with dashboard enabled
-run_and_serve: release
-	@$(MAKE) stop
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║           STARTING INGESTOR WITH LIVE DASHBOARD                  ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Dashboard: http://localhost:8080"
-	@echo ""
-	@echo "To expose to internet, run in another terminal:"
-	@echo "  make tunnel"
-	@echo ""
-	cd rust && ING_DASHBOARD_ENABLED=true ./target/release/ing ../config/ing.toml & echo $$! > ../.ing.pid
-	@echo "Ingestor started (PID $$(cat .ing.pid))"
-
-# Expose dashboard to internet via cloudflare tunnel
-tunnel:
-	@echo "Starting cloudflare tunnel to localhost:8080..."
-	@echo "Press Ctrl+C to stop"
-	cloudflared tunnel --url http://localhost:8080
-
-# =============================================================================
-# DATA VALIDATION
-# =============================================================================
-
-# Validate config files against schema
-validate-config:
-	$(PYTHON) -m scripts.utils.validate_config
-
-# Validate collected data quality
-validate_data:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║                 VALIDATING COLLECTED DATA                        ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	$(PYTHON) scripts/validate_data.py ./data/features --verbose
-
-# Validate last N hours of data (default: 24)
-HOURS ?= 24
-validate_data_recent:
-	@echo "Validating last $(HOURS) hours of data..."
-	$(PYTHON) scripts/validate_data.py ./data/features --hours $(HOURS) --verbose
-
-# Launch Jupyter notebook for feature exploration
-explore:
-	@echo "Launching feature exploration notebook..."
-	jupyter notebook notebooks/explore_features.ipynb
-
-# =============================================================================
-# TESTING
-# =============================================================================
-
-# Run all unit tests
-test:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║                    RUNNING ALL UNIT TESTS                        ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	cd rust && cargo test --package ing
-	@echo ""
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║                    ALL UNIT TESTS PASSED                         ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-
-# Run tests with verbose output
-test_verbose:
-	@echo "Running all tests (verbose)..."
-	cd rust && cargo test --package ing -- --nocapture
-
-# =============================================================================
-# API VALIDATION (Skeptical Live API Tests)
-# =============================================================================
-
-# Run ALL validations (skeptical tests against live Hyperliquid API)
-validate: release
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║           RUNNING ALL VALIDATIONS (SKEPTICAL MODE)               ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "[1/4] API Connection Validation..."
-	@cd rust && ./target/release/validate_api
-	@echo ""
-	@echo "[2/4] Position Tracking Validation..."
-	@cd rust && ./target/release/validate_positions
-	@echo ""
-	@echo "[3/4] Whale Identification Validation..."
-	@cd rust && ./target/release/validate_whales
-	@echo ""
-	@echo "[4/4] Tick Entropy Validation..."
-	@cd rust && ./target/release/validate_entropy
-	@echo ""
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║                  ALL VALIDATIONS COMPLETE                        ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-
-# Alias for validate
-validate_all: validate
-
-# Individual validation targets
-validate_api: release
-	@echo "Running API connection validation..."
-	cd rust && ./target/release/validate_api
-
-validate_positions: release
-	@echo "Running position tracking validation..."
-	cd rust && ./target/release/validate_positions
-
-validate_whales: release
-	@echo "Running whale identification validation..."
-	cd rust && ./target/release/validate_whales
-
-validate_entropy: release
-	@echo "Running tick entropy feature validation..."
-	cd rust && ./target/release/validate_entropy
-
-# =============================================================================
-# REAL-TIME MONITORING
-# =============================================================================
-
-# Show real-time features (no file output, terminal only)
-SYMBOL ?= BTC
-FREQ ?= 1
-show: release
-	@echo "Starting real-time feature display..."
-	@echo "  Symbol: $(SYMBOL)"
-	@echo "  Frequency: $(FREQ) Hz"
-	@echo "Press Ctrl+C to stop"
-	@echo ""
-	cd rust && exec ./target/release/show_features $(SYMBOL) $(FREQ)
-
-# Quick frequency presets
-show_fast: FREQ=10
-show_fast: show
-
-show_hft: FREQ=50
-show_hft: show
-
-# =============================================================================
-# API SERVER
-# =============================================================================
-
-# Start API server
-api: release_api
-	@echo "Starting NAT API server..."
-	@echo "  REST API: http://localhost:3000"
-	@echo "  WebSocket: ws://localhost:3000/ws/stream/:symbol"
-	@echo ""
-	cd rust && exec ./target/release/nat-api
-
-# Build API server (release)
-release_api:
-	@echo "Building API server..."
-	cd rust && cargo build --release --bin nat-api
-
-# Test API endpoints (requires running API server)
-test_api:
-	@echo "Testing API endpoints..."
-	bash scripts/test_api.sh
-
-# Test Redis connection and subscriptions
-test_redis:
-	@echo "Testing Redis connection..."
-	@redis-cli ping && echo "✓ Redis is running" || (echo "✗ Redis not running" && exit 1)
-	@echo ""
-	@echo "Checking cached symbols..."
-	@redis-cli KEYS "nat:latest:*" || true
-	@echo ""
-	@echo "To subscribe to features: redis-cli SUBSCRIBE nat:features:BTC"
-	@echo "To subscribe to alerts:   redis-cli SUBSCRIBE nat:alerts"
-
-# Run full integration test
-test_integration:
-	@echo "Running integration tests..."
-	bash scripts/test_integration.sh
-
-# =============================================================================
-# TELEGRAM ALERTS
-# =============================================================================
-
-# Start Telegram alert service
-alerts: release_api
-	@echo "Starting Telegram Alert Service..."
-	@echo ""
-	@echo "Required environment variables:"
-	@echo "  TELEGRAM_BOT_TOKEN - Bot token from @BotFather"
-	@echo "  TELEGRAM_CHAT_ID   - Your chat ID"
-	@echo ""
-	cd rust && exec ./target/release/alert-service
-
-# =============================================================================
-# FULL STACK
-# =============================================================================
-
-# Start all services (ingestor + API + alerts)
-# Requires: Redis running, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-serve_all: release release_api
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║              STARTING FULL NAT STACK                             ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Services:"
-	@echo "  - Ingestor:  Publishing features to Redis"
-	@echo "  - API:       http://localhost:3000"
-	@echo "  - Alerts:    Sending to Telegram"
-	@echo ""
-	@echo "Prerequisites:"
-	@echo "  - Redis running on localhost:6379"
-	@echo "  - TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID set"
-	@echo ""
-	@echo "Starting in tmux session 'nat'..."
-	@echo "  (Use 'tmux attach -t nat' to reconnect)"
-	@echo ""
-	@tmux kill-session -t nat 2>/dev/null || true
-	@tmux new-session -d -s nat -n ingestor 'cd rust && ./target/release/ing ../config/ing.toml; read'
-	@tmux new-window -t nat -n api 'cd rust && ./target/release/nat-api; read'
-	@tmux new-window -t nat -n alerts 'cd rust && ./target/release/alert-service; read'
-	@tmux attach -t nat
-
-# =============================================================================
-# FRONTEND
-# =============================================================================
-
-# Start frontend dev server (hot reload)
-web_dev:
-	cd web && npm run dev
-
-# Production build
-web_build:
-	cd web && npm run build
-
-# Install frontend dependencies
-web_install:
-	cd web && npm install
-
-# =============================================================================
-# DOCKER
-# =============================================================================
-
-# Build all Docker images
-docker_build:
-	@echo "Building Docker images..."
-	docker-compose build
-
-# Start all services with Docker
-docker_up:
-	@echo "Starting NAT stack with Docker..."
-	docker-compose up -d
-	@echo ""
-	@echo "Services:"
-	@echo "  - API: http://localhost:3000"
-	@echo "  - Redis: localhost:6379"
-	@echo ""
-	@echo "View logs: make docker_logs"
-
-# Stop all Docker services
-docker_down:
-	@echo "Stopping NAT stack..."
-	docker-compose down
-
-# View Docker logs
-docker_logs:
-	docker-compose logs -f
-
-# =============================================================================
-# REGIME MODEL TRAINING
-# =============================================================================
-
-# Train GMM regime classifier on collected data
-train_gmm:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║               TRAINING GMM REGIME CLASSIFIER                     ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@mkdir -p models
-	$(PYTHON) scripts/train_regime_gmm.py --data-dir $(DATA) --output-dir models
-
-# Train with auto BIC selection
-train_gmm_auto:
-	@echo "Training GMM with auto-selected components..."
-	@mkdir -p models
-	$(PYTHON) scripts/train_regime_gmm.py --data-dir $(DATA) --output-dir models --auto-select
-
-# =============================================================================
-# HYPOTHESIS TESTING
-# =============================================================================
-
-# Run hypothesis tests on collected data
+# Shared variables
 DATA ?= ./data/features
-test_hypotheses: release
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║         RUNNING HYPOTHESIS TESTING ON COLLECTED DATA             ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	cd rust && ./target/release/test_hypotheses ../$(DATA)
+SYMBOL ?= BTC
+HOURS ?= 24
+FREQ ?= 1
 
-# =============================================================================
-# BACKTESTING
-# =============================================================================
-
-# Run backtest on collected data
+# Backtest variables
 STRATEGY ?= whale_flow_simple
-backtest:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║                    RUNNING BACKTEST                              ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Strategy: $(STRATEGY)"
-	@echo "Data: $(DATA)"
-	@echo ""
-	$(PYTHON) scripts/run_backtest.py --data-dir $(DATA) --symbol $(SYMBOL) --strategy $(STRATEGY)
-
-# Run walk-forward validation (recommended)
-backtest_validate:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║              WALK-FORWARD VALIDATION                             ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Strategy: $(STRATEGY)"
-	@echo "Data: $(DATA)"
-	@echo ""
-	$(PYTHON) scripts/run_backtest.py --data-dir $(DATA) --symbol $(SYMBOL) --strategy $(STRATEGY) --walk-forward
-
-# Backtest ML model predictions
 ML_PREDICTIONS ?= ./predictions.parquet
 ML_ENTRY ?= 0.001
 ML_EXIT ?= 0.0
 ML_DIRECTION ?= long
-backtest_ml:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║                 ML MODEL BACKTEST                                ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Predictions: $(ML_PREDICTIONS)"
-	@echo "Entry Threshold: $(ML_ENTRY)"
-	@echo "Exit Threshold: $(ML_EXIT)"
-	@echo "Data: $(DATA)"
-	@echo ""
-	$(PYTHON) scripts/run_backtest.py --data-dir $(DATA) --symbol $(SYMBOL) \
-		--ml-predictions $(ML_PREDICTIONS) \
-		--ml-entry-threshold $(ML_ENTRY) \
-		--ml-exit-threshold $(ML_EXIT)
-
-# ML model walk-forward validation (recommended)
-backtest_ml_validate:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          ML MODEL WALK-FORWARD VALIDATION                        ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Predictions: $(ML_PREDICTIONS)"
-	@echo "Entry Threshold: $(ML_ENTRY)"
-	@echo "Exit Threshold: $(ML_EXIT)"
-	@echo "Data: $(DATA)"
-	@echo ""
-	$(PYTHON) scripts/run_backtest.py --data-dir $(DATA) --symbol $(SYMBOL) \
-		--ml-predictions $(ML_PREDICTIONS) \
-		--ml-entry-threshold $(ML_ENTRY) \
-		--ml-exit-threshold $(ML_EXIT) \
-		--walk-forward
-
-# ML model backtest with quantile thresholds
 ML_ENTRY_Q ?= 0.75
 ML_EXIT_Q ?= 0.50
-backtest_ml_quantile:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║            ML MODEL BACKTEST (QUANTILE)                          ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Predictions: $(ML_PREDICTIONS)"
-	@echo "Entry Quantile: $(ML_ENTRY_Q) (top $(shell echo "scale=0; (1-$(ML_ENTRY_Q))*100" | bc)%%)"
-	@echo "Exit Quantile: $(ML_EXIT_Q)"
-	@echo "Data: $(DATA)"
-	@echo ""
-	$(PYTHON) scripts/run_backtest.py --data-dir $(DATA) --symbol $(SYMBOL) \
-		--ml-predictions $(ML_PREDICTIONS) \
-		--ml-quantile \
-		--ml-entry-threshold $(ML_ENTRY_Q) \
-		--ml-exit-threshold $(ML_EXIT_Q) \
-		--walk-forward
+BACKTEST_JSON ?= ./backtest_results.json
+PREDICTIONS ?= ./predictions.parquet
 
-# List available strategies
-backtest_list:
-	@$(PYTHON) scripts/run_backtest.py --list-strategies
-
-# Run backtest tests
-test_backtest:
-	@echo "Running backtest tests..."
-	cd scripts && $(PYTHON) -m pytest backtest/tests/ -v
-
-# Run backtest tests with coverage
-test_backtest_cov:
-	@echo "Running backtest tests with coverage..."
-	cd scripts && $(PYTHON) -m pytest backtest/tests/ -v --cov=backtest --cov-report=term-missing
-
-# =============================================================================
-# CLUSTER QUALITY MEASUREMENT
-# =============================================================================
-
-# Run cluster quality metrics tests
-test_cluster_quality:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          TESTING CLUSTER QUALITY METRICS                         ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	$(PYTHON) -m pytest scripts/cluster_quality/tests/ -v
-
-# Run cluster quality tests with coverage
-test_cluster_quality_cov:
-	@echo "Running cluster quality tests with coverage..."
-	$(PYTHON) -m pytest scripts/cluster_quality/tests/ -v --cov=cluster_quality --cov-report=term-missing
-
-# Analyze cluster quality on collected data
-SYMBOL ?= BTC
-DATA ?= ./data/features
-analyze_clusters:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║              ANALYZING CLUSTER QUALITY                           ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Symbol: $(SYMBOL)"
-	@echo "Data: $(DATA)"
-	@echo ""
-	$(PYTHON) scripts/analyze_clusters.py --data-dir $(DATA) --symbol $(SYMBOL) --hours $(HOURS)
-
-# Analyze with trained GMM model
-analyze_clusters_gmm:
-	@echo "Analyzing with trained GMM model..."
-	$(PYTHON) scripts/analyze_clusters.py --data-dir $(DATA) --symbol $(SYMBOL) --model models/regime_gmm.json
-
-# Analyze all symbols
-analyze_all_symbols:
-	@for sym in BTC ETH SOL; do \
-		echo "Analyzing $$sym..."; \
-		$(PYTHON) scripts/analyze_clusters.py --data-dir $(DATA) --symbol $$sym --output reports/cluster_$$sym.txt; \
-	done
-
-# =============================================================================
-# BASELINE MODEL TRAINING
-# =============================================================================
-
-# Train baseline models
+# Model variables
 SNAPSHOT ?= baseline_30d
 MODEL_TYPE ?= elasticnet
 MODEL_DIR ?= ./models
-train_baseline:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║              TRAINING BASELINE MODEL                             ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Snapshot: $(SNAPSHOT)"
-	@echo "Model: $(MODEL_TYPE)"
-	@echo "Output: $(MODEL_DIR)"
-	@echo ""
-	@mkdir -p $(MODEL_DIR)
-	$(PYTHON) scripts/train_baseline.py --snapshot $(SNAPSHOT) --model $(MODEL_TYPE) --output-dir $(MODEL_DIR)
-
-# List saved models
-list_models:
-	@echo "Listing saved models..."
-	$(PYTHON) scripts/list_models.py --model-dir $(MODEL_DIR)
-
-# Score data with trained model
 MODEL_PATH ?= models/latest.pkl
-score_data:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║              SCORING DATA WITH TRAINED MODEL                     ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Model: $(MODEL_PATH)"
-	@echo "Data: $(DATA)"
-	@echo ""
-	$(PYTHON) scripts/score_data.py --model $(MODEL_PATH) --data $(DATA) --evaluate
 
-# Score and save predictions
-PREDICTIONS ?= ./predictions.parquet
-score_and_save:
-	@echo "Scoring and saving predictions..."
-	$(PYTHON) scripts/score_data.py --model $(MODEL_PATH) --data $(DATA) --output $(PREDICTIONS) --evaluate
-
-# =============================================================================
-# EXPERIMENT TRACKING
-# =============================================================================
-
-# List all tracked experiments
-experiments_list:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║                   TRACKED EXPERIMENTS                            ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	$(PYTHON) scripts/experiment_tracking.py list
-
-# List experiments by stage
-STAGE ?= backtest
-experiments_list_stage:
-	@echo "Listing experiments at stage: $(STAGE)"
-	$(PYTHON) scripts/experiment_tracking.py list --stage $(STAGE)
-
-# Get experiment details
-EXP_ID ?=
-experiments_get:
-	@echo "Getting experiment details: $(EXP_ID)"
-	$(PYTHON) scripts/experiment_tracking.py get $(EXP_ID)
-
-# Compare experiments
-EXP_IDS ?=
-experiments_compare:
-	@echo "Comparing experiments..."
-	$(PYTHON) scripts/experiment_tracking.py compare $(EXP_IDS)
-
-# Get best experiment
-METRIC ?= sharpe_ratio
-experiments_best:
-	@echo "Finding best experiment by $(METRIC)..."
-	$(PYTHON) scripts/experiment_tracking.py best --metric $(METRIC)
-
-# Run complete tracked ML workflow (train → score → backtest)
-BACKTEST_JSON ?= ./backtest_results.json
-run_ml_workflow:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          COMPLETE ML WORKFLOW WITH TRACKING                      ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Step 1: Training model..."
-	$(MAKE) train_baseline SNAPSHOT=$(SNAPSHOT) MODEL_TYPE=$(MODEL_TYPE)
-	@echo ""
-	@echo "Step 2: Generating predictions..."
-	$(MAKE) score_and_save MODEL_PATH=models/$(MODEL_TYPE)_*.* PREDICTIONS=$(PREDICTIONS)
-	@echo ""
-	@echo "Step 3: Running backtest with tracking..."
-	$(PYTHON) scripts/run_backtest_tracked.py \
-		--ml-predictions $(PREDICTIONS) \
-		--ml-entry-threshold $(ML_ENTRY) \
-		--ml-exit-threshold $(ML_EXIT) \
-		--walk-forward \
-		--output $(BACKTEST_JSON)
-	@echo ""
-	@echo "═══════════════════════════════════════════════════════════════════"
-	@echo "WORKFLOW COMPLETE - All stages tracked automatically"
-	@echo "═══════════════════════════════════════════════════════════════════"
-	@echo ""
-	@echo "View experiment:"
-	@echo "  make experiments_list"
-
-# Run tracked backtest only
-backtest_ml_tracked:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          ML BACKTEST WITH TRACKING                               ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	$(PYTHON) scripts/run_backtest_tracked.py \
-		--ml-predictions $(ML_PREDICTIONS) \
-		--ml-entry-threshold $(ML_ENTRY) \
-		--ml-exit-threshold $(ML_EXIT) \
-		--ml-direction $(ML_DIRECTION) \
-		--walk-forward \
-		--output $(BACKTEST_JSON)
-
-# =============================================================================
-# MODEL SERVING (Priority 6)
-# =============================================================================
-
-# Start model serving API
+# Serving variables
 PORT ?= 8000
 HOST ?= 0.0.0.0
 CACHE_SIZE ?= 5
-serve_models:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          STARTING MODEL SERVING API                              ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Server: http://$(HOST):$(PORT)"
-	@echo "Health: http://$(HOST):$(PORT)/health"
-	@echo "Docs:   http://$(HOST):$(PORT)/docs"
-	@echo ""
-	$(PYTHON) scripts/model_serving.py \
-		--host $(HOST) \
-		--port $(PORT) \
-		--cache-size $(CACHE_SIZE)
+METRIC ?= sharpe_ratio
 
-# Start server with hot-reload (development)
-serve_models_dev:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          MODEL SERVING API (DEV MODE - HOT RELOAD)               ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "Server: http://$(HOST):$(PORT)"
-	@echo "Docs:   http://$(HOST):$(PORT)/docs"
-	@echo ""
-	@echo "Changes to model_serving.py will auto-reload"
-	@echo ""
-	uvicorn scripts.model_serving:app \
-		--reload \
-		--host $(HOST) \
-		--port $(PORT)
-
-# Serve best model by metric
-serve_best:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          SERVING BEST MODEL BY $(METRIC)                         ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	$(PYTHON) scripts/model_serving.py \
-		--host $(HOST) \
-		--port $(PORT) \
-		--serve-best \
-		--metric $(METRIC) \
-		--cache-size $(CACHE_SIZE)
-
-# Test model serving endpoints
-test_serving:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          TESTING MODEL SERVING API                               ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	$(PYTHON) -m pytest scripts/tests/test_model_serving.py -v
-
-# =============================================================================
-# CLUSTER PIPELINE (Feature vector clustering & analysis)
-# =============================================================================
-
-# Scan parquet schema and show vector coverage
-scan_schema:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║            SCANNING PARQUET SCHEMA & VECTOR COVERAGE            ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	cd scripts && $(PYTHON) -c "from cluster_pipeline.loader import print_schema_summary; print_schema_summary('../$(DATA)')"
-
-# Run cluster pipeline tests
-test_pipeline:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║             RUNNING CLUSTER PIPELINE TESTS                      ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	cd scripts && $(PYTHON) -m pytest tests/test_cluster_loader.py tests/test_cluster_preprocess.py tests/test_cluster_engine.py tests/test_cluster_reduce.py tests/test_cluster_viz.py -v
-
-# Run cluster pipeline tests with coverage
-test_pipeline_cov:
-	@echo "Running cluster pipeline tests with coverage..."
-	cd scripts && $(PYTHON) -m pytest tests/test_cluster_loader.py tests/test_cluster_preprocess.py tests/test_cluster_engine.py tests/test_cluster_reduce.py tests/test_cluster_viz.py -v --cov=cluster_pipeline --cov-report=term-missing
-
-# =============================================================================
-# AUTOMATED PIPELINE (State machine: IDLE → INGESTING → ANALYZING → DONE)
-# =============================================================================
-
+# Config paths
 PIPELINE_CONFIG ?= config/pipeline.toml
-
-# Start the full automated pipeline (ingest for N days, then analyze)
-pipeline_start:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          STARTING AUTOMATED PIPELINE                             ║"
-	@echo "║  State machine: IDLE → BUILD → INGEST → COLLECT → ANALYZE → DONE║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	$(PYTHON) scripts/pipeline_runner.py --config $(PIPELINE_CONFIG) start
-
-# Resume pipeline after interruption (picks up from saved state)
-pipeline_resume:
-	@echo "Resuming pipeline from saved state..."
-	$(PYTHON) scripts/pipeline_runner.py --config $(PIPELINE_CONFIG) resume
-
-# Skip ingestion — run analysis directly on existing data
-pipeline_analyze:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          ANALYZING EXISTING DATA (skip ingestion)                ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	$(PYTHON) scripts/pipeline_runner.py --config $(PIPELINE_CONFIG) analyze
-
-# Stop the ingestor (data is preserved, resume later with pipeline_resume)
-pipeline_stop:
-	@echo "Stopping ingestor..."
-	$(PYTHON) scripts/pipeline_runner.py --config $(PIPELINE_CONFIG) stop
-
-# Show current pipeline status
-pipeline_status:
-	@$(PYTHON) scripts/pipeline_runner.py --config $(PIPELINE_CONFIG) status
-
-# =============================================================================
-# ALPHA PIPELINE (Signal → Portfolio → Deployment)
-# =============================================================================
-
 ALPHA_CONFIG ?= config/alpha.toml
+DISCOVERY_CONFIG ?= config/discovery.toml
 
-# Start the alpha pipeline from scratch
-alpha_pipeline:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          STARTING ALPHA PIPELINE                                ║"
-	@echo "║  SCREEN → COMBINE → SIZE → VALIDATE → REGIME → PORTFOLIO → … ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	$(PYTHON) scripts/alpha/alpha_pipeline.py --config $(ALPHA_CONFIG) start
-
-# Resume alpha pipeline after interruption or gate failure
-alpha_pipeline_resume:
-	@echo "Resuming alpha pipeline from saved state..."
-	$(PYTHON) scripts/alpha/alpha_pipeline.py --config $(ALPHA_CONFIG) resume
-
-# Resume alpha pipeline, forcing past a failed gate
-alpha_pipeline_force:
-	@echo "Resuming alpha pipeline (forcing past failed gate)..."
-	$(PYTHON) scripts/alpha/alpha_pipeline.py --config $(ALPHA_CONFIG) resume --force-gate
-
-# Show alpha pipeline status
-alpha_pipeline_status:
-	@$(PYTHON) scripts/alpha/alpha_pipeline.py --config $(ALPHA_CONFIG) status
-
-# Show alpha pipeline gate verdicts
-alpha_pipeline_gates:
-	@$(PYTHON) scripts/alpha/alpha_pipeline.py --config $(ALPHA_CONFIG) gates
-
-# Run a single alpha pipeline step (e.g., make alpha_pipeline_step STEP=1)
-alpha_pipeline_step:
-	$(PYTHON) scripts/alpha/alpha_pipeline.py --config $(ALPHA_CONFIG) run-step $(STEP)
-
-# Run pipeline runner tests
-test_pipeline_runner:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          TESTING PIPELINE RUNNER                                 ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	cd scripts && $(PYTHON) -m pytest tests/test_pipeline_runner.py -v
-
-# =============================================================================
-# PIPELINE DASHBOARD
-# =============================================================================
-
+# Dashboard ports
 DASHBOARD_PORT ?= 8050
+AGENT_DASHBOARD_PORT ?= 8060
 
-# Start the read-only pipeline dashboard
-dashboard:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║           NAT PIPELINE DASHBOARD                                ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	$(PYTHON) scripts/dashboard.py --config $(PIPELINE_CONFIG) --port $(DASHBOARD_PORT)
-
-# Run dashboard tests
-test_dashboard:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          TESTING PIPELINE DASHBOARD                              ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	cd scripts && $(PYTHON) -m pytest tests/test_dashboard.py -v
-
-# =============================================================================
-# DEVELOPMENT TOOLS
-# =============================================================================
-
-# Clean build artifacts
-clean:
-	@echo "Cleaning build artifacts..."
-	cd rust && cargo clean
-
-# Format code
-fmt:
-	@echo "Formatting code..."
-	cd rust && cargo fmt
-
-# Run clippy linter
-lint:
-	@echo "Running clippy..."
-	cd rust && cargo clippy -- -D warnings
-
-# Check without building
-check:
-	@echo "Checking code..."
-	cd rust && cargo check
-
-# =============================================================================
-# PHASE 1: SIGNAL EXISTENCE TEST
-# =============================================================================
-
-# Run the Phase 1 signal test on collected data.
-# Tests whether LightGBM can predict 5-min return direction out-of-sample.
-# Three tests: in-sample accuracy, walk-forward validation, confidence-filtered PnL.
-#
-# Options:
-#   SYMBOL      Asset to test (default: BTC)
-#   HORIZON     Prediction horizon in rows, 1 row = 100ms (default: 3000 = 5 min)
-#   SPREAD_BPS  Assumed spread in basis points (default: 1.0)
-#   REMOVE_LEAKY  Set to 1 to remove absolute-value features that leak regime identity
-#                 (raw_midprice, ctx_open_interest, ctx_volume_24h, etc.)
-#
-# Examples:
-#   make signal_test                              # BTC, 5 min horizon, with all features
-#   make signal_test REMOVE_LEAKY=1               # BTC, 5 min, without leaky features
-#   make signal_test SYMBOL=ETH HORIZON=18000     # ETH, 30 min horizon
-#   make signal_test SYMBOL=SOL HORIZON=36000     # SOL, 1 hour horizon
-#
+# Signal test variables
 HORIZON ?= 3000
 SPREAD_BPS ?= 1.0
 REMOVE_LEAKY ?= 0
 
-signal_test:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          PHASE 1: SIGNAL EXISTENCE TEST                          ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "  Symbol:       $(SYMBOL)"
-	@echo "  Horizon:      $(HORIZON) rows ($$(echo "$(HORIZON) * 0.1" | bc)s)"
-	@echo "  Spread:       $(SPREAD_BPS) bps"
-	@echo "  Remove leaky: $(REMOVE_LEAKY)"
-	@echo ""
-	$(PYTHON) scripts/phase1_signal_test.py \
-		--symbol $(SYMBOL) \
-		--horizon $(HORIZON) \
-		--spread-bps $(SPREAD_BPS) \
-		$(if $(filter 1,$(REMOVE_LEAKY)),--remove-leaky,)
+# Experiment tracking
+STAGE ?= backtest
+EXP_ID ?=
+EXP_IDS ?=
 
-# Run signal test across all symbols and both feature sets (full report)
-signal_test_all:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          PHASE 1: FULL SIGNAL SWEEP (all symbols + configs)      ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@echo "=== BTC — all features ===" && \
-	$(PYTHON) scripts/phase1_signal_test.py --symbol BTC --horizon $(HORIZON) --spread-bps $(SPREAD_BPS) && \
-	echo "" && \
-	echo "=== BTC — leaky removed ===" && \
-	$(PYTHON) scripts/phase1_signal_test.py --symbol BTC --horizon $(HORIZON) --spread-bps $(SPREAD_BPS) --remove-leaky && \
-	echo "" && \
-	echo "=== ETH — all features ===" && \
-	$(PYTHON) scripts/phase1_signal_test.py --symbol ETH --horizon $(HORIZON) --spread-bps $(SPREAD_BPS) && \
-	echo "" && \
-	echo "=== SOL — all features ===" && \
-	$(PYTHON) scripts/phase1_signal_test.py --symbol SOL --horizon $(HORIZON) --spread-bps $(SPREAD_BPS)
+# 15-min smoke test
+SMOKE_DATA ?= ./data/features/$(shell date -u +%Y-%m-%d)
+SMOKE_OUTPUT ?= ./reports/smoke_test
+WINDOW ?=
 
-# =============================================================================
-# EAMM — Entropy-Adaptive Market Making
-# =============================================================================
+# Trade visualization
+TRADE_DATE ?=
+TRADE_SYMBOL ?= BTC
 
+# EAMM
 EAMM_SYMBOL ?= BTC
 EAMM_HORIZON ?= 3000
 EAMM_MODE ?= regression
 EAMM_GAMMA ?= 0.1
 EAMM_QMAX ?= 1.0
 
-# Run full EAMM pipeline: simulate → label → train → evaluate → regime
-eamm_run:
-	@echo "Running EAMM full pipeline ($(EAMM_SYMBOL), horizon=$(EAMM_HORIZON))..."
-	cd scripts && $(PYTHON) -m eamm.cli run --symbol $(EAMM_SYMBOL) --horizon $(EAMM_HORIZON) --mode $(EAMM_MODE)
-
-# Run regime analysis only (thesis test)
-eamm_regime:
-	@echo "Running EAMM regime analysis ($(EAMM_SYMBOL))..."
-	cd scripts && $(PYTHON) -m eamm.cli regime --symbol $(EAMM_SYMBOL) --horizon $(EAMM_HORIZON)
-
-# Run stateful backtest
-eamm_backtest:
-	@echo "Running EAMM backtest ($(EAMM_SYMBOL), gamma=$(EAMM_GAMMA))..."
-	cd scripts && $(PYTHON) -m eamm.cli backtest --symbol $(EAMM_SYMBOL) --horizon $(EAMM_HORIZON) --gamma $(EAMM_GAMMA) --q-max $(EAMM_QMAX)
-
-# Run EAMM unit tests
-eamm_test:
-	@echo "Running EAMM test suite..."
-	cd scripts && $(PYTHON) -m pytest eamm/tests/ -v
-
-# Run EAMM integration tests only
-eamm_test_integration:
-	@echo "Running EAMM integration tests..."
-	cd scripts && $(PYTHON) -m pytest eamm/tests/test_integration.py -v
-
-# =============================================================================
-# EXPERIMENTS
-# =============================================================================
-
-# Start ingestor in tmux (background data collection)
-exp_start: release
-	@$(PYTHON) scripts/run_experiment.py start
-
-# Stop ingestor gracefully
-exp_stop:
-	@$(PYTHON) scripts/run_experiment.py stop
-
-# Check ingestor health + data stats
-exp_status:
-	@$(PYTHON) scripts/run_experiment.py status
-
-# Daily validation check (last 24h by default)
-exp_check:
-	@$(PYTHON) scripts/run_experiment.py check --hours $(HOURS)
-
-# Mid-week: full validation + schema scan
-exp_midweek:
-	@$(PYTHON) scripts/run_experiment.py midweek
-
-# End-of-experiment: stop, validate, profile, quality gates
-exp_analyze:
-	@$(PYTHON) scripts/run_experiment.py analyze
-
-# Show dashboard URL
-exp_dashboard:
-	@$(PYTHON) scripts/run_experiment.py dashboard
-
-# Expose dashboard via cloudflare tunnel
-exp_tunnel:
-	@echo "Exposing dashboard at localhost:8050 via Cloudflare tunnel..."
-	cloudflared tunnel --url http://localhost:8050
-
-# =============================================================================
-# 15-MINUTE SMOKE TEST
-# =============================================================================
-
-SMOKE_DATA ?= ./data/features/$(shell date -u +%Y-%m-%d)
-SMOKE_OUTPUT ?= ./reports/smoke_test
-SYMBOL ?= BTC
-WINDOW ?=
-
-# Full 15-minute experiment: ingest → validate → profile → cluster → report
-15m:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          15-MINUTE EXPERIMENT                                    ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	nat 15m
-
-# Analyze existing data (no ingestion)
-15m_offline:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          15-MINUTE ANALYSIS (OFFLINE)                            ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	$(PYTHON) scripts/15m_test.py run --data-dir $(SMOKE_DATA) --output $(SMOKE_OUTPUT) -v
-
-# Visualize 15-minute data window (microstructure snapshot)
-# Defaults to latest experiment; override with SMOKE_DATA=path
-15m_viz:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          15-MINUTE VISUAL HEALTH CHECK                           ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	$(PYTHON) scripts/15m_visualize.py \
-		$(if $(filter command line,$(origin SMOKE_DATA)),--data-dir $(SMOKE_DATA),--latest) \
-		--symbol $(SYMBOL) $(if $(WINDOW),--window $(WINDOW)) -v
-
-# Visualize paper trades — one snapshot PNG per symbol per date
-# Usage: make trade_viz
-#        make trade_viz TRADE_SYMBOL=all
-#        make trade_viz TRADE_DATE=2026-05-23 TRADE_SYMBOL=ETH
-TRADE_DATE ?=
-TRADE_SYMBOL ?= BTC
-
-trade_viz:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          PAPER TRADE VISUALIZATION                               ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	$(PYTHON) scripts/trade_visualize.py \
-		$(if $(TRADE_DATE),--date $(TRADE_DATE),--latest) \
-		--symbol $(TRADE_SYMBOL) -v
-
-# Run 15m_test unit tests
-test_15m:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          TESTING 15-MINUTE SMOKE TEST                            ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	cd scripts && $(PYTHON) -m pytest tests/test_15m_test.py -v
-
-# =============================================================================
-# AUTONOMOUS RESEARCH AGENT
-# =============================================================================
-
-AGENT_DASHBOARD_PORT ?= 8060
-
-# Start the agent daemon in tmux
-agent_start:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          STARTING NAT RESEARCH AGENT                             ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	@-pkill -f 'agent/daemon.py start' 2>/dev/null; sleep 1
-	@tmux kill-session -t nat-agent 2>/dev/null || true
-	tmux new-session -d -s nat-agent '$(PYTHON) scripts/agent/daemon.py start; read'
-	@echo "Agent running in tmux session 'nat-agent'"
-	@echo "  attach: tmux attach -t nat-agent"
-	@echo "  status: make agent_status"
-
-# Stop the agent gracefully
-agent_stop:
-	@echo "Stopping NAT agent..."
-	@-pkill -f 'agent/daemon.py start' 2>/dev/null && echo "Agent stopped" || echo "Agent not running"
-
-# Show agent status
-agent_status:
-	@$(PYTHON) scripts/agent/daemon.py status
-
-# Full agent report (registry + graveyard + generators + cache)
-agent_report:
-	@$(PYTHON) scripts/agent/daemon.py report
-
-# Start agent dashboard
-agent_dashboard:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          NAT AGENT DASHBOARD                                     ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	$(PYTHON) scripts/agent_dashboard.py --port $(AGENT_DASHBOARD_PORT)
-
-# Run agent tests (cache + dashboard)
-test_agent:
-	@echo "╔══════════════════════════════════════════════════════════════════╗"
-	@echo "║          TESTING AGENT SUBSYSTEM                                 ║"
-	@echo "╚══════════════════════════════════════════════════════════════════╝"
-	@echo ""
-	cd scripts && $(PYTHON) -m pytest tests/test_agent_base.py tests/test_agent_cache.py tests/test_agent_dashboard.py tests/test_agent_monitor.py tests/test_agent_ensemble.py tests/test_mf_agent.py tests/test_macro_agent.py tests/test_meta_agent.py -v
-
-# Install cron watchdog (restarts agent if it dies)
-agent_watchdog_install:
-	@echo "Installing agent watchdog cron..."
-	@(crontab -l 2>/dev/null | grep -v 'agent/daemon.py'; \
-	  echo "*/5 * * * * pgrep -f 'agent/daemon.py start' >/dev/null || cd $(CURDIR) && $(PYTHON) scripts/agent/daemon.py start >> data/agent/watchdog.log 2>&1") | crontab -
-	@echo "Watchdog installed (checks every 5 minutes)"
-
-# Remove cron watchdog
-agent_watchdog_remove:
-	@echo "Removing agent watchdog cron..."
-	@(crontab -l 2>/dev/null | grep -v 'agent/daemon.py') | crontab -
-	@echo "Watchdog removed"
-
-# =============================================================================
-# ALPHA DISCOVERY ORCHESTRATOR
-# =============================================================================
-
-DISCOVERY_CONFIG ?= config/discovery.toml
-
-discovery_start:
-	@echo "Starting Alpha Discovery Orchestrator..."
-	@-pkill -f 'discovery_orchestrator.py start' 2>/dev/null; sleep 1
-	@tmux kill-session -t nat-discovery 2>/dev/null || true
-	tmux new-session -d -s nat-discovery '$(PYTHON) scripts/discovery_orchestrator.py --config $(DISCOVERY_CONFIG) start; read'
-	@echo "Orchestrator running in tmux session 'nat-discovery'"
-
-discovery_once:
-	$(PYTHON) scripts/discovery_orchestrator.py --config $(DISCOVERY_CONFIG) once
-
-discovery_status:
-	@$(PYTHON) scripts/discovery_orchestrator.py --config $(DISCOVERY_CONFIG) status
-
-discovery_stop:
-	@echo "Stopping Discovery Orchestrator..."
-	@-pkill -f 'discovery_orchestrator.py start' 2>/dev/null && echo "Stopped" || echo "Not running"
-
-# =============================================================================
-# CASCADE VALIDATION AGENT
-# =============================================================================
-
-cascade_start:
-	@echo "Starting Cascade Validation Agent..."
-	@-pkill -f 'cascade_daemon.py start' 2>/dev/null; sleep 1
-	@tmux kill-session -t nat-cascade 2>/dev/null || true
-	tmux new-session -d -s nat-cascade '$(PYTHON) scripts/agent/cascade_daemon.py start; read'
-	@echo "Cascade agent running in tmux session 'nat-cascade'"
-
-cascade_once:
-	$(PYTHON) scripts/agent/cascade_daemon.py once
-
-cascade_status:
-	@$(PYTHON) scripts/agent/cascade_daemon.py status
-
-cascade_stop:
-	@echo "Stopping Cascade Agent..."
-	@-pkill -f 'cascade_daemon.py start' 2>/dev/null && echo "Stopped" || echo "Not running"
-
-cascade_report:
-	@$(PYTHON) scripts/agent/cascade_daemon.py report
+# Include modular targets
+include make/build.mk
+include make/test.mk
+include make/deploy.mk
+include make/pipeline.mk
+include make/alpha.mk
+include make/experiment.mk
 
 # =============================================================================
 # HELP
 # =============================================================================
+.PHONY: help
 
 help:
 	@echo ""
@@ -1151,235 +115,55 @@ help:
 	@echo "  test_hypotheses         Run H1-H5 hypothesis tests (DATA=./data/features)"
 	@echo "  test_redis              Test Redis connection"
 	@echo "  test_integration        Run full integration test suite"
-	@echo "  test_backtest           Run backtest unit tests"
-	@echo "  test_cluster_quality    Run cluster quality metrics tests"
+	@echo "  test_agent              Run agent tests"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " REGIME MODEL"
+	@echo " ALPHA PIPELINE"
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  train_gmm              Train GMM regime classifier (DATA=./data/features)"
-	@echo "  train_gmm_auto         Train with auto-selected components via BIC"
-	@echo "  analyze_clusters       Analyze cluster quality (SYMBOL=BTC HOURS=24)"
-	@echo "  analyze_clusters_gmm   Analyze with trained GMM model"
-	@echo "  analyze_all_symbols    Analyze BTC, ETH, SOL clusters"
-	@echo ""
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " BASELINE MODELS (ML)"
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  train_baseline         Train baseline ML model (SNAPSHOT=baseline_30d MODEL_TYPE=elasticnet)"
-	@echo "  list_models            List all saved models with metrics"
-	@echo "  score_data             Score data with trained model (MODEL_PATH=models/*.pkl)"
-	@echo "  score_and_save         Score and save predictions to file"
+	@echo "  alpha_pipeline        Start: screen -> combine -> ... -> deploy"
+	@echo "  alpha_pipeline_resume Resume from saved state"
+	@echo "  alpha_pipeline_force  Resume, forcing past a failed gate"
+	@echo "  alpha_pipeline_status Show state"
+	@echo "  alpha_pipeline_gates  Show gate verdicts"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " BACKTESTING"
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  backtest                Run backtest (STRATEGY=whale_flow_simple SYMBOL=BTC)"
-	@echo "  backtest_validate       Run walk-forward validation (recommended)"
-	@echo "  backtest_ml             Backtest ML predictions (ML_PREDICTIONS=./predictions.parquet)"
-	@echo "  backtest_ml_validate    ML walk-forward validation (recommended)"
-	@echo "  backtest_ml_quantile    ML backtest with quantile thresholds"
-	@echo "  backtest_ml_tracked     Backtest with automatic experiment tracking"
-	@echo "  backtest_list           List available backtest strategies"
-	@echo "  test_backtest           Run backtest unit tests"
-	@echo ""
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " EXPERIMENT TRACKING"
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  experiments_list        List all tracked experiments"
-	@echo "  experiments_list_stage  Filter by stage (STAGE=backtest)"
-	@echo "  experiments_get         Get experiment details (EXP_ID=exp_xxx)"
-	@echo "  experiments_compare     Compare experiments (EXP_IDS=\"exp1 exp2\")"
-	@echo "  experiments_best        Find best experiment (METRIC=sharpe_ratio)"
-	@echo "  run_ml_workflow         Complete ML pipeline with tracking"
-	@echo ""
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " MODEL SERVING"
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  serve_models            Start model serving API (PORT=8000)"
-	@echo "  serve_models_dev        Start with hot-reload (development)"
-	@echo "  serve_best              Serve best model by metric (METRIC=sharpe_ratio)"
-	@echo "  test_serving            Run model serving API tests"
-	@echo ""
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " CLUSTER PIPELINE"
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  scan_schema         Scan parquet files and show vector coverage (DATA=./data/features)"
-	@echo "  test_pipeline       Run cluster pipeline tests"
-	@echo "  test_pipeline_cov   Run pipeline tests with coverage report"
-	@echo ""
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " AUTOMATED PIPELINE (State Machine)"
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  pipeline_start      Start full pipeline: ingest N days → analyze → decide"
-	@echo "  pipeline_resume     Resume after interruption (from saved state)"
-	@echo "  pipeline_analyze    Skip ingestion, analyze existing data"
-	@echo "  pipeline_stop       Stop ingestor (preserves data for resume)"
-	@echo "  pipeline_status     Show current pipeline state and progress"
-	@echo "  test_pipeline_runner Run pipeline runner tests"
-	@echo "  dashboard           Start read-only pipeline dashboard (port $(DASHBOARD_PORT))"
-	@echo "  test_dashboard      Run dashboard tests"
-	@echo ""
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " ALPHA PIPELINE (Signal → Portfolio → Deployment)"
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  alpha_pipeline        Start alpha pipeline: screen → combine → … → deploy"
-	@echo "  alpha_pipeline_resume Resume after interruption (from saved state)"
-	@echo "  alpha_pipeline_force  Resume, forcing past a failed gate"
-	@echo "  alpha_pipeline_status Show current alpha pipeline state"
-	@echo "  alpha_pipeline_gates  Show gate verdicts table"
-	@echo "  alpha_pipeline_step   Run single step (STEP=1..9)"
-	@echo ""
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " PHASE 1: SIGNAL TESTING"
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  signal_test         Test if features predict returns out-of-sample"
-	@echo "                      (SYMBOL=BTC HORIZON=3000 SPREAD_BPS=1.0 REMOVE_LEAKY=0)"
-	@echo "  signal_test_all     Run signal test across BTC/ETH/SOL with and without"
-	@echo "                      leaky features (full comparison report)"
-	@echo ""
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " API VALIDATION (Live Hyperliquid)"
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  validate          Run all API validations"
-	@echo "  validate_all      Alias for validate"
-	@echo "  validate_api      Test API connection"
-	@echo "  validate_positions Test position tracking"
-	@echo "  validate_whales   Test whale identification"
-	@echo "  validate_entropy  Test entropy features"
-	@echo ""
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " API & ALERTS"
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  api               Start API server (REST + WebSocket)"
-	@echo "  alerts            Start Telegram alert service"
-	@echo "  serve_all         Start full stack (ingestor + API + alerts)"
-	@echo "  release_api       Build API server (release)"
-	@echo "  test_api          Test API endpoints (requires running server)"
-	@echo ""
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " BUILD"
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  build             Build debug version"
-	@echo "  release           Build optimized release version"
-	@echo "  clean             Remove build artifacts"
-	@echo ""
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " DOCKER"
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  docker_build      Build all Docker images"
-	@echo "  docker_up         Start all services with Docker"
-	@echo "  docker_down       Stop all Docker services"
-	@echo "  docker_logs       View Docker logs"
-	@echo ""
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " DEVELOPMENT"
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  fmt               Format code with rustfmt"
-	@echo "  lint              Run clippy linter"
-	@echo "  check             Check code without building"
-	@echo "  help              Show this help"
-	@echo ""
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " 15-MINUTE SMOKE TEST"
-	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  15m               Full 15-min experiment: ingest → validate → report"
-	@echo "  15m_offline       Analyze existing data (SMOKE_DATA=./data/features/YYYY-MM-DD)"
-	@echo "  15m_viz           Visualize latest experiment (SYMBOL=BTC WINDOW=15)"
-	@echo "  test_15m          Run 15m smoke test unit tests"
-	@echo "  trade_viz         Visualize paper trades (TRADE_DATE=YYYY-MM-DD TRADE_SYMBOL=BTC)"
+	@echo "  backtest              Run backtest (STRATEGY=... SYMBOL=BTC)"
+	@echo "  backtest_validate     Walk-forward validation"
+	@echo "  signal_test           Phase 1 signal existence test"
+	@echo "  test_oos30            30-day OOS validation (5 algos)"
+	@echo "  oos_validate          OOS validation (4 algos)"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
 	@echo " EXPERIMENTS"
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  exp_start         Start ingestor in tmux (background collection)"
-	@echo "  exp_stop          Stop ingestor gracefully"
-	@echo "  exp_status        Check ingestor health + data stats"
-	@echo "  exp_check         Daily validation (last 24h)"
-	@echo "  exp_midweek       Full validation + schema scan"
-	@echo "  exp_analyze       Stop, validate, profile, quality gates"
+	@echo "  exp_start             Start ingestor in tmux"
+	@echo "  exp_stop              Stop ingestor"
+	@echo "  exp_status            Check health + data stats"
+	@echo "  exp_check             Daily validation (HOURS=24)"
+	@echo "  exp_analyze           Stop, validate, profile, quality gates"
+	@echo "  15m                   Full 15-min experiment"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " AUTONOMOUS RESEARCH AGENT"
+	@echo " AGENTS & SERVICES"
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  agent_start             Start agent daemon in tmux"
-	@echo "  agent_stop              Stop agent gracefully"
-	@echo "  agent_status            Show agent state, queue, generators"
-	@echo "  agent_report            Full summary (registry + graveyard + cache)"
-	@echo "  agent_dashboard         Start agent dashboard (port $(AGENT_DASHBOARD_PORT))"
-	@echo "  test_agent              Run agent tests (cache + dashboard)"
-	@echo "  agent_watchdog_install  Install cron watchdog (auto-restart)"
-	@echo "  agent_watchdog_remove   Remove cron watchdog"
+	@echo "  agent_start           Start research agent daemon"
+	@echo "  agent_stop            Stop agent"
+	@echo "  agent_status          Show agent state"
+	@echo "  api                   Start REST/WS API server"
+	@echo "  alerts                Start Telegram alert service"
+	@echo "  serve_all             Full stack (ingestor + API + alerts)"
 	@echo ""
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo " ALGORITHM 1: MF 3-FEATURE LIQUIDITY SIGNAL"
+	@echo " BUILD & DEV"
 	@echo "───────────────────────────────────────────────────────────────────"
-	@echo "  test_alg1               Backtest + dry-run signal bridge"
-	@echo "  test_alg1_paper         Paper trader batch + watch mode"
-	@echo "  test_alg1_live          LIVE mode (requires HL_PRIVATE_KEY)"
-	@echo "  test_oos30              30-day OOS validation (5 winning algos)"
-	@echo "  oos_validate            Run OOS validation (4 winning algos) + terminal report"
-	@echo "  oos_watch               Watch mode: poll for new data, re-run, refresh"
-	@echo "  oos_report              Terminal dashboard from existing state"
-	@echo "  monitor                 Unified terminal monitor (3 tabs: health/agent/features)"
+	@echo "  build             Debug build"
+	@echo "  release           Release build"
+	@echo "  clean             Remove build artifacts"
+	@echo "  fmt               Format code"
+	@echo "  lint              Run clippy"
+	@echo "  setup-python      pip install -e scripts/"
+	@echo "  validate-config   Validate TOML config files"
+	@echo "  help              Show this help"
 	@echo ""
-
-# =============================================================================
-# ALGORITHM 1: MF 3-FEATURE LIQUIDITY SIGNAL (100min)
-# =============================================================================
-
-test_alg1:
-	@echo "═══ ALG1: MF 3-Feature Liquidity Signal (100min) ═══"
-	@echo ""
-	@echo "Step 1: Backtest on latest data..."
-	$(PYTHON) scripts/analysis/mf_liquidity_backtest.py --features both --save
-	@echo ""
-	@echo "Step 2: Starting signal bridge (dry-run, Ctrl-C to stop)..."
-	$(PYTHON) scripts/execution/signal_bridge.py --mode dry-run --cycle 300
-
-test_alg1_paper:
-	@echo "═══ ALG1: Paper Trading Mode ═══"
-	$(PYTHON) scripts/alpha/paper_trader.py batch --save
-	@echo ""
-	@echo "Starting paper trader watch (Ctrl-C to stop)..."
-	$(PYTHON) scripts/alpha/paper_trader.py watch --symbol BTC --poll 300
-
-test_alg1_live:
-	@echo "═══ ALG1: LIVE MODE (requires HL_PRIVATE_KEY) ═══"
-	$(PYTHON) scripts/execution/signal_bridge.py --mode live --cycle 300
-
-# =============================================================================
-# OOS30: 30-DAY OUT-OF-SAMPLE VALIDATION (5 WINNING ALGORITHMS)
-# =============================================================================
-
-test_oos30:
-	@echo "═══ OOS30: 30-Day Out-of-Sample Validation ═══"
-	@echo ""
-	@echo "Step 1/3: 3f liquidity signal..."
-	$(PYTHON) scripts/alpha/paper_trader.py batch --save
-	@echo ""
-	@echo "Step 2/3: Generic algorithms (jump_detector, funding_reversion, optimal_entry)..."
-	$(PYTHON) scripts/alpha/paper_trader_generic.py --algorithms jump_detector funding_reversion optimal_entry --save
-	@echo ""
-	@echo "Step 3/3: Surprise signal..."
-	$(PYTHON) scripts/alpha/paper_trader_surprise.py batch --save
-	@echo ""
-	@echo "Done. Reports saved to reports/"
-
-# =============================================================================
-# OOS VALIDATION
-# =============================================================================
-
-oos_validate:
-	@echo "Running OOS validation (4 winning algos)..."
-	$(PYTHON) scripts/oos_validate.py batch
-
-oos_watch:
-	@echo "Starting OOS validation watcher..."
-	$(PYTHON) scripts/oos_validate.py watch
-
-oos_report:
-	$(PYTHON) scripts/oos_terminal.py
-
-monitor:
-	$(PYTHON) scripts/monitor.py
