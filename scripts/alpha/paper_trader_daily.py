@@ -93,12 +93,28 @@ def run_3f_liquidity(data_dir: Path, train_dates: list[str],
         if not train_vals:
             continue
 
-        # Compute training stats
+        # Compute training stats and IC-based weights
         all_train = __import__("pandas").concat(train_vals, ignore_index=True)
         stats = {}
-        for col in ["spread", "depth", "vwap_dev"]:
+        factors = ["spread", "depth", "vwap_dev"]
+        for col in factors:
             vals = all_train[col].dropna()
             stats[col] = {"mean": float(vals.mean()), "std": float(max(vals.std(), 1e-10))}
+
+        # Estimate factor weights via rank IC on training forward returns
+        from scipy.stats import spearmanr
+        fwd_ret = all_train["midprice"].pct_change(HORIZON_BARS).shift(-HORIZON_BARS).values
+        ic_abs = []
+        for col in factors:
+            z = (all_train[col].values - stats[col]["mean"]) / stats[col]["std"]
+            mask = np.isfinite(z) & np.isfinite(fwd_ret)
+            if mask.sum() > 30:
+                rho, _ = spearmanr(z[mask], fwd_ret[mask])
+                ic_abs.append(max(abs(rho), 0.0))
+            else:
+                ic_abs.append(1.0 / len(factors))
+        ic_sum = sum(ic_abs) or 1.0
+        weights = {col: ic / ic_sum for col, ic in zip(factors, ic_abs)}
 
         # Load test data
         test_df = load_features(
@@ -122,19 +138,17 @@ def run_3f_liquidity(data_dir: Path, train_dates: list[str],
         if len(test_bars) < MIN_BARS_PER_DATE:
             continue
 
-        # Z-score composite
+        # IC-weighted z-score composite
         composite = np.zeros(len(test_bars))
-        for col in ["spread", "depth", "vwap_dev"]:
+        for col in factors:
             z = (test_bars[col].values - stats[col]["mean"]) / stats[col]["std"]
-            composite += z
-        composite /= 3.0
+            composite += weights[col] * z
 
-        # Training composite for percentiles
+        # Training composite for percentiles (same weights)
         train_composite = np.zeros(len(all_train))
-        for col in ["spread", "depth", "vwap_dev"]:
+        for col in factors:
             z = (all_train[col].values - stats[col]["mean"]) / stats[col]["std"]
-            train_composite += z
-        train_composite /= 3.0
+            train_composite += weights[col] * z
         p20 = float(np.nanpercentile(train_composite, 20))
         p80 = float(np.nanpercentile(train_composite, 80))
 

@@ -5,6 +5,14 @@ Detects sudden entropy drops or spikes as regime transition indicators.
 A large negative entropy rate-of-change signals the market transitioning
 from disordered to ordered state — potentially tradeable.
 
+Transition probability derivation:
+  Under the null of stationary entropy dynamics, the z-scored ROC is
+  approximately N(0,1). The transition probability is:
+    P(transition) = 2 * Phi(|z|) - 1 = erf(|z| / sqrt(2))
+  where Phi is the standard normal CDF. No free parameters: a z-score
+  of 2.0 maps to P ≈ 0.954, which is the probability that the observed
+  entropy change exceeds stationary noise.
+
 Reference:
   Bentes & Menezes (2012) — entropy as a measure of market uncertainty
   Schreiber (2000) — transfer entropy and information flow
@@ -22,9 +30,8 @@ from .registry import register
 class SurpriseSignal(MicrostructureAlgorithm):
     """Entropy regime transition detection via rate-of-change and z-score."""
 
-    def __init__(self, roc_window: int = 50, transition_threshold: float = 2.0):
+    def __init__(self, roc_window: int = 50):
         self._roc_window = roc_window
-        self._transition_threshold = transition_threshold
         self._entropy_buffer: list[float] = []
         self._roc_buffer: list[float] = []
 
@@ -83,9 +90,10 @@ class SurpriseSignal(MicrostructureAlgorithm):
         roc_std = np.std(roc_arr) + 1e-12
         surprise = (roc - roc_mean) / roc_std
 
-        # Transition probability: sigmoid of |surprise|
-        # Large |surprise| → high transition probability
-        transition_prob = 1.0 / (1.0 + np.exp(-abs(surprise) + self._transition_threshold))
+        # Transition probability from standard normal CDF (no free parameters):
+        # P(transition) = 2*Phi(|z|) - 1 = erf(|z| / sqrt(2))
+        from math import erf
+        transition_prob = erf(abs(surprise) / 1.4142135623730951)
 
         return {
             "alg_entropy_surprise": surprise,
@@ -119,8 +127,9 @@ class SurpriseSignal(MicrostructureAlgorithm):
         roc_std = roc_s.rolling(self._roc_window * 2, min_periods=20).std().values
         surprise = (roc - roc_mean) / (roc_std + 1e-12)
 
-        # Transition probability
-        transition = 1.0 / (1.0 + np.exp(-np.abs(surprise) + self._transition_threshold))
+        # Transition probability: erf(|z| / sqrt(2)), no free parameters
+        from scipy.special import erf
+        transition = erf(np.abs(surprise) / np.sqrt(2.0))
 
         result = pd.DataFrame({
             "alg_entropy_surprise": surprise,
