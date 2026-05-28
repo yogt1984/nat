@@ -3,6 +3,10 @@
 //! Subscribes to Redis channels (market alerts + research events) and sends
 //! formatted messages to Telegram.
 
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::PathBuf;
+
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -19,6 +23,7 @@ pub struct AlertConfig {
     pub redis_url: String,
     pub channels: Vec<String>,
     pub research_events: Vec<String>,
+    pub alert_log_path: Option<String>,
 }
 
 impl Default for AlertConfig {
@@ -32,6 +37,7 @@ impl Default for AlertConfig {
                 "hypothesis_registered".to_string(),
                 "cycle_completed".to_string(),
             ],
+            alert_log_path: Some("data/alerts/alerts.jsonl".to_string()),
         }
     }
 }
@@ -88,6 +94,47 @@ impl TelegramBot {
         }
 
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// File-based alert logger (fallback when Telegram is unavailable)
+// ---------------------------------------------------------------------------
+
+/// Appends alert JSON lines to a local file as a durable fallback.
+pub struct AlertLogger {
+    path: PathBuf,
+}
+
+impl AlertLogger {
+    pub fn new(path: &str) -> std::io::Result<Self> {
+        let path = PathBuf::from(path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        info!("Alert file logger: {}", path.display());
+        Ok(Self { path })
+    }
+
+    /// Append a JSON value as a single line (atomic via O_APPEND).
+    pub fn log(&self, value: &serde_json::Value) {
+        let line = match serde_json::to_string(value) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("Failed to serialize alert for file log: {}", e);
+                return;
+            }
+        };
+        match OpenOptions::new().create(true).append(true).open(&self.path) {
+            Ok(mut f) => {
+                if let Err(e) = writeln!(f, "{}", line) {
+                    warn!("Failed to write alert to {}: {}", self.path.display(), e);
+                }
+            }
+            Err(e) => {
+                warn!("Failed to open alert log {}: {}", self.path.display(), e);
+            }
+        }
     }
 }
 
@@ -213,6 +260,7 @@ pub async fn run_alert_service(
 ///
 /// Market alerts use Pub/Sub (fire-and-forget, ephemeral).
 /// Research events use Redis Streams (reliable delivery, replay on restart).
+/// All alerts are always logged to a local JSONL file as a durable fallback.
 pub async fn run_multi_channel_alert_service(
     redis_url: &str,
     telegram_token: String,
@@ -220,6 +268,36 @@ pub async fn run_multi_channel_alert_service(
     channels: &[String],
     research_events: &[String],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    run_alert_service_with_log(
+        redis_url,
+        telegram_token,
+        telegram_chat_id,
+        channels,
+        research_events,
+        None,
+    )
+    .await
+}
+
+/// Full alert service with optional file-based logging.
+pub async fn run_alert_service_with_log(
+    redis_url: &str,
+    telegram_token: String,
+    telegram_chat_id: String,
+    channels: &[String],
+    research_events: &[String],
+    alert_log_path: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let file_logger = match alert_log_path {
+        Some(path) => match AlertLogger::new(path) {
+            Ok(logger) => Some(logger),
+            Err(e) => {
+                warn!("Could not initialize alert file logger: {}", e);
+                None
+            }
+        },
+        None => None,
+    };
     let client = redis::Client::open(redis_url)?;
     let conn = redis::aio::ConnectionManager::new(client.clone()).await?;
 
@@ -276,6 +354,10 @@ pub async fn run_multi_channel_alert_service(
                 let payload: String = msg.get_payload().unwrap_or_default();
                 match serde_json::from_str::<serde_json::Value>(&payload) {
                     Ok(alert_json) => {
+                        // Always log to file first (durable fallback)
+                        if let Some(ref logger) = file_logger {
+                            logger.log(&alert_json);
+                        }
                         let alert = AlertMessage {
                             timestamp_ms: alert_json["timestamp_ms"].as_u64().unwrap_or(0),
                             symbol: alert_json["symbol"]
@@ -320,6 +402,10 @@ pub async fn run_multi_channel_alert_service(
                                     if !allowed_events.is_empty() && !allowed_events.contains(event_type) {
                                         ack_ids.push(id.clone());
                                         continue;
+                                    }
+                                    // Always log to file first
+                                    if let Some(ref logger) = file_logger {
+                                        logger.log(&event);
                                     }
                                     if let Some(text) = format_research_event(&event) {
                                         if let Err(e) = bot.send_message(&text).await {
@@ -459,5 +545,29 @@ mod tests {
         assert_eq!(config.channels.len(), 1);
         assert_eq!(config.channels[0], "nat:alerts");
         assert_eq!(config.research_events.len(), 2);
+        assert_eq!(
+            config.alert_log_path.as_deref(),
+            Some("data/alerts/alerts.jsonl")
+        );
+    }
+
+    #[test]
+    fn test_alert_logger_write() {
+        let dir = std::env::temp_dir().join("nat_test_alerts");
+        let path = dir.join("test.jsonl");
+        let _ = fs::remove_file(&path);
+
+        let logger = AlertLogger::new(path.to_str().unwrap()).unwrap();
+        let alert = serde_json::json!({"type": "test", "symbol": "BTC"});
+        logger.log(&alert);
+        logger.log(&alert);
+
+        let content = fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2);
+        assert!(lines[0].contains("BTC"));
+
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_dir(&dir);
     }
 }

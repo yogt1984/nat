@@ -19,7 +19,7 @@
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-use nat_api::telegram::{run_multi_channel_alert_service, AlertConfig};
+use nat_api::telegram::{run_alert_service_with_log, AlertConfig};
 
 #[tokio::main]
 async fn main() {
@@ -50,12 +50,13 @@ async fn main() {
     info!(redis_url = %config.redis_url, channels = ?config.channels, "Connecting to Redis");
 
     if let (Some(token), Some(chat_id)) = (config.telegram_bot_token.clone(), config.telegram_chat_id.clone()) {
-        if let Err(e) = run_multi_channel_alert_service(
+        if let Err(e) = run_alert_service_with_log(
             &config.redis_url,
             token,
             chat_id,
             &config.channels,
             &config.research_events,
+            config.alert_log_path.as_deref(),
         ).await {
             error!("Alert service error: {}", e);
             std::process::exit(1);
@@ -101,6 +102,9 @@ fn load_config() -> AlertConfig {
                             .iter()
                             .filter_map(|v| v.as_str().map(String::from))
                             .collect();
+                    }
+                    if let Some(log_path) = alerts.get("alert_log_path").and_then(|v| v.as_str()) {
+                        config.alert_log_path = Some(log_path.to_string());
                     }
                 }
             }
