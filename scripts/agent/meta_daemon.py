@@ -35,6 +35,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 
 from agent.hypothesis import GeneratorStats
 from agent.meta_portfolio import (
+    compute_min_variance_weights,
     compute_risk_parity_weights,
     compute_portfolio_metrics,
     filter_redundant_signals,
@@ -405,8 +406,12 @@ class MetaAgent:
             self._save_portfolio(portfolio)
             return portfolio
 
-        # Compute risk parity weights
-        weights = compute_risk_parity_weights(filtered)
+        # Compute portfolio weights (min-variance with Ledoit-Wolf, fallback to risk parity)
+        portfolio_method = self.config.get("portfolio_method", "min_variance")
+        if portfolio_method == "min_variance":
+            weights = compute_min_variance_weights(filtered)
+        else:
+            weights = compute_risk_parity_weights(filtered)
         metrics = compute_portfolio_metrics(filtered, weights)
 
         portfolio_signals = []

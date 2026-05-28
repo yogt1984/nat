@@ -11,6 +11,76 @@ from __future__ import annotations
 import math
 from typing import Optional
 
+import numpy as np
+
+
+def compute_min_variance_weights(
+    signals: list[dict], min_history: int = 30
+) -> list[float]:
+    """Minimum-variance weighting using Ledoit-Wolf shrinkage covariance.
+
+    Computes w = Σ^{-1}·1 / (1^T·Σ^{-1}·1) where Σ is the shrunk
+    covariance of IC histories across signals.
+
+    Falls back to compute_risk_parity_weights() when any signal
+    has fewer than min_history IC samples.
+
+    Args:
+        signals: list of signal dicts, each with 'ic_history' (list[float])
+        min_history: minimum IC history length for covariance estimation
+
+    Returns:
+        list of weights summing to 1.0
+    """
+    if not signals:
+        return []
+
+    n = len(signals)
+    if n == 1:
+        return [1.0]
+
+    # Check all signals have enough history
+    histories = []
+    for sig in signals:
+        ic_hist = sig.get("ic_history", [])
+        if len(ic_hist) < min_history:
+            return compute_risk_parity_weights(signals)
+        histories.append(ic_hist)
+
+    # Align to shortest history length
+    min_len = min(len(h) for h in histories)
+    ic_matrix = np.array([h[-min_len:] for h in histories]).T  # (T, n)
+
+    # Ledoit-Wolf shrinkage
+    try:
+        from sklearn.covariance import LedoitWolf
+        lw = LedoitWolf().fit(ic_matrix)
+        cov = lw.covariance_
+    except ImportError:
+        # Fallback: sample covariance with small ridge
+        cov = np.cov(ic_matrix, rowvar=False)
+        cov += np.eye(n) * 1e-6
+
+    # Minimum-variance: w = Σ^{-1}·1 / (1^T·Σ^{-1}·1)
+    try:
+        cov_inv = np.linalg.inv(cov)
+    except np.linalg.LinAlgError:
+        return compute_risk_parity_weights(signals)
+
+    ones = np.ones(n)
+    raw_w = cov_inv @ ones
+    w_sum = ones @ raw_w
+    if abs(w_sum) < 1e-12:
+        return compute_risk_parity_weights(signals)
+
+    weights = raw_w / w_sum
+
+    # Clamp to [0.02, 0.50] and renormalize
+    weights = np.clip(weights, 0.02, 0.50)
+    weights = weights / weights.sum()
+
+    return weights.tolist()
+
 
 def compute_risk_parity_weights(signals: list[dict]) -> list[float]:
     """Inverse-volatility weighting using IC history variance.
