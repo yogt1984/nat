@@ -170,6 +170,23 @@ _DEFAULT_CONFIG = {
 }
 
 
+def _load_taker_bps() -> float:
+    """Load taker_bps from config/costs.toml (single source of truth)."""
+    costs_path = Path(__file__).resolve().parent.parent.parent / "config" / "costs.toml"
+    if not costs_path.exists():
+        return 3.5
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[no-redef]
+        except ImportError:
+            return 3.5
+    with open(costs_path, "rb") as f:
+        data = tomllib.load(f)
+    return data.get("hyperliquid", {}).get("taker_bps", 3.5)
+
+
 def load_profiler_config(path: str = "config/pipeline.toml") -> Dict[str, Any]:
     """Load [profiler] section from pipeline config, with defaults."""
     try:
@@ -178,6 +195,7 @@ def load_profiler_config(path: str = "config/pipeline.toml") -> Dict[str, Any]:
         import tomli as tomllib  # type: ignore[no-redef]
 
     config = dict(_DEFAULT_CONFIG)
+    config["cost_bps"] = _load_taker_bps()
     p = Path(path)
     if p.exists():
         with open(p, "rb") as f:
