@@ -1,5 +1,6 @@
 # PID files
 .ing.pid
+.*_agent.pid
 
 # Rust
 /target/

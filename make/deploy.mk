@@ -198,7 +198,11 @@ agent_start:
 	@echo "║          STARTING NAT RESEARCH AGENT                             ║"
 	@echo "╚══════════════════════════════════════════════════════════════════╝"
 	@echo ""
-	@-pkill -f 'agent/daemon.py start' 2>/dev/null; sleep 1
+	@if [ -f .microstructure_agent.pid ]; then \
+		PID=$$(cat .microstructure_agent.pid); \
+		if kill -0 $$PID 2>/dev/null; then kill $$PID; sleep 1; fi; \
+		rm -f .microstructure_agent.pid; \
+	fi
 	@tmux kill-session -t nat-agent 2>/dev/null || true
 	tmux new-session -d -s nat-agent '$(PYTHON) scripts/agent/daemon.py start; read'
 	@echo "Agent running in tmux session 'nat-agent'"
@@ -206,8 +210,18 @@ agent_start:
 	@echo "  status: make agent_status"
 
 agent_stop:
-	@echo "Stopping NAT agent..."
-	@-pkill -f 'agent/daemon.py start' 2>/dev/null && echo "Agent stopped" || echo "Agent not running"
+	@if [ -f .microstructure_agent.pid ]; then \
+		PID=$$(cat .microstructure_agent.pid); \
+		if kill -0 $$PID 2>/dev/null; then \
+			echo "Stopping NAT agent (PID $$PID)..."; \
+			kill $$PID; sleep 2; \
+			kill -0 $$PID 2>/dev/null && kill -9 $$PID; \
+		fi; \
+		rm -f .microstructure_agent.pid; \
+		echo "Agent stopped"; \
+	else \
+		echo "No .microstructure_agent.pid — agent not running"; \
+	fi
 
 agent_status:
 	@$(PYTHON) scripts/agent/daemon.py status
@@ -236,7 +250,11 @@ agent_watchdog_remove:
 
 discovery_start:
 	@echo "Starting Alpha Discovery Orchestrator..."
-	@-pkill -f 'discovery_orchestrator.py start' 2>/dev/null; sleep 1
+	@if [ -f .discovery_agent.pid ]; then \
+		PID=$$(cat .discovery_agent.pid); \
+		if kill -0 $$PID 2>/dev/null; then kill $$PID; sleep 1; fi; \
+		rm -f .discovery_agent.pid; \
+	fi
 	@tmux kill-session -t nat-discovery 2>/dev/null || true
 	tmux new-session -d -s nat-discovery '$(PYTHON) scripts/discovery_orchestrator.py --config $(DISCOVERY_CONFIG) start; read'
 	@echo "Orchestrator running in tmux session 'nat-discovery'"
@@ -248,14 +266,28 @@ discovery_status:
 	@$(PYTHON) scripts/discovery_orchestrator.py --config $(DISCOVERY_CONFIG) status
 
 discovery_stop:
-	@echo "Stopping Discovery Orchestrator..."
-	@-pkill -f 'discovery_orchestrator.py start' 2>/dev/null && echo "Stopped" || echo "Not running"
+	@if [ -f .discovery_agent.pid ]; then \
+		PID=$$(cat .discovery_agent.pid); \
+		if kill -0 $$PID 2>/dev/null; then \
+			echo "Stopping Discovery Orchestrator (PID $$PID)..."; \
+			kill $$PID; sleep 2; \
+			kill -0 $$PID 2>/dev/null && kill -9 $$PID; \
+		fi; \
+		rm -f .discovery_agent.pid; \
+		echo "Stopped"; \
+	else \
+		echo "No .discovery_agent.pid — orchestrator not running"; \
+	fi
 
 # --- Cascade validation agent ---
 
 cascade_start:
 	@echo "Starting Cascade Validation Agent..."
-	@-pkill -f 'cascade_daemon.py start' 2>/dev/null; sleep 1
+	@if [ -f .cascade_agent.pid ]; then \
+		PID=$$(cat .cascade_agent.pid); \
+		if kill -0 $$PID 2>/dev/null; then kill $$PID; sleep 1; fi; \
+		rm -f .cascade_agent.pid; \
+	fi
 	@tmux kill-session -t nat-cascade 2>/dev/null || true
 	tmux new-session -d -s nat-cascade '$(PYTHON) scripts/agent/cascade_daemon.py start; read'
 	@echo "Cascade agent running in tmux session 'nat-cascade'"
@@ -267,8 +299,18 @@ cascade_status:
 	@$(PYTHON) scripts/agent/cascade_daemon.py status
 
 cascade_stop:
-	@echo "Stopping Cascade Agent..."
-	@-pkill -f 'cascade_daemon.py start' 2>/dev/null && echo "Stopped" || echo "Not running"
+	@if [ -f .cascade_agent.pid ]; then \
+		PID=$$(cat .cascade_agent.pid); \
+		if kill -0 $$PID 2>/dev/null; then \
+			echo "Stopping Cascade Agent (PID $$PID)..."; \
+			kill $$PID; sleep 2; \
+			kill -0 $$PID 2>/dev/null && kill -9 $$PID; \
+		fi; \
+		rm -f .cascade_agent.pid; \
+		echo "Stopped"; \
+	else \
+		echo "No .cascade_agent.pid — cascade agent not running"; \
+	fi
 
 cascade_report:
 	@$(PYTHON) scripts/agent/cascade_daemon.py report

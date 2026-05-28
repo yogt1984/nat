@@ -590,6 +590,9 @@ def main():
     agent = CascadeAgent()
 
     if args.action == "start":
+        from agent.base import _write_pid_file
+        project_root = Path(__file__).resolve().parent.parent.parent
+        _write_pid_file(project_root / ".cascade_agent.pid")
         agent.run()
     elif args.action == "once":
         agent.run_cycle()
