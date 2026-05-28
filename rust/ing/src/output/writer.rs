@@ -10,7 +10,8 @@ use parquet::file::properties::WriterProperties;
 use std::fs::{self, File};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::info;
+use std::sync::atomic::{AtomicU64, Ordering};
+use tracing::{info, error};
 
 use crate::config::OutputConfig;
 use crate::features::Features;
@@ -31,6 +32,8 @@ pub struct ParquetWriter {
     last_progress_pct: usize,
     /// Algorithm feature names for extended schema
     alg_feature_names: Vec<&'static str>,
+    /// Counter for disk-full flush skips
+    disk_full_skips: AtomicU64,
 }
 
 /// Buffer for accumulating features before writing
@@ -154,6 +157,7 @@ impl ParquetWriter {
             file_opened_at: None,
             last_progress_pct: 0,
             alg_feature_names,
+            disk_full_skips: AtomicU64::new(0),
         })
     }
 
@@ -196,10 +200,40 @@ impl ParquetWriter {
         Ok(())
     }
 
+    /// Check available disk space at the data directory.
+    /// Returns available bytes, or None if the check fails.
+    fn available_disk_space(&self) -> Option<u64> {
+        use fs2::available_space;
+        available_space(&self.data_dir).ok()
+    }
+
+    /// Number of times flush was skipped due to low disk space
+    pub fn disk_full_skip_count(&self) -> u64 {
+        self.disk_full_skips.load(Ordering::Relaxed)
+    }
+
     /// Flush the buffer to disk
     fn flush_buffer(&mut self) -> Result<()> {
         if self.buffer.len() == 0 {
             return Ok(());
+        }
+
+        // Pre-flush disk space check: estimate batch size as ~8 bytes per f64 field per row
+        let estimated_bytes = (self.buffer.len() * 220 * 8) as u64; // conservative: 220 columns × 8 bytes
+        let min_required = estimated_bytes.saturating_mul(2); // 2× safety margin
+        if let Some(avail) = self.available_disk_space() {
+            if avail < min_required {
+                let skips = self.disk_full_skips.fetch_add(1, Ordering::Relaxed) + 1;
+                error!(
+                    available_bytes = avail,
+                    required_bytes = min_required,
+                    buffer_rows = self.buffer.len(),
+                    total_skips = skips,
+                    "Disk space too low — skipping flush to preserve buffer"
+                );
+                // Don't clear buffer — data stays in memory for next attempt
+                return Ok(());
+            }
         }
 
         let batch = self.buffer.to_record_batch(&self.alg_feature_names)?;
