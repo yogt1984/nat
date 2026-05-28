@@ -11,8 +11,9 @@ regime_percentile = 30
 # ── Group A: Order Flow ─────────────────────────────────────────
 
 [weighted_ofi]
-decay_lambda = 0.5          # exponential depth decay rate
+decay_lambda = 0.5          # exponential depth decay rate (default; overridden when auto_tune=true)
 ema_span = 50               # ticks for OFI momentum EMA
+auto_tune = true            # fit decay from rank IC of each level vs forward returns
 
 [trade_through]
 volume_window = 10           # ticks to accumulate volume

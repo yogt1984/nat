@@ -77,12 +77,14 @@ from .registry import register
 class WeightedOFI(MicrostructureAlgorithm):
     """Depth-decay weighted OFI with momentum and divergence."""
 
-    def __init__(self, decay_lambda: float = 0.5, ema_span: int = 50):
+    def __init__(self, decay_lambda: float = 0.5, ema_span: int = 50,
+                 auto_tune: bool = False):
         self._decay = decay_lambda
         self._ema_span = ema_span
         self._ema_alpha = 2.0 / (ema_span + 1)
         self._ema_ofi = np.nan
         self._tick_count = 0
+        self._auto_tune = auto_tune
 
     def name(self) -> str:
         return "weighted_ofi"
@@ -137,6 +139,45 @@ class WeightedOFI(MicrostructureAlgorithm):
         self._ema_ofi = np.nan
         self._tick_count = 0
 
+    @staticmethod
+    def estimate_decay(ofi_by_level: dict[int, np.ndarray],
+                       returns: np.ndarray,
+                       levels: list[int] | None = None) -> float:
+        """Estimate optimal decay λ from rank IC of each level vs forward returns.
+
+        Fits |IC(level)| ~ exp(-λ·level) via log-linear regression.
+        Returns λ clamped to [0.05, 1.0], or 0.5 on insufficient data.
+        """
+        from scipy.stats import spearmanr
+
+        if levels is None:
+            levels = [1, 5, 10]
+
+        ics: list[float] = []
+        valid_levels: list[int] = []
+        for k in levels:
+            ofi_k = ofi_by_level[k]
+            mask = np.isfinite(ofi_k) & np.isfinite(returns)
+            if mask.sum() < 100:
+                continue
+            ic, _ = spearmanr(ofi_k[mask], returns[mask])
+            if np.isfinite(ic) and abs(ic) > 1e-6:
+                ics.append(abs(ic))
+                valid_levels.append(k)
+
+        if len(valid_levels) < 2:
+            return 0.5
+
+        # log(|IC|) = -λ·k + c  →  slope = -λ
+        log_ics = np.log(np.array(ics))
+        lvl = np.array(valid_levels, dtype=float)
+        x_mean, y_mean = lvl.mean(), log_ics.mean()
+        slope = np.sum((lvl - x_mean) * (log_ics - y_mean)) / (
+            np.sum((lvl - x_mean) ** 2) + 1e-12
+        )
+        lam = max(-slope, 0.0)
+        return float(np.clip(lam, 0.05, 1.0))
+
     def run_batch(self, df: "pd.DataFrame") -> "pd.DataFrame":
         """Vectorized override."""
         import pandas as pd
@@ -145,9 +186,17 @@ class WeightedOFI(MicrostructureAlgorithm):
         l5 = df["imbalance_qty_l5"].values.astype(np.float64)
         l10 = df["imbalance_qty_l10"].values.astype(np.float64)
 
-        w1 = np.exp(-self._decay * 1)
-        w5 = np.exp(-self._decay * 5)
-        w10 = np.exp(-self._decay * 10)
+        decay = self._decay
+        if self._auto_tune and "raw_midprice" in df.columns:
+            mid = df["raw_midprice"].values.astype(np.float64)
+            fwd_ret = np.empty_like(mid)
+            fwd_ret[:-1] = mid[1:] / mid[:-1] - 1.0
+            fwd_ret[-1] = np.nan
+            decay = self.estimate_decay({1: l1, 5: l5, 10: l10}, fwd_ret)
+
+        w1 = np.exp(-decay * 1)
+        w5 = np.exp(-decay * 5)
+        w10 = np.exp(-decay * 10)
         w_sum = w1 + w5 + w10
 
         ofi = (w1 * l1 + w5 * l5 + w10 * l10) / w_sum
