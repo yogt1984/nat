@@ -98,7 +98,7 @@ async fn main() -> Result<()> {
 
         total_messages += data.message_count;
 
-        let elapsed = data.timestamps.last().unwrap().duration_since(*data.timestamps.first().unwrap());
+        let elapsed = data.timestamps.last().expect("non-empty after guard").duration_since(*data.timestamps.first().expect("non-empty after guard"));
         let freq = data.message_count as f64 / elapsed.as_secs_f64();
 
         // Calculate intervals
@@ -132,17 +132,17 @@ async fn main() -> Result<()> {
     // Find trades frequency
     let btc_trades_freq = channels.iter()
         .find(|(k, _)| k.contains("trades:BTC"))
-        .map(|(_, d)| {
-            let elapsed = d.timestamps.last().unwrap().duration_since(*d.timestamps.first().unwrap());
-            d.message_count as f64 / elapsed.as_secs_f64()
+        .and_then(|(_, d)| {
+            let elapsed = d.timestamps.last()?.duration_since(*d.timestamps.first()?);
+            Some(d.message_count as f64 / elapsed.as_secs_f64())
         })
         .unwrap_or(0.0);
 
     let book_freq = channels.iter()
         .find(|(k, _)| k.contains("l2Book:BTC"))
-        .map(|(_, d)| {
-            let elapsed = d.timestamps.last().unwrap().duration_since(*d.timestamps.first().unwrap());
-            d.message_count as f64 / elapsed.as_secs_f64()
+        .and_then(|(_, d)| {
+            let elapsed = d.timestamps.last()?.duration_since(*d.timestamps.first()?);
+            Some(d.message_count as f64 / elapsed.as_secs_f64())
         })
         .unwrap_or(0.0);
 

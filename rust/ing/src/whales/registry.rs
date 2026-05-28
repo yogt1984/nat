@@ -102,7 +102,7 @@ impl WhaleRegistry {
     /// Get top N whales by score
     pub fn get_top_whales(&self, n: usize) -> Vec<WhaleClassification> {
         let mut whales: Vec<_> = self.whales.read().values().cloned().collect();
-        whales.sort_by(|a, b| b.whale_score.partial_cmp(&a.whale_score).unwrap());
+        whales.sort_by(|a, b| b.whale_score.partial_cmp(&a.whale_score).unwrap_or(std::cmp::Ordering::Equal));
         whales.truncate(n);
         whales
     }
@@ -170,7 +170,7 @@ impl WhaleRegistry {
         }
 
         // Calculate top 10 concentration
-        positions.sort_by(|a, b| b.partial_cmp(a).unwrap());
+        positions.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
         let top10_position: f64 = positions.iter().take(10).sum();
         let concentration = if total_oi > 0.0 {
             top10_position / total_oi

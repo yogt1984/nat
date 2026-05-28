@@ -52,7 +52,8 @@ MIN_BARS_PER_DATE = 12
 P_LONG = 80
 P_SHORT = 20
 
-FEE_BPS = 7.0  # Hyperliquid round-trip (taker)
+from utils.costs import round_trip_taker_bps as _rt_bps
+FEE_BPS = _rt_bps()  # Hyperliquid round-trip (taker), from config/costs.toml
 
 LOAD_COLUMNS = [
     "timestamp_ns", "symbol", "raw_midprice",

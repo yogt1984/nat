@@ -246,7 +246,8 @@ pub fn load_h1_data(batches: &[RecordBatch]) -> Result<H1TestData> {
         let r_24h = compute_forward_returns(&prices, 864_000);
         (r_1h, r_4h, r_24h)
     } else {
-        (returns_1h.unwrap(), returns_4h.unwrap(), returns_24h.unwrap())
+        // Safe: else branch only reached when all three are Ok
+        (returns_1h?, returns_4h?, returns_24h?)
     };
 
     // Filter out NaN values

@@ -282,7 +282,7 @@ pub fn mutual_information_adaptive(x: &[f64], y: &[f64]) -> f64 {
         .map(|&b| mutual_information(x, y, b))
         .collect();
 
-    mis.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    mis.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     if mis.is_empty() {
         0.0

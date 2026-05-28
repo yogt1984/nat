@@ -54,7 +54,8 @@ REPORTS_DIR = ROOT / "reports"
 DAILY_PREFIX = "6h__"
 
 # Default: Binance VIP9 taker (matches paper_trader_generic experiment reports)
-DEFAULT_COST = CostModel(fee_bps=0.805, slippage_bps=0.0)  # 1.61 bps RT
+from utils.costs import binance_vip9_rt_bps as _vip9_bps
+DEFAULT_COST = CostModel(fee_bps=_vip9_bps() / 2, slippage_bps=0.0)  # half RT, from config/costs.toml
 
 
 # ── 3f liquidity signal (inline — avoids importing full paper_trader.py) ──

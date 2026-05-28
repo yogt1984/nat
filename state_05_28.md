@@ -2,9 +2,9 @@
 
 Progress report against the five-dimensional critique from [state_05_26.md](state_05_26.md).
 
-**Scorecard: 30 of 31 weaknesses resolved. 1 deferred (dashboard proxy).**
+**Scorecard: 31 of 31 weaknesses resolved.**
 
-All 7 prioritized action items completed. 33 commits across 4 implementation batches.
+All 7 prioritized action items completed. 40+ commits across 6 implementation batches.
 
 ---
 
@@ -19,8 +19,8 @@ Clean Rust/Python language boundary, rigorous feature vector contract, well-fact
 |---|-----------------|--------|----------|
 | 1 | **Makefile god object** (1,360 lines, 131 targets) | **RESOLVED** | Split into `make/{build,test,deploy,pipeline,alpha,experiment}.mk` (1,112 lines total). Root Makefile reduced to 169 lines of variables + `include make/*.mk`. Commit `2e8af10`. |
 | 2 | **Config sprawl** (fee rates duplicated across 3 configs) | **RESOLVED** | Created `config/costs.toml` as single source of truth for fees, slippage, and cost parameters. Other configs reference it. Commit `831ce58`. |
-| 3 | **ing crate monolith** (7 binaries, 15+ modules) | **PARTIALLY RESOLVED** | Extracted `ing-types` workspace crate (leaf types: ws messages + ring_buffer). Workspace now 3 members: `ing-types`, `ing`, `api`. Full `ing-features` extraction deferred — deep coupling between features/, state/, ws/, ml/. Commit `ea888e8`. |
-| 4 | **Dashboard fragmentation** (4 HTTP servers, no proxy) | **OPEN** | Deferred as low priority. Single-user dev environment; multi-port works fine. |
+| 3 | **ing crate monolith** (7 binaries, 15+ modules) | **RESOLVED** | Full 3-crate extraction: `ing-types` (shared data types) → `ing-features` (26 feature files, 14.8K LOC) → `ing` (binary). Workspace now 4 members. `ing/src/features/mod.rs` reduced to thin re-export layer. Commits `ea888e8`, `295d471`. |
+| 4 | **Dashboard fragmentation** (4 HTTP servers, no proxy) | **RESOLVED** | `config/Caddyfile` unifies all services behind `:80` — `/api/*` and `/ws/*` → `:3000`, `/dashboard/*` → `:8080`, `/pipeline/*` → `:8050`, `/agent/*` → `:8060`, fallback → `:3001`. Commit `80be779`. |
 | 5 | **126 `sys.path.insert` hacks** | **RESOLVED** | Removed 132 occurrences from 125 files. Added proper `pyproject.toml` packaging with `pip install -e scripts/`. 5 remain in test conftest (intentional fallback) and code_synth. Commit `d06f375`. |
 | 6 | **No disk-full handling** in ParquetWriter | **RESOLVED** | Pre-flush disk space check: estimates batch size (220 cols x 8 bytes), requires 2x safety margin, skips flush and retains buffer if disk low. `disk_full_skips` metric counter. Commit `36b6e7c`. |
 
@@ -64,13 +64,19 @@ The original estimate of 30-50% live underperformance vs. backtest was driven pr
 **Unchanged at Tier 1:** `jump_detector`, `optimal_entry`, `switching_ou`.
 **Unchanged at Tier 2:** `convolver`.
 
+**Promoted from Tier 3 → Tier 2 (grounded post-remediation):**
+- `spread_decomp` — causal realized spread using previous emission mid-price (Huang & Stoll 1997). Commit `3c35bcb`.
+- `surprise_signal` — transition probability via `erf(|z|/sqrt(2))` (standard normal CDF), no free parameters. Commit `886fc1d`.
+- `3f_liquidity` — rank IC-weighted composite from training forward returns, replaces ad-hoc 1/3 weights. Commit `886fc1d`.
+- `oi_divergence` — z-score normalized divergence replaces magic scaling constants. Commit `3c35bcb`.
+
 ### Updated Tier Summary
 
 | Tier | Count | Algorithms |
 |------|-------|------------|
 | 1 — Theoretically grounded | 3 | jump_detector, optimal_entry, switching_ou |
-| 2 — Novel/adequate | 7 | convolver, kalman_imbalance, hawkes_intensity, funding_reversion, weighted_ofi, entropy_momentum, cascade_probability |
-| 3 — Shallow implementation | 4 | spread_decomp, surprise_signal, 3f_liquidity, oi_divergence |
+| 2 — Novel/adequate | 11 | convolver, kalman_imbalance, hawkes_intensity, funding_reversion, weighted_ofi, entropy_momentum, cascade_probability, spread_decomp, surprise_signal, 3f_liquidity, oi_divergence |
+| 3 — Shallow implementation | 0 | — |
 | 4 — Broken | 0 | (online_ridge and multi_level_imb deleted) |
 
 ### Universal Gap — Closed
@@ -111,7 +117,7 @@ Production-grade Rust ingestor, 350+ agent tests, structured JSON logging, Docke
 | 1 | **126 sys.path hacks, no packaging** | **RESOLVED** | See Architecture item 5. `pyproject.toml` with `pip install -e scripts/`. |
 | 2 | **No rate limiting on Redis publishes** | **RESOLVED** | Per-symbol rate limiting via `HashMap<String, Instant>`. Default 500ms interval, configurable via `publish_interval_ms` in `config/ing.toml`. Always updates cache; rate-limits Pub/Sub only. Commit `a434a37`. |
 | 3 | **No alerting on process death beyond Telegram** | **RESOLVED** | `AlertLogger` appends every alert as JSON to `data/alerts/alerts.jsonl` (atomic O_APPEND) before dispatching to Telegram. File logging works even if Telegram credentials are missing. Commit `95b0063`. |
-| 4 | **`pkill -f` can kill unrelated processes** | **RESOLVED** | Main ingestor uses PID file (`.ing.pid`). `make run` writes `$!` after start, `make stop` reads PID and sends SIGTERM. Commit `d65da3a`. |
+| 4 | **`pkill -f` can kill unrelated processes** | **RESOLVED** | All processes use PID files: Rust ingestor (`.ing.pid`), Python daemons (`.{type}_agent.pid` via `_write_pid_file()` in `base.py`), discovery (`.discovery_agent.pid`), cascade (`.cascade_agent.pid`). `make/deploy.mk` stop targets read PID + SIGTERM. Commits `d65da3a`, `640a28d`. |
 | 5 | **`shell=True` in subprocess calls** | **RESOLVED** | `run_experiment.py` converted to list-form subprocess calls. One `shell=True` remains for tmux commands requiring shell quoting/pipes, with explicit justification comment. Commit `66876b9`. |
 | 6 | **CI skips IT engine tests** | **RESOLVED** | `test_it_estimators.py` is no longer in the CI ignore list. IT engine tests run on every push. |
 | 7 | **Unpinned `>=` constraints** | **RESOLVED** | `requirements.lock` with pinned versions. CI installs from lockfile. Commit `e78eb84`. |
@@ -137,14 +143,10 @@ The original critique listed 7 prioritized action items. All resolved:
 
 ## 7. Remaining Work
 
-Two items remain from the original critique scope:
+All 31 original critique items are now resolved. Two new gaps were identified during the gap audit:
 
-1. **Dashboard reverse proxy** (low priority) — 4 HTTP servers on separate ports. A Caddyfile for unified routing (:80 → :8050/:8060/:3000) would clean this up but is not blocking. Single-user dev environment.
+### New Gaps (not in original critique)
 
-2. **Full ing-features crate extraction** — `ing-types` is done, but extracting `features/` (13.6K LOC, 26 files) into its own crate requires untangling deep coupling with `state/`, `ws/`, `ml/`, and `config/`. Dedicated session needed.
+1. **Rust `unwrap()` in production code** (HIGH) — 22 `.unwrap()` calls across 11 non-test files. Highest risk: `hypothesis/data_loader.rs` (5 calls on file I/O), `positions/snapshot.rs` (liquidation calc), `whales/metrics.rs` (NaN in sort). These can panic on malformed data or missing files.
 
-### New Weaknesses Surfaced During Remediation
-
-- **Tier 3 algorithms remain shallow**: `spread_decomp` (causality bug from upstream), `3f_liquidity` (ad-hoc combination weights), `oi_divergence` (magic scaling constants), `surprise_signal` (no theoretical grounding for ROC threshold). These work empirically but lack the rigor of Tier 1-2.
-- **Python daemon process management**: Agent, discovery, and cascade daemons still use `pkill -f` instead of PID files. Lower risk than the main ingestor (these are Python, not Rust), but inconsistent.
-- **Config duplication not fully eliminated**: `costs.toml` is the authority, but downstream configs still carry their own copies of fee parameters for backward compatibility rather than referencing `costs.toml` directly.
+2. **Hardcoded fees in alpha scripts** (MEDIUM) — `costs.toml` is the authority, but 4 alpha scripts still embed literal fee values instead of loading from it: `screener.py` (3.5 bps), `paper_trader.py` (7.0 bps), `paper_trader_surprise.py` (1.61 bps), `paper_trader_daily.py` (0.805 bps). Creates drift risk if fees change.
