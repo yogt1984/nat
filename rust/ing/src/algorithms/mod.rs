@@ -8,7 +8,6 @@
 
 pub mod regime_gated;
 pub mod kalman_imbalance;
-pub mod multi_level_imb;
 
 use crate::features::Features;
 
@@ -55,7 +54,6 @@ pub fn create_algorithms(enabled: &[String]) -> Vec<Box<dyn MicrostructureAlgori
         match name.as_str() {
             "regime_gated" => algs.push(Box::new(regime_gated::RegimeGated::new())),
             "kalman_imbalance" => algs.push(Box::new(kalman_imbalance::KalmanImbalance::new())),
-            "multi_level_imb" => algs.push(Box::new(multi_level_imb::MultiLevelImbalance::new())),
             other => tracing::warn!("Unknown algorithm '{}', skipping", other),
         }
     }
@@ -89,9 +87,8 @@ mod tests {
         let algs = create_algorithms(&[
             "regime_gated".into(),
             "kalman_imbalance".into(),
-            "multi_level_imb".into(),
         ]);
-        assert_eq!(algs.len(), 3);
+        assert_eq!(algs.len(), 2);
     }
 
     #[test]
@@ -105,10 +102,9 @@ mod tests {
         let algs = create_algorithms(&[
             "regime_gated".into(),
             "kalman_imbalance".into(),
-            "multi_level_imb".into(),
         ]);
-        // regime_gated: 3, kalman: 4, multi_level: 3
-        assert_eq!(total_alg_feature_count(&algs), 10);
+        // regime_gated: 3, kalman: 4
+        assert_eq!(total_alg_feature_count(&algs), 7);
     }
 
     #[test]
@@ -116,7 +112,6 @@ mod tests {
         let algs = create_algorithms(&[
             "regime_gated".into(),
             "kalman_imbalance".into(),
-            "multi_level_imb".into(),
         ]);
         let names = all_alg_feature_names(&algs);
         let mut seen = std::collections::HashSet::new();
@@ -130,11 +125,10 @@ mod tests {
         let mut algs = create_algorithms(&[
             "regime_gated".into(),
             "kalman_imbalance".into(),
-            "multi_level_imb".into(),
         ]);
         let features = Features::default();
         let values = run_all(&mut algs, &features);
-        assert_eq!(values.len(), 10);
+        assert_eq!(values.len(), 7);
         assert!(values.iter().all(|v| v.is_nan()), "Dummy impls should return NaN");
     }
 }

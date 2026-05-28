@@ -108,8 +108,7 @@ All algorithms below are net negative in aggregate across the OOS window.
 | 9 | propagator | -4,118 | -2.4 | -1.2 | -3.9 | `alg_transient_impact` |
 | 10 | hawkes_intensity | -5,443 | +0.8 | -2.6 | -4.3 | `alg_bid_ask_hawkes_imbalance` |
 | 11 | trade_through | -5,739 | -5.1 | -4.2 | +0.2 | `alg_trade_through_imbalance` |
-| 12 | multi_level_imb | -5,810 | -5.4 | -1.5 | -1.9 | `alg_composite_imbalance` |
-| 13 | weighted_ofi | -6,183 | -4.8 | -0.6 | -3.6 | `alg_weighted_ofi` |
+| 12 | weighted_ofi | -6,183 | -4.8 | -0.6 | -3.6 | `alg_weighted_ofi` |
 | 14 | switching_ou | -6,230 | -3.5 | +0.7 | -6.0 | `alg_switching_ou_state` |
 | 15 | vpin_regime | -7,331 | -4.7 | -1.7 | -3.5 | `alg_vpin_gated_imbalance` |
 | 16 | kalman_imbalance | -7,517 | -2.4 | -0.0 | -7.2 | `alg_kalman_signal_strength` |
