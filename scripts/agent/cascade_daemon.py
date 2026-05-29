@@ -158,35 +158,21 @@ class CascadeRunner:
 
     def _load_data(self, symbol: str = "BTC"):
         """Load latest feature data with heatmap columns."""
-        import numpy as np
-        import pandas as pd
+        from data.features import load_features
 
-        data_root = ROOT / "data" / "features"
-        if not data_root.exists():
+        df = load_features(
+            symbols=[symbol] if symbol else None,
+            columns=list(self.HEATMAP_FEATURES) + ["timestamp_ns", "symbol", "raw_midprice"],
+            validate=False,
+        )
+        if df.empty:
             return None
 
-        dates = sorted(d.name for d in data_root.iterdir() if d.is_dir())
-        if not dates:
-            return None
-
-        # Try loading from most recent dates
-        frames = []
-        for date in dates[-3:]:
-            parquet_dir = data_root / date
-            parquet_files = sorted(parquet_dir.glob("*.parquet"))
-            for pf in parquet_files:
-                try:
-                    df = pd.read_parquet(pf)
-                    if symbol:
-                        df = df[df["symbol"] == symbol] if "symbol" in df.columns else df
-                    frames.append(df)
-                except Exception:
-                    continue
-
-        if not frames:
-            return None
-
-        df = pd.concat(frames, ignore_index=True)
+        # Keep only last ~3 days of data (matching previous behavior)
+        if "timestamp_ns" in df.columns and len(df) > 0:
+            ts = df["timestamp_ns"].values
+            cutoff = ts[-1] - 3 * 86400 * 1_000_000_000
+            df = df[ts >= cutoff].reset_index(drop=True)
 
         # Check heatmap columns exist
         missing = [c for c in self.HEATMAP_FEATURES if c not in df.columns]

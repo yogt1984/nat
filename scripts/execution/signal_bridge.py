@@ -36,7 +36,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pyarrow.parquet as pq
+from data.features import load_features
 
 
 from alpha.deployer import (
@@ -118,27 +118,14 @@ class CycleLog:
 # ── Data loading (same as paper trader) ──────────────────────────────────
 
 def load_date(data_dir: Path, date_str: str, symbol: str) -> pd.DataFrame | None:
-    date_path = data_dir / date_str
-    if not date_path.is_dir():
-        return None
-    files = sorted(f for f in date_path.iterdir() if f.suffix == ".parquet")
-    if not files:
-        return None
-    dfs = []
-    for f in files:
-        try:
-            tbl = pq.read_table(str(f))
-            df = tbl.to_pandas()
-            cols = [c for c in LOAD_COLUMNS if c in df.columns]
-            df = df[cols]
-            df = df[df["symbol"] == symbol].copy() if "symbol" in df.columns else df
-            if len(df) > 0:
-                dfs.append(df)
-        except Exception:
-            continue
-    if not dfs:
-        return None
-    return pd.concat(dfs, ignore_index=True).sort_values("timestamp_ns").reset_index(drop=True)
+    df = load_features(
+        symbols=[symbol],
+        date_range=(date_str, date_str),
+        columns=LOAD_COLUMNS,
+        data_dir=data_dir,
+        validate=False,
+    )
+    return df if not df.empty else None
 
 
 def aggregate_to_bars(ticks: pd.DataFrame) -> pd.DataFrame:

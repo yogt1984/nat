@@ -233,7 +233,7 @@ def load_parquet(
                 columns=columns,
                 filters=filters if filters else None,
             )
-        except Exception as e:
+        except (pa.ArrowInvalid, pa.ArrowIOError, OSError) as e:
             # Skip corrupted files but warn
             import warnings
             warnings.warn(f"Skipping {fpath.name}: {e}")
