@@ -451,9 +451,9 @@ def run_pipeline(
                 return_vol = float(np.nanstd(returns))
             else:
                 return_vol = 0.001
-        except Exception:
+        except (KeyError, ValueError, TypeError, OSError) as exc:
             return_vol = 0.001
-            log.warning("Could not compute return_vol from data, using default 0.001")
+            log.warning("Could not compute return_vol from data, using default 0.001: %s", exc)
 
         position, pos_result = run_position_sizing(
             signal=signal,
@@ -527,7 +527,7 @@ def run_pipeline(
             )
             bars = aggregate_bars(df_pd, timeframe=pipe_cfg["timeframe"])
             df_pl = pl.from_pandas(bars) if not isinstance(bars, pl.DataFrame) else bars
-        except Exception as e:
+        except (ImportError, OSError, KeyError, ValueError) as e:
             log.error("Failed to load data for validation: %s", e)
             ps.transition(Phase.ERROR, f"Data load failed: {e}")
             return

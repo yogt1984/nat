@@ -72,7 +72,7 @@ def poll_system_health() -> dict:
             health["ingestor"] = ("OK", f"PID {pids[0]}")
         else:
             health["ingestor"] = ("DOWN", "process not found")
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
         health["ingestor"] = ("UNKNOWN", "pgrep failed")
 
     # Data freshness
@@ -92,7 +92,7 @@ def poll_system_health() -> dict:
                 health["data"] = ("WARN", f"{len(dates)} days, no parquets today")
         else:
             health["data"] = ("DOWN", "no data directories")
-    except Exception as e:
+    except OSError as e:
         health["data"] = ("ERROR", str(e)[:60])
 
     # Redis
@@ -104,15 +104,16 @@ def poll_system_health() -> dict:
         health["redis"] = ("OK", f"{len(keys)} feature keys")
     except ImportError:
         health["redis"] = ("N/A", "redis-py not installed")
-    except Exception:
+    except (ConnectionError, OSError, TimeoutError):
         health["redis"] = ("DOWN", "connection refused")
 
     # API server
     try:
         import urllib.request
+        import urllib.error
         urllib.request.urlopen("http://localhost:3000/health", timeout=2)
         health["api"] = ("OK", "port 3000")
-    except Exception:
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError):
         health["api"] = ("DOWN", "port 3000 not responding")
 
     # Agent processes
@@ -127,7 +128,7 @@ def poll_system_health() -> dict:
                 health[f"agent_{short}"] = ("RUNNING", f"PID {result.stdout.strip().split()[0]}")
             else:
                 health[f"agent_{short}"] = ("OFF", "not running")
-        except Exception:
+        except (subprocess.SubprocessError, OSError):
             health[f"agent_{short}"] = ("UNKNOWN", "")
 
     return health
@@ -153,7 +154,7 @@ def poll_agent_data() -> dict:
             "ORDER BY created_at DESC LIMIT 10"
         ).fetchall()
         data["cycles"] = [json.loads(r["payload"]) for r in rows]
-    except Exception:
+    except (sqlite3.Error, json.JSONDecodeError, KeyError):
         data["cycles"] = []
 
     # Registry
@@ -170,7 +171,7 @@ def poll_agent_data() -> dict:
                         pass
             signals.append(d)
         data["registry"] = signals
-    except Exception:
+    except (sqlite3.Error, KeyError):
         data["registry"] = []
 
     # Generator stats
@@ -188,7 +189,7 @@ def poll_agent_data() -> dict:
                 "weight": (r["successes"] + 1) / (r["attempts"] + 2),
             }
         data["gen_stats"] = stats
-    except Exception:
+    except (sqlite3.Error, KeyError):
         data["gen_stats"] = {}
 
     # Failure breakdown
@@ -199,7 +200,7 @@ def poll_agent_data() -> dict:
             "GROUP BY failure_reason ORDER BY cnt DESC LIMIT 8"
         ).fetchall()
         data["failures"] = [(r["failure_reason"], r["cnt"]) for r in rows]
-    except Exception:
+    except (sqlite3.Error, KeyError):
         data["failures"] = []
 
     # Total counts
@@ -210,7 +211,7 @@ def poll_agent_data() -> dict:
         ).fetchone()["c"]
         registered = conn.execute("SELECT COUNT(*) as c FROM registry").fetchone()["c"]
         data["totals"] = {"total": total, "failed": failed, "registered": registered}
-    except Exception:
+    except (sqlite3.Error, KeyError):
         data["totals"] = {"total": 0, "failed": 0, "registered": 0}
 
     conn.close()
@@ -230,7 +231,7 @@ def poll_features() -> dict:
             if raw:
                 features[sym] = json.loads(raw)
         return features
-    except Exception:
+    except (ImportError, ConnectionError, OSError, TimeoutError, json.JSONDecodeError):
         return {}
 
 
@@ -502,7 +503,7 @@ def render_features_tab() -> list:
             plt.plotsize(76, 12)
             chart_str = plt.build()
             parts.append(Panel(chart_str, title="PnL Chart", border_style="dim green"))
-        except Exception:
+        except (ImportError, ValueError, AttributeError):
             pass
 
     return parts
@@ -531,7 +532,7 @@ def _key_listener():
             elif ch in ("q", "\x03"):  # q or Ctrl+C
                 _shutdown = True
                 break
-    except Exception:
+    except OSError:
         pass
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)

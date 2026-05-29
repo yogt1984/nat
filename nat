@@ -155,7 +155,7 @@ def cmd_stop(args):
     pid = _pid()
     if pid:
         os.kill(pid, sig.SIGTERM)
-        time.sleep(2)
+        time.sleep(8)  # allow graceful shutdown (flush Parquet, close WS)
         if _pid():
             os.kill(pid, sig.SIGKILL)
             time.sleep(1)

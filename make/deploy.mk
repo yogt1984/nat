@@ -21,7 +21,7 @@ stop:
 		if kill -0 $$PID 2>/dev/null; then \
 			echo "Stopping ingestor (PID $$PID)..."; \
 			kill $$PID; \
-			sleep 2; \
+			sleep 8; \
 			kill -0 $$PID 2>/dev/null && kill -9 $$PID; \
 		fi; \
 		rm -f .ing.pid; \
