@@ -336,30 +336,16 @@ class ITEngine:
 
     def run_offline(self, data_dir: str, dry_run: bool = False):
         """Run on saved parquet files (batch mode)."""
-        data_path = Path(data_dir)
-        parquet_files = sorted(data_path.rglob("*.parquet"))
+        from data.features import load_features
 
-        if not parquet_files:
-            log.error("No parquet files found in %s", data_dir)
+        df = load_features(
+            symbols=[self.symbol],
+            data_dir=Path(data_dir),
+            validate=False,
+        )
+        if df.empty:
+            log.error("No valid parquet data for %s in %s", self.symbol, data_dir)
             return
-
-        log.info("Loading %d parquet files from %s", len(parquet_files), data_dir)
-
-        frames = []
-        for pf in parquet_files:
-            try:
-                df = pd.read_parquet(pf)
-                frames.append(df)
-            except Exception as e:
-                log.warning("Skipping %s: %s", pf, e)
-
-        if not frames:
-            log.error("No valid parquet files loaded")
-            return
-
-        df = pd.concat(frames, ignore_index=True)
-        if "symbol" in df.columns:
-            df = df[df["symbol"] == self.symbol]
 
         log.info("Loaded %d rows for %s", len(df), self.symbol)
 

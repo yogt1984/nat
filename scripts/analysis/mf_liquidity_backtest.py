@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pyarrow.parquet as pq
+from data.features import load_features
 
 
 # ── Config ────────────────────────────────────────────────────────────────
@@ -44,34 +44,18 @@ FEE_MODELS = {
 
 def load_date(data_dir: Path, date_str: str, symbol: str) -> pd.DataFrame | None:
     """Load all parquet files for a date, filter to symbol, return tick df."""
-    date_path = data_dir / date_str
-    if not date_path.is_dir():
-        return None
-
-    files = sorted(f for f in date_path.iterdir() if f.suffix == ".parquet")
-    if not files:
-        return None
-
     want_cols = [
         "timestamp_ns", "symbol", "raw_midprice",
         "raw_spread_bps", "raw_ask_depth_5", "flow_vwap_deviation",
     ]
-    dfs = []
-    for f in files:
-        try:
-            tbl = pq.read_table(str(f))
-            df = tbl.to_pandas()
-            cols = [c for c in want_cols if c in df.columns]
-            df = df[cols]
-            df = df[df["symbol"] == symbol].copy() if "symbol" in df.columns else df
-            if len(df) > 0:
-                dfs.append(df)
-        except Exception:
-            continue
-
-    if not dfs:
-        return None
-    return pd.concat(dfs, ignore_index=True).sort_values("timestamp_ns").reset_index(drop=True)
+    df = load_features(
+        symbols=[symbol],
+        date_range=(date_str, date_str),
+        columns=want_cols,
+        data_dir=data_dir,
+        validate=False,
+    )
+    return df if not df.empty else None
 
 
 def aggregate_to_bars(ticks: pd.DataFrame) -> pd.DataFrame:
