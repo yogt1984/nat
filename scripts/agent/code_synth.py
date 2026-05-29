@@ -20,7 +20,9 @@ from __future__ import annotations
 import argparse
 import importlib
 import logging
+import os
 import re
+import resource
 import subprocess
 import sys
 import textwrap
@@ -143,6 +145,24 @@ def validate_generated_code(
     return True, ""
 
 
+def _sandbox_preexec() -> None:
+    """Set resource limits for sandboxed subprocess (LLM-generated code).
+
+    Limits: 60s CPU, 512MB memory, 32 file descriptors, 4 processes.
+    Called via preexec_fn in subprocess.run() — runs in the child before exec.
+    """
+    # CPU time (seconds) — hard kill after limit
+    resource.setrlimit(resource.RLIMIT_CPU, (60, 90))
+    # Virtual memory (512 MB soft, 1 GB hard)
+    resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 1024 * 1024 * 1024))
+    # Open file descriptors (32 soft, 64 hard)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (32, 64))
+    # Max child processes (4 soft, 8 hard) — prevents fork bombs
+    resource.setrlimit(resource.RLIMIT_NPROC, (4, 8))
+    # New process group for clean cleanup
+    os.setsid()
+
+
 def _run_import_test(filepath: Path, module_name: str, timeout_s: int) -> tuple[bool, str]:
     """Test that the module imports and registers correctly."""
     test_script = textwrap.dedent(f"""
@@ -158,13 +178,14 @@ def _run_import_test(filepath: Path, module_name: str, timeout_s: int) -> tuple[
             [sys.executable, "-c", test_script],
             capture_output=True, text=True, timeout=timeout_s,
             cwd=str(ROOT),
+            preexec_fn=_sandbox_preexec,
         )
         if result.returncode != 0:
             return False, result.stderr[-500:]
         return True, ""
     except subprocess.TimeoutExpired:
         return False, "import timed out"
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError) as e:
         return False, str(e)
 
 
@@ -213,13 +234,14 @@ def _run_smoke_test(module_name: str, timeout_s: int) -> tuple[bool, str]:
             [sys.executable, "-c", test_script],
             capture_output=True, text=True, timeout=timeout_s,
             cwd=str(ROOT),
+            preexec_fn=_sandbox_preexec,
         )
         if result.returncode != 0:
             return False, result.stderr[-500:]
         return True, ""
     except subprocess.TimeoutExpired:
         return False, "smoke test timed out"
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError) as e:
         return False, str(e)
 
 
