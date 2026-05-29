@@ -125,9 +125,16 @@ def run_algorithm_backtest(
     n_trades = int(np.sum(position_changes > 0))
     total_return = float(np.sum(net_returns_clean))
 
-    # Sharpe (annualized from 10Hz data: 864,000 bars/day)
-    from utils.metrics import sharpe_intraday, BARS_PER_DAY_10HZ
-    sharpe = sharpe_intraday(net_returns_clean, bars_per_day=BARS_PER_DAY_10HZ)
+    # Sharpe — aggregate 10Hz returns to daily, then annualize
+    from utils.metrics import sharpe_daily, BARS_PER_DAY_10HZ
+    n_bars = len(net_returns_clean)
+    n_full_days = n_bars // BARS_PER_DAY_10HZ
+    if n_full_days >= 2:
+        trimmed = net_returns_clean[:n_full_days * BARS_PER_DAY_10HZ]
+        daily_pnl = trimmed.reshape(n_full_days, BARS_PER_DAY_10HZ).sum(axis=1)
+        sharpe = sharpe_daily(daily_pnl)
+    else:
+        sharpe = 0.0
 
     # Max drawdown
     equity = np.cumsum(net_returns_clean)

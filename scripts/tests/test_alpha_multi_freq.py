@@ -200,7 +200,8 @@ class TestSharpe:
         assert _sharpe(np.zeros(100)) == 0.0
 
     def test_positive_sharpe(self):
-        pnl = np.ones(100) * 0.001 + np.random.randn(100) * 0.0001
+        np.random.seed(42)
+        pnl = np.ones(96 * 5) * 0.001 + np.random.randn(96 * 5) * 0.0001
         s = _sharpe(pnl)
         assert s > 0
 
