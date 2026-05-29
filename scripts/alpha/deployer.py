@@ -89,6 +89,31 @@ class PositionLimits:
 
 
 @dataclass
+class PortfolioConstraints:
+    """Portfolio-level risk constraint snapshot."""
+    # Leverage
+    gross_leverage: float
+    max_leverage: float
+    leverage_breached: bool
+    leverage_action: str
+    # Concentration
+    herfindahl: float
+    effective_n: float
+    min_effective_n: float
+    concentration_breached: bool
+    # Portfolio drawdown
+    equity_peak: float
+    current_equity: float
+    portfolio_dd_pct: float
+    max_portfolio_dd_pct: float
+    dd_breached: bool
+    dd_action: str
+    # Aggregate
+    any_breached: bool
+    scale_factor: float  # 1.0 if clean, max_leverage/gross_leverage if scaling
+
+
+@dataclass
 class DeploymentState:
     """Complete deployment state snapshot."""
     is_live: bool
@@ -103,6 +128,7 @@ class DeploymentState:
     monthly_pnl_pct: float
     any_kill_triggered: bool
     status: str  # "running", "halted", "killed", "not_started"
+    portfolio_constraints: Optional[PortfolioConstraints] = None
 
 
 @dataclass
@@ -194,6 +220,107 @@ def compute_position_limits(
 
 
 # ---------------------------------------------------------------------------
+# Portfolio-level risk constraints
+# ---------------------------------------------------------------------------
+
+
+def _load_portfolio_risk_config() -> dict:
+    """Load [portfolio_risk] from config/alpha.toml with defaults."""
+    defaults = {
+        "max_leverage": 3.0,
+        "min_effective_n": 1.5,
+        "max_portfolio_dd_pct": 5.0,
+        "dd_action": "halt_review",
+        "leverage_action": "scale_down",
+    }
+    config_path = ROOT / "config" / "alpha.toml"
+    if not config_path.exists():
+        return defaults
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib
+    with open(config_path, "rb") as f:
+        section = tomllib.load(f).get("portfolio_risk", {})
+    return {**defaults, **section}
+
+
+def check_portfolio_constraints(
+    positions_usd: Dict[str, float],
+    account_equity: float,
+    equity_peak: float,
+    max_leverage: float = 3.0,
+    min_effective_n: float = 1.5,
+    max_portfolio_dd_pct: float = 5.0,
+    dd_action: str = "halt_review",
+    leverage_action: str = "scale_down",
+) -> PortfolioConstraints:
+    """Evaluate portfolio-level risk constraints.
+
+    Args:
+        positions_usd: Symbol → signed position USD (positive=long, negative=short).
+        account_equity: Current account equity in USD.
+        equity_peak: Historical equity high-water mark.
+        max_leverage: Gross leverage cap.
+        min_effective_n: Minimum Herfindahl effective N (diversification).
+        max_portfolio_dd_pct: Portfolio drawdown trigger (%).
+        dd_action: Action on DD breach ("halt_24h", "halt_review", "kill").
+        leverage_action: Action on leverage breach ("scale_down", "reject").
+    """
+    # Leverage
+    gross_notional = sum(abs(v) for v in positions_usd.values())
+    gross_leverage = gross_notional / account_equity if account_equity > 0 else 0.0
+    leverage_breached = gross_leverage > max_leverage
+
+    # Concentration (Herfindahl)
+    if gross_notional > 0:
+        weights = [abs(v) / gross_notional for v in positions_usd.values()]
+        herfindahl = sum(w * w for w in weights)
+        effective_n = 1.0 / herfindahl if herfindahl > 0 else 0.0
+    else:
+        herfindahl = 0.0
+        effective_n = float(len(positions_usd)) if positions_usd else 0.0
+    concentration_breached = effective_n < min_effective_n and len(positions_usd) > 1
+
+    # Portfolio drawdown
+    current_equity = account_equity
+    equity_peak = max(equity_peak, current_equity)
+    portfolio_dd_pct = (
+        (equity_peak - current_equity) / equity_peak * 100
+        if equity_peak > 0
+        else 0.0
+    )
+    dd_breached = portfolio_dd_pct > max_portfolio_dd_pct
+
+    # Scale factor for leverage management
+    if leverage_breached and leverage_action == "scale_down":
+        scale_factor = max_leverage / gross_leverage
+    else:
+        scale_factor = 1.0
+
+    any_breached = leverage_breached or concentration_breached or dd_breached
+
+    return PortfolioConstraints(
+        gross_leverage=gross_leverage,
+        max_leverage=max_leverage,
+        leverage_breached=leverage_breached,
+        leverage_action=leverage_action,
+        herfindahl=herfindahl,
+        effective_n=effective_n,
+        min_effective_n=min_effective_n,
+        concentration_breached=concentration_breached,
+        equity_peak=equity_peak,
+        current_equity=current_equity,
+        portfolio_dd_pct=portfolio_dd_pct,
+        max_portfolio_dd_pct=max_portfolio_dd_pct,
+        dd_breached=dd_breached,
+        dd_action=dd_action,
+        any_breached=any_breached,
+        scale_factor=scale_factor,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Readiness check
 # ---------------------------------------------------------------------------
 
@@ -258,6 +385,8 @@ def check_readiness(
 def get_deployment_state(
     symbols: Optional[List[str]] = None,
     account_value_usd: float = 10000.0,
+    positions_usd: Optional[Dict[str, float]] = None,
+    equity_peak: Optional[float] = None,
 ) -> DeploymentState:
     """Load or initialize deployment state."""
     if symbols is None:
@@ -269,20 +398,44 @@ def get_deployment_state(
         weeks = saved.get("weeks_deployed", 0)
         is_live = saved.get("is_live", False)
         start_date = saved.get("start_date")
+        saved_peak = saved.get("equity_peak", account_value_usd)
     else:
         weeks = 0
         is_live = False
         start_date = None
+        saved_peak = account_value_usd
 
     scale = ScaleSchedule.get_schedule(weeks)
     kills = evaluate_kill_switches()
     limits = compute_position_limits(symbols, account_value_usd, scale.max_capital_pct)
     any_triggered = any(k.triggered for k in kills)
 
+    # Portfolio constraints (when position data is available)
+    port_constraints = None
+    if positions_usd is not None:
+        risk_cfg = _load_portfolio_risk_config()
+        peak = equity_peak if equity_peak is not None else saved_peak
+        port_constraints = check_portfolio_constraints(
+            positions_usd=positions_usd,
+            account_equity=account_value_usd,
+            equity_peak=peak,
+            **risk_cfg,
+        )
+
+    port_dd_kill = (
+        port_constraints is not None
+        and port_constraints.dd_breached
+        and port_constraints.dd_action == "kill"
+    )
+    port_halted = port_constraints is not None and port_constraints.dd_breached
+
     status = "not_started"
     if is_live:
-        status = "killed" if any(k.action == "kill" and k.triggered for k in kills) else \
-                 "halted" if any_triggered else "running"
+        status = (
+            "killed" if (any(k.action == "kill" and k.triggered for k in kills) or port_dd_kill)
+            else "halted" if (any_triggered or port_halted)
+            else "running"
+        )
 
     return DeploymentState(
         is_live=is_live,
@@ -297,14 +450,19 @@ def get_deployment_state(
         monthly_pnl_pct=0.0,
         any_kill_triggered=any_triggered,
         status=status,
+        portfolio_constraints=port_constraints,
     )
 
 
 def save_deployment_state(state: DeploymentState):
-    """Persist deployment state."""
+    """Persist deployment state (includes equity_peak for DD tracking)."""
+    data = asdict(state)
+    # Persist equity_peak at top level for easy reload
+    if state.portfolio_constraints is not None:
+        data["equity_peak"] = state.portfolio_constraints.equity_peak
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(STATE_FILE, "w") as f:
-        json.dump(asdict(state), f, indent=2, default=str)
+        json.dump(data, f, indent=2, default=str)
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +513,17 @@ def main():
     print(f"\n  Position Limits:")
     for p in state.position_limits:
         print(f"    {p.symbol}: max ${p.max_position_usd:.0f} ({p.max_notional_pct:.1f}%)")
+
+    if state.portfolio_constraints is not None:
+        pc = state.portfolio_constraints
+        print(f"\n  Portfolio Constraints:")
+        print(f"    Leverage:      {pc.gross_leverage:.2f}x / {pc.max_leverage:.1f}x "
+              f"[{'BREACH' if pc.leverage_breached else 'OK'}]")
+        print(f"    Effective N:   {pc.effective_n:.1f} / {pc.min_effective_n:.1f} "
+              f"[{'BREACH' if pc.concentration_breached else 'OK'}]")
+        print(f"    Portfolio DD:  {pc.portfolio_dd_pct:.1f}% / {pc.max_portfolio_dd_pct:.1f}% "
+              f"[{'BREACH' if pc.dd_breached else 'OK'}]")
+        print(f"    Scale Factor:  {pc.scale_factor:.2f}")
 
 
 if __name__ == "__main__":

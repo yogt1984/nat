@@ -11,9 +11,11 @@ from alpha.deployer import (
     ScaleSchedule,
     KillSwitch,
     PositionLimits,
+    PortfolioConstraints,
     DeploymentReadiness,
     evaluate_kill_switches,
     compute_position_limits,
+    check_portfolio_constraints,
     check_readiness,
 )
 
@@ -210,3 +212,100 @@ class TestCheckReadiness:
 
         assert readiness.overall_ready is False
         assert readiness.paper_sharpe_ok is False
+
+
+# ---------------------------------------------------------------------------
+# check_portfolio_constraints
+# ---------------------------------------------------------------------------
+
+
+class TestCheckPortfolioConstraints:
+    def test_no_breach(self):
+        """Normal positions, all within limits."""
+        result = check_portfolio_constraints(
+            positions_usd={"BTC": 5000, "ETH": 3000, "SOL": 2000},
+            account_equity=10000,
+            equity_peak=10000,
+        )
+        assert result.gross_leverage == pytest.approx(1.0)
+        assert not result.leverage_breached
+        assert not result.concentration_breached
+        assert not result.dd_breached
+        assert not result.any_breached
+        assert result.scale_factor == pytest.approx(1.0)
+
+    def test_leverage_breach_scale_down(self):
+        """Gross leverage exceeds 3x, scale_down mode."""
+        result = check_portfolio_constraints(
+            positions_usd={"BTC": 20000, "ETH": 15000},
+            account_equity=10000,
+            equity_peak=10000,
+            max_leverage=3.0,
+            leverage_action="scale_down",
+        )
+        assert result.gross_leverage == pytest.approx(3.5)
+        assert result.leverage_breached
+        assert result.scale_factor == pytest.approx(3.0 / 3.5)
+
+    def test_leverage_breach_reject(self):
+        """Gross leverage exceeds limit, reject mode — scale_factor stays 1.0."""
+        result = check_portfolio_constraints(
+            positions_usd={"BTC": 20000, "ETH": 15000},
+            account_equity=10000,
+            equity_peak=10000,
+            leverage_action="reject",
+        )
+        assert result.leverage_breached
+        assert result.scale_factor == pytest.approx(1.0)
+
+    def test_concentration_breach(self):
+        """One position dominates."""
+        result = check_portfolio_constraints(
+            positions_usd={"BTC": 9000, "ETH": 500, "SOL": 500},
+            account_equity=10000,
+            equity_peak=10000,
+            min_effective_n=2.0,
+        )
+        assert result.concentration_breached
+        assert result.effective_n < 2.0
+
+    def test_concentration_single_symbol_not_breached(self):
+        """Single symbol should not trigger concentration breach."""
+        result = check_portfolio_constraints(
+            positions_usd={"BTC": 5000},
+            account_equity=10000,
+            equity_peak=10000,
+            min_effective_n=2.0,
+        )
+        assert not result.concentration_breached
+
+    def test_portfolio_dd_breach(self):
+        """Equity drawdown from peak triggers circuit breaker."""
+        result = check_portfolio_constraints(
+            positions_usd={"BTC": 3000},
+            account_equity=9000,
+            equity_peak=10000,
+            max_portfolio_dd_pct=5.0,
+        )
+        assert result.portfolio_dd_pct == pytest.approx(10.0)
+        assert result.dd_breached
+
+    def test_empty_positions(self):
+        """No positions — everything clean."""
+        result = check_portfolio_constraints(
+            positions_usd={},
+            account_equity=10000,
+            equity_peak=10000,
+        )
+        assert result.gross_leverage == pytest.approx(0.0)
+        assert not result.any_breached
+
+    def test_equity_peak_updates(self):
+        """equity_peak should be max(passed_peak, current_equity)."""
+        result = check_portfolio_constraints(
+            positions_usd={"BTC": 3000},
+            account_equity=11000,
+            equity_peak=10000,
+        )
+        assert result.equity_peak == 11000.0
+        assert result.portfolio_dd_pct == pytest.approx(0.0)

@@ -104,3 +104,11 @@ g8_min_sharpe_ratio = 0.5         # paper_sharpe / backtest_sharpe
 g8_max_daily_loss_pct = 2.0
 g8_max_ic_decay_pct = 50.0
 g8_min_days = 14
+
+# ── Portfolio-Level Risk Constraints ──
+[portfolio_risk]
+max_leverage = 3.0              # sum(abs(position_usd)) / account_equity
+min_effective_n = 1.5           # 1/sum(w_i^2); 1.0 = single-name, N = equal weight
+max_portfolio_dd_pct = 5.0      # portfolio equity peak-to-trough trigger (%)
+dd_action = "halt_review"       # "halt_24h", "halt_review", or "kill"
+leverage_action = "scale_down"  # "scale_down" (pro-rata) or "reject"
