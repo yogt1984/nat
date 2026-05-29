@@ -1,7 +1,7 @@
 //! Trade buffer for maintaining rolling window of trades
 
-use std::collections::VecDeque;
 use crate::messages::WsTrade;
+use std::collections::VecDeque;
 
 /// A trade with parsed numeric values
 #[derive(Debug, Clone)]
@@ -79,7 +79,8 @@ impl TradeBuffer {
         let latest_time = self.trades.back().map(|t| t.timestamp).unwrap_or(0);
         let cutoff = latest_time.saturating_sub(seconds * 1000);
 
-        self.trades.iter()
+        self.trades
+            .iter()
             .filter(|t| t.timestamp >= cutoff)
             .collect()
     }
@@ -91,10 +92,7 @@ impl TradeBuffer {
 
     /// Total volume in the last N seconds
     pub fn volume_in_window(&self, seconds: u64) -> f64 {
-        self.trades_in_window(seconds)
-            .iter()
-            .map(|t| t.size)
-            .sum()
+        self.trades_in_window(seconds).iter().map(|t| t.size).sum()
     }
 
     /// Total buy volume in the last N seconds
@@ -124,7 +122,7 @@ impl TradeBuffer {
         if total_volume > 0.0 {
             buy_volume / total_volume
         } else {
-            0.5  // Neutral when no trades
+            0.5 // Neutral when no trades
         }
     }
 
@@ -199,7 +197,8 @@ impl TradeBuffer {
         let trades = self.trades_in_window(seconds);
         if trades.len() < 2 {
             // Need at least 2 trades to compute direction
-            return trades.iter()
+            return trades
+                .iter()
                 .map(|t| {
                     // Use is_buy as direction for single trade
                     let dir = if t.is_buy { 1i8 } else { -1i8 };
@@ -217,11 +216,19 @@ impl TradeBuffer {
                 Some(prev) if trade.price < prev => -1i8,
                 Some(_) => {
                     // Price unchanged, use aggressor side
-                    if trade.is_buy { 1i8 } else { -1i8 }
+                    if trade.is_buy {
+                        1i8
+                    } else {
+                        -1i8
+                    }
                 }
                 None => {
                     // First trade, use aggressor side
-                    if trade.is_buy { 1i8 } else { -1i8 }
+                    if trade.is_buy {
+                        1i8
+                    } else {
+                        -1i8
+                    }
                 }
             };
 
@@ -258,7 +265,8 @@ impl TradeBuffer {
         }
 
         // Compute Shannon entropy
-        let entropy: f64 = counts.iter()
+        let entropy: f64 = counts
+            .iter()
             .filter(|&&c| c > 0)
             .map(|&c| {
                 let p = c as f64 / total as f64;
@@ -295,7 +303,8 @@ impl TradeBuffer {
         }
 
         // Compute Shannon entropy weighted by volume
-        let entropy: f64 = volumes.iter()
+        let entropy: f64 = volumes
+            .iter()
             .filter(|&&v| v > 0.0)
             .map(|&v| {
                 let p = v / total;
@@ -470,7 +479,11 @@ mod tests {
 
         // For equal up/down distribution, entropy should be close to ln(2) ≈ 0.693
         let e = entropy.unwrap();
-        assert!(e > 0.5, "Entropy should be high for uniform distribution: {}", e);
+        assert!(
+            e > 0.5,
+            "Entropy should be high for uniform distribution: {}",
+            e
+        );
     }
 
     #[test]

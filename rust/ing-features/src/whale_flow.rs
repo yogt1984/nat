@@ -26,8 +26,8 @@
 //! - Is flow already priced in by the time we observe it?
 //! - Do market makers (balanced flow) dominate the signal?
 
-use std::collections::{HashMap, VecDeque};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
 
 /// Configuration for whale flow computation
 #[derive(Debug, Clone)]
@@ -211,15 +211,23 @@ impl WhaleFlowBuffer {
         }
 
         // First pass: compute all values from changes (immutable borrow)
-        let (flow_1h, flow_4h, flow_24h, total_activity, buy_ratio, directional_agreement, active_count) = {
+        let (
+            flow_1h,
+            flow_4h,
+            flow_24h,
+            total_activity,
+            buy_ratio,
+            directional_agreement,
+            active_count,
+        ) = {
             let changes_1h = self.get_recent_changes(self.config.window_1h_updates);
             let changes_4h = self.get_recent_changes(self.config.window_4h_updates);
             let changes_24h = self.get_recent_changes(self.config.window_24h_updates);
 
             // Compute net flows (excluding market makers for directional signal)
-            let flow_1h = compute_net_flow(&changes_1h, true);  // exclude MMs
-            let flow_4h = compute_net_flow(&changes_4h, true);  // exclude MMs
-            let flow_24h = compute_net_flow(&changes_24h, true);  // exclude MMs
+            let flow_1h = compute_net_flow(&changes_1h, true); // exclude MMs
+            let flow_4h = compute_net_flow(&changes_4h, true); // exclude MMs
+            let flow_24h = compute_net_flow(&changes_24h, true); // exclude MMs
 
             // Compute total activity (including market makers)
             let total_activity = compute_total_activity(&changes_1h);
@@ -228,7 +236,15 @@ impl WhaleFlowBuffer {
             let (buy_ratio, directional_agreement, active_count) =
                 compute_directional_stats(&changes_1h);
 
-            (flow_1h, flow_4h, flow_24h, total_activity, buy_ratio, directional_agreement, active_count)
+            (
+                flow_1h,
+                flow_4h,
+                flow_24h,
+                total_activity,
+                buy_ratio,
+                directional_agreement,
+                active_count,
+            )
         };
 
         // Second pass: update internal state (mutable operations)
@@ -306,7 +322,8 @@ impl WhaleFlowBuffer {
 /// Compute net flow from position changes
 /// If exclude_mm is true, excludes market makers
 fn compute_net_flow(changes: &[&WhalePositionChange], exclude_mm: bool) -> f64 {
-    changes.iter()
+    changes
+        .iter()
         .filter(|c| !exclude_mm || !c.is_market_maker)
         .map(|c| c.position_change_usd)
         .sum()
@@ -314,9 +331,7 @@ fn compute_net_flow(changes: &[&WhalePositionChange], exclude_mm: bool) -> f64 {
 
 /// Compute total activity (sum of absolute changes)
 fn compute_total_activity(changes: &[&WhalePositionChange]) -> f64 {
-    changes.iter()
-        .map(|c| c.position_change_usd.abs())
-        .sum()
+    changes.iter().map(|c| c.position_change_usd.abs()).sum()
 }
 
 /// Compute directional statistics
@@ -464,10 +479,7 @@ pub mod skeptical_tests {
     }
 
     /// Test signal timing - is it leading or lagging?
-    pub fn test_signal_timing(
-        whale_flow: &[f64],
-        returns: &[f64],
-    ) -> SignalTimingTest {
+    pub fn test_signal_timing(whale_flow: &[f64], returns: &[f64]) -> SignalTimingTest {
         let n = whale_flow.len().min(returns.len());
 
         if n < 10 {
@@ -486,14 +498,14 @@ pub mod skeptical_tests {
 
         // Lag 1: flow predicts next return
         let corr_lag_1 = if n > 1 {
-            pearson_correlation(&whale_flow[..(n-1)], &returns[1..n])
+            pearson_correlation(&whale_flow[..(n - 1)], &returns[1..n])
         } else {
             0.0
         };
 
         // Lag 4: flow predicts return 4 periods ahead
         let corr_lag_4 = if n > 4 {
-            pearson_correlation(&whale_flow[..(n-4)], &returns[4..n])
+            pearson_correlation(&whale_flow[..(n - 4)], &returns[4..n])
         } else {
             0.0
         };
@@ -521,7 +533,8 @@ pub mod skeptical_tests {
         future_returns: &[f64],
         mm_flow_fraction: f64,
     ) -> MarketMakerImpactTest {
-        let n = flow_with_mm.len()
+        let n = flow_with_mm
+            .len()
             .min(flow_without_mm.len())
             .min(future_returns.len());
 
@@ -606,10 +619,8 @@ pub mod skeptical_tests {
     /// Compute ranks for a slice
     fn compute_ranks(values: &[f64]) -> Vec<f64> {
         let n = values.len();
-        let mut indexed: Vec<(usize, f64)> = values.iter()
-            .enumerate()
-            .map(|(i, &v)| (i, v))
-            .collect();
+        let mut indexed: Vec<(usize, f64)> =
+            values.iter().enumerate().map(|(i, &v)| (i, v)).collect();
 
         indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
@@ -704,12 +715,20 @@ mod tests {
 
         let features = buffer.compute();
 
-        assert!(features.whale_net_flow_1h > 0.0,
-            "All buying should produce positive flow, got {}", features.whale_net_flow_1h);
-        assert_eq!(features.whale_net_flow_1h, 1_000_000.0,
-            "Flow should be sum of changes");
-        assert!(features.whale_buy_ratio > 0.9,
-            "Buy ratio should be near 1.0, got {}", features.whale_buy_ratio);
+        assert!(
+            features.whale_net_flow_1h > 0.0,
+            "All buying should produce positive flow, got {}",
+            features.whale_net_flow_1h
+        );
+        assert_eq!(
+            features.whale_net_flow_1h, 1_000_000.0,
+            "Flow should be sum of changes"
+        );
+        assert!(
+            features.whale_buy_ratio > 0.9,
+            "Buy ratio should be near 1.0, got {}",
+            features.whale_buy_ratio
+        );
     }
 
     #[test]
@@ -730,12 +749,21 @@ mod tests {
 
         let features = buffer.compute();
 
-        assert!(features.whale_net_flow_1h < 0.0,
-            "All selling should produce negative flow, got {}", features.whale_net_flow_1h);
-        assert!(features.whale_buy_ratio < 0.1,
-            "Buy ratio should be near 0.0, got {}", features.whale_buy_ratio);
-        assert!(features.whale_directional_agreement < -0.9,
-            "Directional agreement should be negative, got {}", features.whale_directional_agreement);
+        assert!(
+            features.whale_net_flow_1h < 0.0,
+            "All selling should produce negative flow, got {}",
+            features.whale_net_flow_1h
+        );
+        assert!(
+            features.whale_buy_ratio < 0.1,
+            "Buy ratio should be near 0.0, got {}",
+            features.whale_buy_ratio
+        );
+        assert!(
+            features.whale_directional_agreement < -0.9,
+            "Directional agreement should be negative, got {}",
+            features.whale_directional_agreement
+        );
     }
 
     #[test]
@@ -757,10 +785,16 @@ mod tests {
 
         let features = buffer.compute();
 
-        assert!(features.whale_net_flow_1h.abs() < 1e-6,
-            "Balanced flow should be near zero, got {}", features.whale_net_flow_1h);
-        assert!((features.whale_buy_ratio - 0.5).abs() < 0.1,
-            "Buy ratio should be near 0.5, got {}", features.whale_buy_ratio);
+        assert!(
+            features.whale_net_flow_1h.abs() < 1e-6,
+            "Balanced flow should be near zero, got {}",
+            features.whale_net_flow_1h
+        );
+        assert!(
+            (features.whale_buy_ratio - 0.5).abs() < 0.1,
+            "Buy ratio should be near 0.5, got {}",
+            features.whale_buy_ratio
+        );
     }
 
     // ========================================================================
@@ -770,7 +804,7 @@ mod tests {
     #[test]
     fn test_market_maker_exclusion() {
         let config = WhaleFlowConfig {
-            window_1h_updates: 20,  // Large enough to include all changes
+            window_1h_updates: 20, // Large enough to include all changes
             window_4h_updates: 40,
             window_24h_updates: 100,
             normalization_window: 20,
@@ -796,13 +830,19 @@ mod tests {
 
         // Net flow should only reflect directional whales (MM excluded)
         // 5 whales * 100k = 500k
-        assert!((features.whale_net_flow_1h - 500_000.0).abs() < 1e-6,
-            "Net flow should exclude MM, got {}", features.whale_net_flow_1h);
+        assert!(
+            (features.whale_net_flow_1h - 500_000.0).abs() < 1e-6,
+            "Net flow should exclude MM, got {}",
+            features.whale_net_flow_1h
+        );
 
         // Total activity should include MM (all absolute changes)
         // 5 * 100k + 5 * 500k + 5 * 500k = 500k + 2.5M + 2.5M = 5.5M
-        assert!(features.whale_total_activity > 5_000_000.0,
-            "Total activity should include MM, got {}", features.whale_total_activity);
+        assert!(
+            features.whale_total_activity > 5_000_000.0,
+            "Total activity should include MM, got {}",
+            features.whale_total_activity
+        );
     }
 
     // ========================================================================
@@ -813,7 +853,7 @@ mod tests {
     fn test_flow_momentum_accelerating() {
         let config = WhaleFlowConfig {
             window_1h_updates: 5,
-            window_4h_updates: 25,  // Larger window to include all old + some new
+            window_4h_updates: 25, // Larger window to include all old + some new
             window_24h_updates: 100,
             normalization_window: 20,
             min_whale_count: 1,
@@ -827,7 +867,11 @@ mod tests {
 
         // Add recent strong buying (5 changes of large amounts)
         for i in 0..5 {
-            buffer.add_change(make_change(&format!("whale_recent_{}", i), 200_000.0, false));
+            buffer.add_change(make_change(
+                &format!("whale_recent_{}", i),
+                200_000.0,
+                false,
+            ));
         }
 
         let features = buffer.compute();
@@ -843,12 +887,18 @@ mod tests {
 
         // Actually momentum = flow_1h - flow_4h = 1M - 1.2M = -0.2M (negative)
         // This is because 4h includes 1h. Let's check flow_intensity instead
-        assert!(features.whale_flow_intensity > 0.0,
-            "Flow intensity should be positive, got {}", features.whale_flow_intensity);
+        assert!(
+            features.whale_flow_intensity > 0.0,
+            "Flow intensity should be positive, got {}",
+            features.whale_flow_intensity
+        );
 
         // The 1h flow should be strong
-        assert!(features.whale_net_flow_1h > 500_000.0,
-            "Recent flow should be strong, got {}", features.whale_net_flow_1h);
+        assert!(
+            features.whale_net_flow_1h > 500_000.0,
+            "Recent flow should be strong, got {}",
+            features.whale_net_flow_1h
+        );
     }
 
     // ========================================================================
@@ -881,8 +931,11 @@ mod tests {
         // Need to rebuild history after clear
         // This test verifies the intensity calculation works
         let features = buffer.compute();
-        assert!(features.whale_flow_intensity >= 0.0,
-            "Flow intensity should be non-negative, got {}", features.whale_flow_intensity);
+        assert!(
+            features.whale_flow_intensity >= 0.0,
+            "Flow intensity should be non-negative, got {}",
+            features.whale_flow_intensity
+        );
     }
 
     // ========================================================================
@@ -913,13 +966,19 @@ mod tests {
         let features = buffer.compute();
 
         // 1h should be selling, 24h should be net positive
-        assert!(features.whale_net_flow_1h < 0.0,
-            "1h flow should be negative, got {}", features.whale_net_flow_1h);
+        assert!(
+            features.whale_net_flow_1h < 0.0,
+            "1h flow should be negative, got {}",
+            features.whale_net_flow_1h
+        );
 
         // 24h includes both old buying and new selling
         // Old: 30 * 50k = 1.5M, New: 10 * -100k = -1M, Net = 500k
-        assert!(features.whale_net_flow_24h > 0.0,
-            "24h flow should be positive, got {}", features.whale_net_flow_24h);
+        assert!(
+            features.whale_net_flow_24h > 0.0,
+            "24h flow should be positive, got {}",
+            features.whale_net_flow_24h
+        );
     }
 
     // ========================================================================
@@ -949,9 +1008,7 @@ mod tests {
 
         // Create synthetic data where flow predicts returns
         let n: usize = 200;
-        let whale_flow: Vec<f64> = (0..n)
-            .map(|i| ((i as f64 * 0.1).sin() * 100.0))
-            .collect();
+        let whale_flow: Vec<f64> = (0..n).map(|i| ((i as f64 * 0.1).sin() * 100.0)).collect();
 
         // Returns follow flow with lag
         let future_returns: Vec<f64> = (0..n)
@@ -963,8 +1020,11 @@ mod tests {
 
         let result = test_flow_predicts_returns(&whale_flow, &future_returns, 4);
 
-        assert!(result.sample_size > 100,
-            "Should have enough samples, got {}", result.sample_size);
+        assert!(
+            result.sample_size > 100,
+            "Should have enough samples, got {}",
+            result.sample_size
+        );
         // Note: synthetic data may or may not produce significant results
         // The test verifies the function runs correctly
     }
@@ -974,12 +1034,8 @@ mod tests {
         use skeptical_tests::test_signal_timing;
 
         let n = 100;
-        let whale_flow: Vec<f64> = (0..n)
-            .map(|i| (i as f64 * 0.1).sin())
-            .collect();
-        let returns: Vec<f64> = (0..n)
-            .map(|i| (i as f64 * 0.1 + 0.5).sin() * 0.5)
-            .collect();
+        let whale_flow: Vec<f64> = (0..n).map(|i| (i as f64 * 0.1).sin()).collect();
+        let returns: Vec<f64> = (0..n).map(|i| (i as f64 * 0.1 + 0.5).sin() * 0.5).collect();
 
         let result = test_signal_timing(&whale_flow, &returns);
 
@@ -997,12 +1053,8 @@ mod tests {
             .map(|i| (i as f64 * 0.1).sin() + (i as f64 * 0.5).cos() * 2.0)
             .collect();
         // Flow without MM is cleaner
-        let flow_without_mm: Vec<f64> = (0..n)
-            .map(|i| (i as f64 * 0.1).sin())
-            .collect();
-        let returns: Vec<f64> = (0..n)
-            .map(|i| (i as f64 * 0.1 + 0.2).sin())
-            .collect();
+        let flow_without_mm: Vec<f64> = (0..n).map(|i| (i as f64 * 0.1).sin()).collect();
+        let returns: Vec<f64> = (0..n).map(|i| (i as f64 * 0.1 + 0.2).sin()).collect();
 
         let result = test_market_maker_impact(
             &flow_with_mm,
@@ -1041,11 +1093,17 @@ mod tests {
         let features = buffer.compute();
 
         // Buy ratio should be 7/10 = 0.7
-        assert!((features.whale_buy_ratio - 0.7).abs() < 0.01,
-            "Buy ratio should be 0.7, got {}", features.whale_buy_ratio);
+        assert!(
+            (features.whale_buy_ratio - 0.7).abs() < 0.01,
+            "Buy ratio should be 0.7, got {}",
+            features.whale_buy_ratio
+        );
 
         // Directional agreement should be (7-3)/10 = 0.4
-        assert!((features.whale_directional_agreement - 0.4).abs() < 0.01,
-            "Directional agreement should be 0.4, got {}", features.whale_directional_agreement);
+        assert!(
+            (features.whale_directional_agreement - 0.4).abs() < 0.01,
+            "Directional agreement should be 0.4, got {}",
+            features.whale_directional_agreement
+        );
     }
 }

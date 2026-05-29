@@ -4,8 +4,8 @@
 //! Fed by the main ingestor at minute intervals.
 
 use super::{
-    AbsorptionComputer, ChurnComputer, DivergenceComputer, RangeComputer, RegimeFeatures,
-    compute_accumulation_score, compute_distribution_score,
+    compute_accumulation_score, compute_distribution_score, AbsorptionComputer, ChurnComputer,
+    DivergenceComputer, RangeComputer, RegimeFeatures,
 };
 
 /// Configuration for regime feature computation.
@@ -63,7 +63,11 @@ impl RegimeBuffer {
 
         Self {
             absorption: AbsorptionComputer::new(max_window, config.history_size),
-            divergence: DivergenceComputer::new(max_window, config.history_size, config.lambda_window),
+            divergence: DivergenceComputer::new(
+                max_window,
+                config.history_size,
+                config.lambda_window,
+            ),
             churn: ChurnComputer::new(max_window, config.history_size),
             range: RangeComputer::new(max_window),
             config,
@@ -97,29 +101,55 @@ impl RegimeBuffer {
         let range_windows = &self.config.range_windows;
 
         // Absorption at multiple windows
-        let absorption_1h = self.absorption.compute(windows.get(0).copied().unwrap_or(60));
-        let absorption_4h = self.absorption.compute(windows.get(1).copied().unwrap_or(240));
-        let absorption_24h = self.absorption.compute(windows.get(2).copied().unwrap_or(1440));
-        let absorption_zscore = self.absorption.compute_zscore(windows.get(2).copied().unwrap_or(1440));
+        let absorption_1h = self
+            .absorption
+            .compute(windows.first().copied().unwrap_or(60));
+        let absorption_4h = self
+            .absorption
+            .compute(windows.get(1).copied().unwrap_or(240));
+        let absorption_24h = self
+            .absorption
+            .compute(windows.get(2).copied().unwrap_or(1440));
+        let absorption_zscore = self
+            .absorption
+            .compute_zscore(windows.get(2).copied().unwrap_or(1440));
 
         // Divergence at multiple windows
-        let divergence_1h = self.divergence.compute(windows.get(0).copied().unwrap_or(60));
-        let divergence_4h = self.divergence.compute(windows.get(1).copied().unwrap_or(240));
-        let divergence_24h = self.divergence.compute(windows.get(2).copied().unwrap_or(1440));
-        let divergence_zscore = self.divergence.compute_zscore(windows.get(2).copied().unwrap_or(1440));
+        let divergence_1h = self
+            .divergence
+            .compute(windows.first().copied().unwrap_or(60));
+        let divergence_4h = self
+            .divergence
+            .compute(windows.get(1).copied().unwrap_or(240));
+        let divergence_24h = self
+            .divergence
+            .compute(windows.get(2).copied().unwrap_or(1440));
+        let divergence_zscore = self
+            .divergence
+            .compute_zscore(windows.get(2).copied().unwrap_or(1440));
         let kyle_lambda = self.divergence.get_kyle_lambda();
 
         // Churn at multiple windows
-        let churn_1h = self.churn.compute(windows.get(0).copied().unwrap_or(60));
+        let churn_1h = self.churn.compute(windows.first().copied().unwrap_or(60));
         let churn_4h = self.churn.compute(windows.get(1).copied().unwrap_or(240));
         let churn_24h = self.churn.compute(windows.get(2).copied().unwrap_or(1440));
-        let churn_zscore = self.churn.compute_zscore(windows.get(2).copied().unwrap_or(1440));
+        let churn_zscore = self
+            .churn
+            .compute_zscore(windows.get(2).copied().unwrap_or(1440));
 
         // Range position at multiple windows
-        let range_position_4h = self.range.compute_position(range_windows.get(0).copied().unwrap_or(240));
-        let range_position_24h = self.range.compute_position(range_windows.get(1).copied().unwrap_or(1440));
-        let range_position_1w = self.range.compute_position(range_windows.get(2).copied().unwrap_or(10080));
-        let range_width_24h = self.range.compute_width(range_windows.get(1).copied().unwrap_or(1440));
+        let range_position_4h = self
+            .range
+            .compute_position(range_windows.first().copied().unwrap_or(240));
+        let range_position_24h = self
+            .range
+            .compute_position(range_windows.get(1).copied().unwrap_or(1440));
+        let range_position_1w = self
+            .range
+            .compute_position(range_windows.get(2).copied().unwrap_or(10080));
+        let range_width_24h = self
+            .range
+            .compute_width(range_windows.get(1).copied().unwrap_or(1440));
 
         // Composite scores using 24h metrics
         let accumulation_score = compute_accumulation_score(

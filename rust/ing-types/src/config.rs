@@ -2,10 +2,18 @@
 
 use serde::Deserialize;
 
-fn default_emission_interval() -> u64 { 100 }
-fn default_trade_buffer_seconds() -> u64 { 60 }
-fn default_book_levels() -> usize { 10 }
-fn default_price_buffer_size() -> usize { 1000 }
+fn default_emission_interval() -> u64 {
+    100
+}
+fn default_trade_buffer_seconds() -> u64 {
+    60
+}
+fn default_book_levels() -> usize {
+    10
+}
+fn default_price_buffer_size() -> usize {
+    1000
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FeaturesConfig {

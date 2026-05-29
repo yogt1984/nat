@@ -1,18 +1,21 @@
 //! Market state management
 
-mod order_book;
-mod trade_buffer;
 mod context;
+mod order_book;
 mod ring_buffer;
+mod trade_buffer;
 
-pub use order_book::OrderBook;
-pub use trade_buffer::{TradeBuffer, Trade};
 pub use context::MarketContext;
+pub use order_book::OrderBook;
 pub use ring_buffer::RingBuffer;
+pub use trade_buffer::{Trade, TradeBuffer};
 
 use crate::algorithms::{self, MicrostructureAlgorithm};
 use crate::config::FeaturesConfig;
-use crate::features::{Features, FeatureComputer, RegimeBuffer, RegimeConfig, GmmClassificationFeatures, CrossSymbolState};
+use crate::features::{
+    CrossSymbolState, FeatureComputer, Features, GmmClassificationFeatures, RegimeBuffer,
+    RegimeConfig,
+};
 use crate::ml::regime::RegimeClassifier;
 use crate::ws::WsMessage;
 use std::path::Path;
@@ -200,18 +203,21 @@ impl MarketState {
                 // Extract 5D features for GMM input:
                 // [kyle_lambda, vpin, absorption_zscore, hurst, whale_net_flow]
                 let gmm_input = [
-                    features.illiquidity.kyle_lambda_100,   // Kyle's Lambda (closest to 300)
-                    features.toxicity.vpin_50,              // VPIN
-                    regime_features.absorption_zscore,      // Absorption z-score
-                    features.trend.hurst_300,               // Hurst exponent
-                    features.whale_flow
+                    features.illiquidity.kyle_lambda_100, // Kyle's Lambda (closest to 300)
+                    features.toxicity.vpin_50,            // VPIN
+                    regime_features.absorption_zscore,    // Absorption z-score
+                    features.trend.hurst_300,             // Hurst exponent
+                    features
+                        .whale_flow
                         .as_ref()
                         .map(|wf| wf.whale_net_flow_1h)
-                        .unwrap_or(0.0),  // Whale net flow (0 if not available)
+                        .unwrap_or(0.0), // Whale net flow (0 if not available)
                 ];
 
                 let (regime, probs) = classifier.classify(&gmm_input);
-                features.gmm_classification = Some(GmmClassificationFeatures::from_classification(regime, &probs));
+                features.gmm_classification = Some(GmmClassificationFeatures::from_classification(
+                    regime, &probs,
+                ));
             }
 
             features.regime = Some(regime_features);
@@ -305,7 +311,10 @@ mod tests {
 
         // Verify total includes GMM
         let total_all = Features::count_all();
-        assert!(total_all > Features::count(), "count_all should include optional features");
+        assert!(
+            total_all > Features::count(),
+            "count_all should include optional features"
+        );
     }
 
     #[test]
@@ -314,8 +323,14 @@ mod tests {
 
         let gmm_names = GmmClassificationFeatures::names();
         assert!(gmm_names.contains(&"regime"), "Should include regime field");
-        assert!(gmm_names.contains(&"regime_confidence"), "Should include confidence");
-        assert!(gmm_names.contains(&"regime_entropy"), "Should include entropy");
+        assert!(
+            gmm_names.contains(&"regime_confidence"),
+            "Should include confidence"
+        );
+        assert!(
+            gmm_names.contains(&"regime_entropy"),
+            "Should include entropy"
+        );
 
         let all_names = Features::names_all();
         for gmm_name in &gmm_names {
@@ -336,8 +351,11 @@ mod tests {
 
         // to_vec always returns fixed length (NaN for missing optional features)
         let vec_without = features.to_vec();
-        assert_eq!(vec_without.len(), Features::count_all(),
-            "to_vec should always return count_all() elements");
+        assert_eq!(
+            vec_without.len(),
+            Features::count_all(),
+            "to_vec should always return count_all() elements"
+        );
 
         // GMM slots should be NaN when not set
         // GMM is followed by cross_symbol (3) and heatmap (8) in to_vec order
@@ -346,8 +364,10 @@ mod tests {
             - HeatmapFeatures::count()
             - CrossSymbolFeatures::count()
             - GmmClassificationFeatures::count();
-        assert!(vec_without[gmm_start].is_nan(),
-            "GMM features should be NaN when not set");
+        assert!(
+            vec_without[gmm_start].is_nan(),
+            "GMM features should be NaN when not set"
+        );
 
         // With GMM set, length stays the same but values are filled
         let gmm_output = GmmClassificationFeatures::from_classification(
@@ -357,15 +377,20 @@ mod tests {
         features.gmm_classification = Some(gmm_output);
 
         let vec_with = features.to_vec();
-        assert_eq!(vec_with.len(), Features::count_all(),
-            "to_vec length must be constant regardless of optional features");
-        assert!(!vec_with[gmm_start].is_nan(),
-            "GMM features should be filled when set");
+        assert_eq!(
+            vec_with.len(),
+            Features::count_all(),
+            "to_vec length must be constant regardless of optional features"
+        );
+        assert!(
+            !vec_with[gmm_start].is_nan(),
+            "GMM features should be filled when set"
+        );
     }
 
     #[test]
     fn test_gmm_classifier_mock() {
-        use crate::ml::regime::{RegimeClassifier, Regime};
+        use crate::ml::regime::{Regime, RegimeClassifier};
 
         // Test with mock params
         let params = GmmParams::default();

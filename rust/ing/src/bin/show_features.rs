@@ -68,7 +68,10 @@ impl TradeBuffer {
         }
         let latest = self.trades.back().map(|t| t.timestamp_ms).unwrap_or(0);
         let cutoff = latest.saturating_sub(window_secs * 1000);
-        self.trades.iter().filter(|t| t.timestamp_ms >= cutoff).count()
+        self.trades
+            .iter()
+            .filter(|t| t.timestamp_ms >= cutoff)
+            .count()
     }
 
     fn volume_in_window(&self, window_secs: u64) -> f64 {
@@ -77,7 +80,8 @@ impl TradeBuffer {
         }
         let latest = self.trades.back().map(|t| t.timestamp_ms).unwrap_or(0);
         let cutoff = latest.saturating_sub(window_secs * 1000);
-        self.trades.iter()
+        self.trades
+            .iter()
             .filter(|t| t.timestamp_ms >= cutoff)
             .map(|t| t.size)
             .sum()
@@ -89,7 +93,8 @@ impl TradeBuffer {
         }
         let latest = self.trades.back().map(|t| t.timestamp_ms).unwrap_or(0);
         let cutoff = latest.saturating_sub(window_secs * 1000);
-        self.trades.iter()
+        self.trades
+            .iter()
             .filter(|t| t.timestamp_ms >= cutoff && t.is_buy)
             .map(|t| t.size)
             .sum()
@@ -101,7 +106,9 @@ impl TradeBuffer {
         }
         let latest = self.trades.back().map(|t| t.timestamp_ms).unwrap_or(0);
         let cutoff = latest.saturating_sub(window_secs * 1000);
-        let trades: Vec<_> = self.trades.iter()
+        let trades: Vec<_> = self
+            .trades
+            .iter()
             .filter(|t| t.timestamp_ms >= cutoff)
             .collect();
 
@@ -125,7 +132,9 @@ impl TradeBuffer {
         }
         let latest = self.trades.back().map(|t| t.timestamp_ms).unwrap_or(0);
         let cutoff = latest.saturating_sub(window_secs * 1000);
-        let trades: Vec<_> = self.trades.iter()
+        let trades: Vec<_> = self
+            .trades
+            .iter()
             .filter(|t| t.timestamp_ms >= cutoff)
             .collect();
 
@@ -141,8 +150,20 @@ impl TradeBuffer {
             let direction = match last_price {
                 Some(prev) if trade.price > prev => 2, // up
                 Some(prev) if trade.price < prev => 0, // down
-                Some(_) => if trade.is_buy { 2 } else { 0 }, // neutral uses side
-                None => if trade.is_buy { 2 } else { 0 },
+                Some(_) => {
+                    if trade.is_buy {
+                        2
+                    } else {
+                        0
+                    }
+                } // neutral uses side
+                None => {
+                    if trade.is_buy {
+                        2
+                    } else {
+                        0
+                    }
+                }
             };
             counts[direction] += 1;
             last_price = Some(trade.price);
@@ -153,7 +174,8 @@ impl TradeBuffer {
             return None;
         }
 
-        let entropy: f64 = counts.iter()
+        let entropy: f64 = counts
+            .iter()
             .filter(|&&c| c > 0)
             .map(|&c| {
                 let p = c as f64 / total as f64;
@@ -389,7 +411,10 @@ struct FeatureSnapshot {
 impl FeatureSnapshot {
     fn print_header(freq_hz: u64) {
         println!("\n{}", "=".repeat(120));
-        println!("NAT Feature Ingestor - Real-time Display @ {} Hz (Ctrl+C to stop)", freq_hz);
+        println!(
+            "NAT Feature Ingestor - Real-time Display @ {} Hz (Ctrl+C to stop)",
+            freq_hz
+        );
         println!("{}", "=".repeat(120));
         println!();
     }
@@ -399,50 +424,76 @@ impl FeatureSnapshot {
         print!("\x1B[2J\x1B[1;1H");
         io::stdout().flush().unwrap();
 
-        println!("{}",  "=".repeat(100));
-        println!("  NAT Real-time Features | {} | Update #{}",
-            self.timestamp.format("%Y-%m-%d %H:%M:%S UTC"), update_count);
+        println!("{}", "=".repeat(100));
+        println!(
+            "  NAT Real-time Features | {} | Update #{}",
+            self.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
+            update_count
+        );
         println!("{}", "=".repeat(100));
         println!();
 
         // Price section
         println!("  PRICE");
-        println!("  {:<20} {:>15.2}  {:<20} {:>12.2} bps",
-            "Midprice:", self.midprice,
-            "Spread:", self.spread_bps);
+        println!(
+            "  {:<20} {:>15.2}  {:<20} {:>12.2} bps",
+            "Midprice:", self.midprice, "Spread:", self.spread_bps
+        );
         println!();
 
         // Trade activity section
         println!("  TRADE ACTIVITY");
-        println!("  {:<20} {:>15}  {:<20} {:>15}  {:<20} {:>15}",
-            "Trades (1s):", self.trade_count_1s,
-            "Trades (5s):", self.trade_count_5s,
-            "Trades (30s):", self.trade_count_30s);
-        println!("  {:<20} {:>15.4}  {:<20} {:>15.4}  {:<20} {:>15.4}",
-            "Volume (1s):", self.volume_1s,
-            "Volume (5s):", self.volume_5s,
-            "Volume (30s):", self.volume_30s);
-        println!("  {:<20} {:>15.2}/s",
-            "Trade intensity:", self.trade_intensity_5s);
+        println!(
+            "  {:<20} {:>15}  {:<20} {:>15}  {:<20} {:>15}",
+            "Trades (1s):",
+            self.trade_count_1s,
+            "Trades (5s):",
+            self.trade_count_5s,
+            "Trades (30s):",
+            self.trade_count_30s
+        );
+        println!(
+            "  {:<20} {:>15.4}  {:<20} {:>15.4}  {:<20} {:>15.4}",
+            "Volume (1s):",
+            self.volume_1s,
+            "Volume (5s):",
+            self.volume_5s,
+            "Volume (30s):",
+            self.volume_30s
+        );
+        println!(
+            "  {:<20} {:>15.2}/s",
+            "Trade intensity:", self.trade_intensity_5s
+        );
         println!();
 
         // Flow section
         println!("  ORDER FLOW");
-        println!("  {:<20} {:>15.4}  {:<20} {:>15.4}  {:<20} {:>15.4}",
-            "Aggressor (5s):", self.aggressor_ratio_5s,
-            "Aggressor (30s):", self.aggressor_ratio_30s,
-            "Book imbalance:", self.imbalance);
-        println!("  {:<20} {:>15.2}",
-            "VWAP (30s):", self.vwap_30s);
+        println!(
+            "  {:<20} {:>15.4}  {:<20} {:>15.4}  {:<20} {:>15.4}",
+            "Aggressor (5s):",
+            self.aggressor_ratio_5s,
+            "Aggressor (30s):",
+            self.aggressor_ratio_30s,
+            "Book imbalance:",
+            self.imbalance
+        );
+        println!("  {:<20} {:>15.2}", "VWAP (30s):", self.vwap_30s);
         println!();
 
         // Entropy section
         println!("  TICK ENTROPY (regime detection)");
-        println!("  {:<20} {:>15.4}  {:<20} {:>15.4}  {:<20} {:>15.4}  {:<20} {:>15.4}",
-            "Entropy (1s):", self.tick_entropy_1s,
-            "Entropy (5s):", self.tick_entropy_5s,
-            "Entropy (30s):", self.tick_entropy_30s,
-            "Entropy (1m):", self.tick_entropy_1m);
+        println!(
+            "  {:<20} {:>15.4}  {:<20} {:>15.4}  {:<20} {:>15.4}  {:<20} {:>15.4}",
+            "Entropy (1s):",
+            self.tick_entropy_1s,
+            "Entropy (5s):",
+            self.tick_entropy_5s,
+            "Entropy (30s):",
+            self.tick_entropy_30s,
+            "Entropy (1m):",
+            self.tick_entropy_1m
+        );
 
         // Entropy interpretation
         let regime = if self.tick_entropy_30s < 0.3 {
@@ -457,15 +508,21 @@ impl FeatureSnapshot {
 
         // Trend section
         println!("  TREND FEATURES");
-        println!("  {:<20} {:>15.6}  {:<20} {:>15.6}",
-            "Momentum (60):", self.momentum_60,
-            "Momentum (300):", self.momentum_300);
-        println!("  {:<20} {:>15.4}  {:<20} {:>15.4}",
-            "Monotonicity (60):", self.monotonicity_60,
-            "Monotonicity (300):", self.monotonicity_300);
-        println!("  {:<20} {:>15.4}  {:<20} {:>15}",
-            "MA Crossover:", self.ma_crossover,
-            "Price samples:", self.price_samples);
+        println!(
+            "  {:<20} {:>15.6}  {:<20} {:>15.6}",
+            "Momentum (60):", self.momentum_60, "Momentum (300):", self.momentum_300
+        );
+        println!(
+            "  {:<20} {:>15.4}  {:<20} {:>15.4}",
+            "Monotonicity (60):",
+            self.monotonicity_60,
+            "Monotonicity (300):",
+            self.monotonicity_300
+        );
+        println!(
+            "  {:<20} {:>15.4}  {:<20} {:>15}",
+            "MA Crossover:", self.ma_crossover, "Price samples:", self.price_samples
+        );
 
         // Trend interpretation
         let trend = if self.momentum_60 > 0.0 && self.monotonicity_60 > 0.7 {
@@ -483,7 +540,10 @@ impl FeatureSnapshot {
         println!();
 
         println!("{}", "-".repeat(100));
-        println!("  Symbol: {} | Features: 77 (entropy + flow + volume + trend) | Press Ctrl+C to stop", self.symbol);
+        println!(
+            "  Symbol: {} | Features: 77 (entropy + flow + volume + trend) | Press Ctrl+C to stop",
+            self.symbol
+        );
         println!("{}", "=".repeat(100));
     }
 }
@@ -492,12 +552,14 @@ impl FeatureSnapshot {
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
-    let symbol = args.get(1)
-        .filter(|s| !s.parse::<u64>().is_ok()) // Skip if it's a number (freq)
+    let symbol = args
+        .get(1)
+        .filter(|s| s.parse::<u64>().is_err()) // Skip if it's a number (freq)
         .cloned()
         .unwrap_or_else(|| "BTC".to_string());
 
-    let freq_hz: u64 = args.iter()
+    let freq_hz: u64 = args
+        .iter()
         .skip(1)
         .find_map(|s| s.parse::<u64>().ok())
         .unwrap_or(DEFAULT_FREQ_HZ)
@@ -508,7 +570,10 @@ async fn main() -> Result<()> {
 
     println!("Configuration:");
     println!("  Symbol: {}", symbol);
-    println!("  Frequency: {} Hz ({} ms interval)", freq_hz, feature_interval_ms);
+    println!(
+        "  Frequency: {} Hz ({} ms interval)",
+        freq_hz, feature_interval_ms
+    );
     println!();
     println!("Connecting to Hyperliquid WebSocket...");
 
@@ -526,7 +591,9 @@ async fn main() -> Result<()> {
             "coin": &symbol
         }
     });
-    ws_stream.send(Message::Text(serde_json::to_string(&trade_sub)?)).await?;
+    ws_stream
+        .send(Message::Text(serde_json::to_string(&trade_sub)?))
+        .await?;
 
     // Subscribe to order book
     let book_sub = serde_json::json!({
@@ -536,7 +603,9 @@ async fn main() -> Result<()> {
             "coin": &symbol
         }
     });
-    ws_stream.send(Message::Text(serde_json::to_string(&book_sub)?)).await?;
+    ws_stream
+        .send(Message::Text(serde_json::to_string(&book_sub)?))
+        .await?;
 
     println!("Subscribed. Starting feature display...\n");
 

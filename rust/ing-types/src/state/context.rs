@@ -35,9 +35,9 @@ impl MarketContext {
     pub fn new() -> Self {
         Self {
             funding_rate: 0.0,
-            funding_history: RingBuffer::new(288),  // 24h at 5-min intervals
+            funding_history: RingBuffer::new(288), // 24h at 5-min intervals
             open_interest: 0.0,
-            oi_history: RingBuffer::new(60),  // 5 minutes of samples
+            oi_history: RingBuffer::new(60), // 5 minutes of samples
             oracle_price: 0.0,
             mark_price: 0.0,
             volume_24h: 0.0,
@@ -102,7 +102,9 @@ impl MarketContext {
         }
 
         let current = self.open_interest;
-        let past = self.oi_history.get(self.oi_history.len().saturating_sub(samples))
+        let past = self
+            .oi_history
+            .get(self.oi_history.len().saturating_sub(samples))
             .copied()
             .unwrap_or(current);
 
@@ -116,7 +118,9 @@ impl MarketContext {
         }
 
         let current = self.open_interest;
-        let past = self.oi_history.get(self.oi_history.len().saturating_sub(samples))
+        let past = self
+            .oi_history
+            .get(self.oi_history.len().saturating_sub(samples))
             .copied()
             .unwrap_or(current);
 
@@ -176,9 +180,11 @@ impl MarketContext {
         if self.funding_history.len() < lookback + 1 {
             return 0.0;
         }
-        let past = self.funding_history.get(
-            self.funding_history.len().saturating_sub(lookback)
-        ).copied().unwrap_or(self.funding_rate);
+        let past = self
+            .funding_history
+            .get(self.funding_history.len().saturating_sub(lookback))
+            .copied()
+            .unwrap_or(self.funding_rate);
         self.funding_rate - past
     }
 
@@ -191,17 +197,25 @@ impl MarketContext {
             return 0.0;
         }
         let current = self.funding_rate;
-        let past_8h = self.funding_history.get(
-            self.funding_history.len().saturating_sub(lookback_current)
-        ).copied().unwrap_or(current);
-        let past_9h = self.funding_history.get(
-            self.funding_history.len().saturating_sub(lookback_prev)
-        ).copied().unwrap_or(current);
+        let past_8h = self
+            .funding_history
+            .get(self.funding_history.len().saturating_sub(lookback_current))
+            .copied()
+            .unwrap_or(current);
+        let past_9h = self
+            .funding_history
+            .get(self.funding_history.len().saturating_sub(lookback_prev))
+            .copied()
+            .unwrap_or(current);
 
         // funding_1h_ago (approximated from 9h-ago minus 8h-ago momentum)
-        let prev_funding = self.funding_history.get(
-            self.funding_history.len().saturating_sub(12)  // 1h ago
-        ).copied().unwrap_or(current);
+        let prev_funding = self
+            .funding_history
+            .get(
+                self.funding_history.len().saturating_sub(12), // 1h ago
+            )
+            .copied()
+            .unwrap_or(current);
 
         let momentum_now = current - past_8h;
         let momentum_prev = prev_funding - past_9h;

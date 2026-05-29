@@ -124,9 +124,8 @@ impl RingBuffer<f64> {
             return 0.0;
         }
         let mean = self.mean();
-        let variance = self.data.iter()
-            .map(|x| (x - mean).powi(2))
-            .sum::<f64>() / (self.data.len() - 1) as f64;
+        let variance = self.data.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
+            / (self.data.len() - 1) as f64;
         variance.sqrt()
     }
 
@@ -185,7 +184,7 @@ mod tests {
 
         let returns = buf.returns();
         assert_eq!(returns.len(), 2);
-        assert!((returns[0] - 0.1).abs() < 1e-10);  // 110/100 - 1
-        assert!((returns[1] - (-0.04545454545454545)).abs() < 1e-10);  // 105/110 - 1
+        assert!((returns[0] - 0.1).abs() < 1e-10); // 110/100 - 1
+        assert!((returns[1] - (-0.04545454545454545)).abs() < 1e-10); // 105/110 - 1
     }
 }

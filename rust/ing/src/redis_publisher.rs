@@ -164,10 +164,8 @@ impl RedisConfig {
         let default_url = toml_url.unwrap_or("redis://127.0.0.1:6379");
         let default_interval = toml_interval_ms.unwrap_or(500);
         Self {
-            url: std::env::var("REDIS_URL")
-                .unwrap_or_else(|_| default_url.to_string()),
-            channel_prefix: std::env::var("REDIS_PREFIX")
-                .unwrap_or_else(|_| "nat".to_string()),
+            url: std::env::var("REDIS_URL").unwrap_or_else(|_| default_url.to_string()),
+            channel_prefix: std::env::var("REDIS_PREFIX").unwrap_or_else(|_| "nat".to_string()),
             cache_ttl_seconds: std::env::var("REDIS_CACHE_TTL")
                 .ok()
                 .and_then(|s| s.parse().ok())
@@ -239,7 +237,10 @@ impl RedisPublisher {
             symbol: symbol.to_string(),
             features: serde_json::to_value(features.to_vec()).unwrap_or_default(),
             regime: features.regime.as_ref().map(RegimeSummary::from_features),
-            whale: features.whale_flow.as_ref().map(WhaleSummary::from_features),
+            whale: features
+                .whale_flow
+                .as_ref()
+                .map(WhaleSummary::from_features),
             metrics: QuickMetrics::from_features(features),
         };
 
@@ -252,7 +253,10 @@ impl RedisPublisher {
 
         // Always update cache (REST API needs latest value)
         let cache_key = format!("{}:latest:{}", self.config.channel_prefix, snapshot.symbol);
-        let _: () = self.conn.set_ex(&cache_key, &json, self.config.cache_ttl_seconds).await?;
+        let _: () = self
+            .conn
+            .set_ex(&cache_key, &json, self.config.cache_ttl_seconds)
+            .await?;
 
         // Rate-limit Pub/Sub publish per symbol
         let now = Instant::now();
@@ -262,7 +266,10 @@ impl RedisPublisher {
         };
 
         if should_publish {
-            let channel = format!("{}:features:{}", self.config.channel_prefix, snapshot.symbol);
+            let channel = format!(
+                "{}:features:{}",
+                self.config.channel_prefix, snapshot.symbol
+            );
             let _: () = self.conn.publish(&channel, &json).await?;
             self.last_publish.insert(snapshot.symbol.clone(), now);
             debug!("Published features for {} to Redis", snapshot.symbol);
@@ -278,7 +285,10 @@ impl RedisPublisher {
 
         let _: () = self.conn.publish(&channel, &json).await?;
 
-        info!("Published alert: {:?} for {}", alert.alert_type, alert.symbol);
+        info!(
+            "Published alert: {:?} for {}",
+            alert.alert_type, alert.symbol
+        );
 
         Ok(())
     }

@@ -79,7 +79,10 @@ fn main() -> Result<()> {
     let h1_result = match data_loader::load_h1_data(&batches) {
         Ok(h1_data) => {
             if h1_data.whale_flow_1h.len() < 100 {
-                println!("      ⚠️  Insufficient data ({} samples)", h1_data.whale_flow_1h.len());
+                println!(
+                    "      ⚠️  Insufficient data ({} samples)",
+                    h1_data.whale_flow_1h.len()
+                );
                 println!("      Skipping H1 test");
                 None
             } else {
@@ -101,7 +104,10 @@ fn main() -> Result<()> {
     let h2_result = match data_loader::load_h2_data(&batches) {
         Ok(h2_data) => {
             if h2_data.whale_flow.len() < 100 {
-                println!("      ⚠️  Insufficient data ({} samples)", h2_data.whale_flow.len());
+                println!(
+                    "      ⚠️  Insufficient data ({} samples)",
+                    h2_data.whale_flow.len()
+                );
                 println!("      Skipping H2 test");
                 None
             } else {
@@ -123,7 +129,10 @@ fn main() -> Result<()> {
     let h3_result = match data_loader::load_h3_data(&batches) {
         Ok(h3_data) => {
             if h3_data.prices.len() < 100 {
-                println!("      ⚠️  Insufficient data ({} samples)", h3_data.prices.len());
+                println!(
+                    "      ⚠️  Insufficient data ({} samples)",
+                    h3_data.prices.len()
+                );
                 println!("      Skipping H3 test");
                 None
             } else {
@@ -145,7 +154,10 @@ fn main() -> Result<()> {
     let h4_result = match data_loader::load_h4_data(&batches) {
         Ok(h4_data) => {
             if h4_data.hhi.len() < 100 {
-                println!("      ⚠️  Insufficient data ({} samples)", h4_data.hhi.len());
+                println!(
+                    "      ⚠️  Insufficient data ({} samples)",
+                    h4_data.hhi.len()
+                );
                 println!("      Skipping H4 test");
                 None
             } else {
@@ -167,12 +179,15 @@ fn main() -> Result<()> {
     let h5_result = match data_loader::load_h5_data(&batches) {
         Ok(h5_data) => {
             if h5_data.features.len() < 100 {
-                println!("      ⚠️  Insufficient data ({} samples)", h5_data.features.len());
+                println!(
+                    "      ⚠️  Insufficient data ({} samples)",
+                    h5_data.features.len()
+                );
                 println!("      Skipping H5 test");
                 None
             } else {
                 let config = H5TestConfig::default();
-                let volatility_ref = h5_data.volatility.as_ref().map(|v| v.as_slice());
+                let volatility_ref = h5_data.volatility.as_deref();
                 let result = run_h5_persistence_test(
                     &h5_data.features,
                     &h5_data.prices,
@@ -258,10 +273,16 @@ fn print_h1_result(result: &H1TestResult) {
     };
 
     println!("      {} {:?}", status_icon, result.decision);
-    println!("      Passing combinations: {}/{}", result.n_passing, result.n_total);
+    println!(
+        "      Passing combinations: {}/{}",
+        result.n_passing, result.n_total
+    );
 
     if let Some(best) = result.window_horizon_results.first() {
-        println!("      Best: {} window / {} horizon", best.flow_window, best.return_horizon);
+        println!(
+            "      Best: {} window / {} horizon",
+            best.flow_window, best.return_horizon
+        );
         println!("      Pearson r: {:.4}", best.correlation.pearson);
         println!("      Spearman ρ: {:.4}", best.correlation.spearman);
         println!("      p-value: {:.6}", best.correlation.p_value);
@@ -290,7 +311,10 @@ fn print_h3_result(result: &H3TestResult) {
     println!("      {} {:?}", status_icon, result.decision);
 
     if let Some(best) = result.threshold_results.first() {
-        println!("      Precision: {:.1}%", best.oos_metrics.precision * 100.0);
+        println!(
+            "      Precision: {:.1}%",
+            best.oos_metrics.precision * 100.0
+        );
         println!("      Recall: {:.1}%", best.oos_metrics.recall * 100.0);
         println!("      Lift: {:.2}x", best.conditional_lift);
     }
@@ -369,34 +393,73 @@ fn save_report(
     writeln!(file, "-------------------")?;
 
     if let Some(h1_result) = h1 {
-        writeln!(file, "[1] H1: Whale Flow Predicts Returns - {:?}", h1_result.decision)?;
-        writeln!(file, "    Passing: {}/{}", h1_result.n_passing, h1_result.n_total)?;
+        writeln!(
+            file,
+            "[1] H1: Whale Flow Predicts Returns - {:?}",
+            h1_result.decision
+        )?;
+        writeln!(
+            file,
+            "    Passing: {}/{}",
+            h1_result.n_passing, h1_result.n_total
+        )?;
     } else {
-        writeln!(file, "[1] H1: Whale Flow Predicts Returns - SKIPPED (insufficient data)")?;
+        writeln!(
+            file,
+            "[1] H1: Whale Flow Predicts Returns - SKIPPED (insufficient data)"
+        )?;
     }
 
     if let Some(h2_result) = h2 {
-        writeln!(file, "[2] H2: Entropy + Whale Interaction - {:?}", h2_result.decision)?;
+        writeln!(
+            file,
+            "[2] H2: Entropy + Whale Interaction - {:?}",
+            h2_result.decision
+        )?;
     } else {
-        writeln!(file, "[2] H2: Entropy + Whale Interaction - SKIPPED (insufficient data)")?;
+        writeln!(
+            file,
+            "[2] H2: Entropy + Whale Interaction - SKIPPED (insufficient data)"
+        )?;
     }
 
     if let Some(h3_result) = h3 {
-        writeln!(file, "[3] H3: Liquidation Cascades - {:?}", h3_result.decision)?;
+        writeln!(
+            file,
+            "[3] H3: Liquidation Cascades - {:?}",
+            h3_result.decision
+        )?;
     } else {
-        writeln!(file, "[3] H3: Liquidation Cascades - SKIPPED (insufficient data)")?;
+        writeln!(
+            file,
+            "[3] H3: Liquidation Cascades - SKIPPED (insufficient data)"
+        )?;
     }
 
     if let Some(h4_result) = h4 {
-        writeln!(file, "[4] H4: Concentration → Volatility - {:?}", h4_result.decision)?;
+        writeln!(
+            file,
+            "[4] H4: Concentration → Volatility - {:?}",
+            h4_result.decision
+        )?;
     } else {
-        writeln!(file, "[4] H4: Concentration → Volatility - SKIPPED (insufficient data)")?;
+        writeln!(
+            file,
+            "[4] H4: Concentration → Volatility - SKIPPED (insufficient data)"
+        )?;
     }
 
     if let Some(h5_result) = h5 {
-        writeln!(file, "[5] H5: Persistence Indicator - {:?}", h5_result.decision)?;
+        writeln!(
+            file,
+            "[5] H5: Persistence Indicator - {:?}",
+            h5_result.decision
+        )?;
     } else {
-        writeln!(file, "[5] H5: Persistence Indicator - SKIPPED (insufficient data)")?;
+        writeln!(
+            file,
+            "[5] H5: Persistence Indicator - SKIPPED (insufficient data)"
+        )?;
     }
 
     writeln!(file)?;
@@ -407,11 +470,17 @@ fn save_report(
 
     match decision {
         FinalDecision::Go => {
-            writeln!(file, "RECOMMENDATION: Proceed with full strategy deployment")?;
+            writeln!(
+                file,
+                "RECOMMENDATION: Proceed with full strategy deployment"
+            )?;
             writeln!(file, "Strong statistical evidence for alpha generation")?;
         }
         FinalDecision::Pivot => {
-            writeln!(file, "RECOMMENDATION: Selective deployment of validated signals only")?;
+            writeln!(
+                file,
+                "RECOMMENDATION: Selective deployment of validated signals only"
+            )?;
             writeln!(file, "Moderate evidence - focus on passing hypotheses")?;
         }
         FinalDecision::NoGo => {

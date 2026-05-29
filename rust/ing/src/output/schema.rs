@@ -51,8 +51,8 @@ pub fn column_names() -> Vec<String> {
 mod tests {
     use super::*;
     use crate::features::{
-        Features, WhaleFlowFeatures, LiquidationRiskFeatures,
-        ConcentrationFeatures, RegimeFeatures, GmmClassificationFeatures,
+        ConcentrationFeatures, Features, GmmClassificationFeatures, LiquidationRiskFeatures,
+        RegimeFeatures, WhaleFlowFeatures,
     };
 
     #[test]
@@ -66,7 +66,8 @@ mod tests {
             schema.fields().len(),
             3 + vec.len(),
             "Schema fields ({}) must equal 3 metadata + to_vec length ({})",
-            schema.fields().len(), 3 + vec.len()
+            schema.fields().len(),
+            3 + vec.len()
         );
     }
 
@@ -96,16 +97,28 @@ mod tests {
 
         let mut with_whale = Features::default();
         with_whale.whale_flow = Some(WhaleFlowFeatures::default());
-        assert_eq!(with_whale.to_vec().len(), base_len, "Adding whale_flow must not change vec length");
+        assert_eq!(
+            with_whale.to_vec().len(),
+            base_len,
+            "Adding whale_flow must not change vec length"
+        );
 
         let mut with_regime = Features::default();
         with_regime.regime = Some(RegimeFeatures::default());
-        assert_eq!(with_regime.to_vec().len(), base_len, "Adding regime must not change vec length");
+        assert_eq!(
+            with_regime.to_vec().len(),
+            base_len,
+            "Adding regime must not change vec length"
+        );
 
         let mut with_liq_conc = Features::default();
         with_liq_conc.liquidation_risk = Some(LiquidationRiskFeatures::default());
         with_liq_conc.concentration = Some(ConcentrationFeatures::default());
-        assert_eq!(with_liq_conc.to_vec().len(), base_len, "Adding liquidation+concentration must not change vec length");
+        assert_eq!(
+            with_liq_conc.to_vec().len(),
+            base_len,
+            "Adding liquidation+concentration must not change vec length"
+        );
     }
 
     #[test]
@@ -143,9 +156,13 @@ mod tests {
         let base_count = Features::count();
         // Everything after base features should be NaN (all optionals are None)
         for (i, &val) in vec[base_count..].iter().enumerate() {
-            assert!(val.is_nan(),
+            assert!(
+                val.is_nan(),
                 "Optional feature at index {} (offset {}) should be NaN when not set, got {}",
-                base_count + i, i, val);
+                base_count + i,
+                i,
+                val
+            );
         }
     }
 
@@ -157,12 +174,18 @@ mod tests {
         let wf_start = Features::count();
         // Whale flow features should be 0.0 (default), not NaN
         for i in 0..WhaleFlowFeatures::count() {
-            assert!(!vec[wf_start + i].is_nan(),
-                "Whale flow feature at offset {} should not be NaN when set", i);
+            assert!(
+                !vec[wf_start + i].is_nan(),
+                "Whale flow feature at offset {} should not be NaN when set",
+                i
+            );
         }
         // But liquidation (next optional) should still be NaN
         let lr_start = wf_start + WhaleFlowFeatures::count();
-        assert!(vec[lr_start].is_nan(), "Liquidation features should still be NaN");
+        assert!(
+            vec[lr_start].is_nan(),
+            "Liquidation features should still be NaN"
+        );
     }
 
     #[test]
@@ -170,7 +193,10 @@ mod tests {
         let schema = create_schema();
         let col_names = column_names();
         let schema_names: Vec<String> = schema.fields().iter().map(|f| f.name().clone()).collect();
-        assert_eq!(col_names, schema_names, "column_names() must match schema field names");
+        assert_eq!(
+            col_names, schema_names,
+            "column_names() must match schema field names"
+        );
     }
 
     #[test]
@@ -193,7 +219,15 @@ mod tests {
         let v2 = f2.to_vec();
 
         // Both must have same length and match schema
-        assert_eq!(v1.len(), v2.len(), "Vector length must be constant across the session");
-        assert_eq!(v1.len() + 3, schema.fields().len(), "Vector + metadata must match schema");
+        assert_eq!(
+            v1.len(),
+            v2.len(),
+            "Vector length must be constant across the session"
+        );
+        assert_eq!(
+            v1.len() + 3,
+            schema.fields().len(),
+            "Vector + metadata must match schema"
+        );
     }
 }

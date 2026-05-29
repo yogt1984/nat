@@ -151,25 +151,24 @@ async fn main() -> Result<()> {
     for (i, wallet) in wallets.iter().take(MAX_WALLETS_TO_CHECK).enumerate() {
         stats.wallets_checked += 1;
 
-        let request = InfoRequest::ClearinghouseState { user: wallet.clone() };
+        let request = InfoRequest::ClearinghouseState {
+            user: wallet.clone(),
+        };
 
-        match http_client.post(REST_URL)
-            .json(&request)
-            .send()
-            .await
-        {
+        match http_client.post(REST_URL).json(&request).send().await {
             Ok(response) if response.status().is_success() => {
                 if let Ok(state) = response.json::<ClearinghouseState>().await {
-                    let positions: Vec<_> = state.asset_positions.iter()
+                    let positions: Vec<_> = state
+                        .asset_positions
+                        .iter()
                         .filter(|p| !p.position.is_empty())
                         .collect();
 
                     if !positions.is_empty() {
                         stats.wallets_with_positions += 1;
 
-                        let total_position: f64 = positions.iter()
-                            .map(|p| p.position.value().abs())
-                            .sum();
+                        let total_position: f64 =
+                            positions.iter().map(|p| p.position.value().abs()).sum();
 
                         // Check if whale
                         if total_position >= MIN_POSITION_USD {
@@ -195,12 +194,18 @@ async fn main() -> Result<()> {
                             }
 
                             // Build position info
-                            let pos_info: Vec<PositionInfo> = positions.iter()
+                            let pos_info: Vec<PositionInfo> = positions
+                                .iter()
                                 .map(|p| PositionInfo {
                                     symbol: p.position.coin.clone(),
                                     size: p.position.size(),
                                     value_usd: p.position.value().abs(),
-                                    side: if p.position.size() > 0.0 { "LONG" } else { "SHORT" }.to_string(),
+                                    side: if p.position.size() > 0.0 {
+                                        "LONG"
+                                    } else {
+                                        "SHORT"
+                                    }
+                                    .to_string(),
                                 })
                                 .collect();
 
@@ -211,7 +216,8 @@ async fn main() -> Result<()> {
                                 positions: pos_info,
                             });
 
-                            println!("  🐋 {} - {} (${:.0})",
+                            println!(
+                                "  🐋 {} - {} (${:.0})",
                                 &wallet[..10.min(wallet.len())],
                                 tier,
                                 total_position
@@ -225,8 +231,12 @@ async fn main() -> Result<()> {
 
         // Progress
         if (i + 1) % 10 == 0 {
-            println!("  ... checked {}/{} wallets, found {} whales",
-                i + 1, wallets.len().min(MAX_WALLETS_TO_CHECK), stats.whales_found);
+            println!(
+                "  ... checked {}/{} wallets, found {} whales",
+                i + 1,
+                wallets.len().min(MAX_WALLETS_TO_CHECK),
+                stats.whales_found
+            );
         }
 
         // Rate limiting
@@ -272,7 +282,9 @@ async fn discover_wallets_from_trades(_client: &reqwest::Client) -> Result<Vec<S
                 "coin": symbol
             }
         });
-        ws_stream.send(Message::Text(serde_json::to_string(&sub)?)).await?;
+        ws_stream
+            .send(Message::Text(serde_json::to_string(&sub)?))
+            .await?;
     }
 
     let mut wallet_counts: HashMap<String, usize> = HashMap::new();
@@ -288,12 +300,13 @@ async fn discover_wallets_from_trades(_client: &reqwest::Client) -> Result<Vec<S
                             for trade in trades {
                                 if let Some(users) = trade["users"].as_array() {
                                     if users.len() == 2 {
-                                        if let (Some(maker), Some(taker)) = (
-                                            users[0].as_str(),
-                                            users[1].as_str()
-                                        ) {
-                                            *wallet_counts.entry(maker.to_string()).or_insert(0) += 1;
-                                            *wallet_counts.entry(taker.to_string()).or_insert(0) += 1;
+                                        if let (Some(maker), Some(taker)) =
+                                            (users[0].as_str(), users[1].as_str())
+                                        {
+                                            *wallet_counts.entry(maker.to_string()).or_insert(0) +=
+                                                1;
+                                            *wallet_counts.entry(taker.to_string()).or_insert(0) +=
+                                                1;
                                         }
                                     }
                                 }
@@ -320,7 +333,10 @@ fn generate_report(stats: &ValidationStats, whale_list: Vec<WhaleInfo>) -> Whale
     let mut warnings = Vec::new();
 
     if stats.whales_found < 10 {
-        warnings.push(format!("Only {} whales found (target: 50+)", stats.whales_found));
+        warnings.push(format!(
+            "Only {} whales found (target: 50+)",
+            stats.whales_found
+        ));
     }
 
     if stats.wallets_with_positions < stats.wallets_checked / 2 {
@@ -328,9 +344,11 @@ fn generate_report(stats: &ValidationStats, whale_list: Vec<WhaleInfo>) -> Whale
     }
 
     let go_no_go = if stats.whales_found >= 10 {
-        format!("GO: Found {} whales with ${:.0}M total position",
+        format!(
+            "GO: Found {} whales with ${:.0}M total position",
             stats.whales_found,
-            stats.total_whale_position_usd / 1_000_000.0)
+            stats.total_whale_position_usd / 1_000_000.0
+        )
     } else if stats.whales_found > 0 {
         "CAUTION: Fewer whales than expected but identification works".to_string()
     } else {
@@ -363,7 +381,10 @@ fn print_report(report: &WhaleValidationReport) {
 
     println!("║ DISCOVERY");
     println!("║   Wallets checked: {}", report.wallets_checked);
-    println!("║   Wallets with positions: {}", report.wallets_with_positions);
+    println!(
+        "║   Wallets with positions: {}",
+        report.wallets_with_positions
+    );
 
     println!("╠══════════════════════════════════════════════════════════════════╣");
     println!("║ WHALE CLASSIFICATION");
@@ -374,10 +395,19 @@ fn print_report(report: &WhaleValidationReport) {
 
     println!("╠══════════════════════════════════════════════════════════════════╣");
     println!("║ POSITIONS");
-    println!("║   Total whale position: ${:.2}M", report.total_whale_position_usd / 1_000_000.0);
-    println!("║   Largest position: ${:.2}M", report.largest_position_usd / 1_000_000.0);
+    println!(
+        "║   Total whale position: ${:.2}M",
+        report.total_whale_position_usd / 1_000_000.0
+    );
+    println!(
+        "║   Largest position: ${:.2}M",
+        report.largest_position_usd / 1_000_000.0
+    );
     if !report.largest_whale.is_empty() {
-        println!("║   Largest whale: {}...", &report.largest_whale[..12.min(report.largest_whale.len())]);
+        println!(
+            "║   Largest whale: {}...",
+            &report.largest_whale[..12.min(report.largest_whale.len())]
+        );
     }
 
     println!("╠══════════════════════════════════════════════════════════════════╣");

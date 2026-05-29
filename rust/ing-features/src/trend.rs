@@ -187,11 +187,7 @@ fn compute_momentum(prices: &[f64]) -> (f64, f64) {
     let sum_x2: f64 = (n - 1) as f64 * n_f * (2 * n - 1) as f64 / 6.0;
 
     let sum_y: f64 = prices.iter().sum();
-    let sum_xy: f64 = prices
-        .iter()
-        .enumerate()
-        .map(|(i, &p)| i as f64 * p)
-        .sum();
+    let sum_xy: f64 = prices.iter().enumerate().map(|(i, &p)| i as f64 * p).sum();
 
     let denominator = n_f * sum_x2 - sum_x * sum_x;
     if denominator.abs() < 1e-10 {
@@ -354,8 +350,8 @@ fn rescaled_range(returns: &[f64], window_size: usize) -> Option<f64> {
         let mean: f64 = window.iter().sum::<f64>() / window_size as f64;
 
         // Standard deviation
-        let variance: f64 = window.iter().map(|&r| (r - mean).powi(2)).sum::<f64>()
-            / window_size as f64;
+        let variance: f64 =
+            window.iter().map(|&r| (r - mean).powi(2)).sum::<f64>() / window_size as f64;
         let std_dev = variance.sqrt();
 
         if std_dev < 1e-10 {
@@ -481,7 +477,11 @@ mod tests {
         let prices: Vec<f64> = (0..60).map(|i| 100.0 + i as f64).collect();
         let (slope, r2) = compute_momentum(&prices);
 
-        assert!((slope - 1.0).abs() < 1e-10, "Expected slope ~1.0, got {}", slope);
+        assert!(
+            (slope - 1.0).abs() < 1e-10,
+            "Expected slope ~1.0, got {}",
+            slope
+        );
         assert!((r2 - 1.0).abs() < 1e-10, "Expected R^2 ~1.0, got {}", r2);
     }
 
@@ -490,7 +490,11 @@ mod tests {
         let prices: Vec<f64> = (0..60).map(|i| 160.0 - i as f64).collect();
         let (slope, r2) = compute_momentum(&prices);
 
-        assert!((slope + 1.0).abs() < 1e-10, "Expected slope ~-1.0, got {}", slope);
+        assert!(
+            (slope + 1.0).abs() < 1e-10,
+            "Expected slope ~-1.0, got {}",
+            slope
+        );
         assert!((r2 - 1.0).abs() < 1e-10, "Expected R^2 ~1.0, got {}", r2);
     }
 
@@ -546,7 +550,11 @@ mod tests {
         let prices: Vec<f64> = vec![100.0; 60];
         let mono = compute_monotonicity(&prices);
 
-        assert!((mono - 0.5).abs() < 1e-10, "Expected 0.5 for flat, got {}", mono);
+        assert!(
+            (mono - 0.5).abs() < 1e-10,
+            "Expected 0.5 for flat, got {}",
+            mono
+        );
     }
 
     #[test]
@@ -626,7 +634,10 @@ mod tests {
         let (ema_short, ema_long) = compute_emas(&prices, 10, 50);
 
         // In uptrend, short EMA should be above long EMA
-        assert!(ema_short > ema_long, "Short EMA should be > long EMA in uptrend");
+        assert!(
+            ema_short > ema_long,
+            "Short EMA should be > long EMA in uptrend"
+        );
     }
 
     #[test]
@@ -635,7 +646,10 @@ mod tests {
         let (ema_short, ema_long) = compute_emas(&prices, 10, 50);
 
         // In downtrend, short EMA should be below long EMA
-        assert!(ema_short < ema_long, "Short EMA should be < long EMA in downtrend");
+        assert!(
+            ema_short < ema_long,
+            "Short EMA should be < long EMA in downtrend"
+        );
     }
 
     #[test]
@@ -643,8 +657,14 @@ mod tests {
         let prices: Vec<f64> = vec![100.0; 100];
         let (ema_short, ema_long) = compute_emas(&prices, 10, 50);
 
-        assert!((ema_short - 100.0).abs() < 1e-6, "Short EMA should converge to 100");
-        assert!((ema_long - 100.0).abs() < 1e-6, "Long EMA should converge to 100");
+        assert!(
+            (ema_short - 100.0).abs() < 1e-6,
+            "Short EMA should converge to 100"
+        );
+        assert!(
+            (ema_long - 100.0).abs() < 1e-6,
+            "Long EMA should converge to 100"
+        );
     }
 
     // ========================================================================

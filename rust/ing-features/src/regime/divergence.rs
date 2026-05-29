@@ -164,10 +164,7 @@ impl DivergenceComputer {
         let current = self.compute(window);
 
         let mean: f64 = self.history.iter().sum::<f64>() / self.history.len() as f64;
-        let variance: f64 = self.history
-            .iter()
-            .map(|x| (x - mean).powi(2))
-            .sum::<f64>()
+        let variance: f64 = self.history.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
             / self.history.len() as f64;
         let std = variance.sqrt();
 
@@ -489,11 +486,7 @@ mod skeptical_tests {
 
         // Lambda should be reasonably close to true value
         // (EMA smoothing means it won't be exact)
-        assert!(
-            estimated > 0.0,
-            "Lambda should be positive: {}",
-            estimated
-        );
+        assert!(estimated > 0.0, "Lambda should be positive: {}", estimated);
         assert!(
             (estimated - true_lambda).abs() < true_lambda * 2.0,
             "Lambda {} should be within 2x of true value {}",

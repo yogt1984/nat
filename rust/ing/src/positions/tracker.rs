@@ -12,8 +12,8 @@ use parking_lot::RwLock;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
+use super::snapshot::{PositionDelta, PositionSnapshot, WalletPositionStats};
 use crate::rest::HyperliquidRestClient;
-use super::snapshot::{PositionSnapshot, PositionDelta, WalletPositionStats};
 
 /// Configuration for position tracking
 #[derive(Debug, Clone)]
@@ -109,7 +109,8 @@ impl PositionTracker {
 
         // Process wallets in batches to avoid overwhelming the API
         for chunk in wallets.chunks(self.config.max_concurrent_requests) {
-            let futures: Vec<_> = chunk.iter()
+            let futures: Vec<_> = chunk
+                .iter()
                 .map(|wallet| self.fetch_wallet_positions(wallet, timestamp_ms))
                 .collect();
 
@@ -148,7 +149,11 @@ impl PositionTracker {
             }
         }
 
-        debug!(snapshots = all_snapshots.len(), deltas = all_deltas.len(), "Polled positions");
+        debug!(
+            snapshots = all_snapshots.len(),
+            deltas = all_deltas.len(),
+            "Polled positions"
+        );
 
         Ok(all_snapshots)
     }
@@ -291,9 +296,9 @@ impl PositionTracker {
             "Starting position tracker"
         );
 
-        let mut interval = tokio::time::interval(
-            tokio::time::Duration::from_secs(self.config.poll_interval_secs)
-        );
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(
+            self.config.poll_interval_secs,
+        ));
 
         loop {
             interval.tick().await;
@@ -327,7 +332,8 @@ pub async fn discover_wallets_from_trades(
         }
 
         // Check if we have enough data
-        let active_wallets: Vec<_> = wallet_counts.iter()
+        let active_wallets: Vec<_> = wallet_counts
+            .iter()
             .filter(|(_, count)| **count >= min_trades)
             .map(|(wallet, _)| wallet.clone())
             .take(max_wallets)
@@ -341,7 +347,8 @@ pub async fn discover_wallets_from_trades(
     // Return what we have
     let mut wallets: Vec<_> = wallet_counts.into_iter().collect();
     wallets.sort_by(|a, b| b.1.cmp(&a.1));
-    wallets.into_iter()
+    wallets
+        .into_iter()
         .take(max_wallets)
         .map(|(wallet, _)| wallet)
         .collect()

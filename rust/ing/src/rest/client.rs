@@ -32,7 +32,8 @@ impl HyperliquidRestClient {
             user: wallet.to_string(),
         };
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.base_url)
             .json(&request)
             .send()
@@ -59,7 +60,8 @@ impl HyperliquidRestClient {
             user: wallet.to_string(),
         };
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.base_url)
             .json(&request)
             .send()
@@ -84,7 +86,8 @@ impl HyperliquidRestClient {
     pub async fn get_meta(&self) -> Result<Meta> {
         let request = InfoRequest::Meta;
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.base_url)
             .json(&request)
             .send()
@@ -168,15 +171,15 @@ impl Position {
 
     /// Get entry price as f64
     pub fn entry_price(&self) -> f64 {
-        self.entry_px.as_ref()
+        self.entry_px
+            .as_ref()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0)
     }
 
     /// Get liquidation price as f64 (None if no liquidation price)
     pub fn liquidation_price(&self) -> Option<f64> {
-        self.liquidation_px.as_ref()
-            .and_then(|s| s.parse().ok())
+        self.liquidation_px.as_ref().and_then(|s| s.parse().ok())
     }
 
     /// Get unrealized PnL as f64

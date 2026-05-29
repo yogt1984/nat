@@ -125,7 +125,11 @@ impl AlertLogger {
                 return;
             }
         };
-        match OpenOptions::new().create(true).append(true).open(&self.path) {
+        match OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+        {
             Ok(mut f) => {
                 if let Err(e) = writeln!(f, "{}", line) {
                     warn!("Failed to write alert to {}: {}", self.path.display(), e);
@@ -210,9 +214,16 @@ fn format_research_event(event: &serde_json::Value) -> Option<String> {
         "hypothesis_registered" => {
             let id = event.get("id").and_then(|v| v.as_str()).unwrap_or("?");
             let agent = event.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
-            let generator = event.get("generator").and_then(|v| v.as_str()).unwrap_or("?");
+            let generator = event
+                .get("generator")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
             let claim = event.get("claim").and_then(|v| v.as_str()).unwrap_or("");
-            let claim_short = if claim.len() > 120 { &claim[..120] } else { claim };
+            let claim_short = if claim.len() > 120 {
+                &claim[..120]
+            } else {
+                claim
+            };
             Some(format!(
                 "\u{2705} <b>Signal Registered</b>\n\n\
                 <b>ID:</b> <code>{id}</code>\n\
@@ -223,9 +234,15 @@ fn format_research_event(event: &serde_json::Value) -> Option<String> {
         }
         "cycle_completed" => {
             let agent = event.get("agent").and_then(|v| v.as_str()).unwrap_or("?");
-            let cycle_id = event.get("cycle_id").and_then(|v| v.as_str()).unwrap_or("?");
+            let cycle_id = event
+                .get("cycle_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
             let tested = event.get("n_tested").and_then(|v| v.as_u64()).unwrap_or(0);
-            let registered = event.get("n_registered").and_then(|v| v.as_u64()).unwrap_or(0);
+            let registered = event
+                .get("n_registered")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             Some(format!(
                 "\u{1f501} <b>Cycle Complete</b>\n\n\
                 <b>Agent:</b> {agent}\n\
@@ -252,8 +269,12 @@ pub async fn run_alert_service(
         telegram_token,
         telegram_chat_id,
         &["nat:alerts".to_string()],
-        &["hypothesis_registered".to_string(), "cycle_completed".to_string()],
-    ).await
+        &[
+            "hypothesis_registered".to_string(),
+            "cycle_completed".to_string(),
+        ],
+    )
+    .await
 }
 
 /// Multi-channel alert service — subscribes to market alerts (Pub/Sub) + research events (Stream).
@@ -336,7 +357,11 @@ pub async fn run_alert_service_with_log(
 
     bot.send_message(&format!(
         "\u{1f7e2} <b>NAT Alert Service Started</b>\n\nAlerts: {}\nResearch: stream",
-        alert_channels.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+        alert_channels
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     ))
     .await
     .ok();
@@ -446,7 +471,10 @@ fn extract_alert_type(value: &serde_json::Value) -> String {
     if let Some(s) = value.as_str() {
         s.to_string()
     } else if let Some(obj) = value.as_object() {
-        obj.keys().next().cloned().unwrap_or_else(|| "Unknown".to_string())
+        obj.keys()
+            .next()
+            .cloned()
+            .unwrap_or_else(|| "Unknown".to_string())
     } else {
         "Unknown".to_string()
     }

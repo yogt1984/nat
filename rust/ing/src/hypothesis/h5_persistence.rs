@@ -25,8 +25,8 @@
 //! - MI < 0.02 bits
 
 use super::stats::{
-    pearson_correlation, spearman_correlation, mutual_information_adaptive,
-    t_test_correlation, CorrelationResult,
+    mutual_information_adaptive, pearson_correlation, spearman_correlation, t_test_correlation,
+    CorrelationResult,
 };
 use super::HypothesisDecision;
 
@@ -269,53 +269,59 @@ pub struct H5Summary {
 /// - High absolute OFI → sustained order flow → persistence
 /// - High illiquidity + directional move → informed flow → persistence
 pub fn compute_persistence_indicator(features: &[FeatureRow]) -> Vec<f64> {
-    features.iter().map(|f| {
-        // Entropy contribution: low entropy = high persistence
-        // Normalize: assume entropy in [0, 1], invert
-        let entropy_score = 1.0 - f.entropy.clamp(0.0, 1.0);
+    features
+        .iter()
+        .map(|f| {
+            // Entropy contribution: low entropy = high persistence
+            // Normalize: assume entropy in [0, 1], invert
+            let entropy_score = 1.0 - f.entropy.clamp(0.0, 1.0);
 
-        // Momentum contribution: high absolute momentum = persistence
-        // Use signed value - we predict direction AND persistence
-        let momentum_score = f.momentum.clamp(-1.0, 1.0);
+            // Momentum contribution: high absolute momentum = persistence
+            // Use signed value - we predict direction AND persistence
+            let momentum_score = f.momentum.clamp(-1.0, 1.0);
 
-        // Monotonicity: high absolute = persistent direction
-        let monotonicity_score = f.monotonicity.clamp(-1.0, 1.0);
+            // Monotonicity: high absolute = persistent direction
+            let monotonicity_score = f.monotonicity.clamp(-1.0, 1.0);
 
-        // Hurst: >0.5 = trending, normalize to [-1, 1]
-        // Hurst of 0.5 -> 0, Hurst of 1 -> 1, Hurst of 0 -> -1
-        let hurst_score = (f.hurst.clamp(0.0, 1.0) - 0.5) * 2.0;
+            // Hurst: >0.5 = trending, normalize to [-1, 1]
+            // Hurst of 0.5 -> 0, Hurst of 1 -> 1, Hurst of 0 -> -1
+            let hurst_score = (f.hurst.clamp(0.0, 1.0) - 0.5) * 2.0;
 
-        // OFI: directly measures order flow direction
-        let ofi_score = f.ofi.clamp(-1.0, 1.0);
+            // OFI: directly measures order flow direction
+            let ofi_score = f.ofi.clamp(-1.0, 1.0);
 
-        // Illiquidity: high illiquidity amplifies signal
-        // Use as multiplier, normalized to [0.5, 1.5]
-        let illiq_multiplier = 0.5 + f.illiquidity.clamp(0.0, 1.0);
+            // Illiquidity: high illiquidity amplifies signal
+            // Use as multiplier, normalized to [0.5, 1.5]
+            let illiq_multiplier = 0.5 + f.illiquidity.clamp(0.0, 1.0);
 
-        // Combine scores with weights
-        // Core directional signals
-        let directional = 0.3 * momentum_score + 0.3 * ofi_score + 0.2 * monotonicity_score;
+            // Combine scores with weights
+            // Core directional signals
+            let directional = 0.3 * momentum_score + 0.3 * ofi_score + 0.2 * monotonicity_score;
 
-        // Persistence confidence
-        let confidence = 0.4 * entropy_score + 0.3 * hurst_score;
+            // Persistence confidence
+            let confidence = 0.4 * entropy_score + 0.3 * hurst_score;
 
-        // Final indicator: direction * confidence * illiquidity amplification
-        // Range roughly [-1.5, 1.5]
-        directional * (1.0 + confidence) * illiq_multiplier
-    }).collect()
+            // Final indicator: direction * confidence * illiquidity amplification
+            // Range roughly [-1.5, 1.5]
+            directional * (1.0 + confidence) * illiq_multiplier
+        })
+        .collect()
 }
 
 /// Compute three-bar labels from returns
 pub fn compute_labels(returns: &[f64], threshold: f64) -> Vec<ThreeBarLabel> {
-    returns.iter().map(|&r| {
-        if r > threshold {
-            ThreeBarLabel::Up
-        } else if r < -threshold {
-            ThreeBarLabel::Down
-        } else {
-            ThreeBarLabel::Flat
-        }
-    }).collect()
+    returns
+        .iter()
+        .map(|&r| {
+            if r > threshold {
+                ThreeBarLabel::Up
+            } else if r < -threshold {
+                ThreeBarLabel::Down
+            } else {
+                ThreeBarLabel::Flat
+            }
+        })
+        .collect()
 }
 
 /// Compute future returns for a given horizon
@@ -344,9 +350,7 @@ pub fn sharpe_ratio(returns: &[f64]) -> f64 {
     }
 
     let mean = returns.iter().sum::<f64>() / returns.len() as f64;
-    let variance = returns.iter()
-        .map(|r| (r - mean).powi(2))
-        .sum::<f64>() / returns.len() as f64;
+    let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / returns.len() as f64;
     let std = variance.sqrt();
 
     if std < 1e-10 {
@@ -363,10 +367,17 @@ pub fn sharpe_ratio(returns: &[f64]) -> f64 {
 ///
 /// Strategy: go long when indicator > 0, short when < 0
 pub fn compute_strategy_returns(indicator: &[f64], returns: &[f64]) -> Vec<f64> {
-    indicator.iter()
+    indicator
+        .iter()
         .zip(returns.iter())
         .map(|(&signal, &ret)| {
-            let position = if signal > 0.0 { 1.0 } else if signal < 0.0 { -1.0 } else { 0.0 };
+            let position = if signal > 0.0 {
+                1.0
+            } else if signal < 0.0 {
+                -1.0
+            } else {
+                0.0
+            };
             position * ret
         })
         .collect()
@@ -383,7 +394,13 @@ pub fn compute_momentum_baseline(returns: &[f64], lookback: usize) -> Vec<f64> {
     (lookback..returns.len())
         .map(|i| {
             let past_return: f64 = returns[i - lookback..i].iter().sum();
-            let position = if past_return > 0.0 { 1.0 } else if past_return < 0.0 { -1.0 } else { 0.0 };
+            let position = if past_return > 0.0 {
+                1.0
+            } else if past_return < 0.0 {
+                -1.0
+            } else {
+                0.0
+            };
             position * returns[i]
         })
         .collect()
@@ -411,7 +428,11 @@ pub fn walk_forward_validation(
     // Walk-forward: train on folds 0..i, test on fold i
     for test_fold in 1..n_folds {
         let train_end = test_fold * fold_size;
-        let test_end = if test_fold == n_folds - 1 { n } else { (test_fold + 1) * fold_size };
+        let test_end = if test_fold == n_folds - 1 {
+            n
+        } else {
+            (test_fold + 1) * fold_size
+        };
 
         // In-sample
         let is_indicator = &indicator[..train_end];
@@ -447,11 +468,10 @@ pub fn hit_rate(indicator: &[f64], returns: &[f64]) -> f64 {
         return 0.0;
     }
 
-    let hits: usize = indicator.iter()
+    let hits: usize = indicator
+        .iter()
         .zip(returns.iter())
-        .filter(|(&signal, &ret)| {
-            (signal > 0.0 && ret > 0.0) || (signal < 0.0 && ret < 0.0)
-        })
+        .filter(|(&signal, &ret)| (signal > 0.0 && ret > 0.0) || (signal < 0.0 && ret < 0.0))
         .count();
 
     hits as f64 / indicator.len() as f64
@@ -478,8 +498,10 @@ pub fn test_horizon(
         (0.0, 0.0, 0.0)
     } else {
         let wf = fold_results.iter().map(|f| f.oos_sharpe).sum::<f64>() / fold_results.len() as f64;
-        let is_avg = fold_results.iter().map(|f| f.is_sharpe).sum::<f64>() / fold_results.len() as f64;
-        let oos_avg = fold_results.iter().map(|f| f.oos_sharpe).sum::<f64>() / fold_results.len() as f64;
+        let is_avg =
+            fold_results.iter().map(|f| f.is_sharpe).sum::<f64>() / fold_results.len() as f64;
+        let oos_avg =
+            fold_results.iter().map(|f| f.oos_sharpe).sum::<f64>() / fold_results.len() as f64;
         (wf, is_avg, oos_avg)
     };
 
@@ -578,12 +600,20 @@ pub fn compute_feature_importance(
         return vec![];
     }
 
-    let feature_names = ["entropy", "momentum", "monotonicity", "hurst", "ofi", "illiquidity"];
+    let feature_names = [
+        "entropy",
+        "momentum",
+        "monotonicity",
+        "hurst",
+        "ofi",
+        "illiquidity",
+    ];
     let mut importances: Vec<FeatureImportance> = Vec::with_capacity(6);
 
     for (idx, name) in feature_names.iter().enumerate() {
-        let feature_values: Vec<f64> = features.iter().map(|f| {
-            match idx {
+        let feature_values: Vec<f64> = features
+            .iter()
+            .map(|f| match idx {
                 0 => f.entropy,
                 1 => f.momentum,
                 2 => f.monotonicity,
@@ -591,8 +621,8 @@ pub fn compute_feature_importance(
                 4 => f.ofi,
                 5 => f.illiquidity,
                 _ => 0.0,
-            }
-        }).collect();
+            })
+            .collect();
 
         let corr = pearson_correlation(&feature_values, returns);
         let mi = mutual_information_adaptive(&feature_values, returns);
@@ -606,7 +636,11 @@ pub fn compute_feature_importance(
     }
 
     // Sort by MI contribution (descending)
-    importances.sort_by(|a, b| b.mi_contribution.partial_cmp(&a.mi_contribution).unwrap_or(std::cmp::Ordering::Equal));
+    importances.sort_by(|a, b| {
+        b.mi_contribution
+            .partial_cmp(&a.mi_contribution)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Set ranks
     for (i, imp) in importances.iter_mut().enumerate() {
@@ -694,7 +728,11 @@ pub fn run_h5_persistence_test(
     config: &H5TestConfig,
 ) -> H5TestResult {
     let default_config = H5TestConfig::default();
-    let config = if config.horizons.is_empty() { &default_config } else { config };
+    let config = if config.horizons.is_empty() {
+        &default_config
+    } else {
+        config
+    };
 
     // Compute persistence indicator
     let indicator = compute_persistence_indicator(features);
@@ -756,23 +794,26 @@ pub fn run_h5_persistence_test(
     }
 
     // Count successes and failures
-    let horizons_passed = horizon_results.iter()
+    let horizons_passed = horizon_results
+        .iter()
         .filter(|r| r.decision == HorizonDecision::Success)
         .count();
-    let horizons_failed = horizon_results.iter()
+    let horizons_failed = horizon_results
+        .iter()
         .filter(|r| r.decision == HorizonDecision::Failure)
         .count();
 
     // Compute overall metrics
-    let overall_wf_sharpe = horizon_results.iter().map(|r| r.wf_sharpe).sum::<f64>()
-        / horizon_results.len() as f64;
-    let overall_oos_is_ratio = horizon_results.iter().map(|r| r.oos_is_ratio).sum::<f64>()
-        / horizon_results.len() as f64;
-    let overall_mi = horizon_results.iter().map(|r| r.mi).sum::<f64>()
-        / horizon_results.len() as f64;
+    let overall_wf_sharpe =
+        horizon_results.iter().map(|r| r.wf_sharpe).sum::<f64>() / horizon_results.len() as f64;
+    let overall_oos_is_ratio =
+        horizon_results.iter().map(|r| r.oos_is_ratio).sum::<f64>() / horizon_results.len() as f64;
+    let overall_mi =
+        horizon_results.iter().map(|r| r.mi).sum::<f64>() / horizon_results.len() as f64;
 
     // Get fold results from best horizon
-    let best_horizon_result = horizon_results.iter()
+    let best_horizon_result = horizon_results
+        .iter()
         .find(|r| r.horizon_name == best_horizon);
     let fold_results = if let Some(best) = best_horizon_result {
         let future_returns = compute_future_returns(prices, best.horizon_points);
@@ -783,13 +824,14 @@ pub fn run_h5_persistence_test(
     };
 
     // Regime analysis (use first horizon's returns)
-    let regime_analysis = if let (Some(vol), Some(first_result)) = (volatility, horizon_results.first()) {
-        let future_returns = compute_future_returns(prices, first_result.horizon_points);
-        let n = indicator.len().min(future_returns.len()).min(vol.len());
-        compute_regime_analysis(&indicator[..n], &future_returns[..n], &vol[..n])
-    } else {
-        None
-    };
+    let regime_analysis =
+        if let (Some(vol), Some(first_result)) = (volatility, horizon_results.first()) {
+            let future_returns = compute_future_returns(prices, first_result.horizon_points);
+            let n = indicator.len().min(future_returns.len()).min(vol.len());
+            compute_regime_analysis(&indicator[..n], &future_returns[..n], &vol[..n])
+        } else {
+            None
+        };
 
     // Feature importance (use first horizon's returns)
     let feature_importance = if let Some(first_result) = horizon_results.first() {
@@ -801,9 +843,11 @@ pub fn run_h5_persistence_test(
     };
 
     // Average baseline improvement
-    let avg_baseline_improvement = horizon_results.iter()
+    let avg_baseline_improvement = horizon_results
+        .iter()
         .map(|r| r.baseline_improvement)
-        .sum::<f64>() / horizon_results.len() as f64;
+        .sum::<f64>()
+        / horizon_results.len() as f64;
 
     // Overall decision
     // Accept if majority of horizons pass
@@ -846,21 +890,40 @@ impl H5TestResult {
 
         report.push_str("# H5 Hypothesis Test: Persistence Indicator\n\n");
         report.push_str("## Summary\n\n");
-        report.push_str(&format!("- **Decision**: {}\n", match self.decision {
-            H5Decision::Accept => "ACCEPT - Persistence indicator works",
-            H5Decision::Reject => "REJECT - Persistence indicator does not work",
-            H5Decision::Inconclusive => "INCONCLUSIVE - Need more data",
-        }));
+        report.push_str(&format!(
+            "- **Decision**: {}\n",
+            match self.decision {
+                H5Decision::Accept => "ACCEPT - Persistence indicator works",
+                H5Decision::Reject => "REJECT - Persistence indicator does not work",
+                H5Decision::Inconclusive => "INCONCLUSIVE - Need more data",
+            }
+        ));
         report.push_str(&format!("- **Samples**: {}\n", self.summary.n_samples));
-        report.push_str(&format!("- **Horizons Tested**: {}\n", self.summary.n_horizons));
-        report.push_str(&format!("- **Horizons Passed**: {}\n", self.horizons_passed));
-        report.push_str(&format!("- **Best Horizon**: {}\n", self.summary.best_horizon));
-        report.push_str(&format!("- **Best Sharpe**: {:.3}\n", self.summary.best_sharpe));
+        report.push_str(&format!(
+            "- **Horizons Tested**: {}\n",
+            self.summary.n_horizons
+        ));
+        report.push_str(&format!(
+            "- **Horizons Passed**: {}\n",
+            self.horizons_passed
+        ));
+        report.push_str(&format!(
+            "- **Best Horizon**: {}\n",
+            self.summary.best_horizon
+        ));
+        report.push_str(&format!(
+            "- **Best Sharpe**: {:.3}\n",
+            self.summary.best_sharpe
+        ));
         report.push_str(&format!("- **Overall MI**: {:.4} bits\n", self.overall_mi));
 
         report.push_str("\n## Horizon Results\n\n");
-        report.push_str("| Horizon | WF Sharpe | OOS/IS | Baseline Impr | MI | Hit Rate | Decision |\n");
-        report.push_str("|---------|-----------|--------|---------------|-------|----------|----------|\n");
+        report.push_str(
+            "| Horizon | WF Sharpe | OOS/IS | Baseline Impr | MI | Hit Rate | Decision |\n",
+        );
+        report.push_str(
+            "|---------|-----------|--------|---------------|-------|----------|----------|\n",
+        );
 
         for hr in &self.horizon_results {
             report.push_str(&format!(
@@ -877,7 +940,7 @@ impl H5TestResult {
 
         if let Some(regime) = &self.regime_analysis {
             report.push_str("\n## Regime Analysis\n\n");
-            report.push_str(&format!("| Regime | N | Sharpe | Hit Rate | MI |\n"));
+            report.push_str(&"| Regime | N | Sharpe | Hit Rate | MI |\n".to_string());
             report.push_str("|--------|---|--------|----------|----|\n");
             report.push_str(&format!(
                 "| Low Vol | {} | {:.3} | {:.1}% | {:.4} |\n",
@@ -903,24 +966,29 @@ impl H5TestResult {
             for fi in &self.feature_importance {
                 report.push_str(&format!(
                     "| {} | {} | {:.3} | {:.4} bits |\n",
-                    fi.rank,
-                    fi.name,
-                    fi.correlation,
-                    fi.mi_contribution,
+                    fi.rank, fi.name, fi.correlation, fi.mi_contribution,
                 ));
             }
         }
 
         report.push_str("\n## Success Criteria\n\n");
-        report.push_str(&format!("- WF Sharpe > {:.1} (actual: {:.3})\n",
-            self.config.min_wf_sharpe, self.overall_wf_sharpe));
-        report.push_str(&format!("- OOS/IS ratio > {:.1} (actual: {:.2})\n",
-            self.config.min_oos_is_ratio, self.overall_oos_is_ratio));
-        report.push_str(&format!("- Baseline improvement > {:.0}% (actual: {:.1}%)\n",
+        report.push_str(&format!(
+            "- WF Sharpe > {:.1} (actual: {:.3})\n",
+            self.config.min_wf_sharpe, self.overall_wf_sharpe
+        ));
+        report.push_str(&format!(
+            "- OOS/IS ratio > {:.1} (actual: {:.2})\n",
+            self.config.min_oos_is_ratio, self.overall_oos_is_ratio
+        ));
+        report.push_str(&format!(
+            "- Baseline improvement > {:.0}% (actual: {:.1}%)\n",
             self.config.min_baseline_improvement * 100.0,
-            self.summary.avg_baseline_improvement * 100.0));
-        report.push_str(&format!("- MI > {:.2} bits (actual: {:.4} bits)\n",
-            self.config.min_mi, self.overall_mi));
+            self.summary.avg_baseline_improvement * 100.0
+        ));
+        report.push_str(&format!(
+            "- MI > {:.2} bits (actual: {:.4} bits)\n",
+            self.config.min_mi, self.overall_mi
+        ));
 
         report
     }
@@ -936,9 +1004,13 @@ mod tests {
 
         for i in 0..n {
             // Simple LCG for reproducibility
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            rng_state = rng_state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let rand1 = (rng_state >> 33) as f64 / (u32::MAX as f64) - 0.5;
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            rng_state = rng_state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let rand2 = (rng_state >> 33) as f64 / (u32::MAX as f64) - 0.5;
 
             let base_signal = if predictive {
@@ -970,7 +1042,9 @@ mod tests {
             prices.push(price);
 
             // Simple LCG
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            rng_state = rng_state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let noise = ((rng_state >> 33) as f64 / (u32::MAX as f64) - 0.5) * 0.01;
 
             let signal_return = if predictive {
@@ -1034,7 +1108,11 @@ mod tests {
         // All positive returns with some variance
         let positive = vec![0.008, 0.01, 0.012, 0.009, 0.011, 0.01];
         let sharpe_pos = sharpe_ratio(&positive);
-        assert!(sharpe_pos > 10.0, "All positive returns should have high Sharpe: got {}", sharpe_pos);
+        assert!(
+            sharpe_pos > 10.0,
+            "All positive returns should have high Sharpe: got {}",
+            sharpe_pos
+        );
 
         // Zero variance returns
         let zero_var = vec![0.01, 0.01, 0.01, 0.01];
@@ -1084,7 +1162,9 @@ mod tests {
 
     #[test]
     fn test_momentum_baseline() {
-        let returns: Vec<f64> = (0..50).map(|i| if i % 2 == 0 { 0.01 } else { -0.01 }).collect();
+        let returns: Vec<f64> = (0..50)
+            .map(|i| if i % 2 == 0 { 0.01 } else { -0.01 })
+            .collect();
 
         let baseline = compute_momentum_baseline(&returns, 5);
 
@@ -1111,7 +1191,9 @@ mod tests {
     fn test_regime_analysis() {
         let indicator: Vec<f64> = (0..100).map(|i| (i as f64 * 0.1).sin()).collect();
         let returns: Vec<f64> = (0..100).map(|i| (i as f64 * 0.1).sin() * 0.01).collect();
-        let volatility: Vec<f64> = (0..100).map(|i| 0.01 + (i as f64 * 0.05).sin().abs() * 0.02).collect();
+        let volatility: Vec<f64> = (0..100)
+            .map(|i| 0.01 + (i as f64 * 0.05).sin().abs() * 0.02)
+            .collect();
 
         let regime = compute_regime_analysis(&indicator, &returns, &volatility);
 
@@ -1136,7 +1218,10 @@ mod tests {
         let result = run_h5_persistence_test(&features, &prices, None, &config);
 
         // Random data should not pass
-        assert!(result.horizons_passed < 2, "Random data should not consistently pass");
+        assert!(
+            result.horizons_passed < 2,
+            "Random data should not consistently pass"
+        );
 
         // Should have horizon results
         assert!(!result.horizon_results.is_empty());
@@ -1177,16 +1262,27 @@ mod tests {
 
     #[test]
     fn test_decision_mapping() {
-        assert_eq!(H5Decision::Accept.to_hypothesis_decision(), HypothesisDecision::Accept);
-        assert_eq!(H5Decision::Reject.to_hypothesis_decision(), HypothesisDecision::Reject);
-        assert_eq!(H5Decision::Inconclusive.to_hypothesis_decision(), HypothesisDecision::Inconclusive);
+        assert_eq!(
+            H5Decision::Accept.to_hypothesis_decision(),
+            HypothesisDecision::Accept
+        );
+        assert_eq!(
+            H5Decision::Reject.to_hypothesis_decision(),
+            HypothesisDecision::Reject
+        );
+        assert_eq!(
+            H5Decision::Inconclusive.to_hypothesis_decision(),
+            HypothesisDecision::Inconclusive
+        );
     }
 
     #[test]
     fn test_report_generation() {
         let features = generate_test_features(500, true);
         let prices = generate_test_prices(&features, true);
-        let volatility: Vec<f64> = (0..500).map(|i| 0.01 + (i as f64 * 0.01).sin().abs() * 0.01).collect();
+        let volatility: Vec<f64> = (0..500)
+            .map(|i| 0.01 + (i as f64 * 0.01).sin().abs() * 0.01)
+            .collect();
 
         let config = H5TestConfig {
             horizons: vec![1, 5],

@@ -4,12 +4,12 @@
 //! The classifier itself lives in `ing::ml::regime`; these types are
 //! shared across `ing-features` and `ing`.
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 const EPSILON: f64 = 1e-10;
 
 /// Market regime labels
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Regime {
     /// Smart money accumulation phase
@@ -23,13 +23,17 @@ pub enum Regime {
     /// Range-bound / consolidating
     Ranging = 4,
     /// Classification failed or insufficient data
+    #[default]
     Unknown = 5,
 }
 
 impl Regime {
     /// Convert from cluster index using label mapping
     pub fn from_cluster(cluster: usize, cluster_labels: &[Regime]) -> Regime {
-        cluster_labels.get(cluster).copied().unwrap_or(Regime::Unknown)
+        cluster_labels
+            .get(cluster)
+            .copied()
+            .unwrap_or(Regime::Unknown)
     }
 
     /// String representation for logging/display
@@ -71,12 +75,6 @@ impl Regime {
             Regime::Ranging => "Moderate λ, low VPIN, low Hurst, neutral flow",
             Regime::Unknown => "Insufficient data for classification",
         }
-    }
-}
-
-impl Default for Regime {
-    fn default() -> Self {
-        Regime::Unknown
     }
 }
 
@@ -148,7 +146,7 @@ impl RegimeFeatures {
 
         Self {
             regime: regime.as_code(),
-            prob_accumulation: probs.get(0).copied().unwrap_or(0.0),
+            prob_accumulation: probs.first().copied().unwrap_or(0.0),
             prob_markup: probs.get(1).copied().unwrap_or(0.0),
             prob_distribution: probs.get(2).copied().unwrap_or(0.0),
             prob_markdown: probs.get(3).copied().unwrap_or(0.0),
@@ -170,18 +168,12 @@ impl RegimeFeatures {
 
     /// Check if regime is bullish (accumulation or markup)
     pub fn is_bullish(&self) -> bool {
-        matches!(
-            self.get_regime(),
-            Regime::Accumulation | Regime::Markup
-        )
+        matches!(self.get_regime(), Regime::Accumulation | Regime::Markup)
     }
 
     /// Check if regime is bearish (distribution or markdown)
     pub fn is_bearish(&self) -> bool {
-        matches!(
-            self.get_regime(),
-            Regime::Distribution | Regime::Markdown
-        )
+        matches!(self.get_regime(), Regime::Distribution | Regime::Markdown)
     }
 }
 

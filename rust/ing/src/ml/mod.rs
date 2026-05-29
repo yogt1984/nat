@@ -4,4 +4,4 @@
 
 pub mod regime;
 
-pub use regime::{Regime, RegimeClassifier, RegimeFeatures, GmmClassificationFeatures, GmmParams};
+pub use regime::{GmmClassificationFeatures, GmmParams, Regime, RegimeClassifier, RegimeFeatures};

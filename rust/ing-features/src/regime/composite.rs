@@ -46,7 +46,12 @@ pub fn compute_accumulation_score(
 
     // Weighted combination
     let weights = [0.35, 0.30, 0.15, 0.20];
-    let signals = [absorption_signal, divergence_signal, churn_signal, range_signal];
+    let signals = [
+        absorption_signal,
+        divergence_signal,
+        churn_signal,
+        range_signal,
+    ];
 
     let score: f64 = weights.iter().zip(signals.iter()).map(|(w, s)| w * s).sum();
 
@@ -85,7 +90,12 @@ pub fn compute_distribution_score(
 
     // Weighted combination
     let weights = [0.35, 0.30, 0.15, 0.20];
-    let signals = [absorption_signal, divergence_signal, churn_signal, range_signal];
+    let signals = [
+        absorption_signal,
+        divergence_signal,
+        churn_signal,
+        range_signal,
+    ];
 
     let score: f64 = weights.iter().zip(signals.iter()).map(|(w, s)| w * s).sum();
 

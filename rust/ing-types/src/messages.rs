@@ -191,7 +191,8 @@ impl AssetCtxData {
     }
 
     pub fn mark_price(&self) -> f64 {
-        self.mark_px.as_ref()
+        self.mark_px
+            .as_ref()
             .and_then(|s| s.parse().ok())
             .unwrap_or_else(|| self.oracle_price())
     }
@@ -201,7 +202,8 @@ impl AssetCtxData {
     }
 
     pub fn premium(&self) -> f64 {
-        self.premium.as_ref()
+        self.premium
+            .as_ref()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0)
     }

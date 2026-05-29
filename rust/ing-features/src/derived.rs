@@ -19,8 +19,8 @@
 //! market microstructure variables that individual features miss.
 
 use super::{
-    EntropyFeatures, TrendFeatures, VolatilityFeatures,
-    IlliquidityFeatures, ToxicityFeatures, FlowFeatures
+    EntropyFeatures, FlowFeatures, IlliquidityFeatures, ToxicityFeatures, TrendFeatures,
+    VolatilityFeatures,
 };
 
 /// Derived/Interaction features
@@ -231,15 +231,12 @@ pub fn compute(
         tick_entropy,
         monotonicity_60,
         trend_strength_60,
-        flow_imbalance
+        flow_imbalance,
     );
 
     // Confidence in regime classification
-    let regime_confidence = compute_regime_confidence(
-        tick_entropy,
-        monotonicity_60,
-        trend_strength_60
-    );
+    let regime_confidence =
+        compute_regime_confidence(tick_entropy, monotonicity_60, trend_strength_60);
 
     DerivedFeatures {
         entropy_trend_interaction,
@@ -264,7 +261,13 @@ pub fn compute(
 /// Returns value in [-1, 1] where magnitude indicates strength
 fn compute_trend_strength(momentum: f64, monotonicity: f64, entropy: f64) -> f64 {
     // Direction from momentum sign
-    let direction = if momentum > 0.0 { 1.0 } else if momentum < 0.0 { -1.0 } else { 0.0 };
+    let direction = if momentum > 0.0 {
+        1.0
+    } else if momentum < 0.0 {
+        -1.0
+    } else {
+        0.0
+    };
 
     // Strength from monotonicity and inverse entropy
     // monotonicity ∈ [0.5, 1.0], map to [0, 1]
@@ -301,11 +304,7 @@ fn compute_regime_indicator(
 }
 
 /// Compute confidence in regime classification
-fn compute_regime_confidence(
-    entropy: f64,
-    monotonicity: f64,
-    trend_strength: f64,
-) -> f64 {
+fn compute_regime_confidence(entropy: f64, monotonicity: f64, trend_strength: f64) -> f64 {
     // High confidence when signals agree
     // Low entropy + high monotonicity + strong trend = confident trending
     // High entropy + low monotonicity + weak trend = confident mean-reverting
@@ -369,7 +368,8 @@ pub mod skeptical_tests {
         monotonicity_values: &[f64],
         future_volatility: &[f64], // Target to predict
     ) -> InteractionPredictiveTest {
-        let n = entropy_values.len()
+        let n = entropy_values
+            .len()
             .min(monotonicity_values.len())
             .min(future_volatility.len());
 
@@ -460,13 +460,17 @@ pub mod skeptical_tests {
             };
         }
 
-        let pre_mean: f64 = pre_transition_values.iter().sum::<f64>() / pre_transition_values.len() as f64;
+        let pre_mean: f64 =
+            pre_transition_values.iter().sum::<f64>() / pre_transition_values.len() as f64;
         let normal_mean: f64 = normal_values.iter().sum::<f64>() / normal_values.len() as f64;
         let separation = (pre_mean - normal_mean).abs();
 
         // Compute detection rate using threshold
         let threshold = normal_mean + separation * 0.5;
-        let detected: usize = pre_transition_values.iter().filter(|&&v| v > threshold).count();
+        let detected: usize = pre_transition_values
+            .iter()
+            .filter(|&&v| v > threshold)
+            .count();
         let false_positives: usize = normal_values.iter().filter(|&&v| v > threshold).count();
 
         let transition_detected_rate = detected as f64 / pre_transition_values.len() as f64;
@@ -489,7 +493,8 @@ pub mod skeptical_tests {
         momentum: &[f64],
         future_returns: &[f64],
     ) -> TrendStrengthTest {
-        let n = trend_strength.len()
+        let n = trend_strength
+            .len()
             .min(momentum.len())
             .min(future_returns.len());
 
@@ -569,9 +574,8 @@ pub mod skeptical_tests {
         }
 
         let mean: f64 = returns.iter().sum::<f64>() / returns.len() as f64;
-        let variance: f64 = returns.iter()
-            .map(|r| (r - mean).powi(2))
-            .sum::<f64>() / (returns.len() - 1) as f64;
+        let variance: f64 =
+            returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (returns.len() - 1) as f64;
         let std = variance.sqrt();
 
         if std < 1e-10 {
@@ -600,7 +604,12 @@ mod tests {
         }
     }
 
-    fn make_trend(momentum_60: f64, momentum_300: f64, mono_60: f64, mono_300: f64) -> TrendFeatures {
+    fn make_trend(
+        momentum_60: f64,
+        momentum_300: f64,
+        mono_60: f64,
+        mono_300: f64,
+    ) -> TrendFeatures {
         TrendFeatures {
             momentum_60,
             momentum_300,
@@ -664,8 +673,11 @@ mod tests {
 
         let derived = compute(&entropy, &trend, &vol, &illiq, &toxic, &flow);
 
-        assert!(derived.trend_strength_60 > 0.5,
-            "Strong uptrend should have high positive trend_strength, got {}", derived.trend_strength_60);
+        assert!(
+            derived.trend_strength_60 > 0.5,
+            "Strong uptrend should have high positive trend_strength, got {}",
+            derived.trend_strength_60
+        );
     }
 
     #[test]
@@ -680,8 +692,11 @@ mod tests {
 
         let derived = compute(&entropy, &trend, &vol, &illiq, &toxic, &flow);
 
-        assert!(derived.trend_strength_60 < -0.5,
-            "Strong downtrend should have high negative trend_strength, got {}", derived.trend_strength_60);
+        assert!(
+            derived.trend_strength_60 < -0.5,
+            "Strong downtrend should have high negative trend_strength, got {}",
+            derived.trend_strength_60
+        );
     }
 
     #[test]
@@ -696,8 +711,11 @@ mod tests {
 
         let derived = compute(&entropy, &trend, &vol, &illiq, &toxic, &flow);
 
-        assert!(derived.trend_strength_60.abs() < 0.2,
-            "Choppy market should have low trend_strength, got {}", derived.trend_strength_60);
+        assert!(
+            derived.trend_strength_60.abs() < 0.2,
+            "Choppy market should have low trend_strength, got {}",
+            derived.trend_strength_60
+        );
     }
 
     // ========================================================================
@@ -716,8 +734,11 @@ mod tests {
 
         let derived = compute(&entropy, &trend, &vol, &illiq, &toxic, &flow);
 
-        assert!(derived.entropy_trend_interaction < 0.1,
-            "Trending regime should have low interaction, got {}", derived.entropy_trend_interaction);
+        assert!(
+            derived.entropy_trend_interaction < 0.1,
+            "Trending regime should have low interaction, got {}",
+            derived.entropy_trend_interaction
+        );
     }
 
     #[test]
@@ -732,8 +753,11 @@ mod tests {
 
         let derived = compute(&entropy, &trend, &vol, &illiq, &toxic, &flow);
 
-        assert!(derived.entropy_trend_interaction > 0.3,
-            "Choppy regime should have high interaction, got {}", derived.entropy_trend_interaction);
+        assert!(
+            derived.entropy_trend_interaction > 0.3,
+            "Choppy regime should have high interaction, got {}",
+            derived.entropy_trend_interaction
+        );
     }
 
     // ========================================================================
@@ -751,8 +775,11 @@ mod tests {
 
         let derived = compute(&entropy, &trend, &vol, &illiq, &toxic, &flow);
 
-        assert!(derived.regime_indicator < 0.0,
-            "Trending regime should have negative indicator, got {}", derived.regime_indicator);
+        assert!(
+            derived.regime_indicator < 0.0,
+            "Trending regime should have negative indicator, got {}",
+            derived.regime_indicator
+        );
     }
 
     #[test]
@@ -766,8 +793,11 @@ mod tests {
 
         let derived = compute(&entropy, &trend, &vol, &illiq, &toxic, &flow);
 
-        assert!(derived.regime_indicator > 0.0,
-            "Mean-reverting regime should have positive indicator, got {}", derived.regime_indicator);
+        assert!(
+            derived.regime_indicator > 0.0,
+            "Mean-reverting regime should have positive indicator, got {}",
+            derived.regime_indicator
+        );
     }
 
     // ========================================================================
@@ -786,10 +816,16 @@ mod tests {
 
         let derived = compute(&entropy, &trend, &vol, &illiq, &toxic, &flow);
 
-        assert!(derived.toxicity_regime > 0.4,
-            "High toxicity + high entropy should give high toxicity_regime, got {}", derived.toxicity_regime);
-        assert!(derived.toxic_chop_score > 0.3,
-            "High VPIN + low monotonicity should give high toxic_chop_score, got {}", derived.toxic_chop_score);
+        assert!(
+            derived.toxicity_regime > 0.4,
+            "High toxicity + high entropy should give high toxicity_regime, got {}",
+            derived.toxicity_regime
+        );
+        assert!(
+            derived.toxic_chop_score > 0.3,
+            "High VPIN + low monotonicity should give high toxic_chop_score, got {}",
+            derived.toxic_chop_score
+        );
     }
 
     // ========================================================================
@@ -802,8 +838,12 @@ mod tests {
 
         // Create data where interaction is more predictive
         let n = 100;
-        let entropy: Vec<f64> = (0..n).map(|i| 0.3 + 0.4 * ((i as f64 * 0.1).sin() + 1.0) / 2.0).collect();
-        let monotonicity: Vec<f64> = (0..n).map(|i| 0.5 + 0.4 * ((i as f64 * 0.15).cos() + 1.0) / 2.0).collect();
+        let entropy: Vec<f64> = (0..n)
+            .map(|i| 0.3 + 0.4 * ((i as f64 * 0.1).sin() + 1.0) / 2.0)
+            .collect();
+        let monotonicity: Vec<f64> = (0..n)
+            .map(|i| 0.5 + 0.4 * ((i as f64 * 0.15).cos() + 1.0) / 2.0)
+            .collect();
         // Future vol depends on interaction
         let future_vol: Vec<f64> = (0..n)
             .map(|i| {
@@ -814,8 +854,11 @@ mod tests {
 
         let result = test_interaction_predictive_power(&entropy, &monotonicity, &future_vol);
 
-        assert!(result.interaction_correlation > 0.5,
-            "Interaction should correlate with future vol, got {}", result.interaction_correlation);
+        assert!(
+            result.interaction_correlation > 0.5,
+            "Interaction should correlate with future vol, got {}",
+            result.interaction_correlation
+        );
     }
 
     #[test]
@@ -824,19 +867,34 @@ mod tests {
 
         // Create data where trend_strength is more reliable
         let n = 200;
-        let trend_strength: Vec<f64> = (0..n).map(|i| {
-            if i < 100 { 0.8 } else { -0.8 } // Clear signal
-        }).collect();
-        let momentum: Vec<f64> = (0..n).map(|i| {
-            // Noisy momentum - sometimes wrong direction
-            if i < 100 { 0.5 + (i as f64 * 0.5).sin() * 0.8 }  // Can flip to negative
-            else { -0.5 + (i as f64 * 0.5).sin() * 0.8 }  // Can flip to positive
-        }).collect();
+        let trend_strength: Vec<f64> = (0..n)
+            .map(|i| {
+                if i < 100 {
+                    0.8
+                } else {
+                    -0.8
+                } // Clear signal
+            })
+            .collect();
+        let momentum: Vec<f64> = (0..n)
+            .map(|i| {
+                // Noisy momentum - sometimes wrong direction
+                if i < 100 {
+                    0.5 + (i as f64 * 0.5).sin() * 0.8
+                }
+                // Can flip to negative
+                else {
+                    -0.5 + (i as f64 * 0.5).sin() * 0.8
+                } // Can flip to positive
+            })
+            .collect();
         // Future returns with some noise for variance
-        let future_returns: Vec<f64> = (0..n).map(|i| {
-            let base = if i < 100 { 0.01 } else { -0.01 };
-            base + (i as f64 * 0.3).sin() * 0.002  // Add noise for variance
-        }).collect();
+        let future_returns: Vec<f64> = (0..n)
+            .map(|i| {
+                let base = if i < 100 { 0.01 } else { -0.01 };
+                base + (i as f64 * 0.3).sin() * 0.002 // Add noise for variance
+            })
+            .collect();
 
         let result = test_trend_strength_vs_momentum(&trend_strength, &momentum, &future_returns);
 
@@ -844,9 +902,12 @@ mod tests {
         assert_eq!(result.sample_size, 200, "Should have full sample");
         // The signals should produce some returns (positive or negative)
         // Since we have noisy momentum, it may underperform
-        assert!(result.trend_strength_sharpe != 0.0 || result.momentum_sharpe != 0.0,
+        assert!(
+            result.trend_strength_sharpe != 0.0 || result.momentum_sharpe != 0.0,
             "At least one signal should have non-zero sharpe, ts={}, mom={}",
-            result.trend_strength_sharpe, result.momentum_sharpe);
+            result.trend_strength_sharpe,
+            result.momentum_sharpe
+        );
     }
 
     #[test]
@@ -874,7 +935,9 @@ mod tests {
 
         let result = test_regime_transition_prediction(&interaction, &regime_labels, 10);
 
-        assert!(result.pre_transition_interaction_mean > result.normal_interaction_mean,
-            "Pre-transition should have higher interaction");
+        assert!(
+            result.pre_transition_interaction_mean > result.normal_interaction_mean,
+            "Pre-transition should have higher interaction"
+        );
     }
 }

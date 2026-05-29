@@ -6,8 +6,8 @@
 //! Currently all implementations are **dummies** (return NaN). Real logic
 //! is developed in Python first; once validated, the Rust impl replaces the stub.
 
-pub mod regime_gated;
 pub mod kalman_imbalance;
+pub mod regime_gated;
 
 use crate::features::Features;
 
@@ -71,10 +71,7 @@ pub fn all_alg_feature_names(algs: &[Box<dyn MicrostructureAlgorithm>]) -> Vec<&
 }
 
 /// Run all algorithms on a feature vector, collecting outputs into a single Vec
-pub fn run_all(
-    algs: &mut [Box<dyn MicrostructureAlgorithm>],
-    features: &Features,
-) -> Vec<f64> {
+pub fn run_all(algs: &mut [Box<dyn MicrostructureAlgorithm>], features: &Features) -> Vec<f64> {
     algs.iter_mut().flat_map(|a| a.step(features)).collect()
 }
 
@@ -84,10 +81,7 @@ mod tests {
 
     #[test]
     fn test_create_algorithms_known() {
-        let algs = create_algorithms(&[
-            "regime_gated".into(),
-            "kalman_imbalance".into(),
-        ]);
+        let algs = create_algorithms(&["regime_gated".into(), "kalman_imbalance".into()]);
         assert_eq!(algs.len(), 2);
     }
 
@@ -99,20 +93,14 @@ mod tests {
 
     #[test]
     fn test_total_feature_count() {
-        let algs = create_algorithms(&[
-            "regime_gated".into(),
-            "kalman_imbalance".into(),
-        ]);
+        let algs = create_algorithms(&["regime_gated".into(), "kalman_imbalance".into()]);
         // regime_gated: 3, kalman: 4
         assert_eq!(total_alg_feature_count(&algs), 7);
     }
 
     #[test]
     fn test_all_names_unique() {
-        let algs = create_algorithms(&[
-            "regime_gated".into(),
-            "kalman_imbalance".into(),
-        ]);
+        let algs = create_algorithms(&["regime_gated".into(), "kalman_imbalance".into()]);
         let names = all_alg_feature_names(&algs);
         let mut seen = std::collections::HashSet::new();
         for name in &names {
@@ -122,13 +110,13 @@ mod tests {
 
     #[test]
     fn test_run_all_returns_nan_dummies() {
-        let mut algs = create_algorithms(&[
-            "regime_gated".into(),
-            "kalman_imbalance".into(),
-        ]);
+        let mut algs = create_algorithms(&["regime_gated".into(), "kalman_imbalance".into()]);
         let features = Features::default();
         let values = run_all(&mut algs, &features);
         assert_eq!(values.len(), 7);
-        assert!(values.iter().all(|v| v.is_nan()), "Dummy impls should return NaN");
+        assert!(
+            values.iter().all(|v| v.is_nan()),
+            "Dummy impls should return NaN"
+        );
     }
 }

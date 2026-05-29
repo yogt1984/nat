@@ -19,64 +19,53 @@
 //! - 2-3 hypotheses pass → PIVOT
 //! - 4-5 hypotheses pass → GO
 
-pub mod stats;
 pub mod data_loader;
+pub mod feature_analysis;
+pub mod final_decision;
 pub mod h1_whale_flow;
 pub mod h2_entropy_whale;
 pub mod h3_liquidation_cascade;
 pub mod h4_concentration_vol;
 pub mod h5_persistence;
-pub mod feature_analysis;
-pub mod final_decision;
+pub mod stats;
 
 pub use stats::{
-    pearson_correlation, spearman_correlation, mutual_information,
-    t_test_correlation, bonferroni_correct, CorrelationResult,
-    WalkForwardResult, walk_forward_correlation,
+    bonferroni_correct, mutual_information, pearson_correlation, spearman_correlation,
+    t_test_correlation, walk_forward_correlation, CorrelationResult, WalkForwardResult,
 };
 
-pub use h1_whale_flow::{
-    H1TestResult, H1TestConfig, H1Decision,
-    run_h1_whale_flow_test,
-};
+pub use h1_whale_flow::{run_h1_whale_flow_test, H1Decision, H1TestConfig, H1TestResult};
 
 pub use h2_entropy_whale::{
-    H2TestResult, H2TestConfig, H2Decision,
-    run_h2_entropy_whale_test,
-    ContingencyTable, InteractionTable,
+    run_h2_entropy_whale_test, ContingencyTable, H2Decision, H2TestConfig, H2TestResult,
+    InteractionTable,
 };
 
 pub use h3_liquidation_cascade::{
-    H3TestResult, H3TestConfig, H3Decision,
-    run_h3_liquidation_cascade_test,
-    ClassificationMetrics, ThresholdResult,
-    LeadTimeAnalysis, DirectionAnalysis,
+    run_h3_liquidation_cascade_test, ClassificationMetrics, DirectionAnalysis, H3Decision,
+    H3TestConfig, H3TestResult, LeadTimeAnalysis, ThresholdResult,
 };
 
 pub use h4_concentration_vol::{
-    H4TestResult, H4TestConfig, H4Decision,
-    run_h4_concentration_vol_test,
-    ConcentrationMeasureResult, RegimeAnalysis as H4RegimeAnalysis, CausalityAnalysis,
+    run_h4_concentration_vol_test, CausalityAnalysis, ConcentrationMeasureResult, H4Decision,
+    H4TestConfig, H4TestResult, RegimeAnalysis as H4RegimeAnalysis,
 };
 
 pub use h5_persistence::{
-    H5TestResult, H5TestConfig, H5Decision,
-    run_h5_persistence_test,
-    FeatureRow, ThreeBarLabel, HorizonResult, FoldResult,
-    RegimeAnalysis as H5RegimeAnalysis, RegimeResult, FeatureImportance,
-    compute_persistence_indicator, compute_future_returns, sharpe_ratio,
+    compute_future_returns, compute_persistence_indicator, run_h5_persistence_test, sharpe_ratio,
+    FeatureImportance, FeatureRow, FoldResult, H5Decision, H5TestConfig, H5TestResult,
+    HorizonResult, RegimeAnalysis as H5RegimeAnalysis, RegimeResult, ThreeBarLabel,
 };
 
 pub use feature_analysis::{
-    FeatureAnalysisConfig, FeatureAnalysisResult, FeatureStats,
-    FeaturePairCorrelation, FeatureCluster, AnalysisSummary,
-    run_feature_analysis, compute_correlation_matrix, compute_mi_matrix,
+    compute_correlation_matrix, compute_mi_matrix, run_feature_analysis, AnalysisSummary,
+    FeatureAnalysisConfig, FeatureAnalysisResult, FeatureCluster, FeaturePairCorrelation,
+    FeatureStats,
 };
 
 pub use final_decision::{
-    FinalDecision, FinalDecisionResult, DecisionInput,
-    HypothesisSummary, ConfidenceLevel, StrategyEstimate,
-    HonestAssessment, NextSteps, run_final_decision,
+    run_final_decision, ConfidenceLevel, DecisionInput, FinalDecision, FinalDecisionResult,
+    HonestAssessment, HypothesisSummary, NextSteps, StrategyEstimate,
 };
 
 /// Overall hypothesis test outcome

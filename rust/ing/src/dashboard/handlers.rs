@@ -134,9 +134,7 @@ async fn handle_state_socket(socket: WebSocket, state: Arc<DashboardState>) {
 }
 
 /// Handler for /api/symbols endpoint
-pub async fn symbols_handler(
-    State(state): State<Arc<DashboardState>>,
-) -> impl IntoResponse {
+pub async fn symbols_handler(State(state): State<Arc<DashboardState>>) -> impl IntoResponse {
     let symbols = state.symbols.read();
     let symbol_list: Vec<String> = symbols.keys().cloned().collect();
     axum::Json(symbol_list)

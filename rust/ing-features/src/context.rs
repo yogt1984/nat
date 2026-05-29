@@ -56,7 +56,9 @@ pub struct ContextFeatures {
 }
 
 impl ContextFeatures {
-    pub fn count() -> usize { 12 }
+    pub fn count() -> usize {
+        12
+    }
 
     pub fn names() -> Vec<&'static str> {
         vec![
@@ -99,7 +101,7 @@ pub fn compute(market_context: &MarketContext) -> ContextFeatures {
         funding_rate: market_context.funding_rate(),
         funding_zscore: market_context.funding_zscore(),
         open_interest: market_context.open_interest(),
-        oi_change_5m: market_context.oi_change(60),  // ~5min at 5s updates
+        oi_change_5m: market_context.oi_change(60), // ~5min at 5s updates
         oi_change_pct_5m: market_context.oi_change_pct(60),
         premium_bps: market_context.premium_bps(),
         volume_24h: market_context.volume_24h(),

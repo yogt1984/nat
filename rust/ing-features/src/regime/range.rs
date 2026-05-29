@@ -137,8 +137,12 @@ impl RangeComputer {
         let mut max = f64::MIN;
         for i in start..n {
             let p = self.prices[i];
-            if p < min { min = p; }
-            if p > max { max = p; }
+            if p < min {
+                min = p;
+            }
+            if p > max {
+                max = p;
+            }
         }
 
         let range = max - min;
@@ -277,7 +281,7 @@ mod skeptical_tests {
 
         // Create range, end at low
         computer.update(100.0); // High
-        computer.update(90.0);  // Low (current)
+        computer.update(90.0); // Low (current)
 
         let position = computer.compute_position(2);
 
@@ -294,7 +298,7 @@ mod skeptical_tests {
         let mut computer = RangeComputer::new(100);
 
         // Create range, end at high
-        computer.update(90.0);  // Low
+        computer.update(90.0); // Low
         computer.update(100.0); // High (current)
 
         let position = computer.compute_position(2);
@@ -311,7 +315,7 @@ mod skeptical_tests {
     fn test_position_exactly_half_at_midpoint() {
         let mut computer = RangeComputer::new(100);
 
-        computer.update(80.0);  // Low
+        computer.update(80.0); // Low
         computer.update(120.0); // High
         computer.update(100.0); // Exact midpoint
 
@@ -576,11 +580,11 @@ mod skeptical_tests {
         let mut computer = RangeComputer::new(100);
 
         // Create range, settle near lows
-        computer.update(90.0);  // Low
+        computer.update(90.0); // Low
         computer.update(110.0); // High
-        computer.update(95.0);  // Near low
-        computer.update(93.0);  // Even closer to low
-        computer.update(92.0);  // At accumulation zone
+        computer.update(95.0); // Near low
+        computer.update(93.0); // Even closer to low
+        computer.update(92.0); // At accumulation zone
 
         let position = computer.compute_position(5);
         let (dist_low, dist_high) = computer.compute_extreme_distances(5);
@@ -610,7 +614,7 @@ mod skeptical_tests {
         let mut computer = RangeComputer::new(100);
 
         // Create range, settle near highs
-        computer.update(90.0);  // Low
+        computer.update(90.0); // Low
         computer.update(110.0); // High
         computer.update(105.0); // Near high
         computer.update(107.0); // Even closer to high
@@ -647,12 +651,12 @@ mod skeptical_tests {
         for _ in 0..20 {
             computer.update(100.0);
         }
-        computer.update(95.0);  // Low of range
+        computer.update(95.0); // Low of range
         computer.update(105.0); // High of range
 
         // Spring: break below range then recover
-        computer.update(93.0);  // Below range (spring)
-        computer.update(98.0);  // Recover into range
+        computer.update(93.0); // Below range (spring)
+        computer.update(98.0); // Recover into range
         computer.update(102.0); // Strong recovery
 
         let position = computer.compute_position(25);
@@ -681,6 +685,9 @@ mod skeptical_tests {
         // Should still work without panic/NaN
         assert!(position.is_finite(), "Position should be finite");
         assert!(width.is_finite(), "Width should be finite");
-        assert!(position >= 0.0 && position <= 1.0, "Position should be [0,1]");
+        assert!(
+            position >= 0.0 && position <= 1.0,
+            "Position should be [0,1]"
+        );
     }
 }

@@ -168,13 +168,15 @@ impl RegimeClassifier {
                     .iter()
                     .zip(self.params.scaler_std.iter()),
             )
-            .map(|(&x, (&mean, &std))| {
-                if std > EPSILON {
-                    (x - mean) / std
-                } else {
-                    0.0
-                }
-            })
+            .map(
+                |(&x, (&mean, &std))| {
+                    if std > EPSILON {
+                        (x - mean) / std
+                    } else {
+                        0.0
+                    }
+                },
+            )
             .collect();
 
         // Compute log-responsibilities for each component
@@ -224,7 +226,11 @@ impl RegimeClassifier {
         let mean = &self.params.means[k];
 
         // Compute (x - mean)
-        let diff: Vec<f64> = x.iter().zip(mean.iter()).map(|(&xi, &mi)| xi - mi).collect();
+        let diff: Vec<f64> = x
+            .iter()
+            .zip(mean.iter())
+            .map(|(&xi, &mi)| xi - mi)
+            .collect();
 
         // Compute Mahalanobis distance: (x - μ)ᵀ Σ⁻¹ (x - μ)
         let mahalanobis = self.quadratic_form(&diff, &self.cov_inv[k]);
@@ -235,10 +241,7 @@ impl RegimeClassifier {
 
     /// Log-sum-exp normalization to convert log-probs to probabilities
     fn log_sum_exp_normalize(&self, log_probs: &[f64]) -> Vec<f64> {
-        let max_log = log_probs
-            .iter()
-            .cloned()
-            .fold(f64::NEG_INFINITY, f64::max);
+        let max_log = log_probs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
         if max_log.is_infinite() {
             // All log probs are -inf, return uniform
@@ -378,7 +381,11 @@ impl RegimeClassifier {
 
         if valid {
             // log|A| = 2 * sum(log(L_ii))
-            2.0 * l.iter().enumerate().map(|(i, row)| row[i].ln()).sum::<f64>()
+            2.0 * l
+                .iter()
+                .enumerate()
+                .map(|(i, row)| row[i].ln())
+                .sum::<f64>()
         } else {
             // Fall back to product of diagonal elements
             m.iter()
@@ -402,11 +409,11 @@ mod tests {
         GmmParams {
             n_components: 5,
             means: vec![
-                vec![-1.0, -1.0, 1.0, 0.5, 1.0],   // Accumulation: low λ, low VPIN, high abs, pos whale
-                vec![1.0, -1.0, 0.0, 1.0, 0.5],    // Markup: high λ, low VPIN, high Hurst
-                vec![-1.0, 1.0, 1.0, 0.5, -1.0],   // Distribution: low λ, high VPIN, high abs, neg whale
-                vec![1.0, 1.0, 0.0, 1.0, -0.5],    // Markdown: high λ, high VPIN, high Hurst, neg whale
-                vec![0.0, -1.0, 0.0, -1.0, 0.0],   // Ranging: neutral, low Hurst
+                vec![-1.0, -1.0, 1.0, 0.5, 1.0], // Accumulation: low λ, low VPIN, high abs, pos whale
+                vec![1.0, -1.0, 0.0, 1.0, 0.5],  // Markup: high λ, low VPIN, high Hurst
+                vec![-1.0, 1.0, 1.0, 0.5, -1.0], // Distribution: low λ, high VPIN, high abs, neg whale
+                vec![1.0, 1.0, 0.0, 1.0, -0.5], // Markdown: high λ, high VPIN, high Hurst, neg whale
+                vec![0.0, -1.0, 0.0, -1.0, 0.0], // Ranging: neutral, low Hurst
             ],
             covariances: (0..5)
                 .map(|_| {
@@ -440,7 +447,11 @@ mod tests {
         let (regime, probs) = classifier.classify(&features);
 
         assert_eq!(regime, Regime::Accumulation);
-        assert!(probs[0] > 0.5, "Accumulation prob should be high: {:?}", probs);
+        assert!(
+            probs[0] > 0.5,
+            "Accumulation prob should be high: {:?}",
+            probs
+        );
     }
 
     #[test]
@@ -462,7 +473,11 @@ mod tests {
         let (regime, probs) = classifier.classify(&features);
 
         assert_eq!(regime, Regime::Markup);
-        assert!(probs[1] > 0.3, "Markup prob should be elevated: {:?}", probs);
+        assert!(
+            probs[1] > 0.3,
+            "Markup prob should be elevated: {:?}",
+            probs
+        );
     }
 
     #[test]
@@ -662,11 +677,11 @@ mod skeptical_tests {
         GmmParams {
             n_components: 5,
             means: vec![
-                vec![-1.0, -1.0, 1.0, 0.5, 1.0],   // Accumulation: low λ, low VPIN, high abs, pos whale
-                vec![1.0, -1.0, 0.0, 1.0, 0.5],    // Markup: high λ, low VPIN, high Hurst
-                vec![-1.0, 1.0, 1.0, 0.5, -1.0],   // Distribution: low λ, high VPIN, high abs, neg whale
-                vec![1.0, 1.0, 0.0, 1.0, -0.5],    // Markdown: high λ, high VPIN, high Hurst, neg whale
-                vec![0.0, -1.0, 0.0, -1.0, 0.0],   // Ranging: neutral, low Hurst
+                vec![-1.0, -1.0, 1.0, 0.5, 1.0], // Accumulation: low λ, low VPIN, high abs, pos whale
+                vec![1.0, -1.0, 0.0, 1.0, 0.5],  // Markup: high λ, low VPIN, high Hurst
+                vec![-1.0, 1.0, 1.0, 0.5, -1.0], // Distribution: low λ, high VPIN, high abs, neg whale
+                vec![1.0, 1.0, 0.0, 1.0, -0.5], // Markdown: high λ, high VPIN, high Hurst, neg whale
+                vec![0.0, -1.0, 0.0, -1.0, 0.0], // Ranging: neutral, low Hurst
             ],
             covariances: (0..5)
                 .map(|_| {

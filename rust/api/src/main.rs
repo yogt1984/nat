@@ -45,12 +45,21 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/features/:symbol", get(routes::features::get_latest))
         .route("/api/symbols", get(routes::features::get_symbols))
         // Whale endpoints
-        .route("/api/whales/:symbol", get(routes::whales::get_whale_summary))
+        .route(
+            "/api/whales/:symbol",
+            get(routes::whales::get_whale_summary),
+        )
         // Regime endpoints
         .route("/api/regime/:symbol", get(routes::regime::get_regime_state))
         // Research endpoints
-        .route("/api/research/hypotheses", get(routes::research::list_hypotheses))
-        .route("/api/research/hypotheses/:id", get(routes::research::get_hypothesis))
+        .route(
+            "/api/research/hypotheses",
+            get(routes::research::list_hypotheses),
+        )
+        .route(
+            "/api/research/hypotheses/:id",
+            get(routes::research::get_hypothesis),
+        )
         .route("/api/research/cycles", get(routes::research::list_cycles))
         .route("/api/research/signals", get(routes::research::list_signals))
         .route("/api/research/stats", get(routes::research::get_stats))

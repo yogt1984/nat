@@ -43,7 +43,7 @@
 //! - Shannon (1948) - A mathematical theory of communication
 //! - Zunino et al. (2009) - Forbidden patterns, permutation entropy, stock market inefficiency
 
-use ing_types::{OrderBook, TradeBuffer, RingBuffer};
+use ing_types::{OrderBook, RingBuffer, TradeBuffer};
 
 /// Entropy features (27 features: 13 original + 14 tick entropy)
 #[derive(Debug, Clone, Default)]
@@ -110,7 +110,9 @@ pub struct EntropyFeatures {
 }
 
 impl EntropyFeatures {
-    pub fn count() -> usize { 27 }
+    pub fn count() -> usize {
+        27
+    }
 
     pub fn names() -> Vec<&'static str> {
         vec![
@@ -196,36 +198,36 @@ pub fn compute(
 
     // Permutation entropy of returns at different lengths
     let permutation_returns_8 = if returns.len() >= 8 {
-        permutation_entropy(&returns[returns.len()-8..], 3)
+        permutation_entropy(&returns[returns.len() - 8..], 3)
     } else {
         0.0
     };
 
     let permutation_returns_16 = if returns.len() >= 16 {
-        permutation_entropy(&returns[returns.len()-16..], 3)
+        permutation_entropy(&returns[returns.len() - 16..], 3)
     } else {
         0.0
     };
 
     let permutation_returns_32 = if returns.len() >= 32 {
-        permutation_entropy(&returns[returns.len()-32..], 3)
+        permutation_entropy(&returns[returns.len() - 32..], 3)
     } else {
         0.0
     };
 
     // Permutation entropy m=5 (120 ordinal patterns, richer temporal structure)
     let perm_m5_returns_8 = if returns.len() >= 8 {
-        permutation_entropy(&returns[returns.len()-8..], 5)
+        permutation_entropy(&returns[returns.len() - 8..], 5)
     } else {
         0.0
     };
     let perm_m5_returns_16 = if returns.len() >= 16 {
-        permutation_entropy(&returns[returns.len()-16..], 5)
+        permutation_entropy(&returns[returns.len() - 16..], 5)
     } else {
         0.0
     };
     let perm_m5_returns_32 = if returns.len() >= 32 {
-        permutation_entropy(&returns[returns.len()-32..], 5)
+        permutation_entropy(&returns[returns.len() - 32..], 5)
     } else {
         0.0
     };
@@ -233,7 +235,7 @@ pub fn compute(
     // Permutation entropy of imbalance series (16 samples)
     let permutation_imbalance_16 = if imbalance_buffer.len() >= 16 {
         let imb_vec = imbalance_buffer.to_vec();
-        let slice = &imb_vec[imb_vec.len()-16..];
+        let slice = &imb_vec[imb_vec.len() - 16..];
         permutation_entropy(slice, 3)
     } else {
         0.0
@@ -243,7 +245,11 @@ pub fn compute(
     let spread_dispersion = if spread_buffer.len() >= 10 {
         let spread_vec = spread_buffer.to_vec();
         // Use last 300 samples (~30s at 100ms) or whatever is available
-        let start = if spread_vec.len() > 300 { spread_vec.len() - 300 } else { 0 };
+        let start = if spread_vec.len() > 300 {
+            spread_vec.len() - 300
+        } else {
+            0
+        };
         distribution_entropy(&spread_vec[start..], 10)
     } else {
         0.0
@@ -304,11 +310,21 @@ pub fn compute(
     // Volume-weighted tick entropy at various time windows
     let volume_tick_entropy_1s = trade_buffer.volume_tick_entropy_in_window(1).unwrap_or(0.0);
     let volume_tick_entropy_5s = trade_buffer.volume_tick_entropy_in_window(5).unwrap_or(0.0);
-    let volume_tick_entropy_10s = trade_buffer.volume_tick_entropy_in_window(10).unwrap_or(0.0);
-    let volume_tick_entropy_15s = trade_buffer.volume_tick_entropy_in_window(15).unwrap_or(0.0);
-    let volume_tick_entropy_30s = trade_buffer.volume_tick_entropy_in_window(30).unwrap_or(0.0);
-    let volume_tick_entropy_1m = trade_buffer.volume_tick_entropy_in_window(60).unwrap_or(0.0);
-    let volume_tick_entropy_15m = trade_buffer.volume_tick_entropy_in_window(900).unwrap_or(0.0);
+    let volume_tick_entropy_10s = trade_buffer
+        .volume_tick_entropy_in_window(10)
+        .unwrap_or(0.0);
+    let volume_tick_entropy_15s = trade_buffer
+        .volume_tick_entropy_in_window(15)
+        .unwrap_or(0.0);
+    let volume_tick_entropy_30s = trade_buffer
+        .volume_tick_entropy_in_window(30)
+        .unwrap_or(0.0);
+    let volume_tick_entropy_1m = trade_buffer
+        .volume_tick_entropy_in_window(60)
+        .unwrap_or(0.0);
+    let volume_tick_entropy_15m = trade_buffer
+        .volume_tick_entropy_in_window(900)
+        .unwrap_or(0.0);
 
     EntropyFeatures {
         permutation_returns_8,
@@ -403,7 +419,11 @@ fn ordinal_pattern_index(window: &[f64]) -> usize {
 
     // Get the ranking of each element
     let mut indices: Vec<usize> = (0..n).collect();
-    indices.sort_by(|&a, &b| window[a].partial_cmp(&window[b]).unwrap_or(std::cmp::Ordering::Equal));
+    indices.sort_by(|&a, &b| {
+        window[a]
+            .partial_cmp(&window[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Convert ranking to pattern index using factorial number system
     let mut index = 0;
@@ -451,7 +471,9 @@ fn distribution_entropy(data: &[f64], n_bins: usize) -> f64 {
     // Sort indices by value for rank-based bin assignment
     let mut indices: Vec<usize> = (0..n).collect();
     indices.sort_by(|&a, &b| {
-        data[a].partial_cmp(&data[b]).unwrap_or(std::cmp::Ordering::Equal)
+        data[a]
+            .partial_cmp(&data[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     // Assign each datum to a bin based on its rank
@@ -541,7 +563,11 @@ mod tests {
         let data = vec![3.0, 1.0, 4.0, 1.0, 5.0, 9.0, 2.0, 6.0, 5.0, 3.0, 5.0];
         let pe = permutation_entropy(&data, 3);
         // Monotonic has ~0 entropy, this should be meaningfully higher
-        assert!(pe > 0.3, "Random sequence should have higher entropy: {}", pe);
+        assert!(
+            pe > 0.3,
+            "Random sequence should have higher entropy: {}",
+            pe
+        );
     }
 
     #[test]
@@ -549,7 +575,11 @@ mod tests {
         // Monotonic sequence should have zero entropy (only one pattern)
         let data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
         let pe = permutation_entropy(&data, 3);
-        assert!(pe < 0.1, "Monotonic sequence should have low entropy: {}", pe);
+        assert!(
+            pe < 0.1,
+            "Monotonic sequence should have low entropy: {}",
+            pe
+        );
     }
 
     #[test]
@@ -572,7 +602,11 @@ mod tests {
         let data = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 100.0, 1000.0];
         let de = distribution_entropy(&data, 5);
         // With quantile bins: ranks are evenly distributed → high entropy
-        assert!(de > 0.8, "Heavy-tail with quantile bins should have high entropy: {}", de);
+        assert!(
+            de > 0.8,
+            "Heavy-tail with quantile bins should have high entropy: {}",
+            de
+        );
     }
 
     #[test]
@@ -602,7 +636,10 @@ mod tests {
         // This is because -1 * ln(1) = 0
 
         let single_dir_entropy = -(1.0_f64 * 1.0_f64.ln());
-        assert!(single_dir_entropy.abs() < 1e-10, "Single direction entropy should be 0");
+        assert!(
+            single_dir_entropy.abs() < 1e-10,
+            "Single direction entropy should be 0"
+        );
     }
 
     #[test]

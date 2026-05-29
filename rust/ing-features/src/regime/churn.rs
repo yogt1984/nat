@@ -92,10 +92,7 @@ impl ChurnComputer {
         let current = self.compute(window);
 
         let mean: f64 = self.history.iter().sum::<f64>() / self.history.len() as f64;
-        let variance: f64 = self.history
-            .iter()
-            .map(|x| (x - mean).powi(2))
-            .sum::<f64>()
+        let variance: f64 = self.history.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
             / self.history.len() as f64;
         let std = variance.sqrt();
 
@@ -329,7 +326,11 @@ mod skeptical_tests {
         let signal = computer.compute_signal(100);
 
         // Churn = 10000 / 8000 = 1.25, which is < 2
-        assert!(churn < 2.0, "Directional flow should have churn < 2: {}", churn);
+        assert!(
+            churn < 2.0,
+            "Directional flow should have churn < 2: {}",
+            churn
+        );
 
         // Signal = ln(1.25 / 2) = ln(0.625) ≈ -0.47
         assert!(
@@ -353,7 +354,11 @@ mod skeptical_tests {
         let signal = computer.compute_signal(100);
 
         // Churn = 10000 / 400 = 25, which is > 2
-        assert!(churn > 2.0, "Balanced flow should have churn > 2: {}", churn);
+        assert!(
+            churn > 2.0,
+            "Balanced flow should have churn > 2: {}",
+            churn
+        );
 
         // Signal = ln(25 / 2) = ln(12.5) ≈ 2.5
         assert!(
@@ -434,7 +439,10 @@ mod skeptical_tests {
 
         // Should return safe defaults, not panic or NaN
         assert!(churn.is_finite(), "Churn should be finite with zero volume");
-        assert!(signal.is_finite(), "Signal should be finite with zero volume");
+        assert!(
+            signal.is_finite(),
+            "Signal should be finite with zero volume"
+        );
     }
 
     /// Test 10: Multi-window consistency
