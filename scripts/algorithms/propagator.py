@@ -239,22 +239,32 @@ class Propagator(MicrostructureAlgorithm):
 
         signed_vol = (2 * agg - 1) * vol
 
-        # Auto-tune decay exponent from data
-        decay_exp = self._decay_exp
-        if self._auto_tune:
-            valid_sv = signed_vol[np.isfinite(signed_vol)]
-            if len(valid_sv) > 200:
-                decay_exp = self.estimate_decay_exponent(valid_sv)
+        from .regime_retune import has_regime_column, segment_by_regime, REGIME_COL
 
-        # Build decay kernel
-        kernel = np.arange(1, self._window + 1, dtype=np.float64) ** (-decay_exp)
-        kernel = kernel[::-1]  # most recent has smallest τ (largest weight)
-        kernel /= self._window
-
-        # Convolve (causal — output[i] depends on input[i-window+1:i+1])
         n = len(df)
+
+        # Per-segment decay exponent estimation
+        if self._auto_tune and has_regime_column(df):
+            segments = segment_by_regime(df[REGIME_COL].values)
+        elif self._auto_tune:
+            segments = [(0, n, -1)]
+        else:
+            segments = []
+
+        decay_exp_arr = np.full(n, self._decay_exp)
+        for start, end, _regime in segments:
+            valid_sv = signed_vol[start:end]
+            valid_sv = valid_sv[np.isfinite(valid_sv)]
+            if len(valid_sv) > 200:
+                decay_exp_arr[start:end] = self.estimate_decay_exponent(valid_sv)
+
+        # Convolve with per-tick decay exponent (causal)
         transient = np.full(n, np.nan)
+        taus = np.arange(1, self._window + 1, dtype=np.float64)
         for i in range(self._window - 1, n):
+            kernel = taus ** (-decay_exp_arr[i])
+            kernel = kernel[::-1]
+            kernel /= self._window
             chunk = signed_vol[i - self._window + 1:i + 1]
             transient[i] = np.dot(chunk, kernel)
 

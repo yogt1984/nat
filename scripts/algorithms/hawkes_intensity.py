@@ -259,25 +259,20 @@ class HawkesIntensity(MicrostructureAlgorithm):
         }
 
     def run_batch(self, df: "pd.DataFrame") -> "pd.DataFrame":
-        """Vectorized via loop (recursive state prevents full vectorization)."""
+        """Vectorized via loop with regime-conditional re-estimation.
+
+        Recursive state (A_total, A_bid, A_ask) is continuous across
+        regime boundaries; only alpha/beta are re-estimated per segment.
+        """
         import pandas as pd
+        from .regime_retune import has_regime_column, segment_by_regime, REGIME_COL
 
         count = df["flow_count_1s"].values.astype(np.float64)
         intensity = df["flow_intensity"].values.astype(np.float64)
         p_bid = df["imbalance_pressure_bid"].values.astype(np.float64)
         p_ask = df["imbalance_pressure_ask"].values.astype(np.float64)
 
-        # Auto-tune parameters from data
-        if self._auto_tune:
-            params = self.estimate_params(count, dt=self._dt)
-            beta = params["decay_beta"]
-            alpha = params["alpha_fraction"]
-        else:
-            beta = self._beta
-            alpha = self._alpha
-
         n = len(df)
-        decay = np.exp(-beta * self._dt)
 
         # Pre-compute bid/ask fractions
         total_p = np.abs(p_bid) + np.abs(p_ask) + 1e-12
@@ -285,13 +280,32 @@ class HawkesIntensity(MicrostructureAlgorithm):
         ask_frac = np.abs(p_ask) / total_p
         n_events = np.maximum(count, 0)
 
-        # Recursive loop
+        # Determine segments for parameter estimation
+        if self._auto_tune and has_regime_column(df):
+            segments = segment_by_regime(df[REGIME_COL].values)
+        elif self._auto_tune:
+            segments = [(0, n, -1)]  # single segment, full data
+        else:
+            segments = [(0, n, -1)]
+
+        # Build per-tick alpha/beta arrays (re-estimated per regime segment)
+        alpha_arr = np.full(n, self._alpha)
+        beta_arr = np.full(n, self._beta)
+
+        for start, end, _regime in segments:
+            if self._auto_tune:
+                params = self.estimate_params(count[start:end], dt=self._dt)
+                alpha_arr[start:end] = params["alpha_fraction"]
+                beta_arr[start:end] = params["decay_beta"]
+
+        # Recursive loop (continuous state across segments)
         A_total = np.zeros(n)
         A_bid = np.zeros(n)
         A_ask = np.zeros(n)
         a_t, a_b, a_a = 0.0, 0.0, 0.0
 
         for i in range(n):
+            decay = np.exp(-beta_arr[i] * self._dt)
             if np.isfinite(n_events[i]):
                 a_t = min(decay * (a_t + n_events[i]), 1000.0)
                 a_b = min(decay * (a_b + n_events[i] * bid_frac[i]), 500.0)
@@ -305,11 +319,11 @@ class HawkesIntensity(MicrostructureAlgorithm):
             self._baseline_window, min_periods=10
         ).mean().values
 
-        lambda_total = mu + alpha * A_total
-        lambda_bid = mu / 2 + alpha * A_bid
-        lambda_ask = mu / 2 + alpha * A_ask
+        lambda_total = mu + alpha_arr * A_total
+        lambda_bid = mu / 2 + alpha_arr * A_bid
+        lambda_ask = mu / 2 + alpha_arr * A_ask
 
-        excitement = (alpha * A_total) / (lambda_total + 1e-12)
+        excitement = (alpha_arr * A_total) / (lambda_total + 1e-12)
         hawkes_imb = (lambda_ask - lambda_bid) / (lambda_ask + lambda_bid + 1e-12)
 
         result = pd.DataFrame({

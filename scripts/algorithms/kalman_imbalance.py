@@ -71,35 +71,43 @@ class KalmanImbalance(MicrostructureAlgorithm):
     def reset(self) -> None:
         self._kf.reset()
 
+    def _make_kf(self, obs_window: np.ndarray) -> OUKalmanFilter:
+        """Create a Kalman filter, auto-tuned if enabled."""
+        if self._auto_tune:
+            valid = obs_window[np.isfinite(obs_window)]
+            if len(valid) > 200:
+                return auto_tune_filter(valid, dt=self._dt)
+        return OUKalmanFilter(
+            theta=self._theta,
+            sigma_process=0.01,
+            sigma_obs=0.1 * self._r_mult,
+            dt=self._dt,
+        )
+
     def run_batch(self, df: "pd.DataFrame") -> "pd.DataFrame":
-        """Vectorized override using filter_series_full."""
+        """Vectorized override with regime-conditional re-estimation."""
         import pandas as pd
+        from .regime_retune import has_regime_column, segment_by_regime, REGIME_COL
 
         obs = df["imbalance_qty_l1"].values.astype(np.float64)
+        n = len(obs)
+        states = np.full(n, np.nan)
+        uncerts = np.full(n, np.nan)
+        innovs = np.full(n, np.nan)
 
-        # Auto-tune filter parameters from data
-        if self._auto_tune:
-            valid_obs = obs[np.isfinite(obs)]
-            if len(valid_obs) > 200:
-                kf = auto_tune_filter(valid_obs, dt=self._dt)
-            else:
-                kf = OUKalmanFilter(
-                    theta=self._theta,
-                    sigma_process=0.01,
-                    sigma_obs=0.1 * self._r_mult,
-                    dt=self._dt,
-                )
+        # Regime-conditional: re-tune at each regime transition
+        if self._auto_tune and has_regime_column(df):
+            segments = segment_by_regime(df[REGIME_COL].values)
+            for start, end, _regime in segments:
+                kf = self._make_kf(obs[start:end])
+                s, u, iv = kf.filter_series_full(obs[start:end])
+                states[start:end] = s
+                uncerts[start:end] = u
+                innovs[start:end] = iv
         else:
-            kf = OUKalmanFilter(
-                theta=self._theta,
-                sigma_process=0.01,
-                sigma_obs=0.1 * self._r_mult,
-                dt=self._dt,
-            )
+            kf = self._make_kf(obs)
+            states, uncerts, innovs = kf.filter_series_full(obs)
 
-        # filter_series_full handles the loop in Python but it's a tight
-        # numeric loop (no dict/DataFrame overhead per tick)
-        states, uncerts, innovs = kf.filter_series_full(obs)
         strengths = states / (np.sqrt(uncerts) + 1e-12)
 
         # NaN-out where input was NaN
