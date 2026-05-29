@@ -262,9 +262,9 @@ Eliminated trade-frequency annualization bias across all Python Sharpe callers. 
 
 Added parameter stability analysis to backtest engine and health check endpoints. Merged from `feat/param-stability-health`.
 
-### Portfolio-Level Risk Constraints ✅ (2026-05-29)
+### Portfolio-Level Risk Constraints (planned, not yet implemented)
 
-`PortfolioConstraints` dataclass and `check_portfolio_constraints()` in deployer. Aggregate leverage cap, concentration (Herfindahl/effective-N), portfolio drawdown circuit breaker.
+`PortfolioConstraints` dataclass and `check_portfolio_constraints()` in deployer. Aggregate leverage cap, concentration (Herfindahl/effective-N), portfolio drawdown circuit breaker. Full plan in `.claude/plans/floofy-nibbling-origami.md`.
 
 ---
 
