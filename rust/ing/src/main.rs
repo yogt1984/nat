@@ -6,7 +6,7 @@
 use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, watch, Mutex};
 use tracing::{info, warn, error};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -84,6 +84,20 @@ async fn main() -> Result<()> {
 
     info!("Starting ING - Hyperliquid Ingestor");
     info!(?config, "Configuration loaded");
+
+    // Graceful shutdown: watch channel broadcasts to all symbol tasks
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    tokio::spawn(async move {
+        let ctrl_c = tokio::signal::ctrl_c();
+        let mut sigterm = tokio::signal::unix::signal(
+            tokio::signal::unix::SignalKind::terminate(),
+        ).expect("failed to install SIGTERM handler");
+        tokio::select! {
+            _ = ctrl_c => info!("Received SIGINT (Ctrl+C), initiating shutdown..."),
+            _ = sigterm.recv() => info!("Received SIGTERM, initiating shutdown..."),
+        }
+        let _ = shutdown_tx.send(true);
+    });
 
     // Initialize metrics
     let metrics = Arc::new(Metrics::new());
@@ -168,6 +182,7 @@ async fn main() -> Result<()> {
         let redis_publisher = redis_publisher.clone();
         let alert_config = alert_config.clone();
         let cross_symbol = cross_symbol_state.clone();
+        let shutdown_rx = shutdown_rx.clone();
 
         let handle = tokio::spawn(async move {
             run_symbol_ingestor(
@@ -179,6 +194,7 @@ async fn main() -> Result<()> {
                 redis_publisher,
                 alert_config,
                 cross_symbol,
+                shutdown_rx,
             ).await
         });
 
@@ -186,16 +202,33 @@ async fn main() -> Result<()> {
     }
 
     // Drop the original sender so writer knows when to stop
+    // (once all symbol tasks also drop their clones)
     drop(feature_tx);
 
-    // Wait for all tasks
+    // Wait for symbol tasks to exit (3s deadline)
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(3);
     for handle in handles {
-        if let Err(e) = handle.await {
-            error!(?e, "Symbol ingestor task failed");
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(remaining, handle).await {
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(e))) => error!(?e, "Symbol task error"),
+            Ok(Err(e)) => error!(?e, "Symbol task panicked"),
+            Err(_) => warn!("Symbol task did not stop in time"),
         }
     }
 
-    writer_handle.await??;
+    info!("All symbol tasks stopped, waiting for writer flush...");
+
+    // Writer's recv() returns None now that all senders are dropped → flushes buffer
+    match tokio::time::timeout(
+        tokio::time::Duration::from_secs(3),
+        writer_handle,
+    ).await {
+        Ok(Ok(Ok(()))) => info!("Writer flushed successfully"),
+        Ok(Ok(Err(e))) => error!(?e, "Writer error during shutdown"),
+        Ok(Err(e)) => error!(?e, "Writer task panicked"),
+        Err(_) => error!("Writer flush timed out — data may be lost"),
+    }
 
     info!("ING shutdown complete");
     Ok(())
@@ -211,6 +244,7 @@ async fn run_symbol_ingestor(
     redis_publisher: Option<Arc<Mutex<RedisPublisher>>>,
     alert_config: AlertConfig,
     cross_symbol_state: CrossSymbolState,
+    mut shutdown_rx: watch::Receiver<bool>,
 ) -> Result<()> {
     info!(%symbol, "Starting ingestor");
 
@@ -611,6 +645,14 @@ async fn run_symbol_ingestor(
                         "Health summary"
                     );
                 }
+            }
+
+            // Graceful shutdown — lowest priority so in-flight work completes first
+            _ = shutdown_rx.changed() => {
+                info!(%symbol, "Shutdown signal received, closing WebSocket...");
+                client.close().await;
+                info!(%symbol, "Symbol ingestor stopped");
+                break;
             }
         }
     }

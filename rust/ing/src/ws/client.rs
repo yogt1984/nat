@@ -213,6 +213,22 @@ impl HyperliquidClient {
         }
     }
 
+    /// Gracefully close the WebSocket connection.
+    /// Sends a Close frame and waits up to 1 second for acknowledgement.
+    pub async fn close(&mut self) {
+        if let Some(ref mut stream) = self.stream {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                SinkExt::close(stream),
+            ).await {
+                Ok(Ok(())) => info!(symbol = %self.symbol, "WebSocket closed"),
+                Ok(Err(e)) => warn!(symbol = %self.symbol, ?e, "WebSocket close error"),
+                Err(_) => warn!(symbol = %self.symbol, "WebSocket close timed out"),
+            }
+        }
+        self.stream = None;
+    }
+
     /// Check if the connection is stale (no messages received recently).
     /// A connection is stale if no data has arrived for 2x the ping interval.
     pub fn is_stale(&self) -> bool {
