@@ -97,7 +97,7 @@ class BaseRunner(ABC):
             from .research_output import publish_research_event
             payload.setdefault("hypothesis_id", self.h.id)
             publish_research_event(event_type, payload)
-        except Exception:
+        except (ImportError, AttributeError, ConnectionError, OSError):
             pass
 
     # --- Gate methods (shared across all runners) -------------------------
@@ -149,7 +149,7 @@ class BaseRunner(ABC):
         try:
             from data.features import compute_data_version
             self.h.data_version = compute_data_version()
-        except Exception:
+        except (ImportError, OSError):
             pass
 
         log.info("  DISCOVERY PASSED: %s", self.h.claim[:60])
@@ -671,7 +671,7 @@ class ResearchAgent(ABC):
             budget = self._store.get_budget(self.agent_type)
             if budget:
                 return budget["max_hypotheses_per_cycle"]
-        except Exception:
+        except (KeyError, TypeError, AttributeError):
             pass
         return self.config["max_experiments_per_cycle"]
 
@@ -679,7 +679,7 @@ class ResearchAgent(ABC):
         """Consume pending directives from the meta-agent."""
         try:
             directives = self._store.consume_directives(self.agent_type)
-        except Exception:
+        except (KeyError, AttributeError, OSError):
             return
         for d in directives:
             action = d["action"]
@@ -720,7 +720,7 @@ class ResearchAgent(ABC):
                 )
             if n_db or n_json:
                 log.info("Retention cleanup: %d DB rows, %d JSON files removed", n_db, n_json)
-        except Exception as e:
+        except (OSError, ImportError) as e:
             log.debug("Retention cleanup failed: %s", e)
 
     def _publish_event(self, event_type: str, payload: dict) -> None:
@@ -733,7 +733,7 @@ class ResearchAgent(ABC):
             if hasattr(self, "_cycle_id") and self._cycle_id:
                 payload.setdefault("cycle_id", self._cycle_id)
             publish_research_event(event_type, payload)
-        except Exception:
+        except (ImportError, AttributeError, ConnectionError, OSError):
             pass
 
     def _emit_hypothesis_record(self, hypothesis) -> None:
@@ -745,7 +745,7 @@ class ResearchAgent(ABC):
                 agent_type=self.agent_type,
                 output_root=self.research_output_root,
             )
-        except Exception as e:
+        except (ImportError, OSError, TypeError) as e:
             log.debug("Failed to emit hypothesis record: %s", e)
 
     def _emit_cycle_summary(
@@ -774,7 +774,7 @@ class ResearchAgent(ABC):
                 generator_stats=self.gen_stats,
                 output_root=self.research_output_root,
             )
-        except Exception as e:
+        except (ImportError, OSError, TypeError) as e:
             log.debug("Failed to emit cycle summary: %s", e)
 
     def _run_generators(self, manifest: dict) -> int:
@@ -791,7 +791,7 @@ class ResearchAgent(ABC):
                 for h in hypotheses:
                     self.queue.push(h)
                     total += 1
-            except Exception as e:
+            except (ImportError, AttributeError, ValueError, TypeError) as e:
                 log.warning("Generator %s failed: %s", gen_name, e)
         log.info("Generated %d new hypotheses", total)
         return total

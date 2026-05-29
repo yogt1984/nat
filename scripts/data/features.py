@@ -91,7 +91,7 @@ def load_features(
     for fpath in files:
         try:
             table = pq.read_table(str(fpath), columns=read_columns, filters=filters)
-        except Exception as e:
+        except (pa.ArrowInvalid, pa.ArrowIOError, OSError) as e:
             warnings.warn(f"Skipping {fpath.name}: {e}")
             continue
         if table.num_rows > 0:
@@ -247,7 +247,7 @@ def available_symbols(
             try:
                 table = pq.read_table(str(f), columns=["symbol"])
                 symbols.update(table.column("symbol").to_pylist())
-            except Exception:
+            except (pa.ArrowInvalid, pa.ArrowIOError, OSError, KeyError):
                 continue
     return sorted(symbols)
 
@@ -294,7 +294,7 @@ def data_health(data_dir: Optional[Path] = None) -> dict:
             try:
                 meta = pq.read_metadata(str(f))
                 total_rows += meta.num_rows
-            except Exception:
+            except (pa.ArrowInvalid, pa.ArrowIOError, OSError):
                 warns.append(f"Cannot read metadata: {f.name}")
 
     # Get latest timestamp from most recent file
@@ -310,7 +310,7 @@ def data_health(data_dir: Optional[Path] = None) -> dict:
                     ts_arr = table.column("timestamp_ns")
                     latest_ts = max(latest_ts, ts_arr[len(ts_arr) - 1].as_py())
                     break
-            except Exception:
+            except (pa.ArrowInvalid, pa.ArrowIOError, OSError, KeyError):
                 continue
 
     latest_str = None
@@ -349,7 +349,7 @@ def compute_data_version(data_dir: Optional[Path] = None) -> str:
             ["git", "rev-parse", "HEAD"],
             cwd=root.parent, stderr=subprocess.DEVNULL,
         ).decode().strip()
-    except Exception:
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
         git_sha = "unknown"
 
     # Schema from first available file
@@ -358,7 +358,7 @@ def compute_data_version(data_dir: Optional[Path] = None) -> str:
         try:
             schema_cols = ",".join(pq.read_schema(str(f)).names)
             break
-        except Exception:
+        except (pa.ArrowInvalid, pa.ArrowIOError, OSError):
             continue
 
     payload = f"{git_sha}:{files}:{schema_cols}"
