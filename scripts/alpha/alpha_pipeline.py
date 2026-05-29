@@ -376,6 +376,7 @@ def run_pipeline(
             symbol=pipe_cfg["primary_symbol"],
             top_n=comb_cfg["top_n"],
             max_corr=comb_cfg["max_corr"],
+            dedup_method=comb_cfg.get("dedup_method", "cluster"),
             timeframe=pipe_cfg["timeframe"],
             method=comb_cfg["method"],
             output=combine_output,

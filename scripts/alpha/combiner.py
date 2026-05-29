@@ -114,19 +114,12 @@ def select_top_features(
     return specs
 
 
-def deduplicate_by_correlation(
+def _compute_corr_matrix(
     features_df: pl.DataFrame,
-    specs: List[FeatureSpec],
-    max_corr: float = 0.8,
-) -> List[FeatureSpec]:
-    """Drop features with |correlation| > max_corr, keeping higher |IC|."""
-    names = [s.name for s in specs if s.name in features_df.columns]
-    if len(names) <= 1:
-        return [s for s in specs if s.name in names]
-
-    # Compute correlation matrix
+    names: List[str],
+) -> np.ndarray:
+    """Compute correlation matrix with NaN-safe median imputation."""
     mat = features_df.select(names).to_numpy()
-    # Handle NaN: fill with column medians for correlation only
     for i in range(mat.shape[1]):
         col = mat[:, i]
         mask = np.isfinite(col)
@@ -134,11 +127,82 @@ def deduplicate_by_correlation(
             mat[~mask, i] = np.nanmedian(col)
         else:
             mat[:, i] = 0.0
+    return np.corrcoef(mat.T)
 
-    corr = np.corrcoef(mat.T)
+
+def deduplicate_by_correlation(
+    features_df: pl.DataFrame,
+    specs: List[FeatureSpec],
+    max_corr: float = 0.7,
+    method: str = "cluster",
+) -> List[FeatureSpec]:
+    """Remove redundant features, keeping the highest-|IC| representative.
+
+    Methods:
+        "cluster"  — Hierarchical clustering on correlation distance.
+                     Groups features into clusters where within-cluster
+                     correlation exceeds max_corr, then picks the best-IC
+                     feature per cluster. Handles transitive correlations
+                     (A~B=0.75, B~C=0.75 form one cluster even if A~C=0.56).
+        "pairwise" — Legacy greedy pairwise removal.
+    """
+    names = [s.name for s in specs if s.name in features_df.columns]
+    if len(names) <= 1:
+        return [s for s in specs if s.name in names]
+
+    corr = _compute_corr_matrix(features_df, names)
     ic_lookup = {s.name: abs(s.ic_mean) for s in specs}
 
-    # Greedy removal: drop the lower-IC feature in each correlated pair
+    if method == "cluster":
+        survivors = _dedup_cluster(names, corr, ic_lookup, max_corr)
+    else:
+        survivors = _dedup_pairwise(names, corr, ic_lookup, max_corr)
+
+    drop = set(names) - set(survivors)
+    if drop:
+        log.info("Dropped %d correlated features: %s", len(drop), drop)
+    return [s for s in specs if s.name in survivors]
+
+
+def _dedup_cluster(
+    names: List[str],
+    corr: np.ndarray,
+    ic_lookup: dict,
+    max_corr: float,
+) -> List[str]:
+    """Hierarchical clustering dedup — one representative per cluster."""
+    from scipy.cluster.hierarchy import fcluster, linkage
+    from scipy.spatial.distance import squareform
+
+    n = len(names)
+    # Convert correlation to distance: d = 1 - |corr|
+    dist = 1.0 - np.abs(corr)
+    np.fill_diagonal(dist, 0.0)
+    # Ensure symmetry and non-negative (numerical noise can cause tiny negatives)
+    dist = np.clip((dist + dist.T) / 2.0, 0.0, 2.0)
+
+    condensed = squareform(dist, checks=False)
+    Z = linkage(condensed, method="complete")
+    # Cut at distance = 1 - max_corr → features with |corr| > max_corr
+    # are in the same cluster
+    labels = fcluster(Z, t=1.0 - max_corr, criterion="distance")
+
+    # Pick best-IC feature per cluster
+    survivors = []
+    for cluster_id in np.unique(labels):
+        cluster_names = [names[i] for i in range(n) if labels[i] == cluster_id]
+        best = max(cluster_names, key=lambda nm: ic_lookup.get(nm, 0))
+        survivors.append(best)
+    return survivors
+
+
+def _dedup_pairwise(
+    names: List[str],
+    corr: np.ndarray,
+    ic_lookup: dict,
+    max_corr: float,
+) -> List[str]:
+    """Legacy greedy pairwise removal."""
     drop = set()
     for i in range(len(names)):
         if names[i] in drop:
@@ -147,17 +211,12 @@ def deduplicate_by_correlation(
             if names[j] in drop:
                 continue
             if abs(corr[i, j]) > max_corr:
-                # Drop the one with lower |IC|
                 if ic_lookup.get(names[i], 0) < ic_lookup.get(names[j], 0):
                     drop.add(names[i])
                     break
                 else:
                     drop.add(names[j])
-
-    survivors = [s for s in specs if s.name in names and s.name not in drop]
-    if drop:
-        log.info(f"Dropped {len(drop)} correlated features: {drop}")
-    return survivors
+    return [n for n in names if n not in drop]
 
 
 def standardize_features(
@@ -288,7 +347,8 @@ def run_combine(
     symbol: str = "BTC",
     horizon: Optional[str] = None,
     top_n: int = 20,
-    max_corr: float = 0.8,
+    max_corr: float = 0.7,
+    dedup_method: str = "cluster",
     timeframe: str = "15min",
     method: str = "equal",
     output: Optional[str | Path] = None,
@@ -325,9 +385,9 @@ def run_combine(
     df = aggregate_bars(df, timeframe=timeframe)
     print(f"  {len(df)} bars after {timeframe} aggregation")
 
-    # 3. Deduplicate by correlation
-    specs = deduplicate_by_correlation(df, specs, max_corr=max_corr)
-    print(f"  {len(specs)} features after correlation dedup (threshold={max_corr})")
+    # 3. Deduplicate by correlation (hierarchical clustering or pairwise)
+    specs = deduplicate_by_correlation(df, specs, max_corr=max_corr, method=dedup_method)
+    print(f"  {len(specs)} features after {dedup_method} dedup (threshold={max_corr})")
 
     # 4. Standardize
     feature_names = [s.name for s in specs if s.name in df.columns]
