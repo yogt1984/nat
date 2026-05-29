@@ -296,7 +296,7 @@ class TestSurpriseSignal:
         # Constant for first 3/4, then step up
         ent = np.where(np.arange(n) < 3 * n // 4, 1.0, 2.0)
         df = pd.DataFrame({"ent_book_shape": ent, "ent_tick_5s": ent})
-        ss = SurpriseSignal(roc_window=W, transition_threshold=2.0)
+        ss = SurpriseSignal(roc_window=W)
         result = ss.run_batch(df)
 
         # ROC should spike near the transition
