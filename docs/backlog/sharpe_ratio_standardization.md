@@ -110,7 +110,9 @@ Already uses sample std (N-1) which is correct. Add `risk_free_rate` parameter f
 - [x] `ddof=1` used in all Python Sharpe paths
 - [x] No hardcoded `bars_per_day` without documented justification
 - [x] engine.py trade-frequency bias eliminated (aggregates to daily)
-- [x] Existing tests pass: portfolio (19), multi_freq (19), backtest (11), EAMM (125), Rust derived (12)
+- [x] Existing tests pass: portfolio (19), multi_freq (19), adapter (14)
+- [x] All _sharpe() helpers aggregate to daily before annualizing (no intraday multiplier inflation)
+- [x] No callers of sharpe_intraday() remain (definition kept in metrics.py for backward compat)
 - [ ] G6 and G7 gate decisions unchanged or improved on existing backtest data
 
 ## Known Remaining Deviations

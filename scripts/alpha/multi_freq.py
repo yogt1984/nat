@@ -251,9 +251,15 @@ def _compute_signal_pnl(signal: np.ndarray, prices: np.ndarray) -> np.ndarray:
 
 
 def _sharpe(pnl: np.ndarray, bars_per_day: float = 96) -> float:
-    """Annualized Sharpe from intraday bar PnL."""
-    from utils.metrics import sharpe_intraday
-    return sharpe_intraday(pnl, bars_per_day=bars_per_day)
+    """Annualized Sharpe — aggregates intraday bars to daily first."""
+    from utils.metrics import sharpe_daily
+    bpd = int(bars_per_day)
+    n_full_days = len(pnl) // bpd
+    if n_full_days < 2:
+        return 0.0
+    trimmed = pnl[:n_full_days * bpd]
+    daily_pnl = trimmed.reshape(n_full_days, bpd).sum(axis=1)
+    return sharpe_daily(daily_pnl)
 
 
 def _max_dd(pnl: np.ndarray) -> float:

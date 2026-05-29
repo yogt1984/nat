@@ -194,12 +194,18 @@ def print_evaluation_report(result: EvaluationResult):
 
 
 def _sharpe(pnl: np.ndarray, bars_per_day: float = None) -> float:
-    """Annualized Sharpe from per-bar PnL (default: 10Hz emission, 24h)."""
-    from utils.metrics import sharpe_intraday, BARS_PER_DAY_10HZ
+    """Annualized Sharpe from per-bar PnL — aggregates to daily first."""
+    from utils.metrics import sharpe_daily, BARS_PER_DAY_10HZ
     if bars_per_day is None:
         bars_per_day = BARS_PER_DAY_10HZ
     valid = pnl[~np.isnan(pnl)]
-    return sharpe_intraday(valid, bars_per_day=bars_per_day)
+    bpd = int(bars_per_day)
+    n_full_days = len(valid) // bpd
+    if n_full_days < 2:
+        return 0.0
+    trimmed = valid[:n_full_days * bpd]
+    daily_pnl = trimmed.reshape(n_full_days, bpd).sum(axis=1)
+    return sharpe_daily(daily_pnl)
 
 
 def _max_drawdown(pnl: np.ndarray) -> float:
