@@ -13,9 +13,6 @@ Usage:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parent.parent.parent
 
 from agent.base import ResearchAgent, BaseRunner, cli_main, load_agent_config
 from agent.hypothesis import Hypothesis, GeneratorStats
@@ -37,10 +34,6 @@ class MediumFrequencyAgent(ResearchAgent):
         "max_cycle_runtime_s": 5400,
     }
 
-    @property
-    def root(self) -> Path:
-        return ROOT
-
     # 5min bar rolling IC
     _rolling_ic_bar_period = "5min"
     _rolling_ic_horizon_default = 300.0  # 5 minutes
@@ -58,16 +51,16 @@ class MediumFrequencyAgent(ResearchAgent):
                                      store=self._store, agent=self.agent_type)
 
 
-# Backward compatibility — module-level path constants
-MF_STATE_PATH = ROOT / "data" / "agent_mf" / "agent_state.json"
-MF_STATS_PATH = ROOT / "data" / "agent_mf" / "generator_stats.json"
-MF_REGISTRY_PATH = ROOT / "data" / "agent_mf" / "registry.json"
+# Backward compatibility
+_inst = MediumFrequencyAgent.__new__(MediumFrequencyAgent)
+MF_STATE_PATH = _inst.state_path
+MF_STATS_PATH = _inst.stats_path
+MF_REGISTRY_PATH = _inst.registry_path
 
 
 def load_config() -> dict:
-    """Load MF agent config from TOML or return defaults."""
     return load_agent_config(
-        ROOT / "config" / "agent.toml",
+        _inst.root / "config" / "agent.toml",
         "agent_mf",
         MediumFrequencyAgent.BASE_CONFIG,
     )
