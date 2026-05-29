@@ -10,7 +10,7 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
-use super::{WhaleClassification, WhaleConfig, WalletStats, WhaleTier};
+use super::{WalletStats, WhaleClassification, WhaleConfig, WhaleTier};
 
 /// Registry of whale wallets
 #[derive(Debug)]
@@ -92,7 +92,8 @@ impl WhaleRegistry {
 
     /// Get whales by tier
     pub fn get_whales_by_tier(&self, tier: WhaleTier) -> Vec<WhaleClassification> {
-        self.whales.read()
+        self.whales
+            .read()
             .values()
             .filter(|w| w.tier == tier)
             .cloned()
@@ -102,7 +103,11 @@ impl WhaleRegistry {
     /// Get top N whales by score
     pub fn get_top_whales(&self, n: usize) -> Vec<WhaleClassification> {
         let mut whales: Vec<_> = self.whales.read().values().cloned().collect();
-        whales.sort_by(|a, b| b.whale_score.partial_cmp(&a.whale_score).unwrap_or(std::cmp::Ordering::Equal));
+        whales.sort_by(|a, b| {
+            b.whale_score
+                .partial_cmp(&a.whale_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         whales.truncate(n);
         whales
     }
@@ -119,7 +124,8 @@ impl WhaleRegistry {
 
     /// Get whale tier for an address (returns Retail if not found)
     pub fn get_tier(&self, address: &str) -> WhaleTier {
-        self.whales.read()
+        self.whales
+            .read()
             .get(address)
             .map(|w| w.tier)
             .unwrap_or(WhaleTier::Retail)

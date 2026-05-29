@@ -12,6 +12,6 @@ pub mod state;
 
 pub use config::FeaturesConfig;
 pub use messages::*;
-pub use regime::{Regime, RegimeFeatures, GmmClassificationFeatures};
+pub use regime::{GmmClassificationFeatures, Regime, RegimeFeatures};
 pub use ring_buffer::RingBuffer;
-pub use state::{OrderBook, TradeBuffer, Trade, MarketContext};
+pub use state::{MarketContext, OrderBook, Trade, TradeBuffer};

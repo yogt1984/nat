@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::features::Features;
-use crate::redis_publisher::{AlertTrigger, AlertType, AlertSeverity};
+use crate::redis_publisher::{AlertSeverity, AlertTrigger, AlertType};
 
 /// Alert configuration
 #[derive(Debug, Clone)]
@@ -114,38 +114,43 @@ impl AlertTracker {
     }
 
     /// Check features and return any triggered alerts
-    pub fn check(&mut self, features: &Features, symbol: &str, timestamp_ms: u64) -> Vec<AlertTrigger> {
+    pub fn check(
+        &mut self,
+        features: &Features,
+        symbol: &str,
+        timestamp_ms: u64,
+    ) -> Vec<AlertTrigger> {
         let mut alerts = Vec::new();
 
         // Check whale accumulation
         if self.config.enabled_alerts.whale_accumulation {
             if let Some(ref wf) = features.whale_flow {
-                if wf.whale_flow_normalized_1h >= self.config.whale_accumulation_zscore {
-                    if self.can_fire("whale_acc", symbol, timestamp_ms) {
-                        alerts.push(AlertTrigger {
-                            timestamp_ms,
-                            symbol: symbol.to_string(),
-                            alert_type: AlertType::WhaleAccumulation,
-                            severity: if wf.whale_flow_normalized_1h >= 3.0 {
-                                AlertSeverity::Critical
-                            } else {
-                                AlertSeverity::Warning
-                            },
-                            message: format!(
-                                "Whale accumulation: z={:.2}, flow=${:.0}K/1h",
-                                wf.whale_flow_normalized_1h,
-                                wf.whale_net_flow_1h / 1000.0
-                            ),
-                            data: serde_json::json!({
-                                "flow_1h": wf.whale_net_flow_1h,
-                                "flow_zscore": wf.whale_flow_normalized_1h,
-                                "flow_4h": wf.whale_net_flow_4h,
-                                "flow_24h": wf.whale_net_flow_24h,
-                                "intensity": wf.whale_flow_intensity,
-                            }),
-                        });
-                        self.mark_fired("whale_acc", symbol, timestamp_ms);
-                    }
+                if wf.whale_flow_normalized_1h >= self.config.whale_accumulation_zscore
+                    && self.can_fire("whale_acc", symbol, timestamp_ms)
+                {
+                    alerts.push(AlertTrigger {
+                        timestamp_ms,
+                        symbol: symbol.to_string(),
+                        alert_type: AlertType::WhaleAccumulation,
+                        severity: if wf.whale_flow_normalized_1h >= 3.0 {
+                            AlertSeverity::Critical
+                        } else {
+                            AlertSeverity::Warning
+                        },
+                        message: format!(
+                            "Whale accumulation: z={:.2}, flow=${:.0}K/1h",
+                            wf.whale_flow_normalized_1h,
+                            wf.whale_net_flow_1h / 1000.0
+                        ),
+                        data: serde_json::json!({
+                            "flow_1h": wf.whale_net_flow_1h,
+                            "flow_zscore": wf.whale_flow_normalized_1h,
+                            "flow_4h": wf.whale_net_flow_4h,
+                            "flow_24h": wf.whale_net_flow_24h,
+                            "intensity": wf.whale_flow_intensity,
+                        }),
+                    });
+                    self.mark_fired("whale_acc", symbol, timestamp_ms);
                 }
             }
         }
@@ -153,31 +158,31 @@ impl AlertTracker {
         // Check whale distribution
         if self.config.enabled_alerts.whale_distribution {
             if let Some(ref wf) = features.whale_flow {
-                if wf.whale_flow_normalized_1h <= self.config.whale_distribution_zscore {
-                    if self.can_fire("whale_dist", symbol, timestamp_ms) {
-                        alerts.push(AlertTrigger {
-                            timestamp_ms,
-                            symbol: symbol.to_string(),
-                            alert_type: AlertType::WhaleDistribution,
-                            severity: if wf.whale_flow_normalized_1h <= -3.0 {
-                                AlertSeverity::Critical
-                            } else {
-                                AlertSeverity::Warning
-                            },
-                            message: format!(
-                                "Whale distribution: z={:.2}, flow=${:.0}K/1h",
-                                wf.whale_flow_normalized_1h,
-                                wf.whale_net_flow_1h / 1000.0
-                            ),
-                            data: serde_json::json!({
-                                "flow_1h": wf.whale_net_flow_1h,
-                                "flow_zscore": wf.whale_flow_normalized_1h,
-                                "flow_4h": wf.whale_net_flow_4h,
-                                "flow_24h": wf.whale_net_flow_24h,
-                            }),
-                        });
-                        self.mark_fired("whale_dist", symbol, timestamp_ms);
-                    }
+                if wf.whale_flow_normalized_1h <= self.config.whale_distribution_zscore
+                    && self.can_fire("whale_dist", symbol, timestamp_ms)
+                {
+                    alerts.push(AlertTrigger {
+                        timestamp_ms,
+                        symbol: symbol.to_string(),
+                        alert_type: AlertType::WhaleDistribution,
+                        severity: if wf.whale_flow_normalized_1h <= -3.0 {
+                            AlertSeverity::Critical
+                        } else {
+                            AlertSeverity::Warning
+                        },
+                        message: format!(
+                            "Whale distribution: z={:.2}, flow=${:.0}K/1h",
+                            wf.whale_flow_normalized_1h,
+                            wf.whale_net_flow_1h / 1000.0
+                        ),
+                        data: serde_json::json!({
+                            "flow_1h": wf.whale_net_flow_1h,
+                            "flow_zscore": wf.whale_flow_normalized_1h,
+                            "flow_4h": wf.whale_net_flow_4h,
+                            "flow_24h": wf.whale_net_flow_24h,
+                        }),
+                    });
+                    self.mark_fired("whale_dist", symbol, timestamp_ms);
                 }
             }
         }
@@ -227,7 +232,8 @@ impl AlertTracker {
                     }
 
                     // Update tracked regime
-                    self.last_regime.insert(regime_key, current_regime.to_string());
+                    self.last_regime
+                        .insert(regime_key, current_regime.to_string());
                 }
             }
         }
@@ -238,62 +244,60 @@ impl AlertTracker {
             if let Some(ref liq) = features.liquidation_risk {
                 // Check for extreme asymmetry (>3x difference in directional risk)
                 let asymmetry_abs = liq.liquidation_asymmetry.abs();
-                if asymmetry_abs >= 3.0 || asymmetry_abs <= 0.33 {
-                    if self.can_fire("cascade", symbol, timestamp_ms) {
-                        let direction = if liq.liquidation_asymmetry > 1.0 {
-                            "UPWARD (short squeeze risk)"
-                        } else {
-                            "DOWNWARD (long squeeze risk)"
-                        };
+                if (asymmetry_abs >= 3.0 || asymmetry_abs <= 0.33)
+                    && self.can_fire("cascade", symbol, timestamp_ms)
+                {
+                    let direction = if liq.liquidation_asymmetry > 1.0 {
+                        "UPWARD (short squeeze risk)"
+                    } else {
+                        "DOWNWARD (long squeeze risk)"
+                    };
 
-                        alerts.push(AlertTrigger {
-                            timestamp_ms,
-                            symbol: symbol.to_string(),
-                            alert_type: AlertType::LiquidationCluster,
-                            severity: AlertSeverity::Critical,
-                            message: format!(
-                                "Liquidation asymmetry: {:.2}x, {}",
-                                liq.liquidation_asymmetry,
-                                direction
-                            ),
-                            data: serde_json::json!({
-                                "asymmetry": liq.liquidation_asymmetry,
-                                "direction": direction,
-                                "risk_above_1pct": liq.liquidation_risk_above_1pct,
-                                "risk_below_1pct": liq.liquidation_risk_below_1pct,
-                                "risk_above_5pct": liq.liquidation_risk_above_5pct,
-                                "risk_below_5pct": liq.liquidation_risk_below_5pct,
-                            }),
-                        });
-                        self.mark_fired("cascade", symbol, timestamp_ms);
-                    }
+                    alerts.push(AlertTrigger {
+                        timestamp_ms,
+                        symbol: symbol.to_string(),
+                        alert_type: AlertType::LiquidationCluster,
+                        severity: AlertSeverity::Critical,
+                        message: format!(
+                            "Liquidation asymmetry: {:.2}x, {}",
+                            liq.liquidation_asymmetry, direction
+                        ),
+                        data: serde_json::json!({
+                            "asymmetry": liq.liquidation_asymmetry,
+                            "direction": direction,
+                            "risk_above_1pct": liq.liquidation_risk_above_1pct,
+                            "risk_below_1pct": liq.liquidation_risk_below_1pct,
+                            "risk_above_5pct": liq.liquidation_risk_above_5pct,
+                            "risk_below_5pct": liq.liquidation_risk_below_5pct,
+                        }),
+                    });
+                    self.mark_fired("cascade", symbol, timestamp_ms);
                 }
             }
         }
 
         // Check entropy drop (market becoming predictable)
-        if self.config.enabled_alerts.entropy_drop {
-            if features.entropy.tick_entropy_1m < self.config.entropy_low {
-                if self.can_fire("entropy", symbol, timestamp_ms) {
-                    alerts.push(AlertTrigger {
-                        timestamp_ms,
-                        symbol: symbol.to_string(),
-                        alert_type: AlertType::EntropyDrop,
-                        severity: AlertSeverity::Info,
-                        message: format!(
-                            "Low entropy: {:.3} (market predictable)",
-                            features.entropy.tick_entropy_1m
-                        ),
-                        data: serde_json::json!({
-                            "entropy_1m": features.entropy.tick_entropy_1m,
-                            "entropy_5s": features.entropy.tick_entropy_5s,
-                            "entropy_30s": features.entropy.tick_entropy_30s,
-                            "permutation_returns_16": features.entropy.permutation_returns_16,
-                        }),
-                    });
-                    self.mark_fired("entropy", symbol, timestamp_ms);
-                }
-            }
+        if self.config.enabled_alerts.entropy_drop
+            && features.entropy.tick_entropy_1m < self.config.entropy_low
+            && self.can_fire("entropy", symbol, timestamp_ms)
+        {
+            alerts.push(AlertTrigger {
+                timestamp_ms,
+                symbol: symbol.to_string(),
+                alert_type: AlertType::EntropyDrop,
+                severity: AlertSeverity::Info,
+                message: format!(
+                    "Low entropy: {:.3} (market predictable)",
+                    features.entropy.tick_entropy_1m
+                ),
+                data: serde_json::json!({
+                    "entropy_1m": features.entropy.tick_entropy_1m,
+                    "entropy_5s": features.entropy.tick_entropy_5s,
+                    "entropy_30s": features.entropy.tick_entropy_30s,
+                    "permutation_returns_16": features.entropy.permutation_returns_16,
+                }),
+            });
+            self.mark_fired("entropy", symbol, timestamp_ms);
         }
 
         alerts
@@ -324,9 +328,8 @@ impl AlertTracker {
 
     /// Clear old cooldowns (memory cleanup)
     pub fn cleanup_old_cooldowns(&mut self, current_ms: u64, max_age_ms: u64) {
-        self.last_alerts.retain(|_, &mut last_time| {
-            current_ms.saturating_sub(last_time) < max_age_ms
-        });
+        self.last_alerts
+            .retain(|_, &mut last_time| current_ms.saturating_sub(last_time) < max_age_ms);
     }
 }
 
@@ -421,7 +424,9 @@ mod tests {
         let alerts = tracker.check(&features, "BTC", 1000);
 
         // Should fire regime change on first detection
-        assert!(alerts.iter().any(|a| matches!(a.alert_type, AlertType::RegimeChange)));
+        assert!(alerts
+            .iter()
+            .any(|a| matches!(a.alert_type, AlertType::RegimeChange)));
     }
 
     #[test]
@@ -436,7 +441,9 @@ mod tests {
 
         let alerts = tracker.check(&features, "BTC", 1000);
 
-        assert!(alerts.iter().any(|a| matches!(a.alert_type, AlertType::EntropyDrop)));
+        assert!(alerts
+            .iter()
+            .any(|a| matches!(a.alert_type, AlertType::EntropyDrop)));
     }
 
     #[test]

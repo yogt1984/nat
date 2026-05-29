@@ -55,7 +55,9 @@ pub struct RawFeatures {
 }
 
 impl RawFeatures {
-    pub fn count() -> usize { 10 }
+    pub fn count() -> usize {
+        10
+    }
 
     pub fn names() -> Vec<&'static str> {
         vec![

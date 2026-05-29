@@ -17,7 +17,7 @@
 //! - Glosten & Milgrom (1985) - Bid, Ask and Transaction Prices
 //! - Kyle (1985) - Continuous Auctions and Insider Trading
 
-use ing_types::{TradeBuffer, Trade};
+use ing_types::{Trade, TradeBuffer};
 
 /// Minimum trades required for reliable computation
 const MIN_TRADES: usize = 20;
@@ -120,7 +120,8 @@ pub fn compute(trade_buffer: &TradeBuffer, prev_mid_price: Option<f64>) -> Toxic
 
     // Adverse selection measures
     let adverse_selection = compute_adverse_selection(&trade_data);
-    let (effective_spread, realized_spread) = compute_spread_components(&trade_data, prev_mid_price);
+    let (effective_spread, realized_spread) =
+        compute_spread_components(&trade_data, prev_mid_price);
 
     // Order flow imbalance
     let (flow_imbalance, flow_imbalance_abs) = compute_flow_imbalance(&trade_data);
@@ -167,7 +168,13 @@ fn extract_trade_data(trades: &[&Trade]) -> TradeData {
         let direction = match last_price {
             Some(prev) if trade.price > prev => 1i8,
             Some(prev) if trade.price < prev => -1i8,
-            _ => if trade.is_buy { 1i8 } else { -1i8 },
+            _ => {
+                if trade.is_buy {
+                    1i8
+                } else {
+                    -1i8
+                }
+            }
         };
         directions.push(direction);
         last_price = Some(trade.price);
@@ -346,7 +353,12 @@ fn compute_spread_components(data: &TradeData, prev_mid: Option<f64>) -> (f64, f
     }
 
     // Use VWAP as midpoint proxy for effective spread
-    let total_notional: f64 = data.prices.iter().zip(&data.volumes).map(|(p, v)| p * v).sum();
+    let total_notional: f64 = data
+        .prices
+        .iter()
+        .zip(&data.volumes)
+        .map(|(p, v)| p * v)
+        .sum();
     let total_volume: f64 = data.volumes.iter().sum();
 
     if total_volume <= 0.0 {
@@ -416,7 +428,6 @@ fn compute_toxicity_index(vpin: f64, adverse_selection: f64, flow_imbalance_abs:
 // Skeptical Tests Module
 // ============================================================================
 
-/// Module for skeptical statistical tests on toxicity features
 #[allow(dead_code)]
 pub mod skeptical_tests {
     //! Skeptical tests to validate toxicity feature effectiveness
@@ -483,7 +494,10 @@ pub mod skeptical_tests {
         let mut sorted_vpin: Vec<f64> = vpin_values[..n].to_vec();
         sorted_vpin.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let threshold_idx = ((n as f64) * threshold_percentile / 100.0) as usize;
-        let vpin_threshold = sorted_vpin.get(threshold_idx.min(n - 1)).copied().unwrap_or(0.0);
+        let vpin_threshold = sorted_vpin
+            .get(threshold_idx.min(n - 1))
+            .copied()
+            .unwrap_or(0.0);
 
         // Compare high vs low VPIN price moves
         let mut high_vpin_sum = 0.0;
@@ -597,7 +611,10 @@ pub mod skeptical_tests {
         let mut sorted_whale: Vec<f64> = whale_activity[..n].to_vec();
         sorted_whale.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let threshold_idx = ((n as f64) * threshold_percentile / 100.0) as usize;
-        let whale_threshold = sorted_whale.get(threshold_idx.min(n - 1)).copied().unwrap_or(0.0);
+        let whale_threshold = sorted_whale
+            .get(threshold_idx.min(n - 1))
+            .copied()
+            .unwrap_or(0.0);
 
         // Compare adverse selection in high vs low whale periods
         let mut high_whale_sum = 0.0;
@@ -714,9 +731,7 @@ pub mod skeptical_tests {
         let intercept = mean_y - slope * mean_x;
 
         // Compute residuals
-        (0..n)
-            .map(|i| y[i] - (intercept + slope * x[i]))
-            .collect()
+        (0..n).map(|i| y[i] - (intercept + slope * x[i])).collect()
     }
 }
 
@@ -749,12 +764,18 @@ mod tests {
         let data = TradeData {
             prices: vec![100.0; 100],
             volumes: vec![1.0; 100],
-            directions: (0..100).map(|i| if i % 2 == 0 { 1i8 } else { -1i8 }).collect(),
+            directions: (0..100)
+                .map(|i| if i % 2 == 0 { 1i8 } else { -1i8 })
+                .collect(),
             is_buy: (0..100).map(|i| i % 2 == 0).collect(),
         };
 
         let vpin = compute_vpin(&data, 10);
-        assert!(vpin < 0.2, "Balanced flow should have low VPIN, got {}", vpin);
+        assert!(
+            vpin < 0.2,
+            "Balanced flow should have low VPIN, got {}",
+            vpin
+        );
     }
 
     #[test]
@@ -768,7 +789,11 @@ mod tests {
         };
 
         let vpin = compute_vpin(&data, 10);
-        assert!(vpin > 0.8, "All-buy flow should have high VPIN, got {}", vpin);
+        assert!(
+            vpin > 0.8,
+            "All-buy flow should have high VPIN, got {}",
+            vpin
+        );
     }
 
     #[test]
@@ -810,7 +835,11 @@ mod tests {
         let adverse = compute_adverse_selection(&data);
         // With all buys and steadily increasing prices, future returns are positive
         // direction (+1) * positive_return = positive contribution
-        assert!(adverse > 0.0, "All-buy with increasing prices should have positive adverse selection, got {}", adverse);
+        assert!(
+            adverse > 0.0,
+            "All-buy with increasing prices should have positive adverse selection, got {}",
+            adverse
+        );
     }
 
     #[test]
@@ -818,7 +847,9 @@ mod tests {
         // Random directions with trending price
         let n = 100;
         let prices: Vec<f64> = (0..n).map(|i| 100.0 + i as f64 * 0.01).collect();
-        let directions: Vec<i8> = (0..n).map(|i| if i % 2 == 0 { 1i8 } else { -1i8 }).collect();
+        let directions: Vec<i8> = (0..n)
+            .map(|i| if i % 2 == 0 { 1i8 } else { -1i8 })
+            .collect();
 
         let data = TradeData {
             prices,
@@ -829,7 +860,11 @@ mod tests {
 
         let adverse = compute_adverse_selection(&data);
         // Should be close to zero (no correlation)
-        assert!(adverse.abs() < 50.0, "Random flow should have low adverse selection, got {}", adverse);
+        assert!(
+            adverse.abs() < 50.0,
+            "Random flow should have low adverse selection, got {}",
+            adverse
+        );
     }
 
     // ========================================================================
@@ -846,7 +881,10 @@ mod tests {
         };
 
         let (imbalance, imbalance_abs) = compute_flow_imbalance(&data);
-        assert!((imbalance - 1.0).abs() < 1e-10, "All buys should give imbalance of 1");
+        assert!(
+            (imbalance - 1.0).abs() < 1e-10,
+            "All buys should give imbalance of 1"
+        );
         assert!((imbalance_abs - 1.0).abs() < 1e-10);
     }
 
@@ -855,12 +893,18 @@ mod tests {
         let data = TradeData {
             prices: vec![100.0; 50],
             volumes: vec![1.0; 50],
-            directions: (0..50).map(|i| if i % 2 == 0 { 1i8 } else { -1i8 }).collect(),
+            directions: (0..50)
+                .map(|i| if i % 2 == 0 { 1i8 } else { -1i8 })
+                .collect(),
             is_buy: (0..50).map(|i| i % 2 == 0).collect(),
         };
 
         let (imbalance, _) = compute_flow_imbalance(&data);
-        assert!(imbalance.abs() < 0.1, "Balanced flow should have low imbalance, got {}", imbalance);
+        assert!(
+            imbalance.abs() < 0.1,
+            "Balanced flow should have low imbalance, got {}",
+            imbalance
+        );
     }
 
     // ========================================================================
@@ -870,13 +914,21 @@ mod tests {
     #[test]
     fn test_toxicity_index_high() {
         let index = compute_toxicity_index(0.9, 80.0, 0.8);
-        assert!(index > 0.7, "High toxicity inputs should give high index, got {}", index);
+        assert!(
+            index > 0.7,
+            "High toxicity inputs should give high index, got {}",
+            index
+        );
     }
 
     #[test]
     fn test_toxicity_index_low() {
         let index = compute_toxicity_index(0.1, 5.0, 0.1);
-        assert!(index < 0.3, "Low toxicity inputs should give low index, got {}", index);
+        assert!(
+            index < 0.3,
+            "Low toxicity inputs should give low index, got {}",
+            index
+        );
     }
 
     #[test]
@@ -902,7 +954,11 @@ mod tests {
 
         let result = test_vpin_predictive_power(&vpin, &future_moves, 75.0);
 
-        assert!(result.lift > 1.0, "High VPIN should predict larger moves, lift = {}", result.lift);
+        assert!(
+            result.lift > 1.0,
+            "High VPIN should predict larger moves, lift = {}",
+            result.lift
+        );
         assert!(result.high_vpin_move_magnitude > result.low_vpin_move_magnitude);
     }
 
@@ -914,10 +970,12 @@ mod tests {
         let n = 100;
         let vpin: Vec<f64> = (0..n).map(|i| (i as f64 * 0.1).sin().abs()).collect();
         let current_vol: Vec<f64> = (0..n).map(|i| (i as f64 * 0.05).cos().abs()).collect();
-        let future_vol: Vec<f64> = (0..n).map(|i| {
-            // Future vol depends on both VPIN and current vol
-            (i as f64 * 0.1).sin().abs() * 0.5 + (i as f64 * 0.05).cos().abs() * 0.3 + 0.2
-        }).collect();
+        let future_vol: Vec<f64> = (0..n)
+            .map(|i| {
+                // Future vol depends on both VPIN and current vol
+                (i as f64 * 0.1).sin().abs() * 0.5 + (i as f64 * 0.05).cos().abs() * 0.3 + 0.2
+            })
+            .collect();
 
         let result = test_vpin_volatility_independence(&vpin, &current_vol, &future_vol);
 
@@ -934,15 +992,19 @@ mod tests {
         // About 25% high whale activity (so 75th percentile split works)
         let whale_activity: Vec<f64> = (0..n).map(|i| if i % 4 == 0 { 0.9 } else { 0.2 }).collect();
         // Higher adverse selection when whale activity is high
-        let adverse_selection: Vec<f64> = (0..n).map(|i| {
-            if i % 4 == 0 { 80.0 } else { 15.0 }
-        }).collect();
+        let adverse_selection: Vec<f64> = (0..n)
+            .map(|i| if i % 4 == 0 { 80.0 } else { 15.0 })
+            .collect();
 
-        let result = test_adverse_selection_whale_correlation(&adverse_selection, &whale_activity, 75.0);
+        let result =
+            test_adverse_selection_whale_correlation(&adverse_selection, &whale_activity, 75.0);
 
         // High whale periods should have higher adverse selection
-        assert!(result.adverse_selection_high_whale > result.adverse_selection_low_whale,
+        assert!(
+            result.adverse_selection_high_whale > result.adverse_selection_low_whale,
             "High whale ({:.1}) should have more adverse selection than low whale ({:.1})",
-            result.adverse_selection_high_whale, result.adverse_selection_low_whale);
+            result.adverse_selection_high_whale,
+            result.adverse_selection_low_whale
+        );
     }
 }

@@ -35,9 +35,8 @@
 //! - Walk-forward degradation > 60%
 
 use crate::hypothesis::stats::{
-    mutual_information_adaptive,
-    bonferroni_correct, correlation_test,
-    walk_forward_correlation, CorrelationResult, WalkForwardResult,
+    bonferroni_correct, correlation_test, mutual_information_adaptive, walk_forward_correlation,
+    CorrelationResult, WalkForwardResult,
 };
 use crate::hypothesis::HypothesisDecision;
 
@@ -191,7 +190,11 @@ impl H1TestData {
         // Check for all-zero flow (no whale activity)
         let flow_variance: f64 = {
             let mean = self.whale_flow_1h.iter().sum::<f64>() / n as f64;
-            self.whale_flow_1h.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n as f64
+            self.whale_flow_1h
+                .iter()
+                .map(|x| (x - mean).powi(2))
+                .sum::<f64>()
+                / n as f64
         };
 
         if flow_variance < 1e-10 {
@@ -235,7 +238,10 @@ pub fn run_h1_whale_flow_test(data: &H1TestData, config: &H1TestConfig) -> H1Tes
             bonferroni_significant: vec![],
             decision: H1Decision::NoGo,
             summary: format!("Data validation failed: {}", e),
-            report: format!("# H1 Test Report\n\n**Status:** FAILED\n\n**Reason:** {}", e),
+            report: format!(
+                "# H1 Test Report\n\n**Status:** FAILED\n\n**Reason:** {}",
+                e
+            ),
         };
     }
 
@@ -277,11 +283,14 @@ pub fn run_h1_whale_flow_test(data: &H1TestData, config: &H1TestConfig) -> H1Tes
     let n_total = results.len();
 
     // Find best combination
-    let best_combination = results.iter()
+    let best_combination = results
+        .iter()
         .filter(|r| r.passes)
         .max_by(|a, b| {
             // Rank by correlation magnitude
-            a.correlation.pearson.abs()
+            a.correlation
+                .pearson
+                .abs()
                 .partial_cmp(&b.correlation.pearson.abs())
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
@@ -292,7 +301,13 @@ pub fn run_h1_whale_flow_test(data: &H1TestData, config: &H1TestConfig) -> H1Tes
 
     // Generate summary and report
     let summary = generate_summary(&results, n_passing, n_total, &decision);
-    let report = generate_report(&results, &bonferroni_significant, &best_combination, config, &decision);
+    let report = generate_report(
+        &results,
+        &bonferroni_significant,
+        &best_combination,
+        config,
+        &decision,
+    );
 
     H1TestResult {
         config: config.clone(),
@@ -353,38 +368,48 @@ fn evaluate_combination(
 ) -> (bool, String) {
     // Check correlation magnitude
     if corr.pearson.abs() < config.corr_failure_threshold {
-        return (false, format!(
-            "Correlation too weak: {:.4} < {:.4}",
-            corr.pearson.abs(),
-            config.corr_failure_threshold
-        ));
+        return (
+            false,
+            format!(
+                "Correlation too weak: {:.4} < {:.4}",
+                corr.pearson.abs(),
+                config.corr_failure_threshold
+            ),
+        );
     }
 
     // Check p-value (before Bonferroni - that's applied later)
     if corr.p_value > config.max_p_value * 10.0 {
-        return (false, format!(
-            "Not significant: p={:.4} > {:.4}",
-            corr.p_value,
-            config.max_p_value * 10.0
-        ));
+        return (
+            false,
+            format!(
+                "Not significant: p={:.4} > {:.4}",
+                corr.p_value,
+                config.max_p_value * 10.0
+            ),
+        );
     }
 
     // Check MI
     if mi_bits < config.mi_failure_threshold {
-        return (false, format!(
-            "MI too low: {:.4} bits < {:.4} bits",
-            mi_bits,
-            config.mi_failure_threshold
-        ));
+        return (
+            false,
+            format!(
+                "MI too low: {:.4} bits < {:.4} bits",
+                mi_bits, config.mi_failure_threshold
+            ),
+        );
     }
 
     // Check walk-forward
     if wf.n_folds > 0 && !wf.passes {
-        return (false, format!(
-            "Walk-forward failed: OOS/IS={:.2} < {:.2}",
-            wf.oos_is_ratio,
-            config.min_oos_is_ratio
-        ));
+        return (
+            false,
+            format!(
+                "Walk-forward failed: OOS/IS={:.2} < {:.2}",
+                wf.oos_is_ratio, config.min_oos_is_ratio
+            ),
+        );
     }
 
     // All success criteria
@@ -394,14 +419,21 @@ fn evaluate_combination(
     let meets_wf = wf.passes || wf.n_folds == 0;
 
     if meets_corr && meets_pval && meets_mi && meets_wf {
-        (true, format!(
-            "PASS: r={:.4}, p={:.2e}, MI={:.4} bits, OOS/IS={:.2}",
-            corr.pearson, corr.p_value, mi_bits, wf.oos_is_ratio
-        ))
+        (
+            true,
+            format!(
+                "PASS: r={:.4}, p={:.2e}, MI={:.4} bits, OOS/IS={:.2}",
+                corr.pearson, corr.p_value, mi_bits, wf.oos_is_ratio
+            ),
+        )
     } else {
         let mut reasons = Vec::new();
         if !meets_corr {
-            reasons.push(format!("r={:.4}<{:.4}", corr.pearson.abs(), config.min_correlation));
+            reasons.push(format!(
+                "r={:.4}<{:.4}",
+                corr.pearson.abs(),
+                config.min_correlation
+            ));
         }
         if !meets_pval {
             reasons.push(format!("p={:.2e}>{:.2e}", corr.p_value, config.max_p_value));
@@ -426,13 +458,13 @@ fn determine_decision(
 
     // GO: At least one combination passes with strong evidence
     if n_passing >= 1 {
-        let best = results.iter()
-            .filter(|r| r.passes)
-            .max_by(|a, b| {
-                a.correlation.pearson.abs()
-                    .partial_cmp(&b.correlation.pearson.abs())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+        let best = results.iter().filter(|r| r.passes).max_by(|a, b| {
+            a.correlation
+                .pearson
+                .abs()
+                .partial_cmp(&b.correlation.pearson.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         if let Some(best) = best {
             if best.correlation.pearson.abs() >= config.min_correlation * 2.0
@@ -464,13 +496,12 @@ fn generate_summary(
     n_total: usize,
     decision: &H1Decision,
 ) -> String {
-    let best_corr = results.iter()
+    let best_corr = results
+        .iter()
         .map(|r| r.correlation.pearson.abs())
         .fold(0.0_f64, f64::max);
 
-    let best_mi = results.iter()
-        .map(|r| r.mi_bits)
-        .fold(0.0_f64, f64::max);
+    let best_mi = results.iter().map(|r| r.mi_bits).fold(0.0_f64, f64::max);
 
     format!(
         "H1 {} - {}/{} combinations pass. Best: r={:.4}, MI={:.4} bits",
@@ -495,11 +526,20 @@ fn generate_report(
 
     // Config
     report.push_str("## Test Configuration\n\n");
-    report.push_str(&format!("- Minimum correlation: {}\n", config.min_correlation));
-    report.push_str(&format!("- Maximum p-value: {} (Bonferroni-corrected)\n", config.max_p_value));
+    report.push_str(&format!(
+        "- Minimum correlation: {}\n",
+        config.min_correlation
+    ));
+    report.push_str(&format!(
+        "- Maximum p-value: {} (Bonferroni-corrected)\n",
+        config.max_p_value
+    ));
     report.push_str(&format!("- Minimum MI: {} bits\n", config.min_mi_bits));
     report.push_str(&format!("- Walk-forward folds: {}\n", config.n_folds));
-    report.push_str(&format!("- Required OOS/IS ratio: {}\n\n", config.min_oos_is_ratio));
+    report.push_str(&format!(
+        "- Required OOS/IS ratio: {}\n\n",
+        config.min_oos_is_ratio
+    ));
 
     // Results matrix
     report.push_str("## Correlation Matrix (Pearson r)\n\n");
@@ -509,13 +549,14 @@ fn generate_report(
     for window in ["1h", "4h", "24h"] {
         report.push_str(&format!("| {} |", window));
         for horizon in ["1h", "4h", "24h"] {
-            let r = results.iter()
+            let r = results
+                .iter()
                 .find(|r| r.flow_window == window && r.return_horizon == horizon)
                 .map(|r| r.correlation.pearson)
                 .unwrap_or(0.0);
             report.push_str(&format!(" {:.4} |", r));
         }
-        report.push_str("\n");
+        report.push('\n');
     }
 
     // P-value matrix
@@ -526,13 +567,14 @@ fn generate_report(
     for window in ["1h", "4h", "24h"] {
         report.push_str(&format!("| {} |", window));
         for horizon in ["1h", "4h", "24h"] {
-            let p = results.iter()
+            let p = results
+                .iter()
                 .find(|r| r.flow_window == window && r.return_horizon == horizon)
                 .map(|r| r.correlation.p_value)
                 .unwrap_or(1.0);
             report.push_str(&format!(" {:.2e} |", p));
         }
-        report.push_str("\n");
+        report.push('\n');
     }
 
     // MI matrix
@@ -543,18 +585,22 @@ fn generate_report(
     for window in ["1h", "4h", "24h"] {
         report.push_str(&format!("| {} |", window));
         for horizon in ["1h", "4h", "24h"] {
-            let mi = results.iter()
+            let mi = results
+                .iter()
                 .find(|r| r.flow_window == window && r.return_horizon == horizon)
                 .map(|r| r.mi_bits)
                 .unwrap_or(0.0);
             report.push_str(&format!(" {:.4} |", mi));
         }
-        report.push_str("\n");
+        report.push('\n');
     }
 
     // Bonferroni results
     report.push_str("\n## Bonferroni Correction Results\n\n");
-    report.push_str(&format!("Adjusted alpha: {:.6}\n\n", config.max_p_value / 9.0));
+    report.push_str(&format!(
+        "Adjusted alpha: {:.6}\n\n",
+        config.max_p_value / 9.0
+    ));
 
     for (i, result) in results.iter().enumerate() {
         let sig = if bonferroni_sig[i] { "✓" } else { "✗" };
@@ -571,8 +617,12 @@ fn generate_report(
         let status = if wf.passes { "PASS" } else { "FAIL" };
         report.push_str(&format!(
             "- Flow {} → Return {}: {} (IS={:.4}, OOS={:.4}, ratio={:.2})\n",
-            result.flow_window, result.return_horizon, status,
-            wf.mean_is_corr, wf.mean_oos_corr, wf.oos_is_ratio
+            result.flow_window,
+            result.return_horizon,
+            status,
+            wf.mean_is_corr,
+            wf.mean_oos_corr,
+            wf.oos_is_ratio
         ));
     }
 
@@ -581,13 +631,27 @@ fn generate_report(
         report.push_str("\n## Best Performing Combination\n\n");
         report.push_str(&format!("**Flow Window:** {}\n", best.flow_window));
         report.push_str(&format!("**Return Horizon:** {}\n", best.return_horizon));
-        report.push_str(&format!("**Pearson Correlation:** {:.4}\n", best.correlation.pearson));
-        report.push_str(&format!("**Spearman Correlation:** {:.4}\n", best.correlation.spearman));
+        report.push_str(&format!(
+            "**Pearson Correlation:** {:.4}\n",
+            best.correlation.pearson
+        ));
+        report.push_str(&format!(
+            "**Spearman Correlation:** {:.4}\n",
+            best.correlation.spearman
+        ));
         report.push_str(&format!("**P-value:** {:.2e}\n", best.correlation.p_value));
-        report.push_str(&format!("**95% CI:** [{:.4}, {:.4}]\n",
-            best.correlation.ci_lower, best.correlation.ci_upper));
-        report.push_str(&format!("**Mutual Information:** {:.4} bits\n", best.mi_bits));
-        report.push_str(&format!("**Walk-Forward OOS/IS:** {:.2}\n", best.walk_forward.oos_is_ratio));
+        report.push_str(&format!(
+            "**95% CI:** [{:.4}, {:.4}]\n",
+            best.correlation.ci_lower, best.correlation.ci_upper
+        ));
+        report.push_str(&format!(
+            "**Mutual Information:** {:.4} bits\n",
+            best.mi_bits
+        ));
+        report.push_str(&format!(
+            "**Walk-Forward OOS/IS:** {:.2}\n",
+            best.walk_forward.oos_is_ratio
+        ));
     }
 
     // Conclusion
@@ -597,17 +661,21 @@ fn generate_report(
             report.push_str("**ACCEPT H1:** Whale flow demonstrates statistically significant \
                 predictive power for future returns. The signal passes multiple testing correction, \
                 shows meaningful mutual information, and holds up in walk-forward validation.\n\n");
-            report.push_str("**Recommendation:** Proceed with whale flow features in the analytics layer.\n");
+            report.push_str(
+                "**Recommendation:** Proceed with whale flow features in the analytics layer.\n",
+            );
         }
         H1Decision::NoGo => {
             report.push_str("**REJECT H1:** No evidence that whale flow predicts returns. \
                 Correlations are weak, not significant after correction, or fail walk-forward validation.\n\n");
-            report.push_str("**Recommendation:** Do not rely on whale flow for alpha generation.\n");
+            report
+                .push_str("**Recommendation:** Do not rely on whale flow for alpha generation.\n");
         }
         H1Decision::Inconclusive => {
             report.push_str("**INCONCLUSIVE:** Mixed results. Some combinations show promise but \
                 don't meet all criteria. More data or alternative specifications may be needed.\n\n");
-            report.push_str("**Recommendation:** Gather more data before making a final decision.\n");
+            report
+                .push_str("**Recommendation:** Gather more data before making a final decision.\n");
         }
     }
 
@@ -631,31 +699,39 @@ mod tests {
         // Returns follow flow with specified correlation + noise
         let returns_1h: Vec<f64> = (0..n)
             .map(|i| {
-                let signal = whale_flow_1h.get(i.saturating_sub(1)).copied().unwrap_or(0.0);
-                signal * correlation * 0.001 + (i as f64 * 0.3 + noise).sin() * (1.0 - correlation) * 0.01
+                let signal = whale_flow_1h
+                    .get(i.saturating_sub(1))
+                    .copied()
+                    .unwrap_or(0.0);
+                signal * correlation * 0.001
+                    + (i as f64 * 0.3 + noise).sin() * (1.0 - correlation) * 0.01
             })
             .collect();
 
         // 4h and 24h are smoothed versions
-        let whale_flow_4h: Vec<f64> = whale_flow_1h.windows(4)
+        let whale_flow_4h: Vec<f64> = whale_flow_1h
+            .windows(4)
             .map(|w| w.iter().sum::<f64>() / 4.0)
             .chain(std::iter::repeat(0.0))
             .take(n)
             .collect();
 
-        let whale_flow_24h: Vec<f64> = whale_flow_1h.windows(24.min(n))
+        let whale_flow_24h: Vec<f64> = whale_flow_1h
+            .windows(24.min(n))
             .map(|w| w.iter().sum::<f64>() / w.len() as f64)
             .chain(std::iter::repeat(0.0))
             .take(n)
             .collect();
 
-        let returns_4h: Vec<f64> = returns_1h.windows(4)
+        let returns_4h: Vec<f64> = returns_1h
+            .windows(4)
             .map(|w| w.iter().sum::<f64>())
             .chain(std::iter::repeat(0.0))
             .take(n)
             .collect();
 
-        let returns_24h: Vec<f64> = returns_1h.windows(24.min(n))
+        let returns_24h: Vec<f64> = returns_1h
+            .windows(24.min(n))
             .map(|w| w.iter().sum::<f64>())
             .chain(std::iter::repeat(0.0))
             .take(n)
@@ -683,12 +759,18 @@ mod tests {
         let result = run_h1_whale_flow_test(&data, &config);
 
         // With strong correlation, should at least not be NoGo
-        assert_ne!(result.decision, H1Decision::NoGo,
-            "Strong signal should not result in NoGo. Summary: {}", result.summary);
+        assert_ne!(
+            result.decision,
+            H1Decision::NoGo,
+            "Strong signal should not result in NoGo. Summary: {}",
+            result.summary
+        );
 
         // Should have some passing combinations
-        assert!(result.n_passing > 0 || result.decision == H1Decision::Inconclusive,
-            "Should have passing combinations or be inconclusive");
+        assert!(
+            result.n_passing > 0 || result.decision == H1Decision::Inconclusive,
+            "Should have passing combinations or be inconclusive"
+        );
 
         // Report should be non-empty
         assert!(!result.report.is_empty());
@@ -699,9 +781,7 @@ mod tests {
     fn test_h1_with_no_signal() {
         // Generate independent data (no relationship)
         let n = 500;
-        let whale_flow_1h: Vec<f64> = (0..n)
-            .map(|i| (i as f64 * 0.1).sin() * 100.0)
-            .collect();
+        let whale_flow_1h: Vec<f64> = (0..n).map(|i| (i as f64 * 0.1).sin() * 100.0).collect();
 
         // Completely independent returns
         let returns_1h: Vec<f64> = (0..n)
@@ -722,8 +802,11 @@ mod tests {
         let result = run_h1_whale_flow_test(&data, &config);
 
         // Independent data should not show strong signal
-        assert!(result.n_passing < 3,
-            "Independent data should not have many passing combinations, got {}", result.n_passing);
+        assert!(
+            result.n_passing < 3,
+            "Independent data should not have many passing combinations, got {}",
+            result.n_passing
+        );
     }
 
     #[test]
@@ -779,14 +862,20 @@ mod tests {
         assert_eq!(result.bonferroni_significant.len(), 9);
 
         // Verify all combinations are present
-        let combinations: Vec<_> = result.window_horizon_results.iter()
+        let combinations: Vec<_> = result
+            .window_horizon_results
+            .iter()
             .map(|r| (r.flow_window.as_str(), r.return_horizon.as_str()))
             .collect();
 
         for window in ["1h", "4h", "24h"] {
             for horizon in ["1h", "4h", "24h"] {
-                assert!(combinations.contains(&(window, horizon)),
-                    "Missing combination: {} -> {}", window, horizon);
+                assert!(
+                    combinations.contains(&(window, horizon)),
+                    "Missing combination: {} -> {}",
+                    window,
+                    horizon
+                );
             }
         }
     }
@@ -802,17 +891,19 @@ mod tests {
         let result = run_h1_whale_flow_test(&data, &config);
 
         // Count results where raw p < 0.05 but Bonferroni fails
-        let raw_significant = result.window_horizon_results.iter()
+        let raw_significant = result
+            .window_horizon_results
+            .iter()
             .filter(|r| r.correlation.p_value < 0.05)
             .count();
 
-        let bonferroni_significant = result.bonferroni_significant.iter()
-            .filter(|&&s| s)
-            .count();
+        let bonferroni_significant = result.bonferroni_significant.iter().filter(|&&s| s).count();
 
         // Bonferroni should be more conservative
-        assert!(bonferroni_significant <= raw_significant,
-            "Bonferroni should be more conservative");
+        assert!(
+            bonferroni_significant <= raw_significant,
+            "Bonferroni should be more conservative"
+        );
     }
 
     #[test]
@@ -847,8 +938,12 @@ mod tests {
 
         // All results should have walk-forward data
         for whr in &result.window_horizon_results {
-            assert!(whr.walk_forward.n_folds > 0,
-                "Walk-forward should run for {} -> {}", whr.flow_window, whr.return_horizon);
+            assert!(
+                whr.walk_forward.n_folds > 0,
+                "Walk-forward should run for {} -> {}",
+                whr.flow_window,
+                whr.return_horizon
+            );
         }
     }
 
@@ -877,9 +972,13 @@ mod tests {
         // All results should have MI computed
         for whr in &result.window_horizon_results {
             // MI should be non-negative
-            assert!(whr.mi_bits >= 0.0,
+            assert!(
+                whr.mi_bits >= 0.0,
                 "MI should be non-negative, got {} for {} -> {}",
-                whr.mi_bits, whr.flow_window, whr.return_horizon);
+                whr.mi_bits,
+                whr.flow_window,
+                whr.return_horizon
+            );
         }
     }
 
@@ -894,12 +993,19 @@ mod tests {
             let corr = &whr.correlation;
 
             // CI should bracket the point estimate
-            assert!(corr.ci_lower <= corr.pearson && corr.pearson <= corr.ci_upper,
-                "CI [{}, {}] should bracket r={}", corr.ci_lower, corr.ci_upper, corr.pearson);
+            assert!(
+                corr.ci_lower <= corr.pearson && corr.pearson <= corr.ci_upper,
+                "CI [{}, {}] should bracket r={}",
+                corr.ci_lower,
+                corr.ci_upper,
+                corr.pearson
+            );
 
             // CI should be within [-1, 1]
-            assert!(corr.ci_lower >= -1.0 && corr.ci_upper <= 1.0,
-                "CI should be within [-1, 1]");
+            assert!(
+                corr.ci_lower >= -1.0 && corr.ci_upper <= 1.0,
+                "CI should be within [-1, 1]"
+            );
         }
     }
 }

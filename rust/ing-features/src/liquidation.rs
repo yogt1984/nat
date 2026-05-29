@@ -27,8 +27,8 @@
 //! - **Long positions**: Liquidation price is BELOW entry (liquidated when price falls)
 //! - **Short positions**: Liquidation price is ABOVE entry (liquidated when price rises)
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Configuration for liquidation risk computation
 #[derive(Debug, Clone)]
@@ -75,7 +75,7 @@ pub struct LiquidationRiskFeatures {
     // === Derived Metrics ===
     /// Asymmetry ratio: risk_above_5pct / risk_below_5pct
     /// > 1 means more shorts at risk (bullish pressure on squeeze)
-    /// < 1 means more longs at risk (bearish pressure on cascade)
+    /// > < 1 means more longs at risk (bearish pressure on cascade)
     pub liquidation_asymmetry: f64,
 
     /// Total risk at 5% as fraction of total OI
@@ -195,10 +195,12 @@ impl LiquidationPosition {
     pub fn is_at_risk(&self, current_price: f64, price_change_pct: f64) -> bool {
         if price_change_pct > 0.0 {
             // Price going up - shorts get liquidated (liq price is above current)
-            !self.is_long && self.liquidation_price <= current_price * (1.0 + price_change_pct / 100.0)
+            !self.is_long
+                && self.liquidation_price <= current_price * (1.0 + price_change_pct / 100.0)
         } else {
             // Price going down - longs get liquidated (liq price is below current)
-            self.is_long && self.liquidation_price >= current_price * (1.0 + price_change_pct / 100.0)
+            self.is_long
+                && self.liquidation_price >= current_price * (1.0 + price_change_pct / 100.0)
         }
     }
 }
@@ -253,14 +255,16 @@ pub fn compute(
                 // Longs liquidated when price falls - risk below
                 // Check if liquidation price is within bucket% below current
                 let threshold_price = current_price * (1.0 - bucket / 100.0);
-                if pos.liquidation_price >= threshold_price && pos.liquidation_price < current_price {
+                if pos.liquidation_price >= threshold_price && pos.liquidation_price < current_price
+                {
                     *risk_below.get_mut(&bucket_key).unwrap() += pos.position_value_usd;
                 }
             } else {
                 // Shorts liquidated when price rises - risk above
                 // Check if liquidation price is within bucket% above current
                 let threshold_price = current_price * (1.0 + bucket / 100.0);
-                if pos.liquidation_price <= threshold_price && pos.liquidation_price > current_price {
+                if pos.liquidation_price <= threshold_price && pos.liquidation_price > current_price
+                {
                     *risk_above.get_mut(&bucket_key).unwrap() += pos.position_value_usd;
                 }
             }
@@ -567,9 +571,8 @@ pub mod skeptical_tests {
         };
 
         // Significant if clear difference and enough samples
-        let significant = (prob_high - prob_low).abs() > 0.1
-            && high_asym_total >= 20
-            && low_asym_total >= 20;
+        let significant =
+            (prob_high - prob_low).abs() > 0.1 && high_asym_total >= 20 && low_asym_total >= 20;
 
         AsymmetryDirectionTest {
             prob_up_given_high_asymmetry: prob_high,
@@ -584,7 +587,7 @@ pub mod skeptical_tests {
     /// Test cascade prediction precision
     pub fn test_cascade_precision(
         cluster_distance: &[f64],
-        price_moves: &[f64], // Actual price moves in next period
+        price_moves: &[f64],    // Actual price moves in next period
         cluster_threshold: f64, // Distance to be "near cluster"
         cascade_threshold: f64, // % move to count as cascade
     ) -> CascadePrecisionTest {
@@ -734,12 +737,19 @@ mod tests {
 
         let features = compute(&positions, current_price, 10_000_000.0, &config);
 
-        assert!(features.liquidation_risk_above_1pct > 0.0,
-            "Should have risk above 1%, got {}", features.liquidation_risk_above_1pct);
-        assert!(features.liquidation_risk_above_2pct >= features.liquidation_risk_above_1pct,
-            "2% risk should include 1% risk");
-        assert!(features.liquidation_risk_above_5pct >= features.liquidation_risk_above_2pct,
-            "5% risk should include 2% risk");
+        assert!(
+            features.liquidation_risk_above_1pct > 0.0,
+            "Should have risk above 1%, got {}",
+            features.liquidation_risk_above_1pct
+        );
+        assert!(
+            features.liquidation_risk_above_2pct >= features.liquidation_risk_above_1pct,
+            "2% risk should include 1% risk"
+        );
+        assert!(
+            features.liquidation_risk_above_5pct >= features.liquidation_risk_above_2pct,
+            "5% risk should include 2% risk"
+        );
     }
 
     // ========================================================================
@@ -763,12 +773,19 @@ mod tests {
 
         let features = compute(&positions, current_price, 10_000_000.0, &config);
 
-        assert!(features.liquidation_risk_below_1pct > 0.0,
-            "Should have risk below 1%, got {}", features.liquidation_risk_below_1pct);
-        assert!(features.liquidation_risk_below_2pct >= features.liquidation_risk_below_1pct,
-            "2% risk should include 1% risk");
-        assert!(features.liquidation_risk_below_5pct >= features.liquidation_risk_below_2pct,
-            "5% risk should include 2% risk");
+        assert!(
+            features.liquidation_risk_below_1pct > 0.0,
+            "Should have risk below 1%, got {}",
+            features.liquidation_risk_below_1pct
+        );
+        assert!(
+            features.liquidation_risk_below_2pct >= features.liquidation_risk_below_1pct,
+            "2% risk should include 1% risk"
+        );
+        assert!(
+            features.liquidation_risk_below_5pct >= features.liquidation_risk_below_2pct,
+            "5% risk should include 2% risk"
+        );
     }
 
     // ========================================================================
@@ -791,8 +808,11 @@ mod tests {
 
         let features = compute(&positions, current_price, 10_000_000.0, &config);
 
-        assert!(features.liquidation_asymmetry > 1.0,
-            "Asymmetry should be > 1 when more shorts at risk, got {}", features.liquidation_asymmetry);
+        assert!(
+            features.liquidation_asymmetry > 1.0,
+            "Asymmetry should be > 1 when more shorts at risk, got {}",
+            features.liquidation_asymmetry
+        );
     }
 
     #[test]
@@ -811,8 +831,11 @@ mod tests {
 
         let features = compute(&positions, current_price, 10_000_000.0, &config);
 
-        assert!(features.liquidation_asymmetry < 1.0,
-            "Asymmetry should be < 1 when more longs at risk, got {}", features.liquidation_asymmetry);
+        assert!(
+            features.liquidation_asymmetry < 1.0,
+            "Asymmetry should be < 1 when more longs at risk, got {}",
+            features.liquidation_asymmetry
+        );
     }
 
     // ========================================================================
@@ -834,8 +857,11 @@ mod tests {
         let features = compute(&positions, current_price, total_oi, &config);
 
         // Intensity should be ~0.1 (1M / 10M)
-        assert!(features.liquidation_intensity > 0.05,
-            "Intensity should reflect risk/OI ratio, got {}", features.liquidation_intensity);
+        assert!(
+            features.liquidation_intensity > 0.05,
+            "Intensity should reflect risk/OI ratio, got {}",
+            features.liquidation_intensity
+        );
     }
 
     // ========================================================================
@@ -849,17 +875,20 @@ mod tests {
 
         let positions = vec![
             // 3 positions within 5%
-            make_long_position(100_000.0, 52000.0, 49000.0),  // 2% below
-            make_long_position(100_000.0, 53000.0, 48000.0),  // 4% below
+            make_long_position(100_000.0, 52000.0, 49000.0), // 2% below
+            make_long_position(100_000.0, 53000.0, 48000.0), // 4% below
             make_short_position(100_000.0, 48000.0, 51500.0), // 3% above
             // 1 position outside 5%
-            make_long_position(100_000.0, 60000.0, 40000.0),  // 20% below
+            make_long_position(100_000.0, 60000.0, 40000.0), // 20% below
         ];
 
         let features = compute(&positions, current_price, 10_000_000.0, &config);
 
-        assert_eq!(features.positions_at_risk_count, 3.0,
-            "Should count 3 positions within 5%, got {}", features.positions_at_risk_count);
+        assert_eq!(
+            features.positions_at_risk_count, 3.0,
+            "Should count 3 positions within 5%, got {}",
+            features.positions_at_risk_count
+        );
     }
 
     // ========================================================================
@@ -879,9 +908,7 @@ mod tests {
     #[test]
     fn test_zero_price() {
         let config = LiquidationRiskConfig::default();
-        let positions = vec![
-            make_long_position(100_000.0, 50000.0, 45000.0),
-        ];
+        let positions = vec![make_long_position(100_000.0, 50000.0, 45000.0)];
 
         let features = compute(&positions, 0.0, 10_000_000.0, &config);
 
@@ -914,9 +941,15 @@ mod tests {
 
         let result = test_cluster_volatility(&cluster_distance, &realized_volatility, 3.0);
 
-        assert!(result.volatility_lift > 2.0,
-            "Volatility should be higher near clusters, got lift {}", result.volatility_lift);
-        assert!(result.significant, "Should be significant with clear relationship");
+        assert!(
+            result.volatility_lift > 2.0,
+            "Volatility should be higher near clusters, got lift {}",
+            result.volatility_lift
+        );
+        assert!(
+            result.significant,
+            "Should be significant with clear relationship"
+        );
     }
 
     #[test]
@@ -931,9 +964,17 @@ mod tests {
 
         let asymmetry: Vec<f64> = (0..n)
             .map(|i| {
-                if i % 3 == 0 { 2.0 }      // High asymmetry (shorts at risk)
-                else if i % 3 == 1 { 0.5 } // Low asymmetry (longs at risk)
-                else { 1.0 }               // Balanced
+                if i % 3 == 0 {
+                    2.0
+                }
+                // High asymmetry (shorts at risk)
+                else if i % 3 == 1 {
+                    0.5
+                }
+                // Low asymmetry (longs at risk)
+                else {
+                    1.0
+                } // Balanced
             })
             .collect();
 
@@ -944,18 +985,29 @@ mod tests {
                     0.001 // No prior asymmetry data
                 } else {
                     let prior_asym = asymmetry[i - horizon];
-                    if prior_asym > 1.5 { 0.02 }       // Up when prior high asym
-                    else if prior_asym < 0.67 { -0.02 } // Down when prior low asym
-                    else { 0.001 }                      // Flat when balanced
+                    if prior_asym > 1.5 {
+                        0.02
+                    }
+                    // Up when prior high asym
+                    else if prior_asym < 0.67 {
+                        -0.02
+                    }
+                    // Down when prior low asym
+                    else {
+                        0.001
+                    } // Flat when balanced
                 }
             })
             .collect();
 
         let result = test_asymmetry_direction(&asymmetry, &future_returns, horizon);
 
-        assert!(result.prob_up_given_high_asymmetry > result.prob_up_given_low_asymmetry,
+        assert!(
+            result.prob_up_given_high_asymmetry > result.prob_up_given_low_asymmetry,
             "High asymmetry should predict up better than low asymmetry, got high={}, low={}",
-            result.prob_up_given_high_asymmetry, result.prob_up_given_low_asymmetry);
+            result.prob_up_given_high_asymmetry,
+            result.prob_up_given_low_asymmetry
+        );
     }
 
     #[test]
@@ -980,7 +1032,10 @@ mod tests {
 
         let result = test_cascade_precision(&cluster_distance, &price_moves, 3.0, 5.0);
 
-        assert!(result.predicted_cascades > 0, "Should predict some cascades");
+        assert!(
+            result.predicted_cascades > 0,
+            "Should predict some cascades"
+        );
         // Note: Precision depends on synthetic data quality
     }
 
@@ -994,8 +1049,11 @@ mod tests {
         let distance = pos.distance_from_price(50000.0);
 
         // 45000 is 10% below 50000
-        assert!((distance - 10.0).abs() < 0.1,
-            "Distance should be 10%, got {}", distance);
+        assert!(
+            (distance - 10.0).abs() < 0.1,
+            "Distance should be 10%, got {}",
+            distance
+        );
     }
 
     // ========================================================================
@@ -1008,14 +1066,17 @@ mod tests {
         let current_price = 50000.0;
 
         let positions = vec![
-            make_long_position(100_000.0, 52000.0, 49000.0),  // 2% below
-            make_long_position(500_000.0, 53000.0, 48000.0),  // 4% below - largest
+            make_long_position(100_000.0, 52000.0, 49000.0), // 2% below
+            make_long_position(500_000.0, 53000.0, 48000.0), // 4% below - largest
             make_short_position(200_000.0, 48000.0, 51500.0), // 3% above
         ];
 
         let features = compute(&positions, current_price, 10_000_000.0, &config);
 
-        assert_eq!(features.largest_position_at_risk, 500_000.0,
-            "Should identify largest position at risk, got {}", features.largest_position_at_risk);
+        assert_eq!(
+            features.largest_position_at_risk, 500_000.0,
+            "Should identify largest position at risk, got {}",
+            features.largest_position_at_risk
+        );
     }
 }

@@ -60,12 +60,15 @@ impl EntropyBuffer {
         let latest_time = self.trades.back().map(|t| t.timestamp_ms).unwrap_or(0);
         let cutoff = latest_time.saturating_sub(window_ms);
 
-        let trades: Vec<_> = self.trades.iter()
+        let trades: Vec<_> = self
+            .trades
+            .iter()
             .filter(|t| t.timestamp_ms >= cutoff)
             .collect();
 
         if trades.len() < 2 {
-            return trades.iter()
+            return trades
+                .iter()
                 .map(|t| (if t.is_buy { 1i8 } else { -1i8 }, t.size))
                 .collect();
         }
@@ -77,8 +80,20 @@ impl EntropyBuffer {
             let direction = match last_price {
                 Some(prev) if trade.price > prev => 1i8,
                 Some(prev) if trade.price < prev => -1i8,
-                Some(_) => if trade.is_buy { 1i8 } else { -1i8 },
-                None => if trade.is_buy { 1i8 } else { -1i8 },
+                Some(_) => {
+                    if trade.is_buy {
+                        1i8
+                    } else {
+                        -1i8
+                    }
+                }
+                None => {
+                    if trade.is_buy {
+                        1i8
+                    } else {
+                        -1i8
+                    }
+                }
             };
             last_price = Some(trade.price);
             result.push((direction, trade.size));
@@ -109,7 +124,8 @@ impl EntropyBuffer {
             return None;
         }
 
-        let entropy: f64 = counts.iter()
+        let entropy: f64 = counts
+            .iter()
             .filter(|&&c| c > 0)
             .map(|&c| {
                 let p = c as f64 / total as f64;
@@ -142,7 +158,8 @@ impl EntropyBuffer {
             return None;
         }
 
-        let entropy: f64 = volumes.iter()
+        let entropy: f64 = volumes
+            .iter()
             .filter(|&&v| v > 0.0)
             .map(|&v| {
                 let p = v / total;
@@ -159,7 +176,10 @@ impl EntropyBuffer {
         }
         let latest_time = self.trades.back().map(|t| t.timestamp_ms).unwrap_or(0);
         let cutoff = latest_time.saturating_sub(window_secs * 1000);
-        self.trades.iter().filter(|t| t.timestamp_ms >= cutoff).count()
+        self.trades
+            .iter()
+            .filter(|t| t.timestamp_ms >= cutoff)
+            .count()
     }
 }
 
@@ -237,11 +257,16 @@ async fn main() -> Result<()> {
             "coin": symbol
         }
     });
-    ws_stream.send(Message::Text(serde_json::to_string(&sub)?)).await?;
+    ws_stream
+        .send(Message::Text(serde_json::to_string(&sub)?))
+        .await?;
     println!("  ✓ Subscribed\n");
 
     // Collect trades
-    println!("[PHASE 3] Collecting trades for {} seconds...", COLLECTION_DURATION_SECS);
+    println!(
+        "[PHASE 3] Collecting trades for {} seconds...",
+        COLLECTION_DURATION_SECS
+    );
 
     let mut buffer = EntropyBuffer::new();
     let mut snapshots = Vec::new();
@@ -259,10 +284,12 @@ async fn main() -> Result<()> {
                     if response["channel"] == "trades" {
                         if let Some(trades) = response["data"].as_array() {
                             for trade in trades {
-                                let price = trade["px"].as_str()
+                                let price = trade["px"]
+                                    .as_str()
                                     .and_then(|s| s.parse::<f64>().ok())
                                     .unwrap_or(0.0);
-                                let size = trade["sz"].as_str()
+                                let size = trade["sz"]
+                                    .as_str()
                                     .and_then(|s| s.parse::<f64>().ok())
                                     .unwrap_or(0.0);
                                 let side = trade["side"].as_str().unwrap_or("B");
@@ -299,7 +326,8 @@ async fn main() -> Result<()> {
                 volume_entropy_30s: buffer.volume_tick_entropy(30),
             };
 
-            println!("  Snapshot @ {}s: {} trades, tick_ent_5s={:.4}, tick_ent_30s={:.4}",
+            println!(
+                "  Snapshot @ {}s: {} trades, tick_ent_5s={:.4}, tick_ent_30s={:.4}",
                 start.elapsed().as_secs(),
                 snapshot.trade_count_30s,
                 snapshot.tick_entropy_5s.unwrap_or(0.0),
@@ -311,7 +339,11 @@ async fn main() -> Result<()> {
         }
     }
 
-    println!("\n  ✓ Collected {} trades in {} snapshots\n", total_trades, snapshots.len());
+    println!(
+        "\n  ✓ Collected {} trades in {} snapshots\n",
+        total_trades,
+        snapshots.len()
+    );
 
     // Analyze results
     println!("[PHASE 4] Analyzing entropy features...\n");
@@ -333,7 +365,10 @@ async fn main() -> Result<()> {
     }
 
     let go_no_go = if warnings.is_empty() && total_trades >= 100 {
-        format!("GO: Tick entropy features working correctly with {} trades", total_trades)
+        format!(
+            "GO: Tick entropy features working correctly with {} trades",
+            total_trades
+        )
     } else if warnings.len() <= 1 && total_trades >= 50 {
         "CAUTION: Minor issues but entropy features functional".to_string()
     } else {
@@ -391,7 +426,10 @@ fn analyze_entropy(snapshots: &[EntropySnapshot]) -> EntropyAnalysis {
 
     let tick_1s: Vec<f64> = snapshots.iter().filter_map(|s| s.tick_entropy_1s).collect();
     let tick_5s: Vec<f64> = snapshots.iter().filter_map(|s| s.tick_entropy_5s).collect();
-    let tick_30s: Vec<f64> = snapshots.iter().filter_map(|s| s.tick_entropy_30s).collect();
+    let tick_30s: Vec<f64> = snapshots
+        .iter()
+        .filter_map(|s| s.tick_entropy_30s)
+        .collect();
     let tick_1m: Vec<f64> = snapshots.iter().filter_map(|s| s.tick_entropy_1m).collect();
 
     let all_entropy: Vec<f64> = [&tick_1s, &tick_5s, &tick_30s, &tick_1m]
@@ -400,10 +438,19 @@ fn analyze_entropy(snapshots: &[EntropySnapshot]) -> EntropyAnalysis {
         .cloned()
         .collect();
 
-    let max_entropy = all_entropy.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let max_entropy = all_entropy
+        .iter()
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
     let min_entropy = all_entropy.iter().cloned().fold(f64::INFINITY, f64::min);
 
-    let avg = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
+    let avg = |v: &[f64]| {
+        if v.is_empty() {
+            0.0
+        } else {
+            v.iter().sum::<f64>() / v.len() as f64
+        }
+    };
 
     let avg_1s = avg(&tick_1s);
     let avg_5s = avg(&tick_5s);
@@ -411,7 +458,8 @@ fn analyze_entropy(snapshots: &[EntropySnapshot]) -> EntropyAnalysis {
     let avg_1m = avg(&tick_1m);
 
     // Check if all entropy values are in valid range [0, ln(3)]
-    let entropy_values_in_range = all_entropy.iter()
+    let entropy_values_in_range = all_entropy
+        .iter()
         .all(|&e| e >= 0.0 && e <= max_theoretical_entropy + 0.01);
 
     // Check if different windows produce meaningfully different values
@@ -426,8 +474,16 @@ fn analyze_entropy(snapshots: &[EntropySnapshot]) -> EntropyAnalysis {
         avg_tick_entropy_5s: avg_5s,
         avg_tick_entropy_30s: avg_30s,
         avg_tick_entropy_1m: avg_1m,
-        max_tick_entropy: if max_entropy.is_finite() { max_entropy } else { 0.0 },
-        min_tick_entropy: if min_entropy.is_finite() { min_entropy } else { 0.0 },
+        max_tick_entropy: if max_entropy.is_finite() {
+            max_entropy
+        } else {
+            0.0
+        },
+        min_tick_entropy: if min_entropy.is_finite() {
+            min_entropy
+        } else {
+            0.0
+        },
         entropy_range: if max_entropy.is_finite() && min_entropy.is_finite() {
             max_entropy - min_entropy
         } else {
@@ -457,25 +513,64 @@ fn print_report(report: &ValidationReport) {
 
     println!("╠══════════════════════════════════════════════════════════════════╣");
     println!("║ ENTROPY ANALYSIS");
-    println!("║   Theoretical max: {:.4} (ln(3) for 3 states)", 3.0_f64.ln());
-    println!("║   Avg tick entropy (1s):  {:.4}", report.analysis.avg_tick_entropy_1s);
-    println!("║   Avg tick entropy (5s):  {:.4}", report.analysis.avg_tick_entropy_5s);
-    println!("║   Avg tick entropy (30s): {:.4}", report.analysis.avg_tick_entropy_30s);
-    println!("║   Avg tick entropy (1m):  {:.4}", report.analysis.avg_tick_entropy_1m);
+    println!(
+        "║   Theoretical max: {:.4} (ln(3) for 3 states)",
+        3.0_f64.ln()
+    );
+    println!(
+        "║   Avg tick entropy (1s):  {:.4}",
+        report.analysis.avg_tick_entropy_1s
+    );
+    println!(
+        "║   Avg tick entropy (5s):  {:.4}",
+        report.analysis.avg_tick_entropy_5s
+    );
+    println!(
+        "║   Avg tick entropy (30s): {:.4}",
+        report.analysis.avg_tick_entropy_30s
+    );
+    println!(
+        "║   Avg tick entropy (1m):  {:.4}",
+        report.analysis.avg_tick_entropy_1m
+    );
     println!("║   Min entropy: {:.4}", report.analysis.min_tick_entropy);
     println!("║   Max entropy: {:.4}", report.analysis.max_tick_entropy);
     println!("║   Range: {:.4}", report.analysis.entropy_range);
 
     println!("╠══════════════════════════════════════════════════════════════════╣");
     println!("║ VALIDATION CHECKS");
-    println!("║   Values in range [0, ln(3)]: {}",
-        if report.analysis.entropy_values_in_range { "✓" } else { "✗" });
-    println!("║   Different windows differ:  {}",
-        if report.analysis.different_windows_different_values { "✓" } else { "✗" });
-    println!("║   Snapshots with 1s data:  {}", report.analysis.windows_with_data.tick_1s);
-    println!("║   Snapshots with 5s data:  {}", report.analysis.windows_with_data.tick_5s);
-    println!("║   Snapshots with 30s data: {}", report.analysis.windows_with_data.tick_30s);
-    println!("║   Snapshots with 1m data:  {}", report.analysis.windows_with_data.tick_1m);
+    println!(
+        "║   Values in range [0, ln(3)]: {}",
+        if report.analysis.entropy_values_in_range {
+            "✓"
+        } else {
+            "✗"
+        }
+    );
+    println!(
+        "║   Different windows differ:  {}",
+        if report.analysis.different_windows_different_values {
+            "✓"
+        } else {
+            "✗"
+        }
+    );
+    println!(
+        "║   Snapshots with 1s data:  {}",
+        report.analysis.windows_with_data.tick_1s
+    );
+    println!(
+        "║   Snapshots with 5s data:  {}",
+        report.analysis.windows_with_data.tick_5s
+    );
+    println!(
+        "║   Snapshots with 30s data: {}",
+        report.analysis.windows_with_data.tick_30s
+    );
+    println!(
+        "║   Snapshots with 1m data:  {}",
+        report.analysis.windows_with_data.tick_1m
+    );
 
     println!("╠══════════════════════════════════════════════════════════════════╣");
 

@@ -51,7 +51,9 @@ pub struct FlowFeatures {
 }
 
 impl FlowFeatures {
-    pub fn count() -> usize { 12 }
+    pub fn count() -> usize {
+        12
+    }
 
     pub fn names() -> Vec<&'static str> {
         vec![
@@ -107,7 +109,7 @@ pub fn compute(trade_buffer: &TradeBuffer) -> FlowFeatures {
     // For now, use ratio of vwap_5s to last trade price
     let vwap_deviation = if let (Some(last), Some(vwap)) = (
         trade_buffer.last_trade().map(|t| t.price),
-        trade_buffer.vwap_in_window(5)
+        trade_buffer.vwap_in_window(5),
     ) {
         if last > 0.0 {
             (vwap - last) / last

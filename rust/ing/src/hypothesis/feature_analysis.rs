@@ -15,7 +15,7 @@
 //! - Aim for 10-15 non-redundant features
 //! - Each feature must have MI > 0.01 bits with target to be included
 
-use super::stats::{pearson_correlation, spearman_correlation, mutual_information_adaptive};
+use super::stats::{mutual_information_adaptive, pearson_correlation, spearman_correlation};
 use std::collections::HashSet;
 
 /// Configuration for feature analysis
@@ -176,10 +176,7 @@ fn compute_feature_stats(values: &[f64]) -> (f64, f64, f64, f64) {
 }
 
 /// Compute correlation matrix for all feature pairs
-pub fn compute_correlation_matrix(
-    features: &[Vec<f64>],
-    use_spearman: bool,
-) -> Vec<f64> {
+pub fn compute_correlation_matrix(features: &[Vec<f64>], use_spearman: bool) -> Vec<f64> {
     let n = features.len();
     let mut matrix = vec![0.0; n * n];
 
@@ -256,7 +253,10 @@ pub fn find_correlated_pairs(
 
     // Sort by correlation magnitude (descending)
     pairs.sort_by(|a, b| {
-        b.pearson.abs().partial_cmp(&a.pearson.abs()).unwrap_or(std::cmp::Ordering::Equal)
+        b.pearson
+            .abs()
+            .partial_cmp(&a.pearson.abs())
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     pairs
@@ -312,7 +312,11 @@ pub fn hierarchical_clustering(
                         count += 1;
                     }
                 }
-                let avg_dist = if count > 0 { sum_dist / count as f64 } else { f64::INFINITY };
+                let avg_dist = if count > 0 {
+                    sum_dist / count as f64
+                } else {
+                    f64::INFINITY
+                };
 
                 if avg_dist < best_dist {
                     best_dist = avg_dist;
@@ -358,9 +362,12 @@ pub fn build_feature_clusters(
         }
 
         // Find representative (highest MI with target)
-        let representative_idx = indices.iter()
+        let representative_idx = indices
+            .iter()
             .max_by(|&&a, &&b| {
-                target_mi[a].partial_cmp(&target_mi[b]).unwrap_or(std::cmp::Ordering::Equal)
+                target_mi[a]
+                    .partial_cmp(&target_mi[b])
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .copied()
             .unwrap_or(indices[0]);
@@ -374,7 +381,11 @@ pub fn build_feature_clusters(
                 count += 1;
             }
         }
-        let avg_correlation = if count > 0 { sum_corr / count as f64 } else { 1.0 };
+        let avg_correlation = if count > 0 {
+            sum_corr / count as f64
+        } else {
+            1.0
+        };
 
         clusters.push(FeatureCluster {
             id,
@@ -406,7 +417,9 @@ pub fn select_feature_subset(
     // Sort by target MI (descending) to establish ranking
     let mut ranked_indices: Vec<usize> = (0..n).collect();
     ranked_indices.sort_by(|&a, &b| {
-        feature_stats[b].target_mi.partial_cmp(&feature_stats[a].target_mi)
+        feature_stats[b]
+            .target_mi
+            .partial_cmp(&feature_stats[a].target_mi)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
@@ -457,7 +470,8 @@ pub fn select_feature_subset(
     }
 
     // Build recommended subset (in rank order)
-    let mut recommended: Vec<String> = ranked_indices.iter()
+    let mut recommended: Vec<String> = ranked_indices
+        .iter()
         .filter(|&&idx| included.contains(&idx))
         .map(|&idx| feature_stats[idx].name.clone())
         .collect();
@@ -508,7 +522,11 @@ pub fn run_feature_analysis(
     config: &FeatureAnalysisConfig,
 ) -> FeatureAnalysisResult {
     let n_features = features.len();
-    let n_samples = if features.is_empty() { 0 } else { features[0].len() };
+    let n_samples = if features.is_empty() {
+        0
+    } else {
+        features[0].len()
+    };
 
     // Validate inputs
     if n_features == 0 || n_samples == 0 {
@@ -583,13 +601,15 @@ pub fn run_feature_analysis(
         config.high_corr_threshold,
     );
 
-    let redundant_pairs: Vec<FeaturePairCorrelation> = high_corr_pairs.iter()
+    let redundant_pairs: Vec<FeaturePairCorrelation> = high_corr_pairs
+        .iter()
         .filter(|p| p.is_redundant)
         .cloned()
         .collect();
 
     // Hierarchical clustering
-    let cluster_indices = hierarchical_clustering(&corr_matrix, n_features, config.high_corr_threshold);
+    let cluster_indices =
+        hierarchical_clustering(&corr_matrix, n_features, config.high_corr_threshold);
     let target_mi_vec: Vec<f64> = feature_stats.iter().map(|s| s.target_mi).collect();
     let clusters = build_feature_clusters(
         cluster_indices,
@@ -607,14 +627,17 @@ pub fn run_feature_analysis(
     let avg_mi_subset = if recommended_subset.is_empty() {
         0.0
     } else {
-        feature_stats.iter()
+        feature_stats
+            .iter()
             .filter(|s| s.include_in_subset)
             .map(|s| s.target_mi)
-            .sum::<f64>() / recommended_subset.len() as f64
+            .sum::<f64>()
+            / recommended_subset.len() as f64
     };
 
     // Find max correlation within subset
-    let subset_indices: Vec<usize> = feature_stats.iter()
+    let subset_indices: Vec<usize> = feature_stats
+        .iter()
         .filter(|s| s.include_in_subset)
         .map(|s| s.index)
         .collect();
@@ -658,15 +681,27 @@ pub fn run_feature_analysis(
 impl FeatureAnalysisResult {
     /// Get correlation between two features by name
     pub fn get_correlation(&self, feature_a: &str, feature_b: &str) -> Option<f64> {
-        let idx_a = self.feature_stats.iter().position(|s| s.name == feature_a)?;
-        let idx_b = self.feature_stats.iter().position(|s| s.name == feature_b)?;
+        let idx_a = self
+            .feature_stats
+            .iter()
+            .position(|s| s.name == feature_a)?;
+        let idx_b = self
+            .feature_stats
+            .iter()
+            .position(|s| s.name == feature_b)?;
         Some(self.correlation_matrix[idx_a * self.n_features + idx_b])
     }
 
     /// Get MI between two features by name
     pub fn get_mi(&self, feature_a: &str, feature_b: &str) -> Option<f64> {
-        let idx_a = self.feature_stats.iter().position(|s| s.name == feature_a)?;
-        let idx_b = self.feature_stats.iter().position(|s| s.name == feature_b)?;
+        let idx_a = self
+            .feature_stats
+            .iter()
+            .position(|s| s.name == feature_a)?;
+        let idx_b = self
+            .feature_stats
+            .iter()
+            .position(|s| s.name == feature_b)?;
         Some(self.mi_matrix[idx_a * self.n_features + idx_b])
     }
 
@@ -677,14 +712,35 @@ impl FeatureAnalysisResult {
         report.push_str("# Feature Correlation and Redundancy Analysis\n\n");
 
         report.push_str("## Summary\n\n");
-        report.push_str(&format!("- **Total Features Analyzed**: {}\n", self.summary.total_features));
+        report.push_str(&format!(
+            "- **Total Features Analyzed**: {}\n",
+            self.summary.total_features
+        ));
         report.push_str(&format!("- **Samples**: {}\n", self.n_samples));
-        report.push_str(&format!("- **Recommended Subset Size**: {}\n", self.summary.subset_size));
-        report.push_str(&format!("- **Excluded (Redundant)**: {}\n", self.summary.excluded_redundant));
-        report.push_str(&format!("- **Excluded (Low MI)**: {}\n", self.summary.excluded_low_mi));
-        report.push_str(&format!("- **Feature Clusters**: {}\n", self.summary.n_clusters));
-        report.push_str(&format!("- **Avg MI in Subset**: {:.4} bits\n", self.summary.avg_mi_subset));
-        report.push_str(&format!("- **Max Corr in Subset**: {:.3}\n", self.summary.max_corr_in_subset));
+        report.push_str(&format!(
+            "- **Recommended Subset Size**: {}\n",
+            self.summary.subset_size
+        ));
+        report.push_str(&format!(
+            "- **Excluded (Redundant)**: {}\n",
+            self.summary.excluded_redundant
+        ));
+        report.push_str(&format!(
+            "- **Excluded (Low MI)**: {}\n",
+            self.summary.excluded_low_mi
+        ));
+        report.push_str(&format!(
+            "- **Feature Clusters**: {}\n",
+            self.summary.n_clusters
+        ));
+        report.push_str(&format!(
+            "- **Avg MI in Subset**: {:.4} bits\n",
+            self.summary.avg_mi_subset
+        ));
+        report.push_str(&format!(
+            "- **Max Corr in Subset**: {:.3}\n",
+            self.summary.max_corr_in_subset
+        ));
 
         report.push_str("\n## Recommended Feature Subset\n\n");
         report.push_str("| Rank | Feature | Target Corr | Target MI | Include |\n");
@@ -693,10 +749,7 @@ impl FeatureAnalysisResult {
         for stats in self.feature_stats.iter().filter(|s| s.include_in_subset) {
             report.push_str(&format!(
                 "| {} | {} | {:.3} | {:.4} | Yes |\n",
-                stats.predictive_rank,
-                stats.name,
-                stats.target_correlation,
-                stats.target_mi,
+                stats.predictive_rank, stats.name, stats.target_correlation, stats.target_mi,
             ));
         }
 
@@ -708,11 +761,7 @@ impl FeatureAnalysisResult {
             for pair in &self.redundant_pairs {
                 report.push_str(&format!(
                     "| {} | {} | {:.3} | {:.3} | {:.4} |\n",
-                    pair.feature_a,
-                    pair.feature_b,
-                    pair.pearson,
-                    pair.spearman,
-                    pair.mi,
+                    pair.feature_a, pair.feature_b, pair.pearson, pair.spearman, pair.mi,
                 ));
             }
         }
@@ -727,8 +776,14 @@ impl FeatureAnalysisResult {
                     cluster.features.len(),
                     cluster.avg_correlation,
                 ));
-                report.push_str(&format!("- **Representative**: {}\n", cluster.representative));
-                report.push_str(&format!("- **Members**: {}\n\n", cluster.features.join(", ")));
+                report.push_str(&format!(
+                    "- **Representative**: {}\n",
+                    cluster.representative
+                ));
+                report.push_str(&format!(
+                    "- **Members**: {}\n\n",
+                    cluster.features.join(", ")
+                ));
             }
         }
 
@@ -762,10 +817,22 @@ impl FeatureAnalysisResult {
         }
 
         report.push_str("\n## Configuration\n\n");
-        report.push_str(&format!("- Redundancy threshold: |r| > {:.2}\n", self.config.redundancy_threshold));
-        report.push_str(&format!("- High correlation warning: |r| > {:.2}\n", self.config.high_corr_threshold));
-        report.push_str(&format!("- Minimum MI threshold: {:.3} bits\n", self.config.min_mi_threshold));
-        report.push_str(&format!("- Target subset size: {}\n", self.config.target_feature_count));
+        report.push_str(&format!(
+            "- Redundancy threshold: |r| > {:.2}\n",
+            self.config.redundancy_threshold
+        ));
+        report.push_str(&format!(
+            "- High correlation warning: |r| > {:.2}\n",
+            self.config.high_corr_threshold
+        ));
+        report.push_str(&format!(
+            "- Minimum MI threshold: {:.3} bits\n",
+            self.config.min_mi_threshold
+        ));
+        report.push_str(&format!(
+            "- Target subset size: {}\n",
+            self.config.target_feature_count
+        ));
 
         report
     }
@@ -790,7 +857,10 @@ impl FeatureAnalysisResult {
 mod tests {
     use super::*;
 
-    fn generate_test_features(n_samples: usize, n_features: usize) -> (Vec<String>, Vec<Vec<f64>>, Vec<f64>) {
+    fn generate_test_features(
+        n_samples: usize,
+        n_features: usize,
+    ) -> (Vec<String>, Vec<Vec<f64>>, Vec<f64>) {
         let mut rng_state = 42u64;
         let mut features = Vec::with_capacity(n_features);
         let mut names = Vec::with_capacity(n_features);
@@ -801,13 +871,15 @@ mod tests {
 
             let mut values = Vec::with_capacity(n_samples);
             for i in 0..n_samples {
-                rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                rng_state = rng_state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 let rand = (rng_state >> 33) as f64 / (u32::MAX as f64) - 0.5;
 
                 // Create some correlation structure
                 let base = (i as f64 * 0.1).sin();
                 let group_signal = if f < 3 {
-                    base * 0.8  // Group 1: correlated
+                    base * 0.8 // Group 1: correlated
                 } else if f < 6 {
                     -base * 0.7 // Group 2: negatively correlated with group 1
                 } else {
@@ -822,7 +894,9 @@ mod tests {
         // Target correlates with group 1
         let target: Vec<f64> = (0..n_samples)
             .map(|i| {
-                rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                rng_state = rng_state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 let rand = (rng_state >> 33) as f64 / (u32::MAX as f64) - 0.5;
                 (i as f64 * 0.1).sin() * 0.5 + rand * 0.2
             })
@@ -893,10 +967,9 @@ mod tests {
 
         assert!(!pairs.is_empty());
         // a and b should be highly correlated
-        let ab_pair = pairs.iter().find(|p|
-            (p.feature_a == "a" && p.feature_b == "b") ||
-            (p.feature_a == "b" && p.feature_b == "a")
-        );
+        let ab_pair = pairs.iter().find(|p| {
+            (p.feature_a == "a" && p.feature_b == "b") || (p.feature_a == "b" && p.feature_b == "a")
+        });
         assert!(ab_pair.is_some());
     }
 
@@ -952,7 +1025,7 @@ mod tests {
             "independent".to_string(),
         ];
         let original: Vec<f64> = (0..100).map(|i| (i as f64 * 0.1).sin()).collect();
-        let copy: Vec<f64> = original.iter().map(|x| x * 1.001 + 0.001).collect();  // Nearly identical
+        let copy: Vec<f64> = original.iter().map(|x| x * 1.001 + 0.001).collect(); // Nearly identical
         let independent: Vec<f64> = (0..100).map(|i| (i as f64 * 0.37).cos()).collect();
 
         let features = vec![original.clone(), copy, independent];
@@ -966,10 +1039,11 @@ mod tests {
         let result = run_feature_analysis(&names, &features, &target, &config);
 
         // Copy should be flagged as redundant with original
-        assert!(result.redundant_pairs.iter().any(|p|
-            (p.feature_a == "original" && p.feature_b == "copy") ||
-            (p.feature_a == "copy" && p.feature_b == "original")
-        ));
+        assert!(result
+            .redundant_pairs
+            .iter()
+            .any(|p| (p.feature_a == "original" && p.feature_b == "copy")
+                || (p.feature_a == "copy" && p.feature_b == "original")));
     }
 
     #[test]
@@ -986,7 +1060,11 @@ mod tests {
         }
 
         // Ranks should be unique
-        let ranks: Vec<usize> = result.feature_stats.iter().map(|s| s.predictive_rank).collect();
+        let ranks: Vec<usize> = result
+            .feature_stats
+            .iter()
+            .map(|s| s.predictive_rank)
+            .collect();
         let unique_ranks: HashSet<usize> = ranks.iter().cloned().collect();
         assert_eq!(ranks.len(), unique_ranks.len());
     }
@@ -1008,10 +1086,7 @@ mod tests {
     #[test]
     fn test_get_correlation() {
         let names = vec!["a".to_string(), "b".to_string()];
-        let features = vec![
-            vec![1.0, 2.0, 3.0, 4.0],
-            vec![2.0, 4.0, 6.0, 8.0],
-        ];
+        let features = vec![vec![1.0, 2.0, 3.0, 4.0], vec![2.0, 4.0, 6.0, 8.0]];
         let target = vec![1.0, 2.0, 3.0, 4.0];
         let config = FeatureAnalysisConfig::default();
 
@@ -1028,10 +1103,7 @@ mod tests {
     #[test]
     fn test_heatmap_data() {
         let names = vec!["a".to_string(), "b".to_string()];
-        let features = vec![
-            vec![1.0, 2.0, 3.0],
-            vec![3.0, 2.0, 1.0],
-        ];
+        let features = vec![vec![1.0, 2.0, 3.0], vec![3.0, 2.0, 1.0]];
         let target = vec![1.0, 2.0, 3.0];
         let config = FeatureAnalysisConfig::default();
 
@@ -1046,11 +1118,7 @@ mod tests {
         let cluster_indices = vec![vec![0, 1], vec![2]];
         let names = vec!["a".to_string(), "b".to_string(), "c".to_string()];
         let target_mi = vec![0.1, 0.2, 0.05]; // b has highest MI in first cluster
-        let corr_matrix = vec![
-            1.0, 0.9, 0.1,
-            0.9, 1.0, 0.1,
-            0.1, 0.1, 1.0,
-        ];
+        let corr_matrix = vec![1.0, 0.9, 0.1, 0.9, 1.0, 0.1, 0.1, 0.1, 1.0];
 
         let clusters = build_feature_clusters(cluster_indices, &names, &target_mi, &corr_matrix, 3);
 

@@ -11,11 +11,10 @@
 //! | 2-3 of 5          | PIVOT: Focus only on validated features |
 //! | 4-5 of 5          | GO: Full development of analytics layer |
 
-use super::{
-    H1TestResult, H2TestResult, H3TestResult, H4TestResult, H5TestResult,
-    HypothesisDecision,
-};
 use super::feature_analysis::FeatureAnalysisResult;
+use super::{
+    H1TestResult, H2TestResult, H3TestResult, H4TestResult, H5TestResult, HypothesisDecision,
+};
 
 /// Final project decision
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -230,7 +229,8 @@ fn summarize_h2(result: &H2TestResult) -> HypothesisSummary {
     let explanation = match decision {
         HypothesisDecision::Accept => format!(
             "Entropy + whale interaction shows {:.1}% lift (p={:.4})",
-            result.joint_vs_best_lift * 100.0, result.interaction_p_value
+            result.joint_vs_best_lift * 100.0,
+            result.interaction_p_value
         ),
         HypothesisDecision::Reject => format!(
             "Interaction lift of {:.1}% is below threshold; no synergy detected",
@@ -238,7 +238,8 @@ fn summarize_h2(result: &H2TestResult) -> HypothesisSummary {
         ),
         HypothesisDecision::Inconclusive => format!(
             "Lift={:.1}%, p={:.4} - evidence is mixed",
-            result.joint_vs_best_lift * 100.0, result.interaction_p_value
+            result.joint_vs_best_lift * 100.0,
+            result.interaction_p_value
         ),
     };
 
@@ -258,7 +259,11 @@ fn summarize_h3(result: &H3TestResult) -> HypothesisSummary {
     let decision = result.to_hypothesis_decision();
 
     let (key_metric, key_metric_name) = if let Some(ref best) = result.best_threshold {
-        let name = format!("${:.0}M/{:.0}%", best.amount_threshold / 1_000_000.0, best.distance_threshold * 100.0);
+        let name = format!(
+            "${:.0}M/{:.0}%",
+            best.amount_threshold / 1_000_000.0,
+            best.distance_threshold * 100.0
+        );
         (best.oos_metrics.lift, format!("lift ({})", name))
     } else {
         (0.0, "lift".to_string())
@@ -323,7 +328,9 @@ fn summarize_h4(result: &H4TestResult) -> HypothesisSummary {
             "Concentration-volatility relationship weak; only {} of {} measures passed",
             result.n_passing, result.n_total
         ),
-        HypothesisDecision::Inconclusive => "Mixed evidence across concentration measures".to_string(),
+        HypothesisDecision::Inconclusive => {
+            "Mixed evidence across concentration measures".to_string()
+        }
     };
 
     HypothesisSummary {
@@ -363,7 +370,8 @@ fn summarize_h5(result: &H5TestResult) -> HypothesisSummary {
         ),
         HypothesisDecision::Inconclusive => format!(
             "Mixed results: {} horizons pass, {} fail",
-            result.horizons_passed, result.horizon_results.len() - result.horizons_passed
+            result.horizons_passed,
+            result.horizon_results.len() - result.horizons_passed
         ),
     };
 
@@ -383,7 +391,8 @@ fn generate_strategy_estimate(
     summaries: &[HypothesisSummary],
     h5: Option<&H5TestResult>,
 ) -> StrategyEstimate {
-    let passed_count = summaries.iter()
+    let passed_count = summaries
+        .iter()
         .filter(|s| s.decision == HypothesisDecision::Accept)
         .count();
 
@@ -446,12 +455,19 @@ fn generate_honest_assessment(
         }
     }
 
-    let h1_failed = summaries.iter().any(|s| s.id == "H1" && s.decision == HypothesisDecision::Reject);
-    let h2_failed = summaries.iter().any(|s| s.id == "H2" && s.decision == HypothesisDecision::Reject);
-    let h5_failed = summaries.iter().any(|s| s.id == "H5" && s.decision == HypothesisDecision::Reject);
+    let h1_failed = summaries
+        .iter()
+        .any(|s| s.id == "H1" && s.decision == HypothesisDecision::Reject);
+    let h2_failed = summaries
+        .iter()
+        .any(|s| s.id == "H2" && s.decision == HypothesisDecision::Reject);
+    let h5_failed = summaries
+        .iter()
+        .any(|s| s.id == "H5" && s.decision == HypothesisDecision::Reject);
 
     if h1_failed {
-        wrong_assumptions.push("Whale flow predictive power may not exist for this market".to_string());
+        wrong_assumptions
+            .push("Whale flow predictive power may not exist for this market".to_string());
     }
     if h2_failed {
         wrong_assumptions.push("Entropy-whale interaction effect may be too weak".to_string());
@@ -462,11 +478,13 @@ fn generate_honest_assessment(
 
     if let Some(fa) = feature_analysis {
         if fa.summary.excluded_redundant > fa.summary.subset_size {
-            wrong_assumptions.push("Many features are redundant - simpler model may be better".to_string());
+            wrong_assumptions
+                .push("Many features are redundant - simpler model may be better".to_string());
         }
     }
 
-    let passed_count = summaries.iter()
+    let passed_count = summaries
+        .iter()
         .filter(|s| s.decision == HypothesisDecision::Accept)
         .count();
 
@@ -509,14 +527,18 @@ fn generate_next_steps(decision: FinalDecision, summaries: &[HypothesisSummary])
             ],
         },
         FinalDecision::Pivot => {
-            let passed_ids: Vec<&str> = summaries.iter()
+            let passed_ids: Vec<&str> = summaries
+                .iter()
                 .filter(|s| s.decision == HypothesisDecision::Accept)
                 .map(|s| s.id.as_str())
                 .collect();
 
             NextSteps {
                 immediate: vec![
-                    format!("Focus development on validated signals: {}", passed_ids.join(", ")),
+                    format!(
+                        "Focus development on validated signals: {}",
+                        passed_ids.join(", ")
+                    ),
                     "Remove/deprioritize failed hypothesis features".to_string(),
                     "Simplify model to reduce overfitting risk".to_string(),
                 ],
@@ -572,13 +594,16 @@ pub fn run_final_decision(input: &DecisionInput) -> FinalDecisionResult {
         summaries.push(summarize_h5(h5));
     }
 
-    let hypotheses_passed = summaries.iter()
+    let hypotheses_passed = summaries
+        .iter()
         .filter(|s| s.decision == HypothesisDecision::Accept)
         .count();
-    let hypotheses_failed = summaries.iter()
+    let hypotheses_failed = summaries
+        .iter()
         .filter(|s| s.decision == HypothesisDecision::Reject)
         .count();
-    let hypotheses_inconclusive = summaries.iter()
+    let hypotheses_inconclusive = summaries
+        .iter()
         .filter(|s| s.decision == HypothesisDecision::Inconclusive)
         .count();
 
@@ -605,7 +630,8 @@ pub fn run_final_decision(input: &DecisionInput) -> FinalDecisionResult {
     let (recommended_features, features_to_avoid) = if let Some(ref fa) = input.feature_analysis {
         (
             fa.recommended_subset.clone(),
-            fa.excluded_redundant.iter()
+            fa.excluded_redundant
+                .iter()
                 .chain(fa.excluded_low_mi.iter())
                 .cloned()
                 .collect(),
@@ -644,12 +670,19 @@ impl FinalDecisionResult {
 
         report.push_str("```\n");
         report.push_str("╔══════════════════════════════════════╗\n");
-        report.push_str(&format!("║  HYPOTHESES PASSED: {}/{}             ║\n",
+        report.push_str(&format!(
+            "║  HYPOTHESES PASSED: {}/{}             ║\n",
             self.hypotheses_passed,
             self.hypotheses_passed + self.hypotheses_failed + self.hypotheses_inconclusive
         ));
-        report.push_str(&format!("║  DECISION: {:25} ║\n", self.decision.to_string()));
-        report.push_str(&format!("║  CONFIDENCE: {:22} ║\n", self.confidence.to_string()));
+        report.push_str(&format!(
+            "║  DECISION: {:25} ║\n",
+            self.decision.to_string()
+        ));
+        report.push_str(&format!(
+            "║  CONFIDENCE: {:22} ║\n",
+            self.confidence.to_string()
+        ));
         report.push_str("╚══════════════════════════════════════╝\n");
         report.push_str("```\n\n");
 
@@ -680,10 +713,22 @@ impl FinalDecisionResult {
         }
 
         report.push_str("## Strategy Estimate\n\n");
-        report.push_str(&format!("- **Conservative Sharpe:** {:.2}\n", self.strategy_estimate.sharpe_conservative));
-        report.push_str(&format!("- **Optimistic Sharpe:** {:.2}\n", self.strategy_estimate.sharpe_optimistic));
-        report.push_str(&format!("- **Estimated Alpha Decay:** {:.0} months\n", self.strategy_estimate.alpha_decay_months));
-        report.push_str(&format!("- **Capacity Estimate:** ${:.0}\n\n", self.strategy_estimate.capacity_usd));
+        report.push_str(&format!(
+            "- **Conservative Sharpe:** {:.2}\n",
+            self.strategy_estimate.sharpe_conservative
+        ));
+        report.push_str(&format!(
+            "- **Optimistic Sharpe:** {:.2}\n",
+            self.strategy_estimate.sharpe_optimistic
+        ));
+        report.push_str(&format!(
+            "- **Estimated Alpha Decay:** {:.0} months\n",
+            self.strategy_estimate.alpha_decay_months
+        ));
+        report.push_str(&format!(
+            "- **Capacity Estimate:** ${:.0}\n\n",
+            self.strategy_estimate.capacity_usd
+        ));
 
         report.push_str("### Key Risks\n\n");
         for risk in &self.strategy_estimate.risks {
@@ -728,8 +773,13 @@ impl FinalDecisionResult {
         }
 
         report.push_str("\n### Edge Assessment\n\n");
-        report.push_str(&format!("**Enough Edge:** {}\n\n",
-            if self.honest_assessment.enough_edge { "Yes" } else { "No" }
+        report.push_str(&format!(
+            "**Enough Edge:** {}\n\n",
+            if self.honest_assessment.enough_edge {
+                "Yes"
+            } else {
+                "No"
+            }
         ));
         report.push_str(&format!("{}\n", self.honest_assessment.edge_explanation));
 
@@ -848,17 +898,15 @@ mod tests {
 
     #[test]
     fn test_next_steps_pivot() {
-        let summaries = vec![
-            HypothesisSummary {
-                id: "H1".to_string(),
-                description: "Test".to_string(),
-                decision: HypothesisDecision::Accept,
-                key_metric: 0.5,
-                key_metric_name: "metric".to_string(),
-                confidence: 0.8,
-                explanation: "Passed".to_string(),
-            },
-        ];
+        let summaries = vec![HypothesisSummary {
+            id: "H1".to_string(),
+            description: "Test".to_string(),
+            decision: HypothesisDecision::Accept,
+            key_metric: 0.5,
+            key_metric_name: "metric".to_string(),
+            confidence: 0.8,
+            explanation: "Passed".to_string(),
+        }];
         let steps = generate_next_steps(FinalDecision::Pivot, &summaries);
 
         assert!(steps.immediate.iter().any(|s| s.contains("H1")));

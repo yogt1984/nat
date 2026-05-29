@@ -109,47 +109,70 @@ impl Default for RedisTomlConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct AlgorithmsConfig {
     #[serde(default)]
     pub enabled: Vec<String>,
-}
-
-impl Default for AlgorithmsConfig {
-    fn default() -> Self {
-        Self { enabled: Vec::new() }
-    }
 }
 
 /// Read symbols list from an external TOML file (config/symbols.toml).
 fn load_symbols_toml(path: &Path) -> Result<Vec<String>> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read symbols file: {:?}", path))?;
-    let table: toml::Table = content.parse()
+    let table: toml::Table = content
+        .parse()
         .with_context(|| format!("Failed to parse symbols file: {:?}", path))?;
-    let symbols = table.get("symbols")
+    let symbols = table
+        .get("symbols")
         .and_then(|v| v.as_array())
         .with_context(|| "symbols file missing 'symbols' array")?;
-    symbols.iter()
-        .map(|v| v.as_str()
-            .map(|s| s.to_string())
-            .with_context(|| "symbols array must contain strings"))
+    symbols
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .map(|s| s.to_string())
+                .with_context(|| "symbols array must contain strings")
+        })
         .collect()
 }
 
 // Default values
-fn default_log_level() -> String { "info".to_string() }
-fn default_ws_url() -> String { "wss://api.hyperliquid.xyz/ws".to_string() }
-fn default_reconnect_delay() -> u64 { 1000 }
-fn default_max_reconnect_delay() -> u64 { 30000 }
-fn default_ping_interval() -> u64 { 30000 }
-fn default_format() -> String { "parquet".to_string() }
-fn default_row_group_size() -> usize { 10000 }
-fn default_compression() -> String { "zstd".to_string() }
-fn default_rotate_interval() -> String { "1h".to_string() }
-fn default_dashboard_addr() -> String { "0.0.0.0:8080".to_string() }
-fn default_redis_url() -> String { "redis://127.0.0.1:6379".to_string() }
-fn default_redis_prefix() -> Option<String> { None }
+fn default_log_level() -> String {
+    "info".to_string()
+}
+fn default_ws_url() -> String {
+    "wss://api.hyperliquid.xyz/ws".to_string()
+}
+fn default_reconnect_delay() -> u64 {
+    1000
+}
+fn default_max_reconnect_delay() -> u64 {
+    30000
+}
+fn default_ping_interval() -> u64 {
+    30000
+}
+fn default_format() -> String {
+    "parquet".to_string()
+}
+fn default_row_group_size() -> usize {
+    10000
+}
+fn default_compression() -> String {
+    "zstd".to_string()
+}
+fn default_rotate_interval() -> String {
+    "1h".to_string()
+}
+fn default_dashboard_addr() -> String {
+    "0.0.0.0:8080".to_string()
+}
+fn default_redis_url() -> String {
+    "redis://127.0.0.1:6379".to_string()
+}
+fn default_redis_prefix() -> Option<String> {
+    None
+}
 
 impl Config {
     /// Load configuration from a TOML file
@@ -157,17 +180,19 @@ impl Config {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {:?}", path))?;
 
-        let mut config: Config = toml::from_str(&content)
-            .with_context(|| "Failed to parse config file")?;
+        let mut config: Config =
+            toml::from_str(&content).with_context(|| "Failed to parse config file")?;
 
         // Load symbols from external file if symbols_file is set
         if let Some(ref symbols_file) = config.symbols.symbols_file {
-            let symbols_path = path.parent()
-                .unwrap_or(Path::new("."))
-                .join(symbols_file);
+            let symbols_path = path.parent().unwrap_or(Path::new(".")).join(symbols_file);
             match load_symbols_toml(&symbols_path) {
                 Ok(symbols) => {
-                    tracing::info!(?symbols_path, n = symbols.len(), "Loaded symbols from symbols_file");
+                    tracing::info!(
+                        ?symbols_path,
+                        n = symbols.len(),
+                        "Loaded symbols from symbols_file"
+                    );
                     config.symbols.assets = symbols;
                 }
                 Err(e) => {
@@ -205,7 +230,10 @@ impl Config {
 
     /// Get the data directory, with fallback
     pub fn data_dir(&self) -> &str {
-        self.output.data_dir.as_deref().unwrap_or(&self.general.data_dir)
+        self.output
+            .data_dir
+            .as_deref()
+            .unwrap_or(&self.general.data_dir)
     }
 }
 

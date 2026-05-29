@@ -17,7 +17,7 @@
 //! - Amihud (2002) - Illiquidity and stock returns
 //! - Hasbrouck (2009) - Trading costs and returns for US equities
 
-use ing_types::{TradeBuffer, Trade};
+use ing_types::{Trade, TradeBuffer};
 
 /// Minimum observations required for reliable computation
 const MIN_OBSERVATIONS: usize = 20;
@@ -140,11 +140,8 @@ pub fn compute(trade_buffer: &TradeBuffer) -> IlliquidityFeatures {
     };
 
     // Composite illiquidity score (normalized average)
-    let illiquidity_composite = compute_composite(
-        kyle_lambda_100,
-        amihud_lambda_100,
-        hasbrouck_lambda_100,
-    );
+    let illiquidity_composite =
+        compute_composite(kyle_lambda_100, amihud_lambda_100, hasbrouck_lambda_100);
 
     IlliquidityFeatures {
         kyle_lambda_100,
@@ -177,8 +174,20 @@ fn extract_trade_data(trades: &[&Trade]) -> (Vec<f64>, Vec<f64>, Vec<i8>) {
         let direction = match last_price {
             Some(prev) if trade.price > prev => 1i8,
             Some(prev) if trade.price < prev => -1i8,
-            Some(_) => if trade.is_buy { 1i8 } else { -1i8 },
-            None => if trade.is_buy { 1i8 } else { -1i8 },
+            Some(_) => {
+                if trade.is_buy {
+                    1i8
+                } else {
+                    -1i8
+                }
+            }
+            None => {
+                if trade.is_buy {
+                    1i8
+                } else {
+                    -1i8
+                }
+            }
         };
         directions.push(direction);
         last_price = Some(trade.price);
@@ -193,12 +202,7 @@ fn extract_trade_data(trades: &[&Trade]) -> (Vec<f64>, Vec<f64>, Vec<i8>) {
 ///
 /// Interpretation: Price impact per unit of signed volume
 /// Higher values indicate lower liquidity (larger price impact)
-fn compute_kyle_lambda(
-    prices: &[f64],
-    volumes: &[f64],
-    directions: &[i8],
-    window: usize,
-) -> f64 {
+fn compute_kyle_lambda(prices: &[f64], volumes: &[f64], directions: &[i8], window: usize) -> f64 {
     let n = prices.len().min(window);
     if n < MIN_OBSERVATIONS_KYLE {
         return 0.0;
@@ -363,10 +367,7 @@ fn compute_roll_spread(prices: &[f64], window: usize) -> f64 {
     let prices = &prices[start..];
 
     // Compute price changes
-    let price_changes: Vec<f64> = prices
-        .windows(2)
-        .map(|w| w[1] - w[0])
-        .collect();
+    let price_changes: Vec<f64> = prices.windows(2).map(|w| w[1] - w[0]).collect();
 
     if price_changes.len() < 2 {
         return 0.0;
@@ -403,7 +404,6 @@ fn compute_composite(kyle: f64, amihud: f64, hasbrouck: f64) -> f64 {
 // Skeptical Tests Module
 // ============================================================================
 
-/// Module for skeptical statistical tests on illiquidity features
 #[allow(dead_code)]
 pub mod skeptical_tests {
     //! Skeptical tests to validate illiquidity feature effectiveness
@@ -473,7 +473,10 @@ pub mod skeptical_tests {
         amihud_values: &[f64],
         hasbrouck_values: &[f64],
     ) -> RedundancyTest {
-        let n = kyle_values.len().min(amihud_values.len()).min(hasbrouck_values.len());
+        let n = kyle_values
+            .len()
+            .min(amihud_values.len())
+            .min(hasbrouck_values.len());
 
         if n < 30 {
             return RedundancyTest {
@@ -486,8 +489,10 @@ pub mod skeptical_tests {
         }
 
         let kyle_amihud_corr = pearson_correlation(&kyle_values[..n], &amihud_values[..n]).abs();
-        let kyle_hasbrouck_corr = pearson_correlation(&kyle_values[..n], &hasbrouck_values[..n]).abs();
-        let amihud_hasbrouck_corr = pearson_correlation(&amihud_values[..n], &hasbrouck_values[..n]).abs();
+        let kyle_hasbrouck_corr =
+            pearson_correlation(&kyle_values[..n], &hasbrouck_values[..n]).abs();
+        let amihud_hasbrouck_corr =
+            pearson_correlation(&amihud_values[..n], &hasbrouck_values[..n]).abs();
 
         let max_correlation = kyle_amihud_corr
             .max(kyle_hasbrouck_corr)
@@ -510,7 +515,8 @@ pub mod skeptical_tests {
         future_returns: &[f64],
         illiquidity_threshold_percentile: f64,
     ) -> InformedFlowTest {
-        let n = illiquidity_values.len()
+        let n = illiquidity_values
+            .len()
             .min(trend_values.len())
             .min(future_returns.len());
 
@@ -697,14 +703,14 @@ pub mod skeptical_tests {
         let x = x - 1.0;
         let g = 7.0;
         let c = [
-            0.99999999999980993,
+            0.999_999_999_999_809_9,
             676.5203681218851,
             -1259.1392167224028,
-            771.32342877765313,
-            -176.61502916214059,
+            771.323_428_777_653_1,
+            -176.615_029_162_140_6,
             12.507343278686905,
             -0.13857109526572012,
-            9.9843695780195716e-6,
+            9.984_369_578_019_572e-6,
             1.5056327351493116e-7,
         ];
 
@@ -725,11 +731,11 @@ pub mod skeptical_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ing_types::{TradeBuffer, Trade};
+    use ing_types::{Trade, TradeBuffer};
 
     fn create_test_buffer_with_trades(trades: Vec<Trade>) -> TradeBuffer {
         let mut buffer = TradeBuffer::new(300); // 5 minute window
-        // Manually insert trades (bypassing add() since we have Trade directly)
+                                                // Manually insert trades (bypassing add() since we have Trade directly)
         for trade in trades {
             // We need to access the internal trades field
             // Since we can't, we'll create a different approach
@@ -783,7 +789,11 @@ mod tests {
         }
 
         let lambda = compute_kyle_lambda(&prices, &volumes, &directions, 100);
-        assert!(lambda > 0.0, "Kyle's lambda should be positive, got {}", lambda);
+        assert!(
+            lambda > 0.0,
+            "Kyle's lambda should be positive, got {}",
+            lambda
+        );
     }
 
     #[test]
@@ -792,11 +802,17 @@ mod tests {
         let n = 100;
         let prices: Vec<f64> = (0..n).map(|i| 100.0 + (i as f64 * 0.01).sin()).collect();
         let volumes: Vec<f64> = vec![1.0; n];
-        let directions: Vec<i8> = (0..n).map(|i| if i % 2 == 0 { 1i8 } else { -1i8 }).collect();
+        let directions: Vec<i8> = (0..n)
+            .map(|i| if i % 2 == 0 { 1i8 } else { -1i8 })
+            .collect();
 
         let lambda = compute_kyle_lambda(&prices, &volumes, &directions, 100);
         // Should be small but not necessarily zero
-        assert!(lambda < 1.0, "Kyle's lambda should be small for random data, got {}", lambda);
+        assert!(
+            lambda < 1.0,
+            "Kyle's lambda should be small for random data, got {}",
+            lambda
+        );
     }
 
     // ========================================================================
@@ -870,7 +886,11 @@ mod tests {
         }
 
         let lambda = compute_hasbrouck_lambda(&prices, &volumes, &directions, 100);
-        assert!(lambda > 0.0, "Hasbrouck should detect permanent impact, got {}", lambda);
+        assert!(
+            lambda > 0.0,
+            "Hasbrouck should detect permanent impact, got {}",
+            lambda
+        );
     }
 
     // ========================================================================
@@ -881,12 +901,22 @@ mod tests {
     fn test_roll_spread_bid_ask_bounce() {
         // Simulate bid-ask bounce: price alternates
         let n = 100;
-        let prices: Vec<f64> = (0..n).map(|i| {
-            if i % 2 == 0 { 100.0 } else { 100.1 } // Bounce between bid and ask
-        }).collect();
+        let prices: Vec<f64> = (0..n)
+            .map(|i| {
+                if i % 2 == 0 {
+                    100.0
+                } else {
+                    100.1
+                } // Bounce between bid and ask
+            })
+            .collect();
 
         let spread = compute_roll_spread(&prices, 100);
-        assert!(spread > 0.0, "Roll spread should detect bid-ask bounce, got {}", spread);
+        assert!(
+            spread > 0.0,
+            "Roll spread should detect bid-ask bounce, got {}",
+            spread
+        );
     }
 
     #[test]
@@ -907,7 +937,10 @@ mod tests {
     #[test]
     fn test_composite_calculation() {
         let composite = compute_composite(1.0, 2.0, 3.0);
-        assert!((composite - 2.0).abs() < 1e-10, "Composite should be average");
+        assert!(
+            (composite - 2.0).abs() < 1e-10,
+            "Composite should be average"
+        );
     }
 
     // ========================================================================
@@ -926,7 +959,10 @@ mod tests {
 
         let result = test_lambda_redundancy(&kyle, &amihud, &hasbrouck);
 
-        assert!(result.kyle_amihud_corr > 0.9, "Kyle-Amihud should be highly correlated");
+        assert!(
+            result.kyle_amihud_corr > 0.9,
+            "Kyle-Amihud should be highly correlated"
+        );
         assert!(result.is_redundant, "Should detect redundancy");
     }
 
@@ -938,11 +974,16 @@ mod tests {
         let n = 100;
         let kyle: Vec<f64> = (0..n).map(|i| (i as f64 * 0.1).sin() * 10.0).collect();
         let amihud: Vec<f64> = (0..n).map(|i| (i as f64 * 0.2).cos() * 10.0).collect();
-        let hasbrouck: Vec<f64> = (0..n).map(|i| (i as f64 * 0.3).sin() * 10.0 + 5.0).collect();
+        let hasbrouck: Vec<f64> = (0..n)
+            .map(|i| (i as f64 * 0.3).sin() * 10.0 + 5.0)
+            .collect();
 
         let result = test_lambda_redundancy(&kyle, &amihud, &hasbrouck);
 
-        assert!(result.max_correlation < 0.9, "Should not detect redundancy for uncorrelated data");
+        assert!(
+            result.max_correlation < 0.9,
+            "Should not detect redundancy for uncorrelated data"
+        );
         assert!(!result.is_redundant, "Should not be redundant");
     }
 
@@ -957,7 +998,11 @@ mod tests {
 
         let result = test_illiquidity_volatility_prediction(&illiquidity, &volatility);
 
-        assert!(result.correlation > 0.5, "Should detect correlation, got {}", result.correlation);
+        assert!(
+            result.correlation > 0.5,
+            "Should detect correlation, got {}",
+            result.correlation
+        );
     }
 
     #[test]
@@ -978,9 +1023,17 @@ mod tests {
             // High illiquidity: 90% continuation rate
             // Low illiquidity: 40% continuation rate
             let ret = if illiq > 5.0 {
-                if i % 10 == 0 { -1.0 } else { 1.0 }  // 90% continues
+                if i % 10 == 0 {
+                    -1.0
+                } else {
+                    1.0
+                } // 90% continues
             } else {
-                if i % 5 < 2 { 1.0 } else { -1.0 }  // 40% continues
+                if i % 5 < 2 {
+                    1.0
+                } else {
+                    -1.0
+                } // 40% continues
             };
 
             illiquidity.push(illiq);
@@ -991,9 +1044,16 @@ mod tests {
         let result = test_informed_flow_detection(&illiquidity, &trend, &future_returns, 75.0);
 
         // With our synthetic data, high illiquidity should show higher continuation
-        assert!(result.p_continue_high_illiq_trend > result.p_continue_low_illiq_trend,
+        assert!(
+            result.p_continue_high_illiq_trend > result.p_continue_low_illiq_trend,
             "High illiq continuation ({:.2}) should be > low illiq ({:.2})",
-            result.p_continue_high_illiq_trend, result.p_continue_low_illiq_trend);
-        assert!(result.lift > 1.0, "Lift should be > 1, got {:.2}", result.lift);
+            result.p_continue_high_illiq_trend,
+            result.p_continue_low_illiq_trend
+        );
+        assert!(
+            result.lift > 1.0,
+            "Lift should be > 1, got {:.2}",
+            result.lift
+        );
     }
 }

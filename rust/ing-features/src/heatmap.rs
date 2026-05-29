@@ -106,11 +106,7 @@ impl HeatmapBuffer {
         }
 
         // Build current heatmap
-        let current = build_heatmap(
-            positions,
-            current_price,
-            &self.config,
-        );
+        let current = build_heatmap(positions, current_price, &self.config);
 
         // Extract features
         let features = extract_features(
@@ -282,14 +278,16 @@ fn extract_features(
 
     // F5: Absorption capacity (use worst-case direction)
     let absorption_capacity = compute_absorption_capacity(
-        heatmap, bid_depth_2pct, ask_depth_2pct, half_range, num_bins,
+        heatmap,
+        bid_depth_2pct,
+        ask_depth_2pct,
+        half_range,
+        num_bins,
     );
 
     // F6: Cluster velocity (finite difference)
     let cluster_velocity = match prev_nearest_dist {
-        Some(prev) => {
-            (nearest_cluster_dist - prev) / config.velocity_lag_ticks as f64
-        }
+        Some(prev) => (nearest_cluster_dist - prev) / config.velocity_lag_ticks as f64,
         None => 0.0,
     };
 
@@ -319,10 +317,7 @@ fn extract_features(
 }
 
 /// F1: min |δ_k| where H(t,k) > τ_cluster
-fn compute_nearest_cluster_dist(
-    heatmap: &[f64; DEFAULT_NUM_BINS],
-    config: &HeatmapConfig,
-) -> f64 {
+fn compute_nearest_cluster_dist(heatmap: &[f64; DEFAULT_NUM_BINS], config: &HeatmapConfig) -> f64 {
     let mut min_dist = config.half_range;
 
     for k in 0..config.num_bins {
@@ -352,10 +347,7 @@ fn compute_cluster_mass_ratio(heatmap: &[f64; DEFAULT_NUM_BINS]) -> f64 {
 }
 
 /// F3: Max consecutive bins above τ_chain within ±5% of mid
-fn compute_cascade_chain_length(
-    heatmap: &[f64; DEFAULT_NUM_BINS],
-    config: &HeatmapConfig,
-) -> f64 {
+fn compute_cascade_chain_length(heatmap: &[f64; DEFAULT_NUM_BINS], config: &HeatmapConfig) -> f64 {
     let start = CENTRE_BIN.saturating_sub(BINS_5PCT);
     let end = (CENTRE_BIN + BINS_5PCT).min(DEFAULT_NUM_BINS);
 
@@ -494,7 +486,11 @@ mod tests {
             position_value_usd: value,
             liquidation_price: liq_price,
             is_long,
-            entry_price: if is_long { liq_price * 1.5 } else { liq_price * 0.67 },
+            entry_price: if is_long {
+                liq_price * 1.5
+            } else {
+                liq_price * 0.67
+            },
         }
     }
 
@@ -512,7 +508,11 @@ mod tests {
     #[test]
     fn test_feature_names_prefix() {
         for name in HeatmapFeatures::names() {
-            assert!(name.starts_with("hm_"), "Feature name should start with hm_: {}", name);
+            assert!(
+                name.starts_with("hm_"),
+                "Feature name should start with hm_: {}",
+                name
+            );
         }
     }
 
@@ -540,11 +540,18 @@ mod tests {
         // δ = ln(0.99) ≈ -0.01005
         // bin = floor((-0.01005 + 0.10) / 0.001) = floor(89.95) = 89
         let total: f64 = heatmap.iter().sum();
-        assert!((total - 500_000.0).abs() < 1e-6, "Total mass should be 500K");
+        assert!(
+            (total - 500_000.0).abs() < 1e-6,
+            "Total mass should be 500K"
+        );
 
         // Verify it landed in the right region (bins 85-95, around -1%)
         let expected_bin = ((-0.01005 + 0.10) / 0.001) as usize;
-        assert!(heatmap[expected_bin] > 0.0, "Position should be in bin {}", expected_bin);
+        assert!(
+            heatmap[expected_bin] > 0.0,
+            "Position should be in bin {}",
+            expected_bin
+        );
     }
 
     #[test]
@@ -552,7 +559,10 @@ mod tests {
         let config = make_config(); // min_position_value = 1000
         let positions = vec![make_position(500.0, 99_000.0, true)]; // Below threshold
         let heatmap = build_heatmap(&positions, 100_000.0, &config);
-        assert!(heatmap.iter().all(|&v| v == 0.0), "Sub-threshold positions should be filtered");
+        assert!(
+            heatmap.iter().all(|&v| v == 0.0),
+            "Sub-threshold positions should be filtered"
+        );
     }
 
     // ========================================================================
@@ -564,7 +574,10 @@ mod tests {
         let config = make_config();
         let heatmap = [0.0f64; DEFAULT_NUM_BINS];
         let dist = compute_nearest_cluster_dist(&heatmap, &config);
-        assert!((dist - config.half_range).abs() < 1e-10, "No cluster → max distance");
+        assert!(
+            (dist - config.half_range).abs() < 1e-10,
+            "No cluster → max distance"
+        );
     }
 
     #[test]
@@ -590,7 +603,10 @@ mod tests {
     fn test_mass_ratio_uniform() {
         let heatmap = [100.0f64; DEFAULT_NUM_BINS];
         let ratio = compute_cluster_mass_ratio(&heatmap);
-        assert!((ratio - 1.0).abs() < 1e-10, "Uniform distribution → ratio = 1");
+        assert!(
+            (ratio - 1.0).abs() < 1e-10,
+            "Uniform distribution → ratio = 1"
+        );
     }
 
     #[test]
@@ -599,7 +615,10 @@ mod tests {
         heatmap[50] = 1_000_000.0;
         let ratio = compute_cluster_mass_ratio(&heatmap);
         // mean = 1M / 200 = 5K, ratio = 1M / 5K = 200
-        assert!((ratio - 200.0).abs() < 1e-6, "Single bin → ratio = num_bins");
+        assert!(
+            (ratio - 200.0).abs() < 1e-6,
+            "Single bin → ratio = num_bins"
+        );
     }
 
     // ========================================================================
@@ -667,7 +686,11 @@ mod tests {
         let mut heatmap = [0.0f64; DEFAULT_NUM_BINS];
         heatmap[CENTRE_BIN + 5] = 10_000_000.0; // all mass above
         let acp = compute_asymmetric_cascade_pot(&heatmap);
-        assert!(acp > 0.0 && acp <= 1.0, "ACP should be in (0, 1], got {}", acp);
+        assert!(
+            acp > 0.0 && acp <= 1.0,
+            "ACP should be in (0, 1], got {}",
+            acp
+        );
     }
 
     // ========================================================================
@@ -678,7 +701,10 @@ mod tests {
     fn test_absorption_no_liquidation_mass() {
         let heatmap = [0.0f64; DEFAULT_NUM_BINS];
         let absorption = compute_absorption_capacity(&heatmap, 1e6, 1e6, 0.10, 200);
-        assert!(absorption.is_infinite(), "No liquidation mass → infinite absorption");
+        assert!(
+            absorption.is_infinite(),
+            "No liquidation mass → infinite absorption"
+        );
     }
 
     #[test]
@@ -688,9 +714,14 @@ mod tests {
         for k in (CENTRE_BIN - 20)..CENTRE_BIN {
             heatmap[k] = 250_000.0; // 20 bins × 250K = $5M
         }
-        let absorption = compute_absorption_capacity(&heatmap, 1_000_000.0, 10_000_000.0, 0.10, 200);
+        let absorption =
+            compute_absorption_capacity(&heatmap, 1_000_000.0, 10_000_000.0, 0.10, 200);
         // bid_depth ($1M) / down_mass ($5M) = 0.2
-        assert!((absorption - 0.2).abs() < 0.01, "Thin book → low absorption, got {}", absorption);
+        assert!(
+            (absorption - 0.2).abs() < 0.01,
+            "Thin book → low absorption, got {}",
+            absorption
+        );
     }
 
     // ========================================================================
@@ -701,12 +732,16 @@ mod tests {
     fn test_velocity_warmup() {
         let features = extract_features(
             &[0.0; DEFAULT_NUM_BINS],
-            None,  // no lag
-            None,  // no prev distance
-            1e6, 1e6,
+            None, // no lag
+            None, // no prev distance
+            1e6,
+            1e6,
             &make_config(),
         );
-        assert_eq!(features.hm_cluster_velocity, 0.0, "No previous → velocity = 0");
+        assert_eq!(
+            features.hm_cluster_velocity, 0.0,
+            "No previous → velocity = 0"
+        );
     }
 
     // ========================================================================
@@ -746,7 +781,11 @@ mod tests {
         let heatmap = [1_000.0f64; DEFAULT_NUM_BINS];
         let entropy = compute_heatmap_entropy(&heatmap);
         let max_entropy = (DEFAULT_NUM_BINS as f64).ln();
-        assert!((entropy - max_entropy).abs() < 1e-6, "Uniform → max entropy (ln(K)), got {}", entropy);
+        assert!(
+            (entropy - max_entropy).abs() < 1e-6,
+            "Uniform → max entropy (ln(K)), got {}",
+            entropy
+        );
     }
 
     #[test]
@@ -756,7 +795,11 @@ mod tests {
         heatmap[150] = 500_000.0;
         let entropy = compute_heatmap_entropy(&heatmap);
         let expected = 2.0f64.ln(); // ln(2)
-        assert!((entropy - expected).abs() < 1e-6, "Two equal bins → ln(2), got {}", entropy);
+        assert!(
+            (entropy - expected).abs() < 1e-6,
+            "Two equal bins → ln(2), got {}",
+            entropy
+        );
     }
 
     // ========================================================================
@@ -769,16 +812,25 @@ mod tests {
         let mut buffer = HeatmapBuffer::new(config);
         let mid = 100_000.0;
         let positions = vec![
-            make_position(2_000_000.0, mid * 0.97, true),  // 3% below
+            make_position(2_000_000.0, mid * 0.97, true), // 3% below
             make_position(1_500_000.0, mid * 1.02, false), // 2% above
         ];
 
         let features = buffer.update_and_compute(&positions, mid, 5_000_000.0, 5_000_000.0);
 
         // Should have valid features even on first tick (except velocity)
-        assert!(features.hm_nearest_cluster_dist < 0.10, "Should detect cluster");
-        assert!(features.hm_cluster_mass_ratio > 1.0, "Should have concentrated mass");
-        assert_eq!(features.hm_cluster_velocity, 0.0, "No velocity on first tick");
+        assert!(
+            features.hm_nearest_cluster_dist < 0.10,
+            "Should detect cluster"
+        );
+        assert!(
+            features.hm_cluster_mass_ratio > 1.0,
+            "Should have concentrated mass"
+        );
+        assert_eq!(
+            features.hm_cluster_velocity, 0.0,
+            "No velocity on first tick"
+        );
     }
 
     #[test]
@@ -801,7 +853,10 @@ mod tests {
         // After 3 ticks with velocity_lag=2, the lag snapshot fires at tick 0 and tick 2.
         // velocity should now be computable (distance hasn't changed → velocity ≈ 0)
         // The exact value depends on when prev_nearest_dist was stored
-        assert!(features.hm_cluster_velocity.is_finite(), "Velocity should be finite after warmup");
+        assert!(
+            features.hm_cluster_velocity.is_finite(),
+            "Velocity should be finite after warmup"
+        );
     }
 
     #[test]
@@ -809,7 +864,12 @@ mod tests {
         let features = HeatmapFeatures::default();
         let vec = features.to_vec();
         for (i, &v) in vec.iter().enumerate() {
-            assert!(v.is_finite(), "Default feature {} should be finite, got {}", i, v);
+            assert!(
+                v.is_finite(),
+                "Default feature {} should be finite, got {}",
+                i,
+                v
+            );
         }
     }
 }

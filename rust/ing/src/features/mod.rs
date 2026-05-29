@@ -9,6 +9,5 @@ pub use ing_features::*;
 
 // Re-export GMM classifier types that live in ing::ml
 pub use crate::ml::regime::{
-    RegimeClassifier, GmmParams,
-    RegimeFeatures as GmmClassificationFeatures,
+    GmmParams, RegimeClassifier, RegimeFeatures as GmmClassificationFeatures,
 };

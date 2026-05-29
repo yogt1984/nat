@@ -22,8 +22,8 @@ impl Default for WhaleConfig {
         Self {
             min_position_usd: 500_000.0,      // $500K position
             min_volume_30d_usd: 10_000_000.0, // $10M 30-day volume
-            min_trades_30d: 10,                // At least 10 trades
-            top_whale_count: 10,               // Track top 10 for concentration
+            min_trades_30d: 10,               // At least 10 trades
+            top_whale_count: 10,              // Track top 10 for concentration
         }
     }
 }
@@ -212,7 +212,7 @@ mod tests {
 
         let stats = WalletStats {
             address: "0x123".to_string(),
-            max_position_usd: 100_000.0, // Below position threshold
+            max_position_usd: 100_000.0,  // Below position threshold
             volume_30d_usd: 15_000_000.0, // Above volume threshold
             ..Default::default()
         };
@@ -226,8 +226,8 @@ mod tests {
 
         let stats = WalletStats {
             address: "0x123".to_string(),
-            max_position_usd: 50_000.0,   // $50K - below threshold
-            volume_30d_usd: 500_000.0,    // $500K - below threshold
+            max_position_usd: 50_000.0, // $50K - below threshold
+            volume_30d_usd: 500_000.0,  // $500K - below threshold
             ..Default::default()
         };
 
@@ -241,10 +241,10 @@ mod tests {
 
         let stats = WalletStats {
             address: "0x123".to_string(),
-            max_position_usd: 1_000_000.0,       // $1M position
-            volume_30d_usd: 100_000_000.0,       // $100M volume (100x position)
-            trades_30d: 500,                      // Very active
-            long_short_ratio: 0.1,               // Nearly balanced
+            max_position_usd: 1_000_000.0, // $1M position
+            volume_30d_usd: 100_000_000.0, // $100M volume (100x position)
+            trades_30d: 500,               // Very active
+            long_short_ratio: 0.1,         // Nearly balanced
             ..Default::default()
         };
 
@@ -257,8 +257,8 @@ mod tests {
 
         let stats = WalletStats {
             address: "0x123".to_string(),
-            max_position_usd: 1_000_000.0,  // 2x threshold
-            volume_30d_usd: 20_000_000.0,   // 2x threshold
+            max_position_usd: 1_000_000.0, // 2x threshold
+            volume_30d_usd: 20_000_000.0,  // 2x threshold
             ..Default::default()
         };
 

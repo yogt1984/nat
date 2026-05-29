@@ -31,8 +31,7 @@ impl AppState {
 fn open_research_db(path: &str) -> Option<Arc<TokioMutex<Connection>>> {
     match Connection::open_with_flags(
         path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
-            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     ) {
         Ok(conn) => {
             // Ensure WAL mode for concurrent reads
@@ -40,7 +39,10 @@ fn open_research_db(path: &str) -> Option<Arc<TokioMutex<Connection>>> {
             Some(Arc::new(TokioMutex::new(conn)))
         }
         Err(e) => {
-            warn!("Could not open research DB at {}: {} — falling back to JSON", path, e);
+            warn!(
+                "Could not open research DB at {}: {} — falling back to JSON",
+                path, e
+            );
             None
         }
     }

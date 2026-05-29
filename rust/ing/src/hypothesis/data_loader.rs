@@ -53,17 +53,17 @@ pub fn load_all_data(data_dir: &Path) -> Result<Vec<RecordBatch>> {
             println!("      Loaded {} files...", file_count);
         }
 
-        let file = File::open(path)
-            .with_context(|| format!("Failed to open {}", path.display()))?;
+        let file =
+            File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
 
         let builder = ParquetRecordBatchReaderBuilder::try_new(file)
             .with_context(|| format!("Failed to create reader for {}", path.display()))?;
 
         let mut reader = builder.build()?;
 
-        while let Some(batch) = reader.next() {
-            let batch = batch
-                .with_context(|| format!("Failed to read batch from {}", path.display()))?;
+        for batch in reader {
+            let batch =
+                batch.with_context(|| format!("Failed to read batch from {}", path.display()))?;
             batches.push(batch);
         }
     }
@@ -87,10 +87,7 @@ pub fn extract_f64_column(batches: &[RecordBatch], column_name: &str) -> Result<
                     }
                 }
             } else {
-                anyhow::bail!(
-                    "Column '{}' exists but is not Float64 type",
-                    column_name
-                );
+                anyhow::bail!("Column '{}' exists but is not Float64 type", column_name);
             }
         } else {
             anyhow::bail!("Column '{}' not found in Parquet data", column_name);
@@ -234,38 +231,42 @@ pub fn load_h1_data(batches: &[RecordBatch]) -> Result<H1TestData> {
         .or_else(|_| extract_f64_column(batches, "forward_returns_24h"));
 
     // If any returns columns are missing, compute from raw_midprice
-    let (returns_1h, returns_4h, returns_24h) = if returns_1h.is_err() || returns_4h.is_err() || returns_24h.is_err() {
-        println!("      Computing forward returns from raw_midprice...");
-        let prices = extract_f64_column(batches, "raw_midprice")
-            .or_else(|_| extract_f64_column(batches, "midprice"))
-            .context("Missing price column for return computation")?;
-        // Use smaller offsets: 600 rows = 1min at 10/sec; 36000 = 1h is too large for 1-day data
-        // Use 600 (1min), 3000 (5min), 18000 (30min) as practical horizons
-        let r_1h = compute_forward_returns(&prices, 36_000);
-        let r_4h = compute_forward_returns(&prices, 144_000);
-        let r_24h = compute_forward_returns(&prices, 864_000);
-        (r_1h, r_4h, r_24h)
-    } else {
-        // Safe: else branch only reached when all three are Ok
-        (returns_1h?, returns_4h?, returns_24h?)
-    };
+    let (returns_1h, returns_4h, returns_24h) =
+        if returns_1h.is_err() || returns_4h.is_err() || returns_24h.is_err() {
+            println!("      Computing forward returns from raw_midprice...");
+            let prices = extract_f64_column(batches, "raw_midprice")
+                .or_else(|_| extract_f64_column(batches, "midprice"))
+                .context("Missing price column for return computation")?;
+            // Use smaller offsets: 600 rows = 1min at 10/sec; 36000 = 1h is too large for 1-day data
+            // Use 600 (1min), 3000 (5min), 18000 (30min) as practical horizons
+            let r_1h = compute_forward_returns(&prices, 36_000);
+            let r_4h = compute_forward_returns(&prices, 144_000);
+            let r_24h = compute_forward_returns(&prices, 864_000);
+            (r_1h, r_4h, r_24h)
+        } else {
+            // Safe: else branch only reached when all three are Ok
+            (returns_1h?, returns_4h?, returns_24h?)
+        };
 
     // Filter out NaN values
     let valid_indices: Vec<usize> = (0..timestamps.len())
         .filter(|&i| {
             !whale_flow_1h[i].is_nan()
-            && !whale_flow_4h[i].is_nan()
-            && !whale_flow_24h[i].is_nan()
-            && !returns_1h[i].is_nan()
-            && !returns_4h[i].is_nan()
-            && !returns_24h[i].is_nan()
-            && timestamps[i] > 0
+                && !whale_flow_4h[i].is_nan()
+                && !whale_flow_24h[i].is_nan()
+                && !returns_1h[i].is_nan()
+                && !returns_4h[i].is_nan()
+                && !returns_24h[i].is_nan()
+                && timestamps[i] > 0
         })
         .collect();
 
-    let filtered_whale_flow_1h: Vec<f64> = valid_indices.iter().map(|&i| whale_flow_1h[i]).collect();
-    let filtered_whale_flow_4h: Vec<f64> = valid_indices.iter().map(|&i| whale_flow_4h[i]).collect();
-    let filtered_whale_flow_24h: Vec<f64> = valid_indices.iter().map(|&i| whale_flow_24h[i]).collect();
+    let filtered_whale_flow_1h: Vec<f64> =
+        valid_indices.iter().map(|&i| whale_flow_1h[i]).collect();
+    let filtered_whale_flow_4h: Vec<f64> =
+        valid_indices.iter().map(|&i| whale_flow_4h[i]).collect();
+    let filtered_whale_flow_24h: Vec<f64> =
+        valid_indices.iter().map(|&i| whale_flow_24h[i]).collect();
     let filtered_returns_1h: Vec<f64> = valid_indices.iter().map(|&i| returns_1h[i]).collect();
     let filtered_returns_4h: Vec<f64> = valid_indices.iter().map(|&i| returns_4h[i]).collect();
     let filtered_returns_24h: Vec<f64> = valid_indices.iter().map(|&i| returns_24h[i]).collect();
@@ -485,8 +486,10 @@ pub fn load_h4_data(batches: &[RecordBatch]) -> Result<H4TestData> {
     let filtered_theil: Vec<f64> = valid_indices.iter().map(|&i| theil[i]).collect();
     let filtered_top10: Vec<f64> = valid_indices.iter().map(|&i| top10[i]).collect();
     let filtered_top20: Vec<f64> = valid_indices.iter().map(|&i| top20[i]).collect();
-    let filtered_current_volatility: Vec<f64> =
-        valid_indices.iter().map(|&i| current_volatility[i]).collect();
+    let filtered_current_volatility: Vec<f64> = valid_indices
+        .iter()
+        .map(|&i| current_volatility[i])
+        .collect();
     let filtered_prices: Vec<f64> = valid_indices.iter().map(|&i| prices[i]).collect();
     let filtered_timestamps: Vec<i64> = valid_indices.iter().map(|&i| timestamps[i]).collect();
 
@@ -596,7 +599,11 @@ pub fn load_h5_data(batches: &[RecordBatch]) -> Result<H5TestData> {
     Ok(H5TestData {
         features,
         prices,
-        volatility: if volatility.is_empty() { None } else { Some(volatility) },
+        volatility: if volatility.is_empty() {
+            None
+        } else {
+            Some(volatility)
+        },
     })
 }
 
@@ -652,9 +659,11 @@ mod tests {
         let timestamps = extract_timestamps(&batches).unwrap();
         assert!(!timestamps.is_empty(), "Should extract timestamps");
 
-        println!("Loaded {} batches with {} rows total",
-                 batches.len(),
-                 batches.iter().map(|b| b.num_rows()).sum::<usize>());
+        println!(
+            "Loaded {} batches with {} rows total",
+            batches.len(),
+            batches.iter().map(|b| b.num_rows()).sum::<usize>()
+        );
     }
 
     #[test]
@@ -669,7 +678,10 @@ mod tests {
         let batches = load_all_data(&data_dir).unwrap();
         let h1_data = load_h1_data(&batches).unwrap();
 
-        assert!(!h1_data.whale_flow_1h.is_empty(), "Should have whale flow data");
+        assert!(
+            !h1_data.whale_flow_1h.is_empty(),
+            "Should have whale flow data"
+        );
         assert_eq!(
             h1_data.whale_flow_1h.len(),
             h1_data.returns_1h.len(),

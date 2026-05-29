@@ -42,22 +42,37 @@ fn normalize_record(mut record: serde_json::Value) -> serde_json::Value {
         obj.entry("gates").or_insert(serde_json::json!([]));
         obj.entry("features").or_insert(serde_json::json!([]));
         obj.entry("math").or_insert(serde_json::json!(""));
-        obj.entry("failure_reason").or_insert(serde_json::Value::Null);
+        obj.entry("failure_reason")
+            .or_insert(serde_json::Value::Null);
         obj.entry("parent_id").or_insert(serde_json::Value::Null);
 
         // Normalize timestamps: old records may have flat completed/created fields
         if obj.get("timestamps").is_none() {
-            let created = obj.get("created").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let completed = obj.get("completed").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let created = obj
+                .get("created")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let completed = obj
+                .get("completed")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             if !created.is_empty() || !completed.is_empty() {
-                obj.insert("timestamps".to_string(), serde_json::json!({
-                    "created": created,
-                    "completed": completed,
-                }));
+                obj.insert(
+                    "timestamps".to_string(),
+                    serde_json::json!({
+                        "created": created,
+                        "completed": completed,
+                    }),
+                );
             }
         }
 
-        debug!(id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("?"), "Normalized v0 record to v1");
+        debug!(
+            id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
+            "Normalized v0 record to v1"
+        );
     } else if version > CURRENT_SCHEMA_VERSION {
         warn!(
             version,
@@ -168,11 +183,16 @@ async fn query_db(
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
 
     // Count total
-    let count_sql = format!("SELECT COUNT(*) FROM research_output WHERE {}", where_clause);
+    let count_sql = format!(
+        "SELECT COUNT(*) FROM research_output WHERE {}",
+        where_clause
+    );
     let total: usize = conn
-        .query_row(&count_sql, rusqlite::params_from_iter(param_refs.iter()), |row| {
-            row.get::<_, i64>(0)
-        })
+        .query_row(
+            &count_sql,
+            rusqlite::params_from_iter(param_refs.iter()),
+            |row| row.get::<_, i64>(0),
+        )
         .unwrap_or(0) as usize;
 
     // Fetch page
@@ -333,7 +353,11 @@ fn filter_cycles(items: &[serde_json::Value], q: &CycleQuery) -> Vec<serde_json:
         .collect()
 }
 
-fn paginate(items: Vec<serde_json::Value>, offset: usize, limit: usize) -> PaginatedResponse<serde_json::Value> {
+fn paginate(
+    items: Vec<serde_json::Value>,
+    offset: usize,
+    limit: usize,
+) -> PaginatedResponse<serde_json::Value> {
     let total = items.len();
     let paged: Vec<serde_json::Value> = items.into_iter().skip(offset).take(limit).collect();
     PaginatedResponse {
@@ -366,9 +390,16 @@ pub async fn list_hypotheses(
         q.status.as_deref(),
         limit,
         offset,
-    ).await {
+    )
+    .await
+    {
         debug!(total, "Served hypotheses from SQLite");
-        return Ok(Json(PaginatedResponse { total, offset, limit, items }));
+        return Ok(Json(PaginatedResponse {
+            total,
+            offset,
+            limit,
+            items,
+        }));
     }
 
     // Fallback to JSON files
@@ -391,7 +422,9 @@ pub async fn get_hypothesis(
     }
 
     // Fallback to direct file read
-    let path = research_dir(&state).join("hypotheses").join(format!("{}.json", id));
+    let path = research_dir(&state)
+        .join("hypotheses")
+        .join(format!("{}.json", id));
     let data = std::fs::read_to_string(&path).map_err(|_| {
         (
             StatusCode::NOT_FOUND,
@@ -425,13 +458,20 @@ pub async fn list_cycles(
         &state,
         "cycle",
         q.agent.as_deref(),
-        None,  // cycles don't filter by generator
+        None, // cycles don't filter by generator
         None,
         limit,
         offset,
-    ).await {
+    )
+    .await
+    {
         debug!(total, "Served cycles from SQLite");
-        return Ok(Json(PaginatedResponse { total, offset, limit, items }));
+        return Ok(Json(PaginatedResponse {
+            total,
+            offset,
+            limit,
+            items,
+        }));
     }
 
     // Fallback to JSON files
@@ -448,7 +488,17 @@ pub async fn list_signals(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<serde_json::Value>>, (StatusCode, Json<ErrorResponse>)> {
     // Try SQLite first
-    if let Some((items, _)) = query_db(&state, "hypothesis", None, None, Some("replicated"), 1000, 0).await {
+    if let Some((items, _)) = query_db(
+        &state,
+        "hypothesis",
+        None,
+        None,
+        Some("replicated"),
+        1000,
+        0,
+    )
+    .await
+    {
         return Ok(Json(items));
     }
 
@@ -554,10 +604,14 @@ async fn compute_stats_from_db(state: &AppState) -> Option<ResearchStats> {
     })
 }
 
-fn compute_stats_from_items(hypotheses: &[serde_json::Value], total_cycles: usize) -> ResearchStats {
+fn compute_stats_from_items(
+    hypotheses: &[serde_json::Value],
+    total_cycles: usize,
+) -> ResearchStats {
     let mut by_status: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut by_agent: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let mut by_generator: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut by_generator: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
 
     for h in hypotheses {
         if let Some(s) = h.get("status").and_then(|v| v.as_str()) {
@@ -603,10 +657,7 @@ pub async fn get_heatmap(
             .and_then(|v| v.as_str())
             .unwrap_or("unknown")
             .to_string();
-        let horizon = h
-            .get("horizon_s")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
+        let horizon = h.get("horizon_s").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let feats = h
             .get("features")
             .and_then(|v| v.as_array())
@@ -690,24 +741,62 @@ pub struct NetworkResponse {
 
 /// Derive a category from feature name prefix.
 fn feature_category(name: &str) -> &'static str {
-    if name.starts_with("spread_") { return "spread"; }
-    if name.starts_with("depth_") { return "depth"; }
-    if name.starts_with("imb_") { return "imbalance"; }
-    if name.starts_with("flow_") { return "flow"; }
-    if name.starts_with("vol_") || name.starts_with("volatility_") { return "volatility"; }
-    if name.starts_with("ent_") { return "entropy"; }
-    if name.starts_with("trend_") { return "trend"; }
-    if name.starts_with("illiq_") { return "illiquidity"; }
-    if name.starts_with("tox_") { return "toxicity"; }
-    if name.starts_with("whale_") { return "whale"; }
-    if name.starts_with("liquidation_") || name.starts_with("largest_position")
-        || name.starts_with("nearest_cluster") || name.starts_with("positions_at_risk") { return "liquidation"; }
-    if name.starts_with("top") || name.starts_with("herfindahl_") || name.starts_with("gini_")
-        || name.starts_with("theil_") { return "concentration"; }
-    if name.starts_with("ctx_") { return "context"; }
-    if name.starts_with("raw_") { return "raw"; }
-    if name.starts_with("regime_") || name.starts_with("gmm_") { return "regime"; }
-    if name.starts_with("cross_") { return "cross_symbol"; }
+    if name.starts_with("spread_") {
+        return "spread";
+    }
+    if name.starts_with("depth_") {
+        return "depth";
+    }
+    if name.starts_with("imb_") {
+        return "imbalance";
+    }
+    if name.starts_with("flow_") {
+        return "flow";
+    }
+    if name.starts_with("vol_") || name.starts_with("volatility_") {
+        return "volatility";
+    }
+    if name.starts_with("ent_") {
+        return "entropy";
+    }
+    if name.starts_with("trend_") {
+        return "trend";
+    }
+    if name.starts_with("illiq_") {
+        return "illiquidity";
+    }
+    if name.starts_with("tox_") {
+        return "toxicity";
+    }
+    if name.starts_with("whale_") {
+        return "whale";
+    }
+    if name.starts_with("liquidation_")
+        || name.starts_with("largest_position")
+        || name.starts_with("nearest_cluster")
+        || name.starts_with("positions_at_risk")
+    {
+        return "liquidation";
+    }
+    if name.starts_with("top")
+        || name.starts_with("herfindahl_")
+        || name.starts_with("gini_")
+        || name.starts_with("theil_")
+    {
+        return "concentration";
+    }
+    if name.starts_with("ctx_") {
+        return "context";
+    }
+    if name.starts_with("raw_") {
+        return "raw";
+    }
+    if name.starts_with("regime_") || name.starts_with("gmm_") {
+        return "regime";
+    }
+    if name.starts_with("cross_") {
+        return "cross_symbol";
+    }
     "other"
 }
 
@@ -719,7 +808,10 @@ fn read_it_engine_state(dir: &std::path::Path, symbol: &str) -> Option<serde_jso
 }
 
 /// Build network graph from IT engine state and hypothesis data.
-fn build_network(it_state: &serde_json::Value, hypotheses: &[serde_json::Value]) -> NetworkResponse {
+fn build_network(
+    it_state: &serde_json::Value,
+    hypotheses: &[serde_json::Value],
+) -> NetworkResponse {
     let mi_matrix = it_state.get("mi_matrix").and_then(|v| v.as_object());
     let cmi_matrix = it_state.get("cmi_matrix").and_then(|v| v.as_object());
     let interaction_map = it_state.get("interaction").and_then(|v| v.as_object());
@@ -731,15 +823,21 @@ fn build_network(it_state: &serde_json::Value, hypotheses: &[serde_json::Value])
         .unwrap_or_default();
 
     // Count hypotheses per feature
-    let mut feature_hyp_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut feature_hyp_count: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
     // Track co-occurrence pairs
-    let mut cooccurrence: std::collections::HashMap<(String, String), usize> = std::collections::HashMap::new();
+    let mut cooccurrence: std::collections::HashMap<(String, String), usize> =
+        std::collections::HashMap::new();
 
     for h in hypotheses {
         let feats: Vec<String> = h
             .get("features")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
 
         for f in &feats {
@@ -791,7 +889,10 @@ fn build_network(it_state: &serde_json::Value, hypotheses: &[serde_json::Value])
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
 
-            let hypothesis_count = feature_hyp_count.get(feature.as_str()).copied().unwrap_or(0);
+            let hypothesis_count = feature_hyp_count
+                .get(feature.as_str())
+                .copied()
+                .unwrap_or(0);
             let selected = selected_features.contains(&feature.as_str());
 
             nodes.push(NetworkNode {
@@ -813,7 +914,11 @@ fn build_network(it_state: &serde_json::Value, hypotheses: &[serde_json::Value])
     // Build edges
     let edges: Vec<NetworkEdge> = cooccurrence
         .into_iter()
-        .map(|((source, target), weight)| NetworkEdge { source, target, weight })
+        .map(|((source, target), weight)| NetworkEdge {
+            source,
+            target,
+            weight,
+        })
         .collect();
 
     let meta = NetworkMeta {
@@ -906,7 +1011,13 @@ mod tests {
         Arc::new(Mutex::new(conn))
     }
 
-    fn insert_hypothesis(db: &Arc<Mutex<Connection>>, id: &str, agent: &str, gen: &str, status: &str) {
+    fn insert_hypothesis(
+        db: &Arc<Mutex<Connection>>,
+        id: &str,
+        agent: &str,
+        gen: &str,
+        status: &str,
+    ) {
         let conn = db.blocking_lock();
         let record = serde_json::json!({
             "schema_version": 1,
@@ -998,12 +1109,20 @@ mod tests {
         }
 
         let where_clause = conditions.join(" AND ");
-        let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            params_vec.iter().map(|p| p.as_ref()).collect();
 
         // Count
-        let count_sql = format!("SELECT COUNT(*) FROM research_output WHERE {}", where_clause);
+        let count_sql = format!(
+            "SELECT COUNT(*) FROM research_output WHERE {}",
+            where_clause
+        );
         let total: i64 = conn
-            .query_row(&count_sql, rusqlite::params_from_iter(params_refs.iter()), |row| row.get(0))
+            .query_row(
+                &count_sql,
+                rusqlite::params_from_iter(params_refs.iter()),
+                |row| row.get(0),
+            )
             .unwrap_or(0);
 
         // Fetch
@@ -1158,12 +1277,14 @@ mod tests {
         assert_eq!(items.len(), 2);
 
         // Filter by status
-        let (items, total) = test_query_db(&db, "hypothesis", None, None, Some("replicated"), 50, 0);
+        let (items, total) =
+            test_query_db(&db, "hypothesis", None, None, Some("replicated"), 50, 0);
         assert_eq!(total, 2);
         assert_eq!(items.len(), 2);
 
         // Filter by generator
-        let (items, total) = test_query_db(&db, "hypothesis", None, Some("systematic"), None, 50, 0);
+        let (items, total) =
+            test_query_db(&db, "hypothesis", None, Some("systematic"), None, 50, 0);
         assert_eq!(total, 2);
         assert_eq!(items.len(), 2);
     }
@@ -1249,7 +1370,13 @@ mod tests {
     // JSON fallback tests (existing)
     // -----------------------------------------------------------------------
 
-    fn write_hypothesis_json(dir: &std::path::Path, id: &str, agent: &str, gen: &str, status: &str) {
+    fn write_hypothesis_json(
+        dir: &std::path::Path,
+        id: &str,
+        agent: &str,
+        gen: &str,
+        status: &str,
+    ) {
         let hyp_dir = dir.join("hypotheses");
         fs::create_dir_all(&hyp_dir).unwrap();
         let record = serde_json::json!({
@@ -1345,7 +1472,13 @@ mod tests {
             serde_json::json!({"agent": "macro", "status": "failed"}),
             serde_json::json!({"agent": "micro", "status": "failed"}),
         ];
-        let q = HypothesisQuery { agent: Some("micro".to_string()), generator: None, status: None, limit: None, offset: None };
+        let q = HypothesisQuery {
+            agent: Some("micro".to_string()),
+            generator: None,
+            status: None,
+            limit: None,
+            offset: None,
+        };
         let filtered = filter_hypotheses(&items, &q);
         assert_eq!(filtered.len(), 2);
     }
@@ -1356,7 +1489,13 @@ mod tests {
             serde_json::json!({"agent": "micro", "status": "replicated"}),
             serde_json::json!({"agent": "macro", "status": "failed"}),
         ];
-        let q = HypothesisQuery { agent: None, generator: None, status: Some("replicated".to_string()), limit: None, offset: None };
+        let q = HypothesisQuery {
+            agent: None,
+            generator: None,
+            status: Some("replicated".to_string()),
+            limit: None,
+            offset: None,
+        };
         let filtered = filter_hypotheses(&items, &q);
         assert_eq!(filtered.len(), 1);
     }
@@ -1469,7 +1608,8 @@ mod tests {
         fs::write(
             tmp.path().join("state_BTC.json"),
             serde_json::to_string(&state).unwrap(),
-        ).unwrap();
+        )
+        .unwrap();
         let loaded = read_it_engine_state(tmp.path(), "BTC");
         assert!(loaded.is_some());
         assert!(read_it_engine_state(tmp.path(), "ETH").is_none());
@@ -1489,7 +1629,13 @@ mod tests {
         let all = read_json_dir(&dir);
         assert_eq!(all.len(), 2);
 
-        let q = HypothesisQuery { agent: Some("micro".to_string()), generator: None, status: Some("replicated".to_string()), limit: None, offset: None };
+        let q = HypothesisQuery {
+            agent: Some("micro".to_string()),
+            generator: None,
+            status: Some("replicated".to_string()),
+            limit: None,
+            offset: None,
+        };
         let filtered = filter_hypotheses(&all, &q);
         assert_eq!(filtered.len(), 1);
     }
@@ -1504,7 +1650,11 @@ mod tests {
         let all = read_json_dir(&dir);
         assert_eq!(all.len(), 2);
 
-        let q = CycleQuery { agent: Some("micro".to_string()), limit: None, offset: None };
+        let q = CycleQuery {
+            agent: Some("micro".to_string()),
+            limit: None,
+            offset: None,
+        };
         let filtered = filter_cycles(&all, &q);
         assert_eq!(filtered.len(), 1);
     }
@@ -1519,7 +1669,10 @@ mod tests {
     fn assert_hypothesis_shape(h: &serde_json::Value) {
         assert!(h["id"].is_string(), "Hypothesis.id must be string");
         assert!(h["agent"].is_string(), "Hypothesis.agent must be string");
-        assert!(h["generator"].is_string(), "Hypothesis.generator must be string");
+        assert!(
+            h["generator"].is_string(),
+            "Hypothesis.generator must be string"
+        );
         assert!(h["claim"].is_string(), "Hypothesis.claim must be string");
         assert!(h["math"].is_string(), "Hypothesis.math must be string");
         assert!(h["status"].is_string(), "Hypothesis.status must be string");
@@ -1548,7 +1701,10 @@ mod tests {
             );
         }
         // features: string[]
-        assert!(h["features"].is_array(), "Hypothesis.features must be array");
+        assert!(
+            h["features"].is_array(),
+            "Hypothesis.features must be array"
+        );
         for f in h["features"].as_array().unwrap() {
             assert!(f.is_string(), "features[] items must be strings");
         }
@@ -1563,15 +1719,24 @@ mod tests {
             "Hypothesis.horizon_s must be number|null"
         );
         // thresholds: Record<string, unknown>
-        assert!(h["thresholds"].is_object(), "Hypothesis.thresholds must be object");
+        assert!(
+            h["thresholds"].is_object(),
+            "Hypothesis.thresholds must be object"
+        );
         // parent_id: string | null
         assert!(
             h["parent_id"].is_string() || h["parent_id"].is_null(),
             "Hypothesis.parent_id must be string|null"
         );
         // timestamps: { created: string; completed: string | null }
-        assert!(h["timestamps"].is_object(), "Hypothesis.timestamps must be object");
-        assert!(h["timestamps"]["created"].is_string(), "timestamps.created must be string");
+        assert!(
+            h["timestamps"].is_object(),
+            "Hypothesis.timestamps must be object"
+        );
+        assert!(
+            h["timestamps"]["created"].is_string(),
+            "timestamps.created must be string"
+        );
         assert!(
             h["timestamps"]["completed"].is_string() || h["timestamps"]["completed"].is_null(),
             "timestamps.completed must be string|null"
@@ -1581,18 +1746,48 @@ mod tests {
     /// Assert that a cycle record has every field the frontend CycleSummary
     /// interface expects.
     fn assert_cycle_shape(c: &serde_json::Value) {
-        assert!(c["cycle_id"].is_string(), "CycleSummary.cycle_id must be string");
+        assert!(
+            c["cycle_id"].is_string(),
+            "CycleSummary.cycle_id must be string"
+        );
         assert!(c["agent"].is_string(), "CycleSummary.agent must be string");
-        assert!(c["started"].is_string(), "CycleSummary.started must be string");
-        assert!(c["completed"].is_string(), "CycleSummary.completed must be string");
-        assert!(c["duration_s"].is_number(), "CycleSummary.duration_s must be number");
-        assert!(c["n_tested"].is_number(), "CycleSummary.n_tested must be number");
-        assert!(c["n_registered"].is_number(), "CycleSummary.n_registered must be number");
-        assert!(c["n_fdr_rejected"].is_number(), "CycleSummary.n_fdr_rejected must be number");
-        assert!(c["n_chained"].is_number(), "CycleSummary.n_chained must be number");
+        assert!(
+            c["started"].is_string(),
+            "CycleSummary.started must be string"
+        );
+        assert!(
+            c["completed"].is_string(),
+            "CycleSummary.completed must be string"
+        );
+        assert!(
+            c["duration_s"].is_number(),
+            "CycleSummary.duration_s must be number"
+        );
+        assert!(
+            c["n_tested"].is_number(),
+            "CycleSummary.n_tested must be number"
+        );
+        assert!(
+            c["n_registered"].is_number(),
+            "CycleSummary.n_registered must be number"
+        );
+        assert!(
+            c["n_fdr_rejected"].is_number(),
+            "CycleSummary.n_fdr_rejected must be number"
+        );
+        assert!(
+            c["n_chained"].is_number(),
+            "CycleSummary.n_chained must be number"
+        );
         assert!(c["fdr_q"].is_number(), "CycleSummary.fdr_q must be number");
-        assert!(c["hypotheses"].is_array(), "CycleSummary.hypotheses must be array");
-        assert!(c["generator_stats"].is_object(), "CycleSummary.generator_stats must be object");
+        assert!(
+            c["hypotheses"].is_array(),
+            "CycleSummary.hypotheses must be array"
+        );
+        assert!(
+            c["generator_stats"].is_object(),
+            "CycleSummary.generator_stats must be object"
+        );
     }
 
     #[test]
@@ -1626,10 +1821,22 @@ mod tests {
         let resp = paginate(items, 1, 2);
         let json = serde_json::to_value(&resp).unwrap();
 
-        assert!(json["items"].is_array(), "PaginatedResponse.items must be array");
-        assert!(json["total"].is_number(), "PaginatedResponse.total must be number");
-        assert!(json["offset"].is_number(), "PaginatedResponse.offset must be number");
-        assert!(json["limit"].is_number(), "PaginatedResponse.limit must be number");
+        assert!(
+            json["items"].is_array(),
+            "PaginatedResponse.items must be array"
+        );
+        assert!(
+            json["total"].is_number(),
+            "PaginatedResponse.total must be number"
+        );
+        assert!(
+            json["offset"].is_number(),
+            "PaginatedResponse.offset must be number"
+        );
+        assert!(
+            json["limit"].is_number(),
+            "PaginatedResponse.limit must be number"
+        );
         assert_eq!(json["total"], 5);
         assert_eq!(json["offset"], 1);
         assert_eq!(json["limit"], 2);
@@ -1645,11 +1852,26 @@ mod tests {
         let stats = compute_stats_from_items(&items, 3);
         let json = serde_json::to_value(&stats).unwrap();
 
-        assert!(json["total_hypotheses"].is_number(), "ResearchStats.total_hypotheses must be number");
-        assert!(json["total_cycles"].is_number(), "ResearchStats.total_cycles must be number");
-        assert!(json["by_status"].is_object(), "ResearchStats.by_status must be object");
-        assert!(json["by_agent"].is_object(), "ResearchStats.by_agent must be object");
-        assert!(json["by_generator"].is_object(), "ResearchStats.by_generator must be object");
+        assert!(
+            json["total_hypotheses"].is_number(),
+            "ResearchStats.total_hypotheses must be number"
+        );
+        assert!(
+            json["total_cycles"].is_number(),
+            "ResearchStats.total_cycles must be number"
+        );
+        assert!(
+            json["by_status"].is_object(),
+            "ResearchStats.by_status must be object"
+        );
+        assert!(
+            json["by_agent"].is_object(),
+            "ResearchStats.by_agent must be object"
+        );
+        assert!(
+            json["by_generator"].is_object(),
+            "ResearchStats.by_generator must be object"
+        );
         // Values in maps must be numbers
         for (_, v) in json["by_status"].as_object().unwrap() {
             assert!(v.is_number(), "by_status values must be numbers");
@@ -1670,14 +1892,32 @@ mod tests {
         };
         let json = serde_json::to_value(&resp).unwrap();
 
-        assert!(json["entries"].is_array(), "HeatmapResponse.entries must be array");
-        assert!(json["features"].is_array(), "HeatmapResponse.features must be array");
-        assert!(json["horizons"].is_array(), "HeatmapResponse.horizons must be array");
+        assert!(
+            json["entries"].is_array(),
+            "HeatmapResponse.entries must be array"
+        );
+        assert!(
+            json["features"].is_array(),
+            "HeatmapResponse.features must be array"
+        );
+        assert!(
+            json["horizons"].is_array(),
+            "HeatmapResponse.horizons must be array"
+        );
         let entry = &json["entries"][0];
-        assert!(entry["feature"].is_string(), "HeatmapEntry.feature must be string");
-        assert!(entry["horizon_s"].is_number(), "HeatmapEntry.horizon_s must be number");
+        assert!(
+            entry["feature"].is_string(),
+            "HeatmapEntry.feature must be string"
+        );
+        assert!(
+            entry["horizon_s"].is_number(),
+            "HeatmapEntry.horizon_s must be number"
+        );
         assert!(entry["ic"].is_number(), "HeatmapEntry.ic must be number");
-        assert!(entry["status"].is_string(), "HeatmapEntry.status must be string");
+        assert!(
+            entry["status"].is_string(),
+            "HeatmapEntry.status must be string"
+        );
     }
 
     #[test]
@@ -1697,27 +1937,63 @@ mod tests {
         let json = serde_json::to_value(&net).unwrap();
 
         // NetworkResponse top level
-        assert!(json["nodes"].is_array(), "NetworkResponse.nodes must be array");
-        assert!(json["edges"].is_array(), "NetworkResponse.edges must be array");
-        assert!(json["meta"].is_object(), "NetworkResponse.meta must be object");
+        assert!(
+            json["nodes"].is_array(),
+            "NetworkResponse.nodes must be array"
+        );
+        assert!(
+            json["edges"].is_array(),
+            "NetworkResponse.edges must be array"
+        );
+        assert!(
+            json["meta"].is_object(),
+            "NetworkResponse.meta must be object"
+        );
 
         // NetworkMeta
         let meta = &json["meta"];
-        assert!(meta["symbol"].is_string(), "NetworkMeta.symbol must be string");
-        assert!(meta["n_samples"].is_number(), "NetworkMeta.n_samples must be number");
-        assert!(meta["last_updated"].is_string(), "NetworkMeta.last_updated must be string");
-        assert!(meta["total_features"].is_number(), "NetworkMeta.total_features must be number");
+        assert!(
+            meta["symbol"].is_string(),
+            "NetworkMeta.symbol must be string"
+        );
+        assert!(
+            meta["n_samples"].is_number(),
+            "NetworkMeta.n_samples must be number"
+        );
+        assert!(
+            meta["last_updated"].is_string(),
+            "NetworkMeta.last_updated must be string"
+        );
+        assert!(
+            meta["total_features"].is_number(),
+            "NetworkMeta.total_features must be number"
+        );
 
         // NetworkNode
         let node = &json["nodes"][0];
         assert!(node["id"].is_string(), "NetworkNode.id must be string");
-        assert!(node["category"].is_string(), "NetworkNode.category must be string");
+        assert!(
+            node["category"].is_string(),
+            "NetworkNode.category must be string"
+        );
         assert!(node["mi"].is_object(), "NetworkNode.mi must be object");
         assert!(node["cmi"].is_object(), "NetworkNode.cmi must be object");
-        assert!(node["interaction"].is_number(), "NetworkNode.interaction must be number");
-        assert!(node["cost_viable"].is_boolean(), "NetworkNode.cost_viable must be boolean");
-        assert!(node["hypothesis_count"].is_number(), "NetworkNode.hypothesis_count must be number");
-        assert!(node["selected"].is_boolean(), "NetworkNode.selected must be boolean");
+        assert!(
+            node["interaction"].is_number(),
+            "NetworkNode.interaction must be number"
+        );
+        assert!(
+            node["cost_viable"].is_boolean(),
+            "NetworkNode.cost_viable must be boolean"
+        );
+        assert!(
+            node["hypothesis_count"].is_number(),
+            "NetworkNode.hypothesis_count must be number"
+        );
+        assert!(
+            node["selected"].is_boolean(),
+            "NetworkNode.selected must be boolean"
+        );
     }
 
     #[test]

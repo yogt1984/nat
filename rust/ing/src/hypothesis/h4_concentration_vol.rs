@@ -32,8 +32,8 @@
 //! - Only predicts very short-term (not actionable)
 
 use crate::hypothesis::stats::{
-    pearson_correlation, spearman_correlation, correlation_test,
-    mutual_information_adaptive, CorrelationResult,
+    correlation_test, mutual_information_adaptive, pearson_correlation, spearman_correlation,
+    CorrelationResult,
 };
 use crate::hypothesis::HypothesisDecision;
 
@@ -205,8 +205,11 @@ impl H4TestData {
         }
 
         // Check all series have same length
-        if self.hhi.len() != n || self.top10.len() != n || self.top20.len() != n
-            || self.theil.len() != n || self.current_volatility.len() != n
+        if self.hhi.len() != n
+            || self.top10.len() != n
+            || self.top20.len() != n
+            || self.theil.len() != n
+            || self.current_volatility.len() != n
             || self.prices.len() != n
         {
             return Err("All data series must have same length".to_string());
@@ -254,9 +257,8 @@ impl H4TestData {
 
                 // Standard deviation of returns (annualized would multiply by sqrt(periods_per_year))
                 let mean = returns.iter().sum::<f64>() / returns.len() as f64;
-                let var = returns.iter()
-                    .map(|r| (r - mean).powi(2))
-                    .sum::<f64>() / returns.len() as f64;
+                let var =
+                    returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / returns.len() as f64;
 
                 var.sqrt()
             })
@@ -331,10 +333,13 @@ pub fn run_h4_concentration_vol_test(data: &H4TestData, config: &H4TestConfig) -
     let n_total = results.len();
 
     // Find best measure
-    let best_measure = results.iter()
+    let best_measure = results
+        .iter()
         .filter(|r| r.passes)
         .max_by(|a, b| {
-            a.correlation.pearson.abs()
+            a.correlation
+                .pearson
+                .abs()
                 .partial_cmp(&b.correlation.pearson.abs())
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
@@ -344,28 +349,55 @@ pub fn run_h4_concentration_vol_test(data: &H4TestData, config: &H4TestConfig) -
     let regime_analysis = if let Some(ref best) = best_measure {
         let measure = data.get_measure(&best.measure_name);
         let forward_vol = data.compute_forward_volatility(best.horizon);
-        Some(analyze_regimes(measure, &forward_vol, &data.current_volatility))
+        Some(analyze_regimes(
+            measure,
+            &forward_vol,
+            &data.current_volatility,
+        ))
     } else {
         let forward_vol = data.compute_forward_volatility(config.horizons[0]);
-        Some(analyze_regimes(&data.gini, &forward_vol, &data.current_volatility))
+        Some(analyze_regimes(
+            &data.gini,
+            &forward_vol,
+            &data.current_volatility,
+        ))
     };
 
     // Causality analysis
     let causality_analysis = if let Some(ref best) = best_measure {
         let measure = data.get_measure(&best.measure_name);
-        Some(analyze_causality(measure, &data.current_volatility, best.horizon))
+        Some(analyze_causality(
+            measure,
+            &data.current_volatility,
+            best.horizon,
+        ))
     } else {
-        Some(analyze_causality(&data.gini, &data.current_volatility, config.horizons[0]))
+        Some(analyze_causality(
+            &data.gini,
+            &data.current_volatility,
+            config.horizons[0],
+        ))
     };
 
     // Determine decision
-    let decision = determine_h4_decision(&results, &best_measure, &causality_analysis, config, n_passing);
+    let decision = determine_h4_decision(
+        &results,
+        &best_measure,
+        &causality_analysis,
+        config,
+        n_passing,
+    );
 
     // Generate outputs
     let summary = generate_h4_summary(&decision, &best_measure, n_passing, n_total);
     let report = generate_h4_report(
-        &results, &best_measure, &regime_analysis, &causality_analysis,
-        &decision, config, n
+        &results,
+        &best_measure,
+        &regime_analysis,
+        &causality_analysis,
+        &decision,
+        config,
+        n,
     );
 
     H4TestResult {
@@ -394,7 +426,10 @@ fn make_error_result(config: &H4TestConfig, error: &str) -> H4TestResult {
         n_total: 0,
         decision: H4Decision::NoGo,
         summary: format!("Data validation failed: {}", error),
-        report: format!("# H4 Test Report\n\n**Status:** FAILED\n\n**Reason:** {}", error),
+        report: format!(
+            "# H4 Test Report\n\n**Status:** FAILED\n\n**Reason:** {}",
+            error
+        ),
         n_samples: 0,
     }
 }
@@ -424,9 +459,7 @@ fn test_single_measure(
     let mi_bits = mutual_information_adaptive(&x, &y);
 
     // Evaluate pass/fail
-    let (passes, reason) = evaluate_measure(
-        &correlation, partial_corr, mi_bits, config
-    );
+    let (passes, reason) = evaluate_measure(&correlation, partial_corr, mi_bits, config);
 
     ConcentrationMeasureResult {
         measure_name: measure_name.to_string(),
@@ -505,26 +538,37 @@ fn evaluate_measure(
 ) -> (bool, String) {
     // Check raw correlation
     if corr.pearson.abs() < config.corr_failure_threshold {
-        return (false, format!(
-            "Correlation too weak: {:.3} < {:.3}",
-            corr.pearson.abs(), config.corr_failure_threshold
-        ));
+        return (
+            false,
+            format!(
+                "Correlation too weak: {:.3} < {:.3}",
+                corr.pearson.abs(),
+                config.corr_failure_threshold
+            ),
+        );
     }
 
     // Check significance
     if corr.p_value > config.max_p_value * 10.0 {
-        return (false, format!(
-            "Not significant: p={:.3} > {:.3}",
-            corr.p_value, config.max_p_value * 10.0
-        ));
+        return (
+            false,
+            format!(
+                "Not significant: p={:.3} > {:.3}",
+                corr.p_value,
+                config.max_p_value * 10.0
+            ),
+        );
     }
 
     // Check partial correlation (must survive controlling for current vol)
     if partial_corr.abs() < config.min_partial_correlation {
-        return (false, format!(
+        return (
+            false,
+            format!(
             "Partial corr too weak: {:.3} < {:.3} (disappears when controlling for current vol)",
             partial_corr.abs(), config.min_partial_correlation
-        ));
+        ),
+        );
     }
 
     // Success criteria
@@ -533,14 +577,21 @@ fn evaluate_measure(
     let meets_partial = partial_corr.abs() >= config.min_partial_correlation;
 
     if meets_corr && meets_pval && meets_partial {
-        (true, format!(
-            "PASS: r={:.3}, p={:.2e}, partial_r={:.3}, MI={:.4} bits",
-            corr.pearson, corr.p_value, partial_corr, mi_bits
-        ))
+        (
+            true,
+            format!(
+                "PASS: r={:.3}, p={:.2e}, partial_r={:.3}, MI={:.4} bits",
+                corr.pearson, corr.p_value, partial_corr, mi_bits
+            ),
+        )
     } else {
         let mut reasons = Vec::new();
         if !meets_corr {
-            reasons.push(format!("r={:.3}<{:.3}", corr.pearson.abs(), config.min_correlation));
+            reasons.push(format!(
+                "r={:.3}<{:.3}",
+                corr.pearson.abs(),
+                config.min_correlation
+            ));
         }
         if !meets_pval {
             reasons.push(format!("p={:.2e}>{:.2e}", corr.p_value, config.max_p_value));
@@ -554,7 +605,10 @@ fn analyze_regimes(
     forward_vol: &[f64],
     current_vol: &[f64],
 ) -> RegimeAnalysis {
-    let n = concentration.len().min(forward_vol.len()).min(current_vol.len());
+    let n = concentration
+        .len()
+        .min(forward_vol.len())
+        .min(current_vol.len());
 
     // Split by current volatility median
     let vol_median = median(&current_vol[..n]);
@@ -616,16 +670,10 @@ fn analyze_causality(
     }
 
     // Forward: concentration_t → volatility_{t+h}
-    let forward_corr = pearson_correlation(
-        &concentration[..n - horizon],
-        &volatility[horizon..n]
-    );
+    let forward_corr = pearson_correlation(&concentration[..n - horizon], &volatility[horizon..n]);
 
     // Reverse: volatility_t → concentration_{t+h}
-    let reverse_corr = pearson_correlation(
-        &volatility[..n - horizon],
-        &concentration[horizon..n]
-    );
+    let reverse_corr = pearson_correlation(&volatility[..n - horizon], &concentration[horizon..n]);
 
     let concentration_leads = forward_corr.abs() > reverse_corr.abs() * 1.2;
     let lead_lag_ratio = if reverse_corr.abs() > 1e-10 {
@@ -675,18 +723,18 @@ fn determine_h4_decision(
     }
 
     // Check for clear failure
-    let all_weak = results.iter().all(|r| {
-        r.correlation.pearson.abs() < config.corr_failure_threshold
-    });
+    let all_weak = results
+        .iter()
+        .all(|r| r.correlation.pearson.abs() < config.corr_failure_threshold);
 
     if all_weak {
         return H4Decision::NoGo;
     }
 
     // Check if partial correlations all collapse
-    let all_partial_weak = results.iter().all(|r| {
-        r.partial_correlation.abs() < config.min_partial_correlation * 0.5
-    });
+    let all_partial_weak = results
+        .iter()
+        .all(|r| r.partial_correlation.abs() < config.min_partial_correlation * 0.5);
 
     if all_partial_weak {
         return H4Decision::NoGo;
@@ -704,9 +752,13 @@ fn generate_h4_summary(
     match best {
         Some(b) => format!(
             "H4 {} - {}/{} measures pass. Best: {} ({}h), r={:.3}, partial_r={:.3}",
-            decision, n_passing, n_total,
-            b.measure_name, b.horizon,
-            b.correlation.pearson, b.partial_correlation
+            decision,
+            n_passing,
+            n_total,
+            b.measure_name,
+            b.horizon,
+            b.correlation.pearson,
+            b.partial_correlation
         ),
         None => format!(
             "H4 {} - {}/{} measures pass. No measure met criteria.",
@@ -738,18 +790,31 @@ fn generate_h4_report(
 
     // Configuration
     report.push_str("## Test Configuration\n\n");
-    report.push_str(&format!("- Minimum correlation: {}\n", config.min_correlation));
+    report.push_str(&format!(
+        "- Minimum correlation: {}\n",
+        config.min_correlation
+    ));
     report.push_str(&format!("- Maximum p-value: {}\n", config.max_p_value));
-    report.push_str(&format!("- Minimum partial correlation: {}\n", config.min_partial_correlation));
-    report.push_str(&format!("- Correlation failure threshold: {}\n\n", config.corr_failure_threshold));
+    report.push_str(&format!(
+        "- Minimum partial correlation: {}\n",
+        config.min_partial_correlation
+    ));
+    report.push_str(&format!(
+        "- Correlation failure threshold: {}\n\n",
+        config.corr_failure_threshold
+    ));
 
     // Results by measure
     report.push_str("## Results by Concentration Measure\n\n");
 
     for horizon in &config.horizons {
         report.push_str(&format!("### Horizon: {} periods\n\n", horizon));
-        report.push_str("| Measure | Pearson | Spearman | Partial r | p-value | MI (bits) | Pass |\n");
-        report.push_str("|---------|---------|----------|-----------|---------|-----------|------|\n");
+        report.push_str(
+            "| Measure | Pearson | Spearman | Partial r | p-value | MI (bits) | Pass |\n",
+        );
+        report.push_str(
+            "|---------|---------|----------|-----------|---------|-----------|------|\n",
+        );
 
         for result in results.iter().filter(|r| r.horizon == *horizon) {
             let pass_mark = if result.passes { "✓" } else { "✗" };
@@ -764,7 +829,7 @@ fn generate_h4_report(
                 pass_mark
             ));
         }
-        report.push_str("\n");
+        report.push('\n');
     }
 
     // Best measure details
@@ -772,81 +837,131 @@ fn generate_h4_report(
         report.push_str("## Best Performing Measure\n\n");
         report.push_str(&format!("**Measure:** {}\n", best.measure_name));
         report.push_str(&format!("**Horizon:** {} periods\n", best.horizon));
-        report.push_str(&format!("**Pearson Correlation:** {:.4}\n", best.correlation.pearson));
+        report.push_str(&format!(
+            "**Pearson Correlation:** {:.4}\n",
+            best.correlation.pearson
+        ));
         report.push_str(&format!("**Spearman Correlation:** {:.4}\n", best.spearman));
-        report.push_str(&format!("**95% CI:** [{:.4}, {:.4}]\n",
-            best.correlation.ci_lower, best.correlation.ci_upper));
+        report.push_str(&format!(
+            "**95% CI:** [{:.4}, {:.4}]\n",
+            best.correlation.ci_lower, best.correlation.ci_upper
+        ));
         report.push_str(&format!("**P-value:** {:.2e}\n", best.correlation.p_value));
-        report.push_str(&format!("**Partial Correlation (controlling for current vol):** {:.4}\n",
-            best.partial_correlation));
-        report.push_str(&format!("**Mutual Information:** {:.4} bits\n\n", best.mi_bits));
+        report.push_str(&format!(
+            "**Partial Correlation (controlling for current vol):** {:.4}\n",
+            best.partial_correlation
+        ));
+        report.push_str(&format!(
+            "**Mutual Information:** {:.4} bits\n\n",
+            best.mi_bits
+        ));
     }
 
     // Regime analysis
     if let Some(regime) = regime {
         report.push_str("## Regime Analysis\n\n");
         report.push_str("Does the relationship hold across volatility regimes?\n\n");
-        report.push_str(&format!("- **Low volatility regime:**\n"));
+        report.push_str(&"- **Low volatility regime:**\n".to_string());
         report.push_str(&format!("  - Samples: {}\n", regime.n_low_vol));
         report.push_str(&format!("  - Correlation: {:.4}\n", regime.corr_low_vol));
-        report.push_str(&format!("- **High volatility regime:**\n"));
+        report.push_str(&"- **High volatility regime:**\n".to_string());
         report.push_str(&format!("  - Samples: {}\n", regime.n_high_vol));
         report.push_str(&format!("  - Correlation: {:.4}\n", regime.corr_high_vol));
-        report.push_str(&format!("- **Stronger in low vol:** {}\n\n",
-            if regime.stronger_in_low_vol { "Yes (more useful for prediction)" } else { "No" }));
+        report.push_str(&format!(
+            "- **Stronger in low vol:** {}\n\n",
+            if regime.stronger_in_low_vol {
+                "Yes (more useful for prediction)"
+            } else {
+                "No"
+            }
+        ));
     }
 
     // Causality analysis
     if let Some(causality) = causality {
         report.push_str("## Causality Analysis\n\n");
         report.push_str("Does concentration LEAD volatility, or just correlate?\n\n");
-        report.push_str(&format!("- **Forward (concentration → future vol):** {:.4}\n",
-            causality.forward_correlation));
-        report.push_str(&format!("- **Reverse (volatility → future concentration):** {:.4}\n",
-            causality.reverse_correlation));
-        report.push_str(&format!("- **Lead-lag ratio:** {:.2}x\n", causality.lead_lag_ratio));
-        report.push_str(&format!("- **Concentration leads:** {}\n\n",
-            if causality.concentration_leads { "Yes ✓" } else { "No ✗" }));
+        report.push_str(&format!(
+            "- **Forward (concentration → future vol):** {:.4}\n",
+            causality.forward_correlation
+        ));
+        report.push_str(&format!(
+            "- **Reverse (volatility → future concentration):** {:.4}\n",
+            causality.reverse_correlation
+        ));
+        report.push_str(&format!(
+            "- **Lead-lag ratio:** {:.2}x\n",
+            causality.lead_lag_ratio
+        ));
+        report.push_str(&format!(
+            "- **Concentration leads:** {}\n\n",
+            if causality.concentration_leads {
+                "Yes ✓"
+            } else {
+                "No ✗"
+            }
+        ));
     }
 
     // Success criteria evaluation
     report.push_str("## Success Criteria Evaluation\n\n");
 
     let any_passes = results.iter().any(|r| r.passes);
-    let any_strong_corr = results.iter().any(|r| r.correlation.pearson.abs() >= config.min_correlation);
-    let any_survives_control = results.iter().any(|r| r.partial_correlation.abs() >= config.min_partial_correlation);
+    let any_strong_corr = results
+        .iter()
+        .any(|r| r.correlation.pearson.abs() >= config.min_correlation);
+    let any_survives_control = results
+        .iter()
+        .any(|r| r.partial_correlation.abs() >= config.min_partial_correlation);
 
     let corr_check = if any_strong_corr { "✓" } else { "✗" };
     let partial_check = if any_survives_control { "✓" } else { "✗" };
     let pass_check = if any_passes { "✓" } else { "✗" };
 
-    report.push_str(&format!("- {} Correlation ≥ {} for at least one measure\n",
-        corr_check, config.min_correlation));
-    report.push_str(&format!("- {} Partial correlation ≥ {} (survives controlling for current vol)\n",
-        partial_check, config.min_partial_correlation));
-    report.push_str(&format!("- {} At least one measure passes all criteria: {}\n\n",
-        pass_check, results.iter().filter(|r| r.passes).count()));
+    report.push_str(&format!(
+        "- {} Correlation ≥ {} for at least one measure\n",
+        corr_check, config.min_correlation
+    ));
+    report.push_str(&format!(
+        "- {} Partial correlation ≥ {} (survives controlling for current vol)\n",
+        partial_check, config.min_partial_correlation
+    ));
+    report.push_str(&format!(
+        "- {} At least one measure passes all criteria: {}\n\n",
+        pass_check,
+        results.iter().filter(|r| r.passes).count()
+    ));
 
     // Conclusion
     report.push_str("## Conclusion\n\n");
     match decision {
         H4Decision::Go => {
-            report.push_str("**ACCEPT H4:** Position concentration demonstrates predictive power for \
+            report.push_str(
+                "**ACCEPT H4:** Position concentration demonstrates predictive power for \
                 future volatility. The relationship survives controlling for current volatility, \
-                indicating genuine predictive value rather than just persistence.\n\n");
-            report.push_str("**Recommendation:** Use concentration metrics for volatility forecasting \
-                and risk management.\n");
+                indicating genuine predictive value rather than just persistence.\n\n",
+            );
+            report.push_str(
+                "**Recommendation:** Use concentration metrics for volatility forecasting \
+                and risk management.\n",
+            );
         }
         H4Decision::NoGo => {
             report.push_str("**REJECT H4:** No evidence that concentration predicts volatility. \
                 Either correlations are too weak, or the relationship disappears when controlling \
                 for current volatility (indicating it's just volatility persistence, not prediction).\n\n");
-            report.push_str("**Recommendation:** Do not use concentration for volatility prediction.\n");
+            report.push_str(
+                "**Recommendation:** Do not use concentration for volatility prediction.\n",
+            );
         }
         H4Decision::Inconclusive => {
-            report.push_str("**INCONCLUSIVE:** Mixed results. Some measures show promise but don't \
-                meet all criteria. The relationship may exist but is weak or inconsistent.\n\n");
-            report.push_str("**Recommendation:** Gather more data or test alternative specifications.\n");
+            report.push_str(
+                "**INCONCLUSIVE:** Mixed results. Some measures show promise but don't \
+                meet all criteria. The relationship may exist but is weak or inconsistent.\n\n",
+            );
+            report.push_str(
+                "**Recommendation:** Gather more data or test alternative specifications.\n",
+            );
         }
     }
 
@@ -868,7 +983,7 @@ fn median(data: &[f64]) -> f64 {
     if data.is_empty() {
         return 0.0;
     }
-    let mut sorted: Vec<f64> = data.iter().cloned().collect();
+    let mut sorted: Vec<f64> = data.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     sorted[sorted.len() / 2]
 }
@@ -914,7 +1029,8 @@ mod tests {
         // Future volatility correlates with concentration
         let mut prices = vec![100.0];
         for i in 1..n {
-            let vol_factor = 1.0 + gini.get(i.saturating_sub(24)).copied().unwrap_or(0.5) * true_correlation;
+            let vol_factor =
+                1.0 + gini.get(i.saturating_sub(24)).copied().unwrap_or(0.5) * true_correlation;
             let return_val = (i as f64 * 0.1).sin() * 0.02 * vol_factor;
             prices.push(prices[i - 1] * (1.0 + return_val));
         }
@@ -1009,14 +1125,21 @@ mod tests {
         // x and y both correlate with z, but x has additional info about y
         let n = 100;
         let z: Vec<f64> = (0..n).map(|i| (i as f64 * 0.1).sin()).collect();
-        let x: Vec<f64> = (0..n).map(|i| z[i] * 0.7 + (i as f64 * 0.2).cos() * 0.3).collect();
-        let y: Vec<f64> = (0..n).map(|i| z[i] * 0.5 + x[i] * 0.3 + (i as f64 * 0.15).sin() * 0.2).collect();
+        let x: Vec<f64> = (0..n)
+            .map(|i| z[i] * 0.7 + (i as f64 * 0.2).cos() * 0.3)
+            .collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| z[i] * 0.5 + x[i] * 0.3 + (i as f64 * 0.15).sin() * 0.2)
+            .collect();
 
         let (partial_r, _p) = partial_correlation(&x, &y, &z);
 
         // Partial correlation should be non-zero (x has info about y beyond z)
-        assert!(partial_r.abs() > 0.1,
-            "Partial correlation should be non-zero, got {}", partial_r);
+        assert!(
+            partial_r.abs() > 0.1,
+            "Partial correlation should be non-zero, got {}",
+            partial_r
+        );
     }
 
     #[test]
@@ -1033,8 +1156,12 @@ mod tests {
         // Raw correlation should be high
         assert!(raw_r.abs() > 0.8, "Raw correlation should be high");
         // Partial correlation should be much smaller
-        assert!(partial_r.abs() < raw_r.abs() * 0.3,
-            "Partial correlation should collapse, raw={}, partial={}", raw_r, partial_r);
+        assert!(
+            partial_r.abs() < raw_r.abs() * 0.3,
+            "Partial correlation should collapse, raw={}, partial={}",
+            raw_r,
+            partial_r
+        );
     }
 
     #[test]
@@ -1046,7 +1173,9 @@ mod tests {
             top20: vec![0.6; 100],
             theil: vec![0.3; 100],
             current_volatility: vec![0.02; 100],
-            prices: (0..100).map(|i| 100.0 * (1.0 + 0.01 * (i as f64 * 0.1).sin())).collect(),
+            prices: (0..100)
+                .map(|i| 100.0 * (1.0 + 0.01 * (i as f64 * 0.1).sin()))
+                .collect(),
             timestamps_ms: (0..100).collect(),
         };
 
@@ -1095,8 +1224,11 @@ mod tests {
 
         // Should test 5 measures × 2 horizons = 10 combinations
         let expected = H4TestData::measure_names().len() * config.horizons.len();
-        assert_eq!(result.n_total, expected,
-            "Should test {} combinations", expected);
+        assert_eq!(
+            result.n_total, expected,
+            "Should test {} combinations",
+            expected
+        );
     }
 
     #[test]
@@ -1108,7 +1240,9 @@ mod tests {
 
         assert!(result.report.contains("## Decision:"));
         assert!(result.report.contains("## Data Summary"));
-        assert!(result.report.contains("## Results by Concentration Measure"));
+        assert!(result
+            .report
+            .contains("## Results by Concentration Measure"));
         assert!(result.report.contains("## Regime Analysis"));
         assert!(result.report.contains("## Causality Analysis"));
         assert!(result.report.contains("## Conclusion"));

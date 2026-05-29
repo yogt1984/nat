@@ -38,7 +38,10 @@ impl OrderBook {
 
     /// Update the order book from a WebSocket message
     pub fn update(&mut self, book: &WsBook) {
-        self.bids = book.levels.0.iter()
+        self.bids = book
+            .levels
+            .0
+            .iter()
             .take(self.max_levels)
             .map(|l| Level {
                 price: l.price(),
@@ -47,7 +50,10 @@ impl OrderBook {
             })
             .collect();
 
-        self.asks = book.levels.1.iter()
+        self.asks = book
+            .levels
+            .1
+            .iter()
             .take(self.max_levels)
             .map(|l| Level {
                 price: l.price(),
@@ -202,13 +208,13 @@ impl OrderBook {
         let mut bid_pressure = 0.0;
         let mut ask_pressure = 0.0;
 
-        for (_i, level) in self.bids.iter().enumerate() {
+        for level in self.bids.iter() {
             let distance = (mid - level.price).abs() / mid;
-            let weight = 1.0 / (1.0 + distance * 100.0);  // Decay with distance
+            let weight = 1.0 / (1.0 + distance * 100.0); // Decay with distance
             bid_pressure += level.size * weight;
         }
 
-        for (_i, level) in self.asks.iter().enumerate() {
+        for level in self.asks.iter() {
             let distance = (level.price - mid).abs() / mid;
             let weight = 1.0 / (1.0 + distance * 100.0);
             ask_pressure += level.size * weight;
@@ -236,12 +242,28 @@ mod tests {
             coin: "BTC".to_string(),
             levels: (
                 vec![
-                    WsLevel { px: "50000.0".to_string(), sz: "1.0".to_string(), n: 3 },
-                    WsLevel { px: "49999.0".to_string(), sz: "2.0".to_string(), n: 5 },
+                    WsLevel {
+                        px: "50000.0".to_string(),
+                        sz: "1.0".to_string(),
+                        n: 3,
+                    },
+                    WsLevel {
+                        px: "49999.0".to_string(),
+                        sz: "2.0".to_string(),
+                        n: 5,
+                    },
                 ],
                 vec![
-                    WsLevel { px: "50001.0".to_string(), sz: "1.5".to_string(), n: 2 },
-                    WsLevel { px: "50002.0".to_string(), sz: "3.0".to_string(), n: 4 },
+                    WsLevel {
+                        px: "50001.0".to_string(),
+                        sz: "1.5".to_string(),
+                        n: 2,
+                    },
+                    WsLevel {
+                        px: "50002.0".to_string(),
+                        sz: "3.0".to_string(),
+                        n: 4,
+                    },
                 ],
             ),
             time: 1704067200000,

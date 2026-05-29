@@ -24,17 +24,11 @@ async fn serve_index() -> impl IntoResponse {
 
 /// Health check endpoint
 async fn health() -> impl IntoResponse {
-    (
-        [(header::CONTENT_TYPE, "text/plain")],
-        "ok",
-    )
+    ([(header::CONTENT_TYPE, "text/plain")], "ok")
 }
 
 /// Run the dashboard server
-pub async fn run_dashboard_server(
-    addr: SocketAddr,
-    state: Arc<DashboardState>,
-) -> Result<()> {
+pub async fn run_dashboard_server(addr: SocketAddr, state: Arc<DashboardState>) -> Result<()> {
     let app = Router::new()
         .route("/", get(serve_index))
         .route("/ws/logs", get(logs_handler))

@@ -38,49 +38,55 @@
 //! `Features::names_all()` returns the corresponding column names.
 //! The Parquet schema is built from `names_all()` in `output/schema.rs`.
 
-mod raw;
-mod imbalance;
-mod flow;
-mod volatility;
-mod entropy;
-mod context;
-mod trend;
-mod illiquidity;
-mod toxicity;
-mod derived;
-mod microstructure;
-mod resilience;
-mod hawkes;
-pub mod cross_symbol;
-pub mod whale_flow;
-pub mod liquidation;
 pub mod concentration;
-pub mod regime;
+mod context;
+pub mod cross_symbol;
+mod derived;
+mod entropy;
+mod flow;
+mod hawkes;
 pub mod heatmap;
+mod illiquidity;
+mod imbalance;
+pub mod liquidation;
+mod microstructure;
+mod raw;
+pub mod regime;
+mod resilience;
+mod toxicity;
+mod trend;
+mod volatility;
+pub mod whale_flow;
 
-pub use raw::RawFeatures;
-pub use imbalance::ImbalanceFeatures;
-pub use flow::FlowFeatures;
-pub use volatility::VolatilityFeatures;
-pub use entropy::EntropyFeatures;
+pub use concentration::{
+    ConcentrationBuffer, ConcentrationConfig, ConcentrationFeatures,
+    Position as ConcentrationPosition,
+};
 pub use context::ContextFeatures;
-pub use trend::TrendFeatures;
-pub use illiquidity::IlliquidityFeatures;
-pub use toxicity::ToxicityFeatures;
-pub use derived::DerivedFeatures;
-pub use microstructure::MicrostructureFeatures;
-pub use resilience::{ResilienceFeatures, ResilienceTracker};
-pub use hawkes::HawkesFeatures;
 pub use cross_symbol::{CrossSymbolFeatures, CrossSymbolState};
-pub use whale_flow::{WhaleFlowFeatures, WhaleFlowBuffer, WhaleFlowConfig, WhalePositionChange};
-pub use liquidation::{LiquidationRiskFeatures, LiquidationRiskConfig, LiquidationPosition};
-pub use heatmap::{HeatmapFeatures, HeatmapBuffer, HeatmapConfig};
-pub use concentration::{ConcentrationFeatures, ConcentrationBuffer, ConcentrationConfig, Position as ConcentrationPosition};
-pub use regime::{RegimeFeatures, RegimeBuffer, RegimeConfig, AbsorptionComputer, DivergenceComputer, ChurnComputer, RangeComputer};
+pub use derived::DerivedFeatures;
+pub use entropy::EntropyFeatures;
+pub use flow::FlowFeatures;
+pub use hawkes::HawkesFeatures;
+pub use heatmap::{HeatmapBuffer, HeatmapConfig, HeatmapFeatures};
+pub use illiquidity::IlliquidityFeatures;
+pub use imbalance::ImbalanceFeatures;
+pub use liquidation::{LiquidationPosition, LiquidationRiskConfig, LiquidationRiskFeatures};
+pub use microstructure::MicrostructureFeatures;
+pub use raw::RawFeatures;
+pub use regime::{
+    AbsorptionComputer, ChurnComputer, DivergenceComputer, RangeComputer, RegimeBuffer,
+    RegimeConfig, RegimeFeatures,
+};
+pub use resilience::{ResilienceFeatures, ResilienceTracker};
+pub use toxicity::ToxicityFeatures;
+pub use trend::TrendFeatures;
+pub use volatility::VolatilityFeatures;
+pub use whale_flow::{WhaleFlowBuffer, WhaleFlowConfig, WhaleFlowFeatures, WhalePositionChange};
 
 use ing_types::FeaturesConfig;
 use ing_types::GmmClassificationFeatures;
-use ing_types::{OrderBook, TradeBuffer, MarketContext, RingBuffer};
+use ing_types::{MarketContext, OrderBook, RingBuffer, TradeBuffer};
 
 /// All computed features
 #[derive(Debug, Clone, Default)]
@@ -120,19 +126,19 @@ pub struct Features {
 impl Features {
     /// Get total number of base features (always computed)
     pub fn count() -> usize {
-        RawFeatures::count() +
-        ImbalanceFeatures::count() +
-        FlowFeatures::count() +
-        VolatilityFeatures::count() +
-        EntropyFeatures::count() +
-        ContextFeatures::count() +
-        TrendFeatures::count() +
-        IlliquidityFeatures::count() +
-        ToxicityFeatures::count() +
-        DerivedFeatures::count() +
-        MicrostructureFeatures::count() +
-        ResilienceFeatures::count() +
-        HawkesFeatures::count()
+        RawFeatures::count()
+            + ImbalanceFeatures::count()
+            + FlowFeatures::count()
+            + VolatilityFeatures::count()
+            + EntropyFeatures::count()
+            + ContextFeatures::count()
+            + TrendFeatures::count()
+            + IlliquidityFeatures::count()
+            + ToxicityFeatures::count()
+            + DerivedFeatures::count()
+            + MicrostructureFeatures::count()
+            + ResilienceFeatures::count()
+            + HawkesFeatures::count()
     }
 
     /// Get total number of features including whale flow
@@ -142,7 +148,10 @@ impl Features {
 
     /// Get total number of features including all Hyperliquid-unique features
     pub fn count_with_hyperliquid_features() -> usize {
-        Self::count() + WhaleFlowFeatures::count() + LiquidationRiskFeatures::count() + ConcentrationFeatures::count()
+        Self::count()
+            + WhaleFlowFeatures::count()
+            + LiquidationRiskFeatures::count()
+            + ConcentrationFeatures::count()
     }
 
     /// Get total number of features including all optional features
@@ -177,31 +186,40 @@ impl Features {
         // Optional features (NaN when not yet available)
         match &self.whale_flow {
             Some(wf) => v.extend(wf.to_vec()),
-            None => v.extend(std::iter::repeat(f64::NAN).take(WhaleFlowFeatures::count())),
+            None => v.extend(std::iter::repeat_n(f64::NAN, WhaleFlowFeatures::count())),
         }
         match &self.liquidation_risk {
             Some(lr) => v.extend(lr.to_vec()),
-            None => v.extend(std::iter::repeat(f64::NAN).take(LiquidationRiskFeatures::count())),
+            None => v.extend(std::iter::repeat_n(
+                f64::NAN,
+                LiquidationRiskFeatures::count(),
+            )),
         }
         match &self.concentration {
             Some(c) => v.extend(c.to_vec()),
-            None => v.extend(std::iter::repeat(f64::NAN).take(ConcentrationFeatures::count())),
+            None => v.extend(std::iter::repeat_n(
+                f64::NAN,
+                ConcentrationFeatures::count(),
+            )),
         }
         match &self.regime {
             Some(r) => v.extend(r.to_vec()),
-            None => v.extend(std::iter::repeat(f64::NAN).take(RegimeFeatures::count())),
+            None => v.extend(std::iter::repeat_n(f64::NAN, RegimeFeatures::count())),
         }
         match &self.gmm_classification {
             Some(g) => v.extend(g.to_vec()),
-            None => v.extend(std::iter::repeat(f64::NAN).take(GmmClassificationFeatures::count())),
+            None => v.extend(std::iter::repeat_n(
+                f64::NAN,
+                GmmClassificationFeatures::count(),
+            )),
         }
         match &self.cross_symbol {
             Some(cs) => v.extend(cs.to_vec()),
-            None => v.extend(std::iter::repeat(f64::NAN).take(CrossSymbolFeatures::count())),
+            None => v.extend(std::iter::repeat_n(f64::NAN, CrossSymbolFeatures::count())),
         }
         match &self.heatmap {
             Some(hm) => v.extend(hm.to_vec()),
-            None => v.extend(std::iter::repeat(f64::NAN).take(HeatmapFeatures::count())),
+            None => v.extend(std::iter::repeat_n(f64::NAN, HeatmapFeatures::count())),
         }
         v
     }
@@ -319,12 +337,12 @@ impl FeatureComputer {
     pub fn new(config: &FeaturesConfig) -> Self {
         Self {
             _config: config.clone(),
-            spread_buffer: RingBuffer::new(600),    // 1 minute at 100ms
+            spread_buffer: RingBuffer::new(600), // 1 minute at 100ms
             midprice_buffer: RingBuffer::new(3000), // 5 minutes at 100ms
-            entropy_buffer: RingBuffer::new(600),   // 1 minute at 100ms
-            imbalance_buffer: RingBuffer::new(16),  // 16 samples for permutation entropy
-            obi_buffer: RingBuffer::new(600),       // 1 minute at 100ms for OBI dynamics
-            depth_buffer: RingBuffer::new(600),     // 1 minute at 100ms for depth recovery
+            entropy_buffer: RingBuffer::new(600), // 1 minute at 100ms
+            imbalance_buffer: RingBuffer::new(16), // 16 samples for permutation entropy
+            obi_buffer: RingBuffer::new(600),    // 1 minute at 100ms for OBI dynamics
+            depth_buffer: RingBuffer::new(600),  // 1 minute at 100ms for depth recovery
             resilience_tracker: ResilienceTracker::new(),
             vol_1m_buffer: RingBuffer::new(36_000), // 1 hour at 100ms for vol z-score
         }
@@ -358,16 +376,22 @@ impl FeatureComputer {
         let imbalance = imbalance::compute(order_book);
         let flow = flow::compute(trade_buffer);
         let volatility = volatility::compute(
-            price_buffer, order_book,
-            &self.spread_buffer, &self.vol_1m_buffer,
+            price_buffer,
+            order_book,
+            &self.spread_buffer,
+            &self.vol_1m_buffer,
         );
 
         // Push current vol_1m into hourly history for z-score computation
         self.vol_1m_buffer.push(volatility.returns_1m);
 
         let entropy = entropy::compute(
-            price_buffer, order_book, trade_buffer,
-            &self.imbalance_buffer, &self.spread_buffer, &self.entropy_buffer,
+            price_buffer,
+            order_book,
+            trade_buffer,
+            &self.imbalance_buffer,
+            &self.spread_buffer,
+            &self.entropy_buffer,
         );
 
         // Update entropy history buffer with a representative entropy value (tick_1m)
@@ -378,7 +402,9 @@ impl FeatureComputer {
         let illiquidity = illiquidity::compute(trade_buffer);
         // Use previous mid-price for causal realized spread (Huang & Stoll 1997)
         let prev_mid = if self.midprice_buffer.len() >= 2 {
-            self.midprice_buffer.get(self.midprice_buffer.len() - 2).copied()
+            self.midprice_buffer
+                .get(self.midprice_buffer.len() - 2)
+                .copied()
         } else {
             None
         };
@@ -396,8 +422,10 @@ impl FeatureComputer {
 
         // New Phase 5 base features
         let micro = microstructure::compute(
-            order_book, trade_buffer,
-            &self.obi_buffer, &self.depth_buffer,
+            order_book,
+            trade_buffer,
+            &self.obi_buffer,
+            &self.depth_buffer,
         );
         let resilience_features = self.resilience_tracker.update(total_depth);
         let hawkes_features = hawkes::compute(trade_buffer);
@@ -416,13 +444,13 @@ impl FeatureComputer {
             microstructure: micro,
             resilience: resilience_features,
             hawkes: hawkes_features,
-            whale_flow: None, // Computed separately via WhaleFlowBuffer
-            liquidation_risk: None, // Computed separately via liquidation::compute()
-            concentration: None, // Computed separately via ConcentrationBuffer
-            regime: None, // Computed separately via RegimeBuffer at minute intervals
+            whale_flow: None,         // Computed separately via WhaleFlowBuffer
+            liquidation_risk: None,   // Computed separately via liquidation::compute()
+            concentration: None,      // Computed separately via ConcentrationBuffer
+            regime: None,             // Computed separately via RegimeBuffer at minute intervals
             gmm_classification: None, // Computed when regime features are ready
-            cross_symbol: None, // Computed separately via CrossSymbolState
-            heatmap: None, // Computed separately via HeatmapBuffer
+            cross_symbol: None,       // Computed separately via CrossSymbolState
+            heatmap: None,            // Computed separately via HeatmapBuffer
         }
     }
 }

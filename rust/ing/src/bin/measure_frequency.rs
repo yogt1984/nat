@@ -23,9 +23,7 @@ async fn main() -> Result<()> {
     println!("║      HYPERLIQUID WEBSOCKET FREQUENCY MEASUREMENT                 ║");
     println!("╚══════════════════════════════════════════════════════════════════╝\n");
 
-    let (mut ws_stream, _) = connect_async(WS_URL)
-        .await
-        .context("Failed to connect")?;
+    let (mut ws_stream, _) = connect_async(WS_URL).await.context("Failed to connect")?;
 
     println!("Connected to Hyperliquid WebSocket\n");
 
@@ -36,14 +34,18 @@ async fn main() -> Result<()> {
             "method": "subscribe",
             "subscription": {"type": "trades", "coin": coin}
         });
-        ws_stream.send(Message::Text(serde_json::to_string(&sub)?)).await?;
+        ws_stream
+            .send(Message::Text(serde_json::to_string(&sub)?))
+            .await?;
 
         // L2 Book
         let sub = serde_json::json!({
             "method": "subscribe",
             "subscription": {"type": "l2Book", "coin": coin}
         });
-        ws_stream.send(Message::Text(serde_json::to_string(&sub)?)).await?;
+        ws_stream
+            .send(Message::Text(serde_json::to_string(&sub)?))
+            .await?;
     }
 
     println!("Subscribed to BTC & ETH trades + l2Book");
@@ -59,7 +61,8 @@ async fn main() -> Result<()> {
                 let now = Instant::now();
                 if let Ok(data) = serde_json::from_str::<serde_json::Value>(&text) {
                     let channel = data["channel"].as_str().unwrap_or("unknown");
-                    let coin = data["data"]["coin"].as_str()
+                    let coin = data["data"]["coin"]
+                        .as_str()
                         .or_else(|| data["data"].get("coin").and_then(|c| c.as_str()))
                         .unwrap_or("");
 
@@ -98,11 +101,17 @@ async fn main() -> Result<()> {
 
         total_messages += data.message_count;
 
-        let elapsed = data.timestamps.last().expect("non-empty after guard").duration_since(*data.timestamps.first().expect("non-empty after guard"));
+        let elapsed = data
+            .timestamps
+            .last()
+            .expect("non-empty after guard")
+            .duration_since(*data.timestamps.first().expect("non-empty after guard"));
         let freq = data.message_count as f64 / elapsed.as_secs_f64();
 
         // Calculate intervals
-        let intervals: Vec<f64> = data.timestamps.windows(2)
+        let intervals: Vec<f64> = data
+            .timestamps
+            .windows(2)
             .map(|w| w[1].duration_since(w[0]).as_secs_f64() * 1000.0)
             .collect();
 
@@ -130,7 +139,8 @@ async fn main() -> Result<()> {
     println!("║");
 
     // Find trades frequency
-    let btc_trades_freq = channels.iter()
+    let btc_trades_freq = channels
+        .iter()
         .find(|(k, _)| k.contains("trades:BTC"))
         .and_then(|(_, d)| {
             let elapsed = d.timestamps.last()?.duration_since(*d.timestamps.first()?);
@@ -138,7 +148,8 @@ async fn main() -> Result<()> {
         })
         .unwrap_or(0.0);
 
-    let book_freq = channels.iter()
+    let book_freq = channels
+        .iter()
         .find(|(k, _)| k.contains("l2Book:BTC"))
         .and_then(|(_, d)| {
             let elapsed = d.timestamps.last()?.duration_since(*d.timestamps.first()?);
@@ -146,8 +157,14 @@ async fn main() -> Result<()> {
         })
         .unwrap_or(0.0);
 
-    println!("║   Trades stream:  ~{:.0} Hz (event-driven, varies with activity)", btc_trades_freq);
-    println!("║   L2 Book stream: ~{:.0} Hz (batched by block)", book_freq);
+    println!(
+        "║   Trades stream:  ~{:.0} Hz (event-driven, varies with activity)",
+        btc_trades_freq
+    );
+    println!(
+        "║   L2 Book stream: ~{:.0} Hz (batched by block)",
+        book_freq
+    );
     println!("║");
     println!("║   Your 1 Hz display is ARTIFICIAL - raw data is much faster!");
     println!("║   For HFT: Use 10-100 Hz feature emission");

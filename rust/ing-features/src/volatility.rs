@@ -75,7 +75,9 @@ pub struct VolatilityFeatures {
 }
 
 impl VolatilityFeatures {
-    pub fn count() -> usize { 9 }
+    pub fn count() -> usize {
+        9
+    }
 
     pub fn names() -> Vec<&'static str> {
         vec![
@@ -128,24 +130,21 @@ pub fn compute(
 
     // 1-minute vol (assuming 100ms intervals, ~600 samples per minute)
     let returns_1m = if returns.len() >= 60 {
-        compute_realized_vol(&returns[returns.len()-60..])
+        compute_realized_vol(&returns[returns.len() - 60..])
     } else {
         compute_realized_vol(&returns)
     };
 
     // 5-minute vol
     let returns_5m = if returns.len() >= 300 {
-        compute_realized_vol(&returns[returns.len()-300..])
+        compute_realized_vol(&returns[returns.len() - 300..])
     } else {
         compute_realized_vol(&returns)
     };
 
     // Parkinson volatility (range-based: high/low)
     let parkinson_5m = if price_buffer.len() >= 300 {
-        let prices: Vec<f64> = price_buffer.last_n(300)
-            .into_iter()
-            .cloned()
-            .collect();
+        let prices: Vec<f64> = price_buffer.last_n(300).into_iter().cloned().collect();
         compute_parkinson_vol(&prices)
     } else {
         compute_parkinson_vol(&price_buffer.to_vec())
@@ -153,10 +152,7 @@ pub fn compute(
 
     // Garman-Klass volatility (OHLC-based, most efficient classical estimator)
     let garman_klass_5m = if price_buffer.len() >= 300 {
-        let prices: Vec<f64> = price_buffer.last_n(300)
-            .into_iter()
-            .cloned()
-            .collect();
+        let prices: Vec<f64> = price_buffer.last_n(300).into_iter().cloned().collect();
         compute_garman_klass_vol(&prices)
     } else {
         compute_garman_klass_vol(&price_buffer.to_vec())
@@ -172,10 +168,7 @@ pub fn compute(
 
     // Midprice std
     let midprice_std_1m = if price_buffer.len() >= 60 {
-        let prices: Vec<f64> = price_buffer.last_n(60)
-            .into_iter()
-            .cloned()
-            .collect();
+        let prices: Vec<f64> = price_buffer.last_n(60).into_iter().cloned().collect();
         std_dev(&prices)
     } else {
         price_buffer.std()
@@ -288,9 +281,8 @@ fn std_dev(values: &[f64]) -> f64 {
     }
 
     let mean: f64 = values.iter().sum::<f64>() / values.len() as f64;
-    let variance: f64 = values.iter()
-        .map(|x| (x - mean).powi(2))
-        .sum::<f64>() / (values.len() - 1) as f64;
+    let variance: f64 =
+        values.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (values.len() - 1) as f64;
 
     variance.sqrt()
 }
@@ -311,12 +303,16 @@ mod tests {
         let book = ing_types::WsBook {
             coin: "BTC".to_string(),
             levels: (
-                vec![
-                    ing_types::WsLevel { px: format!("{:.1}", bid), sz: "1.0".to_string(), n: 1 },
-                ],
-                vec![
-                    ing_types::WsLevel { px: format!("{:.1}", ask), sz: "1.0".to_string(), n: 1 },
-                ],
+                vec![ing_types::WsLevel {
+                    px: format!("{:.1}", bid),
+                    sz: "1.0".to_string(),
+                    n: 1,
+                }],
+                vec![ing_types::WsLevel {
+                    px: format!("{:.1}", ask),
+                    sz: "1.0".to_string(),
+                    n: 1,
+                }],
             ),
             time: 1000,
         };
@@ -360,7 +356,11 @@ mod tests {
     #[test]
     fn test_names_are_prefixed() {
         for name in VolatilityFeatures::names() {
-            assert!(name.starts_with("vol_"), "Feature name '{}' must start with vol_", name);
+            assert!(
+                name.starts_with("vol_"),
+                "Feature name '{}' must start with vol_",
+                name
+            );
         }
     }
 
@@ -455,7 +455,10 @@ mod tests {
         // Wider range → higher vol
         let narrow = compute_parkinson_vol(&[99.0, 100.0, 101.0]);
         let wide = compute_parkinson_vol(&[90.0, 100.0, 110.0]);
-        assert!(wide > narrow, "Wider range should give higher Parkinson vol");
+        assert!(
+            wide > narrow,
+            "Wider range should give higher Parkinson vol"
+        );
     }
 
     // ---------- Garman-Klass vol ----------
@@ -490,9 +493,15 @@ mod tests {
         let gk = compute_garman_klass_vol(&prices);
         let ln_hl = (110.0_f64 / 95.0).ln();
         let ln_co = (105.0_f64 / 100.0).ln();
-        let expected_sq = 0.5 * ln_hl * ln_hl - (2.0 * std::f64::consts::LN_2 - 1.0) * ln_co * ln_co;
+        let expected_sq =
+            0.5 * ln_hl * ln_hl - (2.0 * std::f64::consts::LN_2 - 1.0) * ln_co * ln_co;
         let expected = expected_sq.sqrt();
-        assert!((gk - expected).abs() < 1e-10, "GK={}, expected={}", gk, expected);
+        assert!(
+            (gk - expected).abs() < 1e-10,
+            "GK={}, expected={}",
+            gk,
+            expected
+        );
     }
 
     #[test]
@@ -513,7 +522,12 @@ mod tests {
         // Wider range → higher GK vol
         let narrow = compute_garman_klass_vol(&[100.0, 99.0, 101.0, 100.0]);
         let wide = compute_garman_klass_vol(&[100.0, 90.0, 110.0, 100.0]);
-        assert!(wide > narrow, "Wider range should give higher GK vol: {} vs {}", wide, narrow);
+        assert!(
+            wide > narrow,
+            "Wider range should give higher GK vol: {} vs {}",
+            wide,
+            narrow
+        );
     }
 
     #[test]
@@ -539,8 +553,12 @@ mod tests {
         let gk_no_drift = compute_garman_klass_vol(&prices_no_drift);
         let gk_with_drift = compute_garman_klass_vol(&prices_with_drift);
         // Close-to-open term subtracts, so with drift vol should be lower
-        assert!(gk_with_drift < gk_no_drift,
-            "Close-to-open drift should reduce GK estimate: {} vs {}", gk_with_drift, gk_no_drift);
+        assert!(
+            gk_with_drift < gk_no_drift,
+            "Close-to-open drift should reduce GK estimate: {} vs {}",
+            gk_with_drift,
+            gk_no_drift
+        );
     }
 
     #[test]
@@ -548,8 +566,8 @@ mod tests {
         // GK should never return negative (we guard σ²<0 → 0.0)
         // Edge case: very large drift, tiny range
         let prices = vec![100.0, 100.0, 100.001, 200.0]; // huge C/O, tiny H/L... wait
-        // Actually H=200, L=100 → big range. Let's try:
-        // Big drift, range barely exceeds it
+                                                         // Actually H=200, L=100 → big range. Let's try:
+                                                         // Big drift, range barely exceeds it
         let prices2 = vec![100.0, 99.99, 100.01, 110.0]; // O=100, H=110, L=99.99, C=110
         let gk = compute_garman_klass_vol(&prices2);
         assert!(gk >= 0.0, "GK must be non-negative, got {}", gk);
@@ -584,7 +602,12 @@ mod tests {
         let ln_ratio = (1.1_f64).ln();
         let expected_sq = ln_ratio * ln_ratio * (1.5 - 2.0 * std::f64::consts::LN_2);
         let expected = expected_sq.sqrt();
-        assert!((gk - expected).abs() < 1e-12, "gk={}, expected={}", gk, expected);
+        assert!(
+            (gk - expected).abs() < 1e-12,
+            "gk={}, expected={}",
+            gk,
+            expected
+        );
     }
 
     #[test]
@@ -594,7 +617,12 @@ mod tests {
         let prices2: Vec<f64> = prices1.iter().map(|p| p * 10.0).collect();
         let gk1 = compute_garman_klass_vol(&prices1);
         let gk2 = compute_garman_klass_vol(&prices2);
-        assert!((gk1 - gk2).abs() < 1e-12, "GK should be scale-invariant: {} vs {}", gk1, gk2);
+        assert!(
+            (gk1 - gk2).abs() < 1e-12,
+            "GK should be scale-invariant: {} vs {}",
+            gk1,
+            gk2
+        );
     }
 
     #[test]
@@ -607,7 +635,10 @@ mod tests {
         let vol_buf = RingBuffer::<f64>::new(36_000);
 
         let f = compute(&price_buf, &ob, &spread_buf, &vol_buf);
-        assert!(f.garman_klass_5m > 0.0, "GK should be positive for trending prices");
+        assert!(
+            f.garman_klass_5m > 0.0,
+            "GK should be positive for trending prices"
+        );
         assert!(f.garman_klass_5m.is_finite(), "GK must be finite");
         assert!(!f.garman_klass_5m.is_nan(), "GK must not be NaN");
     }
@@ -625,9 +656,12 @@ mod tests {
         let vol_buf = RingBuffer::<f64>::new(36_000);
 
         let f = compute(&price_buf, &ob, &spread_buf, &vol_buf);
-        assert!(f.garman_klass_5m < f.parkinson_5m,
+        assert!(
+            f.garman_klass_5m < f.parkinson_5m,
             "For trending data, GK ({}) should be < Parkinson ({}) due to drift correction",
-            f.garman_klass_5m, f.parkinson_5m);
+            f.garman_klass_5m,
+            f.parkinson_5m
+        );
     }
 
     // ---------- std_dev ----------
@@ -682,7 +716,10 @@ mod tests {
         let vol_buf = RingBuffer::<f64>::new(36_000);
 
         let f = compute(&price_buf, &ob, &spread_buf, &vol_buf);
-        assert_eq!(f.spread_std_1m, 0.0, "Single sample → 0.0 (can't compute std)");
+        assert_eq!(
+            f.spread_std_1m, 0.0,
+            "Single sample → 0.0 (can't compute std)"
+        );
     }
 
     #[test]
@@ -701,7 +738,9 @@ mod tests {
         let ob = make_order_book(99.0, 101.0);
         let price_buf = make_price_buffer(&[100.0; 100]);
         // Alternating spreads: 1.0 and 3.0
-        let spreads: Vec<f64> = (0..100).map(|i| if i % 2 == 0 { 1.0 } else { 3.0 }).collect();
+        let spreads: Vec<f64> = (0..100)
+            .map(|i| if i % 2 == 0 { 1.0 } else { 3.0 })
+            .collect();
         let spread_buf = make_spread_buffer(&spreads);
         let vol_buf = RingBuffer::<f64>::new(36_000);
 
@@ -781,7 +820,11 @@ mod tests {
         let vol_buf = make_vol_buffer(&vols);
 
         let f = compute(&price_buf, &ob, &spread_buf, &vol_buf);
-        assert!(f.zscore > 0.0, "High current vol vs low history → positive z-score, got {}", f.zscore);
+        assert!(
+            f.zscore > 0.0,
+            "High current vol vs low history → positive z-score, got {}",
+            f.zscore
+        );
     }
 
     #[test]
@@ -799,8 +842,16 @@ mod tests {
         let vol_buf = make_vol_buffer(&vols);
 
         let f = compute(&price_buf, &ob, &spread_buf, &vol_buf);
-        assert!(f.zscore <= 10.0, "Z-score should be clamped to 10.0, got {}", f.zscore);
-        assert!(f.zscore == 10.0, "Should actually hit the clamp for such extreme input, got {}", f.zscore);
+        assert!(
+            f.zscore <= 10.0,
+            "Z-score should be clamped to 10.0, got {}",
+            f.zscore
+        );
+        assert!(
+            f.zscore == 10.0,
+            "Should actually hit the clamp for such extreme input, got {}",
+            f.zscore
+        );
     }
 
     #[test]
@@ -814,7 +865,11 @@ mod tests {
         let vol_buf = make_vol_buffer(&vols);
 
         let f = compute(&price_buf, &ob, &spread_buf, &vol_buf);
-        assert!(f.zscore >= -10.0, "Z-score should be clamped to -10.0, got {}", f.zscore);
+        assert!(
+            f.zscore >= -10.0,
+            "Z-score should be clamped to -10.0, got {}",
+            f.zscore
+        );
     }
 
     #[test]
@@ -843,7 +898,12 @@ mod tests {
         let f = compute(&price_buf, &ob, &spread_buf, &vol_buf);
         // All should be zero or finite
         for (i, v) in f.to_vec().iter().enumerate() {
-            assert!(v.is_finite(), "Feature index {} should be finite with empty buffers, got {}", i, v);
+            assert!(
+                v.is_finite(),
+                "Feature index {} should be finite with empty buffers, got {}",
+                i,
+                v
+            );
         }
     }
 
@@ -872,17 +932,20 @@ mod tests {
         let vol_buf = RingBuffer::<f64>::new(36_000);
 
         let f = compute(&price_buf, &ob, &spread_buf, &vol_buf);
-        assert!(f.ratio_short_long > 1.0,
-            "Recent vol spike → ratio > 1, got {}", f.ratio_short_long);
+        assert!(
+            f.ratio_short_long > 1.0,
+            "Recent vol spike → ratio > 1, got {}",
+            f.ratio_short_long
+        );
     }
 
     #[test]
     fn test_compute_ratio_short_long_decelerating() {
         let ob = make_order_book(99.0, 101.0);
         // Volatile for first 240 ticks, then stable for last 60
-        let mut prices: Vec<f64> = (0..240).map(|i| {
-            100.0 + if i % 2 == 0 { 1.0 } else { -1.0 }
-        }).collect();
+        let mut prices: Vec<f64> = (0..240)
+            .map(|i| 100.0 + if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
         for _ in 0..60 {
             prices.push(100.0);
         }
@@ -891,8 +954,11 @@ mod tests {
         let vol_buf = RingBuffer::<f64>::new(36_000);
 
         let f = compute(&price_buf, &ob, &spread_buf, &vol_buf);
-        assert!(f.ratio_short_long < 1.0,
-            "Calming vol → ratio < 1, got {}", f.ratio_short_long);
+        assert!(
+            f.ratio_short_long < 1.0,
+            "Calming vol → ratio < 1, got {}",
+            f.ratio_short_long
+        );
     }
 
     #[test]
@@ -920,10 +986,18 @@ mod tests {
 
         let f = compute(&price_buf, &ob, &spread_buf, &vol_buf);
         for (i, v) in f.to_vec().iter().enumerate() {
-            assert!(!v.is_nan(), "Feature {} ({}) must not be NaN",
-                i, VolatilityFeatures::names()[i]);
-            assert!(v.is_finite(), "Feature {} ({}) must be finite",
-                i, VolatilityFeatures::names()[i]);
+            assert!(
+                !v.is_nan(),
+                "Feature {} ({}) must not be NaN",
+                i,
+                VolatilityFeatures::names()[i]
+            );
+            assert!(
+                v.is_finite(),
+                "Feature {} ({}) must be finite",
+                i,
+                VolatilityFeatures::names()[i]
+            );
         }
     }
 
@@ -953,6 +1027,9 @@ mod tests {
         let vol_buf = RingBuffer::<f64>::new(36_000);
 
         let f = compute(&price_buf, &ob, &spread_buf, &vol_buf);
-        assert!(f.midprice_std_1m > 0.0, "Should have positive midprice std for trending prices");
+        assert!(
+            f.midprice_std_1m > 0.0,
+            "Should have positive midprice std for trending prices"
+        );
     }
 }

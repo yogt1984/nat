@@ -157,7 +157,10 @@ async fn main() -> Result<()> {
         .build()?;
 
     // Phase 1: Collect trades to discover active wallets
-    println!("[PHASE 1] Discovering active wallets from trades ({} seconds)...", TRADE_COLLECTION_SECS);
+    println!(
+        "[PHASE 1] Discovering active wallets from trades ({} seconds)...",
+        TRADE_COLLECTION_SECS
+    );
 
     let (mut ws_stream, _) = connect_async(WS_URL)
         .await
@@ -172,7 +175,9 @@ async fn main() -> Result<()> {
                 "coin": symbol
             }),
         };
-        ws_stream.send(Message::Text(serde_json::to_string(&sub)?)).await?;
+        ws_stream
+            .send(Message::Text(serde_json::to_string(&sub)?))
+            .await?;
     }
 
     let start = Instant::now();
@@ -190,8 +195,10 @@ async fn main() -> Result<()> {
                                     stats.trades_with_wallet += 1;
                                     stats.unique_wallets.insert(maker.clone());
                                     stats.unique_wallets.insert(taker.clone());
-                                    *stats.wallet_trade_counts.entry(maker.clone()).or_insert(0) += 1;
-                                    *stats.wallet_trade_counts.entry(taker.clone()).or_insert(0) += 1;
+                                    *stats.wallet_trade_counts.entry(maker.clone()).or_insert(0) +=
+                                        1;
+                                    *stats.wallet_trade_counts.entry(taker.clone()).or_insert(0) +=
+                                        1;
                                 }
                             }
                         }
@@ -206,25 +213,37 @@ async fn main() -> Result<()> {
 
         // Progress
         let elapsed = start.elapsed().as_secs();
-        print!("\r  {} trades | {} unique wallets | {}s/{}s",
-            stats.total_trades_seen, stats.unique_wallets.len(), elapsed, TRADE_COLLECTION_SECS);
+        print!(
+            "\r  {} trades | {} unique wallets | {}s/{}s",
+            stats.total_trades_seen,
+            stats.unique_wallets.len(),
+            elapsed,
+            TRADE_COLLECTION_SECS
+        );
         std::io::stdout().flush().ok();
     }
     println!();
 
     // Find wallets with enough trades
-    let mut active_wallets: Vec<_> = stats.wallet_trade_counts.iter()
+    let mut active_wallets: Vec<_> = stats
+        .wallet_trade_counts
+        .iter()
         .filter(|(_, count)| **count >= MIN_TRADES_PER_WALLET)
         .map(|(wallet, count)| (wallet.clone(), *count))
         .collect();
     active_wallets.sort_by(|a, b| b.1.cmp(&a.1));
 
-    let wallets_to_test: Vec<_> = active_wallets.iter()
+    let wallets_to_test: Vec<_> = active_wallets
+        .iter()
         .take(MAX_WALLETS_TO_TEST)
         .map(|(w, _)| w.clone())
         .collect();
 
-    println!("\n  ✓ Found {} wallets with >= {} trades", active_wallets.len(), MIN_TRADES_PER_WALLET);
+    println!(
+        "\n  ✓ Found {} wallets with >= {} trades",
+        active_wallets.len(),
+        MIN_TRADES_PER_WALLET
+    );
     println!("  ✓ Testing top {} wallets\n", wallets_to_test.len());
 
     // Phase 2: Test position fetching for discovered wallets
@@ -238,13 +257,11 @@ async fn main() -> Result<()> {
         std::io::stdout().flush().ok();
 
         let fetch_start = Instant::now();
-        let request = InfoRequest::ClearinghouseState { user: wallet.clone() };
+        let request = InfoRequest::ClearinghouseState {
+            user: wallet.clone(),
+        };
 
-        match http_client.post(REST_URL)
-            .json(&request)
-            .send()
-            .await
-        {
+        match http_client.post(REST_URL).json(&request).send().await {
             Ok(response) => {
                 let fetch_time = fetch_start.elapsed().as_millis() as f64;
                 fetch_times.push(fetch_time);
@@ -252,7 +269,9 @@ async fn main() -> Result<()> {
                 if response.status().is_success() {
                     match response.json::<ClearinghouseState>().await {
                         Ok(state) => {
-                            let positions: Vec<_> = state.asset_positions.iter()
+                            let positions: Vec<_> = state
+                                .asset_positions
+                                .iter()
                                 .filter(|p| !p.position.is_empty())
                                 .collect();
 
@@ -265,9 +284,13 @@ async fn main() -> Result<()> {
                                 for pos in &positions {
                                     let p = &pos.position;
                                     let side = if p.size() > 0.0 { "LONG" } else { "SHORT" };
-                                    println!("    {} {} {:.4} @ entry {}",
-                                        p.coin, side, p.size().abs(),
-                                        p.entry_px.as_ref().unwrap_or(&"N/A".to_string()));
+                                    println!(
+                                        "    {} {} {:.4} @ entry {}",
+                                        p.coin,
+                                        side,
+                                        p.size().abs(),
+                                        p.entry_px.as_ref().unwrap_or(&"N/A".to_string())
+                                    );
                                 }
                             } else {
                                 println!("✓ no positions ({:.0}ms)", fetch_time);
@@ -317,7 +340,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn generate_report(stats: &ValidationStats, active_wallets: &[(String, usize)]) -> PositionValidationReport {
+fn generate_report(
+    stats: &ValidationStats,
+    active_wallets: &[(String, usize)],
+) -> PositionValidationReport {
     let trades_with_wallet_pct = if stats.total_trades_seen > 0 {
         (stats.trades_with_wallet as f64 / stats.total_trades_seen as f64) * 100.0
     } else {
@@ -325,7 +351,8 @@ fn generate_report(stats: &ValidationStats, active_wallets: &[(String, usize)]) 
     };
 
     let position_fetch_success_rate = if stats.wallets_tested > 0 {
-        ((stats.wallets_tested - stats.position_fetch_errors) as f64 / stats.wallets_tested as f64) * 100.0
+        ((stats.wallets_tested - stats.position_fetch_errors) as f64 / stats.wallets_tested as f64)
+            * 100.0
     } else {
         0.0
     };
@@ -333,15 +360,24 @@ fn generate_report(stats: &ValidationStats, active_wallets: &[(String, usize)]) 
     let mut warnings = Vec::new();
 
     if trades_with_wallet_pct < 100.0 {
-        warnings.push(format!("Only {:.1}% of trades have wallet info", trades_with_wallet_pct));
+        warnings.push(format!(
+            "Only {:.1}% of trades have wallet info",
+            trades_with_wallet_pct
+        ));
     }
 
     if stats.position_fetch_errors > 0 {
-        warnings.push(format!("{} position fetch errors", stats.position_fetch_errors));
+        warnings.push(format!(
+            "{} position fetch errors",
+            stats.position_fetch_errors
+        ));
     }
 
     if stats.avg_fetch_time_ms > 500.0 {
-        warnings.push(format!("High avg fetch time: {:.0}ms", stats.avg_fetch_time_ms));
+        warnings.push(format!(
+            "High avg fetch time: {:.0}ms",
+            stats.avg_fetch_time_ms
+        ));
     }
 
     let position_tracking_available = stats.wallets_tested > 0 && stats.position_fetch_errors == 0;
@@ -349,7 +385,8 @@ fn generate_report(stats: &ValidationStats, active_wallets: &[(String, usize)]) 
     let go_no_go = if !position_tracking_available {
         "NO-GO: Cannot fetch positions".to_string()
     } else if stats.wallets_with_positions == 0 {
-        "CAUTION: Fetching works but no positions found (normal if wallets have no open positions)".to_string()
+        "CAUTION: Fetching works but no positions found (normal if wallets have no open positions)"
+            .to_string()
     } else {
         "GO: Position tracking works".to_string()
     };
@@ -379,17 +416,29 @@ fn print_report(report: &PositionValidationReport) {
 
     println!("║ WALLET DISCOVERY");
     println!("║   Total trades: {}", report.total_trades);
-    println!("║   Trades with wallet: {:.1}%", report.trades_with_wallet_pct);
+    println!(
+        "║   Trades with wallet: {:.1}%",
+        report.trades_with_wallet_pct
+    );
     println!("║   Unique wallets: {}", report.unique_wallets_found);
-    println!("║   Wallets with {} trades: {}", MIN_TRADES_PER_WALLET, report.wallets_meeting_threshold);
+    println!(
+        "║   Wallets with {} trades: {}",
+        MIN_TRADES_PER_WALLET, report.wallets_meeting_threshold
+    );
 
     println!("╠══════════════════════════════════════════════════════════════════╣");
     println!("║ POSITION FETCHING");
     println!("║   Wallets tested: {}", report.wallets_tested);
-    println!("║   Wallets with positions: {}", report.wallets_with_positions);
+    println!(
+        "║   Wallets with positions: {}",
+        report.wallets_with_positions
+    );
     println!("║   Total positions found: {}", report.total_positions);
     println!("║   Avg fetch time: {:.0}ms", report.avg_fetch_time_ms);
-    println!("║   Success rate: {:.1}%", report.position_fetch_success_rate);
+    println!(
+        "║   Success rate: {:.1}%",
+        report.position_fetch_success_rate
+    );
 
     println!("╠══════════════════════════════════════════════════════════════════╣");
 

@@ -24,8 +24,8 @@
 use ing_types::TradeBuffer;
 
 /// Hawkes process parameters (fixed calibration)
-const ALPHA: f64 = 0.5;  // Excitation amplitude per trade (per second)
-const BETA: f64 = 1.0;   // Decay rate (per second)
+const ALPHA: f64 = 0.5; // Excitation amplitude per trade (per second)
+const BETA: f64 = 1.0; // Decay rate (per second)
 const WINDOW_SECONDS: u64 = 30;
 
 /// Hawkes trade intensity features (3 features)
@@ -40,7 +40,9 @@ pub struct HawkesFeatures {
 }
 
 impl HawkesFeatures {
-    pub fn count() -> usize { 3 }
+    pub fn count() -> usize {
+        3
+    }
 
     pub fn names() -> Vec<&'static str> {
         vec![
@@ -75,7 +77,8 @@ pub fn compute(trade_buffer: &TradeBuffer) -> HawkesFeatures {
 
     // Compute self-exciting component: Σ α·exp(-β·(t_now - t_i))
     // Timestamps are in milliseconds, convert to seconds for decay
-    let excitation: f64 = trades.iter()
+    let excitation: f64 = trades
+        .iter()
         .map(|trade| {
             let dt_sec = (now - trade.timestamp) as f64 / 1000.0;
             ALPHA * (-BETA * dt_sec).exp()
@@ -84,11 +87,7 @@ pub fn compute(trade_buffer: &TradeBuffer) -> HawkesFeatures {
 
     let lambda = mu + excitation;
 
-    let branching_ratio = if mu > 1e-9 {
-        excitation / mu
-    } else {
-        0.0
-    };
+    let branching_ratio = if mu > 1e-9 { excitation / mu } else { 0.0 };
 
     HawkesFeatures {
         hawkes_intensity: lambda,

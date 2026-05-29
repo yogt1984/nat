@@ -53,7 +53,8 @@ impl CrossSymbolState {
         };
 
         // Collect other symbols' OBI values
-        let others: Vec<f64> = map.iter()
+        let others: Vec<f64> = map
+            .iter()
             .filter(|(k, _)| k.as_str() != self_symbol)
             .map(|(_, &v)| v)
             .collect();
@@ -70,9 +71,11 @@ impl CrossSymbolState {
             .collect();
         let mean_all = all_values.iter().sum::<f64>() / all_values.len() as f64;
         let dispersion = if all_values.len() > 1 {
-            let var = all_values.iter()
+            let var = all_values
+                .iter()
                 .map(|x| (x - mean_all).powi(2))
-                .sum::<f64>() / (all_values.len() - 1) as f64;
+                .sum::<f64>()
+                / (all_values.len() - 1) as f64;
             var.sqrt()
         } else {
             0.0
@@ -104,7 +107,9 @@ pub struct CrossSymbolFeatures {
 }
 
 impl CrossSymbolFeatures {
-    pub fn count() -> usize { 3 }
+    pub fn count() -> usize {
+        3
+    }
 
     pub fn names() -> Vec<&'static str> {
         vec![

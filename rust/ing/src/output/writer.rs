@@ -3,15 +3,15 @@
 use anyhow::{Context, Result};
 use arrow::array::{ArrayRef, Float64Builder, Int64Builder, StringBuilder, UInt64Builder};
 use arrow::record_batch::RecordBatch;
-use chrono::{DateTime, Utc, Timelike};
+use chrono::{DateTime, Timelike, Utc};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use std::fs::{self, File};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use tracing::{info, error};
+use std::sync::Arc;
+use tracing::{error, info};
 
 use crate::config::OutputConfig;
 use crate::features::Features;
@@ -122,8 +122,7 @@ impl FeatureBuffer {
             columns.push(Arc::new(builder.finish()));
         }
 
-        RecordBatch::try_new(schema, columns)
-            .context("Failed to create record batch")
+        RecordBatch::try_new(schema, columns).context("Failed to create record batch")
     }
 }
 
@@ -139,11 +138,9 @@ impl ParquetWriter {
         general_data_dir: &str,
         alg_feature_names: Vec<&'static str>,
     ) -> Result<Self> {
-        let data_dir = config.data_dir.as_deref()
-            .unwrap_or(general_data_dir);
+        let data_dir = config.data_dir.as_deref().unwrap_or(general_data_dir);
 
-        fs::create_dir_all(data_dir)
-            .context("Failed to create data directory")?;
+        fs::create_dir_all(data_dir).context("Failed to create data directory")?;
 
         Ok(Self {
             config: config.clone(),
@@ -179,7 +176,8 @@ impl ParquetWriter {
         let pct = (self.buffer.len() * 100) / self.buffer.capacity;
         let milestone = (pct / 25) * 25;
         if milestone > 0 && milestone > self.last_progress_pct && milestone < 100 {
-            let elapsed = self.file_opened_at
+            let elapsed = self
+                .file_opened_at
                 .map(|t| format!("{:.0}s", t.elapsed().as_secs_f64()))
                 .unwrap_or_else(|| "?".to_string());
             info!(
@@ -247,7 +245,8 @@ impl ParquetWriter {
             // Log flush with file size
             if let Some(ref path) = self.current_file_path {
                 let file_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-                let elapsed = self.file_opened_at
+                let elapsed = self
+                    .file_opened_at
                     .map(|t| format!("{:.0}s", t.elapsed().as_secs_f64()))
                     .unwrap_or_else(|| "?".to_string());
                 info!(
@@ -317,7 +316,9 @@ impl ParquetWriter {
             writer.close()?;
 
             // Atomic rename: .tmp → final path
-            if let (Some(tmp), Some(final_path)) = (self.current_tmp_path.take(), &self.current_file_path) {
+            if let (Some(tmp), Some(final_path)) =
+                (self.current_tmp_path.take(), &self.current_file_path)
+            {
                 if tmp.exists() {
                     fs::rename(&tmp, final_path)?;
                     info!(path = ?final_path, rows = self.rows_written, "Closed Parquet file");

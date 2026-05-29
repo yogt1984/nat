@@ -49,7 +49,10 @@ async fn main() {
 
     info!(redis_url = %config.redis_url, channels = ?config.channels, "Connecting to Redis");
 
-    if let (Some(token), Some(chat_id)) = (config.telegram_bot_token.clone(), config.telegram_chat_id.clone()) {
+    if let (Some(token), Some(chat_id)) = (
+        config.telegram_bot_token.clone(),
+        config.telegram_chat_id.clone(),
+    ) {
         if let Err(e) = run_alert_service_with_log(
             &config.redis_url,
             token,
@@ -57,7 +60,9 @@ async fn main() {
             &config.channels,
             &config.research_events,
             config.alert_log_path.as_deref(),
-        ).await {
+        )
+        .await
+        {
             error!("Alert service error: {}", e);
             std::process::exit(1);
         }

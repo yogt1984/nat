@@ -174,20 +174,22 @@ pub enum PositionChangeType {
 impl PositionChangeType {
     /// Returns true if this change increases exposure
     pub fn increases_exposure(&self) -> bool {
-        matches!(self,
-            PositionChangeType::OpenLong |
-            PositionChangeType::OpenShort |
-            PositionChangeType::IncreaseLong |
-            PositionChangeType::IncreaseShort
+        matches!(
+            self,
+            PositionChangeType::OpenLong
+                | PositionChangeType::OpenShort
+                | PositionChangeType::IncreaseLong
+                | PositionChangeType::IncreaseShort
         )
     }
 
     /// Returns true if this change decreases exposure
     pub fn decreases_exposure(&self) -> bool {
-        matches!(self,
-            PositionChangeType::DecreaseLong |
-            PositionChangeType::DecreaseShort |
-            PositionChangeType::Close
+        matches!(
+            self,
+            PositionChangeType::DecreaseLong
+                | PositionChangeType::DecreaseShort
+                | PositionChangeType::Close
         )
     }
 }

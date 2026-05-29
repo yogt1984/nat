@@ -4,9 +4,9 @@
 //! tracks their behavior, and computes concentration metrics.
 
 mod classifier;
-mod registry;
 mod metrics;
+mod registry;
 
 pub use classifier::*;
-pub use registry::*;
 pub use metrics::*;
+pub use registry::*;

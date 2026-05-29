@@ -87,7 +87,12 @@ pub struct ContingencyTable {
 
 impl ContingencyTable {
     pub fn new() -> Self {
-        Self { tt: 0, tf: 0, ft: 0, ff: 0 }
+        Self {
+            tt: 0,
+            tf: 0,
+            ft: 0,
+            ff: 0,
+        }
     }
 
     pub fn total(&self) -> usize {
@@ -97,25 +102,41 @@ impl ContingencyTable {
     /// P(outcome=true | condition=true)
     pub fn p_outcome_given_condition(&self) -> f64 {
         let denom = self.tt + self.tf;
-        if denom == 0 { 0.5 } else { self.tt as f64 / denom as f64 }
+        if denom == 0 {
+            0.5
+        } else {
+            self.tt as f64 / denom as f64
+        }
     }
 
     /// P(outcome=true | condition=false)
     pub fn p_outcome_given_not_condition(&self) -> f64 {
         let denom = self.ft + self.ff;
-        if denom == 0 { 0.5 } else { self.ft as f64 / denom as f64 }
+        if denom == 0 {
+            0.5
+        } else {
+            self.ft as f64 / denom as f64
+        }
     }
 
     /// P(outcome=true) - baseline probability
     pub fn p_outcome(&self) -> f64 {
         let total = self.total();
-        if total == 0 { 0.5 } else { (self.tt + self.ft) as f64 / total as f64 }
+        if total == 0 {
+            0.5
+        } else {
+            (self.tt + self.ft) as f64 / total as f64
+        }
     }
 
     /// Lift: P(outcome|condition) / P(outcome)
     pub fn lift(&self) -> f64 {
         let baseline = self.p_outcome();
-        if baseline < 1e-10 { 1.0 } else { self.p_outcome_given_condition() / baseline }
+        if baseline < 1e-10 {
+            1.0
+        } else {
+            self.p_outcome_given_condition() / baseline
+        }
     }
 
     /// Chi-squared statistic
@@ -195,59 +216,92 @@ pub struct InteractionTable {
 impl InteractionTable {
     pub fn new() -> Self {
         Self {
-            lbp: 0, lbn: 0, lnp: 0, lnn: 0,
-            hbp: 0, hbn: 0, hnp: 0, hnn: 0,
+            lbp: 0,
+            lbn: 0,
+            lnp: 0,
+            lnn: 0,
+            hbp: 0,
+            hbn: 0,
+            hnp: 0,
+            hnn: 0,
         }
     }
 
     pub fn total(&self) -> usize {
-        self.lbp + self.lbn + self.lnp + self.lnn +
-        self.hbp + self.hbn + self.hnp + self.hnn
+        self.lbp + self.lbn + self.lnp + self.lnn + self.hbp + self.hbn + self.hnp + self.hnn
     }
 
     /// P(positive | low_entropy, whale_buying)
     pub fn p_pos_given_low_buy(&self) -> f64 {
         let denom = self.lbp + self.lbn;
-        if denom == 0 { 0.5 } else { self.lbp as f64 / denom as f64 }
+        if denom == 0 {
+            0.5
+        } else {
+            self.lbp as f64 / denom as f64
+        }
     }
 
     /// P(positive | low_entropy, not_whale_buying)
     pub fn p_pos_given_low_nobuy(&self) -> f64 {
         let denom = self.lnp + self.lnn;
-        if denom == 0 { 0.5 } else { self.lnp as f64 / denom as f64 }
+        if denom == 0 {
+            0.5
+        } else {
+            self.lnp as f64 / denom as f64
+        }
     }
 
     /// P(positive | high_entropy, whale_buying)
     pub fn p_pos_given_high_buy(&self) -> f64 {
         let denom = self.hbp + self.hbn;
-        if denom == 0 { 0.5 } else { self.hbp as f64 / denom as f64 }
+        if denom == 0 {
+            0.5
+        } else {
+            self.hbp as f64 / denom as f64
+        }
     }
 
     /// P(positive | high_entropy, not_whale_buying)
     pub fn p_pos_given_high_nobuy(&self) -> f64 {
         let denom = self.hnp + self.hnn;
-        if denom == 0 { 0.5 } else { self.hnp as f64 / denom as f64 }
+        if denom == 0 {
+            0.5
+        } else {
+            self.hnp as f64 / denom as f64
+        }
     }
 
     /// P(positive | low_entropy) - marginal
     pub fn p_pos_given_low_entropy(&self) -> f64 {
         let pos = self.lbp + self.lnp;
         let total = self.lbp + self.lbn + self.lnp + self.lnn;
-        if total == 0 { 0.5 } else { pos as f64 / total as f64 }
+        if total == 0 {
+            0.5
+        } else {
+            pos as f64 / total as f64
+        }
     }
 
     /// P(positive | whale_buying) - marginal
     pub fn p_pos_given_whale_buy(&self) -> f64 {
         let pos = self.lbp + self.hbp;
         let total = self.lbp + self.lbn + self.hbp + self.hbn;
-        if total == 0 { 0.5 } else { pos as f64 / total as f64 }
+        if total == 0 {
+            0.5
+        } else {
+            pos as f64 / total as f64
+        }
     }
 
     /// P(positive) - baseline
     pub fn p_pos_baseline(&self) -> f64 {
         let pos = self.lbp + self.lnp + self.hbp + self.hnp;
         let total = self.total();
-        if total == 0 { 0.5 } else { pos as f64 / total as f64 }
+        if total == 0 {
+            0.5
+        } else {
+            pos as f64 / total as f64
+        }
     }
 
     /// Interaction effect: how much does combining factors improve prediction?
@@ -277,10 +331,14 @@ impl InteractionTable {
 
         // Compute expected frequencies under independence
         let cells = [
-            (self.lbp, "lbp"), (self.lbn, "lbn"),
-            (self.lnp, "lnp"), (self.lnn, "lnn"),
-            (self.hbp, "hbp"), (self.hbn, "hbn"),
-            (self.hnp, "hnp"), (self.hnn, "hnn"),
+            (self.lbp, "lbp"),
+            (self.lbn, "lbn"),
+            (self.lnp, "lnp"),
+            (self.lnn, "lnn"),
+            (self.hbp, "hbp"),
+            (self.hbn, "hbn"),
+            (self.hnp, "hnp"),
+            (self.hnn, "hnn"),
         ];
 
         // Marginal counts
@@ -293,14 +351,14 @@ impl InteractionTable {
 
         // Expected under independence
         let expected = [
-            n_low * n_buy * n_pos / (total * total),   // lbp
-            n_low * n_buy * n_neg / (total * total),   // lbn
-            n_low * n_nobuy * n_pos / (total * total), // lnp
-            n_low * n_nobuy * n_neg / (total * total), // lnn
-            n_high * n_buy * n_pos / (total * total),  // hbp
-            n_high * n_buy * n_neg / (total * total),  // hbn
-            n_high * n_nobuy * n_pos / (total * total),// hnp
-            n_high * n_nobuy * n_neg / (total * total),// hnn
+            n_low * n_buy * n_pos / (total * total),    // lbp
+            n_low * n_buy * n_neg / (total * total),    // lbn
+            n_low * n_nobuy * n_pos / (total * total),  // lnp
+            n_low * n_nobuy * n_neg / (total * total),  // lnn
+            n_high * n_buy * n_pos / (total * total),   // hbp
+            n_high * n_buy * n_neg / (total * total),   // hbn
+            n_high * n_nobuy * n_pos / (total * total), // hnp
+            n_high * n_nobuy * n_neg / (total * total), // hnn
         ];
 
         let mut chi2 = 0.0;
@@ -317,9 +375,12 @@ impl InteractionTable {
 
     /// Minimum cell count
     pub fn min_cell(&self) -> usize {
-        [self.lbp, self.lbn, self.lnp, self.lnn,
-         self.hbp, self.hbn, self.hnp, self.hnn]
-            .into_iter().min().unwrap_or(0)
+        [
+            self.lbp, self.lbn, self.lnp, self.lnn, self.hbp, self.hbn, self.hnp, self.hnn,
+        ]
+        .into_iter()
+        .min()
+        .unwrap_or(0)
     }
 
     /// Count in joint condition (low entropy + whale buying)
@@ -473,26 +534,26 @@ pub fn run_h2_entropy_whale_test(data: &H2TestData, config: &H2TestConfig) -> H2
     let whale_threshold = percentile(&data.whale_flow, config.whale_percentile);
 
     // Build conditions
-    let low_entropy: Vec<bool> = data.entropy.iter()
+    let low_entropy: Vec<bool> = data
+        .entropy
+        .iter()
         .map(|&e| e < config.entropy_threshold)
         .collect();
 
-    let whale_buying: Vec<bool> = data.whale_flow.iter()
+    let whale_buying: Vec<bool> = data
+        .whale_flow
+        .iter()
         .map(|&w| w > whale_threshold)
         .collect();
 
-    let positive_return: Vec<bool> = data.returns.iter()
-        .map(|&r| r > 0.0)
-        .collect();
+    let positive_return: Vec<bool> = data.returns.iter().map(|&r| r > 0.0).collect();
 
     // Build single factor contingency tables
     let entropy_table = build_contingency(&low_entropy, &positive_return);
     let whale_table = build_contingency(&whale_buying, &positive_return);
 
     // Build interaction table
-    let interaction_table = build_interaction_table(
-        &low_entropy, &whale_buying, &positive_return
-    );
+    let interaction_table = build_interaction_table(&low_entropy, &whale_buying, &positive_return);
 
     // Single factor results
     let entropy_only = SingleFactorResult {
@@ -522,7 +583,11 @@ pub fn run_h2_entropy_whale_test(data: &H2TestData, config: &H2TestConfig) -> H2
     // Joint analysis
     let p_joint = interaction_table.p_pos_given_low_buy();
     let baseline = interaction_table.p_pos_baseline();
-    let joint_lift = if baseline > 1e-10 { p_joint / baseline } else { 1.0 };
+    let joint_lift = if baseline > 1e-10 {
+        p_joint / baseline
+    } else {
+        1.0
+    };
 
     let best_single_lift = entropy_only.lift.max(whale_only.lift);
     let joint_vs_best_lift = if best_single_lift > 1e-10 {
@@ -557,13 +622,7 @@ pub fn run_h2_entropy_whale_test(data: &H2TestData, config: &H2TestConfig) -> H2
     );
 
     // Generate outputs
-    let summary = generate_h2_summary(
-        &decision,
-        p_joint,
-        baseline,
-        joint_vs_best_lift,
-        mi_gain,
-    );
+    let summary = generate_h2_summary(&decision, p_joint, baseline, joint_vs_best_lift, mi_gain);
 
     let report = generate_h2_report(
         &entropy_only,
@@ -646,7 +705,10 @@ fn make_error_result(config: &H2TestConfig, error: &str) -> H2TestResult {
         corr_whale_returns: 0.0,
         decision: H2Decision::NoGo,
         summary: format!("Data validation failed: {}", error),
-        report: format!("# H2 Test Report\n\n**Status:** FAILED\n\n**Reason:** {}", error),
+        report: format!(
+            "# H2 Test Report\n\n**Status:** FAILED\n\n**Reason:** {}",
+            error
+        ),
         n_samples: 0,
     }
 }
@@ -760,7 +822,9 @@ fn determine_h2_decision(
     // Weak GO: 2 of 3 criteria met with strong individual factors
     let both_factors_significant = entropy_result.significant && whale_result.significant;
     let criteria_met = [lift_passes, interaction_significant, mi_passes]
-        .iter().filter(|&&x| x).count();
+        .iter()
+        .filter(|&&x| x)
+        .count();
 
     if criteria_met >= 2 && both_factors_significant {
         return H2Decision::Go;
@@ -826,104 +890,235 @@ fn generate_h2_report(
 
     // Configuration
     report.push_str("## Test Configuration\n\n");
-    report.push_str(&format!("- Entropy threshold: < {} (low entropy)\n", config.entropy_threshold));
-    report.push_str(&format!("- Whale percentile: > {}th (whale buying)\n", config.whale_percentile * 100.0));
+    report.push_str(&format!(
+        "- Entropy threshold: < {} (low entropy)\n",
+        config.entropy_threshold
+    ));
+    report.push_str(&format!(
+        "- Whale percentile: > {}th (whale buying)\n",
+        config.whale_percentile * 100.0
+    ));
     report.push_str(&format!("- Minimum lift: {}%\n", config.min_lift_pct));
     report.push_str(&format!("- Maximum p-value: {}\n", config.max_p_value));
-    report.push_str(&format!("- Minimum MI gain: {} bits\n\n", config.min_mi_gain_bits));
+    report.push_str(&format!(
+        "- Minimum MI gain: {} bits\n\n",
+        config.min_mi_gain_bits
+    ));
 
     // Single factor results
     report.push_str("## Single Factor Analysis\n\n");
     report.push_str("### Low Entropy Factor\n\n");
-    report.push_str(&format!("- P(up | low_entropy) = {:.2}%\n", entropy_result.p_outcome_given_factor * 100.0));
-    report.push_str(&format!("- P(up | high_entropy) = {:.2}%\n", entropy_result.contingency.p_outcome_given_not_condition() * 100.0));
-    report.push_str(&format!("- Lift: {:.2}x ({:+.1}%)\n", entropy_result.lift, entropy_result.lift_pct));
-    report.push_str(&format!("- Chi-squared: {:.2}, p-value: {:.2e}\n", entropy_result.chi_squared, entropy_result.p_value));
-    report.push_str(&format!("- Significant: {}\n\n", if entropy_result.significant { "Yes" } else { "No" }));
+    report.push_str(&format!(
+        "- P(up | low_entropy) = {:.2}%\n",
+        entropy_result.p_outcome_given_factor * 100.0
+    ));
+    report.push_str(&format!(
+        "- P(up | high_entropy) = {:.2}%\n",
+        entropy_result.contingency.p_outcome_given_not_condition() * 100.0
+    ));
+    report.push_str(&format!(
+        "- Lift: {:.2}x ({:+.1}%)\n",
+        entropy_result.lift, entropy_result.lift_pct
+    ));
+    report.push_str(&format!(
+        "- Chi-squared: {:.2}, p-value: {:.2e}\n",
+        entropy_result.chi_squared, entropy_result.p_value
+    ));
+    report.push_str(&format!(
+        "- Significant: {}\n\n",
+        if entropy_result.significant {
+            "Yes"
+        } else {
+            "No"
+        }
+    ));
 
     report.push_str("### Whale Buying Factor\n\n");
-    report.push_str(&format!("- P(up | whale_buying) = {:.2}%\n", whale_result.p_outcome_given_factor * 100.0));
-    report.push_str(&format!("- P(up | not_whale_buying) = {:.2}%\n", whale_result.contingency.p_outcome_given_not_condition() * 100.0));
-    report.push_str(&format!("- Lift: {:.2}x ({:+.1}%)\n", whale_result.lift, whale_result.lift_pct));
-    report.push_str(&format!("- Chi-squared: {:.2}, p-value: {:.2e}\n", whale_result.chi_squared, whale_result.p_value));
-    report.push_str(&format!("- Significant: {}\n\n", if whale_result.significant { "Yes" } else { "No" }));
+    report.push_str(&format!(
+        "- P(up | whale_buying) = {:.2}%\n",
+        whale_result.p_outcome_given_factor * 100.0
+    ));
+    report.push_str(&format!(
+        "- P(up | not_whale_buying) = {:.2}%\n",
+        whale_result.contingency.p_outcome_given_not_condition() * 100.0
+    ));
+    report.push_str(&format!(
+        "- Lift: {:.2}x ({:+.1}%)\n",
+        whale_result.lift, whale_result.lift_pct
+    ));
+    report.push_str(&format!(
+        "- Chi-squared: {:.2}, p-value: {:.2e}\n",
+        whale_result.chi_squared, whale_result.p_value
+    ));
+    report.push_str(&format!(
+        "- Significant: {}\n\n",
+        if whale_result.significant {
+            "Yes"
+        } else {
+            "No"
+        }
+    ));
 
     // Interaction analysis
     report.push_str("## Interaction Analysis (Combined Factors)\n\n");
     report.push_str("### Conditional Probabilities\n\n");
     report.push_str("| Condition | P(up) |\n");
     report.push_str("|-----------|-------|\n");
-    report.push_str(&format!("| Baseline | {:.2}% |\n", interaction_table.p_pos_baseline() * 100.0));
-    report.push_str(&format!("| Low entropy only | {:.2}% |\n", interaction_table.p_pos_given_low_entropy() * 100.0));
-    report.push_str(&format!("| Whale buying only | {:.2}% |\n", interaction_table.p_pos_given_whale_buy() * 100.0));
-    report.push_str(&format!("| **Low entropy + Whale buying** | **{:.2}%** |\n\n", p_joint * 100.0));
+    report.push_str(&format!(
+        "| Baseline | {:.2}% |\n",
+        interaction_table.p_pos_baseline() * 100.0
+    ));
+    report.push_str(&format!(
+        "| Low entropy only | {:.2}% |\n",
+        interaction_table.p_pos_given_low_entropy() * 100.0
+    ));
+    report.push_str(&format!(
+        "| Whale buying only | {:.2}% |\n",
+        interaction_table.p_pos_given_whale_buy() * 100.0
+    ));
+    report.push_str(&format!(
+        "| **Low entropy + Whale buying** | **{:.2}%** |\n\n",
+        p_joint * 100.0
+    ));
 
     // 2x2x2 table
     report.push_str("### Full Contingency Table\n\n");
     report.push_str("| Entropy | Whale | Return+ | Return- | P(up) |\n");
     report.push_str("|---------|-------|---------|---------|-------|\n");
-    report.push_str(&format!("| Low | Buy | {} | {} | {:.1}% |\n",
-        interaction_table.lbp, interaction_table.lbn, interaction_table.p_pos_given_low_buy() * 100.0));
-    report.push_str(&format!("| Low | No-Buy | {} | {} | {:.1}% |\n",
-        interaction_table.lnp, interaction_table.lnn, interaction_table.p_pos_given_low_nobuy() * 100.0));
-    report.push_str(&format!("| High | Buy | {} | {} | {:.1}% |\n",
-        interaction_table.hbp, interaction_table.hbn, interaction_table.p_pos_given_high_buy() * 100.0));
-    report.push_str(&format!("| High | No-Buy | {} | {} | {:.1}% |\n\n",
-        interaction_table.hnp, interaction_table.hnn, interaction_table.p_pos_given_high_nobuy() * 100.0));
+    report.push_str(&format!(
+        "| Low | Buy | {} | {} | {:.1}% |\n",
+        interaction_table.lbp,
+        interaction_table.lbn,
+        interaction_table.p_pos_given_low_buy() * 100.0
+    ));
+    report.push_str(&format!(
+        "| Low | No-Buy | {} | {} | {:.1}% |\n",
+        interaction_table.lnp,
+        interaction_table.lnn,
+        interaction_table.p_pos_given_low_nobuy() * 100.0
+    ));
+    report.push_str(&format!(
+        "| High | Buy | {} | {} | {:.1}% |\n",
+        interaction_table.hbp,
+        interaction_table.hbn,
+        interaction_table.p_pos_given_high_buy() * 100.0
+    ));
+    report.push_str(&format!(
+        "| High | No-Buy | {} | {} | {:.1}% |\n\n",
+        interaction_table.hnp,
+        interaction_table.hnn,
+        interaction_table.p_pos_given_high_nobuy() * 100.0
+    ));
 
     // Key metrics
     report.push_str("### Key Metrics\n\n");
-    report.push_str(&format!("- **Joint Lift vs Baseline:** {:.2}x\n", joint_lift));
-    report.push_str(&format!("- **Joint Lift vs Best Single Factor:** {:.2}x ({:+.1}%)\n",
-        joint_vs_best_lift, (joint_vs_best_lift - 1.0) * 100.0));
-    report.push_str(&format!("- **Interaction Effect:** {:+.4}\n", interaction_effect));
-    report.push_str(&format!("- **Interaction p-value:** {:.2e}\n\n", interaction_p_value));
+    report.push_str(&format!(
+        "- **Joint Lift vs Baseline:** {:.2}x\n",
+        joint_lift
+    ));
+    report.push_str(&format!(
+        "- **Joint Lift vs Best Single Factor:** {:.2}x ({:+.1}%)\n",
+        joint_vs_best_lift,
+        (joint_vs_best_lift - 1.0) * 100.0
+    ));
+    report.push_str(&format!(
+        "- **Interaction Effect:** {:+.4}\n",
+        interaction_effect
+    ));
+    report.push_str(&format!(
+        "- **Interaction p-value:** {:.2e}\n\n",
+        interaction_p_value
+    ));
 
     // MI analysis
     report.push_str("## Mutual Information Analysis\n\n");
-    report.push_str(&format!("- MI(returns | entropy): {:.4} bits\n", mi_entropy));
-    report.push_str(&format!("- MI(returns | entropy, whale): {:.4} bits\n", mi_joint));
+    report.push_str(&format!(
+        "- MI(returns | entropy): {:.4} bits\n",
+        mi_entropy
+    ));
+    report.push_str(&format!(
+        "- MI(returns | entropy, whale): {:.4} bits\n",
+        mi_joint
+    ));
     report.push_str(&format!("- **MI Gain:** {:.4} bits\n\n", mi_gain));
 
     // Correlations
     report.push_str("## Correlation Analysis\n\n");
-    report.push_str(&format!("- Correlation(entropy, returns): {:.4}\n", corr_entropy));
-    report.push_str(&format!("- Correlation(whale_flow, returns): {:.4}\n\n", corr_whale));
+    report.push_str(&format!(
+        "- Correlation(entropy, returns): {:.4}\n",
+        corr_entropy
+    ));
+    report.push_str(&format!(
+        "- Correlation(whale_flow, returns): {:.4}\n\n",
+        corr_whale
+    ));
 
     // Success criteria check
     report.push_str("## Success Criteria Evaluation\n\n");
-    let lift_check = if (joint_vs_best_lift - 1.0) * 100.0 >= config.min_lift_pct { "✓" } else { "✗" };
-    let interaction_check = if interaction_p_value < config.max_p_value { "✓" } else { "✗" };
-    let mi_check = if mi_gain >= config.min_mi_gain_bits { "✓" } else { "✗" };
+    let lift_check = if (joint_vs_best_lift - 1.0) * 100.0 >= config.min_lift_pct {
+        "✓"
+    } else {
+        "✗"
+    };
+    let interaction_check = if interaction_p_value < config.max_p_value {
+        "✓"
+    } else {
+        "✗"
+    };
+    let mi_check = if mi_gain >= config.min_mi_gain_bits {
+        "✓"
+    } else {
+        "✗"
+    };
 
-    report.push_str(&format!("- {} Lift vs best single factor ≥ {}%: {:.1}%\n",
-        lift_check, config.min_lift_pct, (joint_vs_best_lift - 1.0) * 100.0));
-    report.push_str(&format!("- {} Interaction p-value < {}: {:.2e}\n",
-        interaction_check, config.max_p_value, interaction_p_value));
-    report.push_str(&format!("- {} MI gain ≥ {} bits: {:.4} bits\n\n",
-        mi_check, config.min_mi_gain_bits, mi_gain));
+    report.push_str(&format!(
+        "- {} Lift vs best single factor ≥ {}%: {:.1}%\n",
+        lift_check,
+        config.min_lift_pct,
+        (joint_vs_best_lift - 1.0) * 100.0
+    ));
+    report.push_str(&format!(
+        "- {} Interaction p-value < {}: {:.2e}\n",
+        interaction_check, config.max_p_value, interaction_p_value
+    ));
+    report.push_str(&format!(
+        "- {} MI gain ≥ {} bits: {:.4} bits\n\n",
+        mi_check, config.min_mi_gain_bits, mi_gain
+    ));
 
     // Conclusion
     report.push_str("## Conclusion\n\n");
     match decision {
         H2Decision::Go => {
-            report.push_str("**ACCEPT H2:** Combining low entropy with whale buying produces a \
+            report.push_str(
+                "**ACCEPT H2:** Combining low entropy with whale buying produces a \
                 significantly stronger signal than either factor alone. The interaction effect \
-                is statistically significant and provides meaningful information gain.\n\n");
-            report.push_str("**Recommendation:** Use the combined entropy + whale flow signal \
-                for improved predictions.\n");
+                is statistically significant and provides meaningful information gain.\n\n",
+            );
+            report.push_str(
+                "**Recommendation:** Use the combined entropy + whale flow signal \
+                for improved predictions.\n",
+            );
         }
         H2Decision::NoGo => {
-            report.push_str("**REJECT H2:** No evidence that combining factors improves predictions. \
-                The interaction effect is weak or not statistically significant.\n\n");
-            report.push_str("**Recommendation:** Use individual factors separately; combining \
-                does not add value.\n");
+            report.push_str(
+                "**REJECT H2:** No evidence that combining factors improves predictions. \
+                The interaction effect is weak or not statistically significant.\n\n",
+            );
+            report.push_str(
+                "**Recommendation:** Use individual factors separately; combining \
+                does not add value.\n",
+            );
         }
         H2Decision::Inconclusive => {
-            report.push_str("**INCONCLUSIVE:** Mixed results. Some criteria are met but not all. \
-                More data or alternative thresholds may be needed.\n\n");
-            report.push_str("**Recommendation:** Gather more data or test different threshold \
-                combinations.\n");
+            report.push_str(
+                "**INCONCLUSIVE:** Mixed results. Some criteria are met but not all. \
+                More data or alternative thresholds may be needed.\n\n",
+            );
+            report.push_str(
+                "**Recommendation:** Gather more data or test different threshold \
+                combinations.\n",
+            );
         }
     }
 
@@ -946,7 +1141,7 @@ fn percentile(data: &[f64], p: f64) -> f64 {
         return 0.0;
     }
 
-    let mut sorted: Vec<f64> = data.iter().cloned().collect();
+    let mut sorted: Vec<f64> = data.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let idx = (p * (sorted.len() - 1) as f64).round() as usize;
@@ -968,8 +1163,8 @@ fn chi_squared_p_value(chi2: f64, df: f64) -> f64 {
 
     // Use Wilson-Hilferty approximation for large df
     if df > 30.0 {
-        let z = ((chi2 / df).powf(1.0 / 3.0) - (1.0 - 2.0 / (9.0 * df)))
-            / (2.0 / (9.0 * df)).sqrt();
+        let z =
+            ((chi2 / df).powf(1.0 / 3.0) - (1.0 - 2.0 / (9.0 * df))) / (2.0 / (9.0 * df)).sqrt();
         return 1.0 - normal_cdf(z);
     }
 
@@ -1127,7 +1322,11 @@ mod tests {
             })
             .collect();
 
-        H2TestData { entropy, whale_flow, returns }
+        H2TestData {
+            entropy,
+            whale_flow,
+            returns,
+        }
     }
 
     #[test]
@@ -1168,7 +1367,10 @@ mod tests {
         let chi2 = table.chi_squared();
         let p = table.p_value();
 
-        assert!(chi2 > 50.0, "Chi-squared should be large for dependent data");
+        assert!(
+            chi2 > 50.0,
+            "Chi-squared should be large for dependent data"
+        );
         assert!(p < 0.001, "P-value should be very small");
     }
 
@@ -1182,7 +1384,11 @@ mod tests {
         table.ff = 25;
 
         let chi2 = table.chi_squared();
-        assert!(chi2 < 0.1, "Chi-squared should be ~0 for independent data, got {}", chi2);
+        assert!(
+            chi2 < 0.1,
+            "Chi-squared should be ~0 for independent data, got {}",
+            chi2
+        );
     }
 
     #[test]
@@ -1225,14 +1431,21 @@ mod tests {
         let whale_flow: Vec<f64> = (0..n).map(|i| (i as f64 * 0.37).cos() * 100.0).collect();
         let returns: Vec<f64> = (0..n).map(|i| (i as f64 * 0.23).sin() * 0.01).collect();
 
-        let data = H2TestData { entropy, whale_flow, returns };
+        let data = H2TestData {
+            entropy,
+            whale_flow,
+            returns,
+        };
         let config = H2TestConfig::default();
 
         let result = run_h2_entropy_whale_test(&data, &config);
 
         // Should not find strong interaction
-        assert!(result.interaction_effect.abs() < 0.2,
-            "Independent data should have weak interaction: {}", result.interaction_effect);
+        assert!(
+            result.interaction_effect.abs() < 0.2,
+            "Independent data should have weak interaction: {}",
+            result.interaction_effect
+        );
     }
 
     #[test]

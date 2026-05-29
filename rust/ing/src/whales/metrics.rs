@@ -2,10 +2,10 @@
 //!
 //! Computes concentration metrics, skill analysis, and behavioral patterns.
 
-use serde::{Deserialize, Serialize};
 use super::WhaleClassification;
 #[cfg(test)]
 use super::WhaleTier;
+use serde::{Deserialize, Serialize};
 
 /// Concentration metrics for whale analysis
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -38,7 +38,8 @@ impl WhaleConcentration {
         }
 
         // Get position sizes
-        let mut positions: Vec<f64> = whales.iter()
+        let mut positions: Vec<f64> = whales
+            .iter()
             .map(|w| w.stats.current_position_usd.abs())
             .collect();
 
@@ -50,7 +51,8 @@ impl WhaleConcentration {
         let top10_ratio = top10_position / total_oi;
 
         // HHI: sum of squared market shares
-        let hhi: f64 = positions.iter()
+        let hhi: f64 = positions
+            .iter()
             .map(|p| {
                 let share = p / total_oi;
                 share * share
@@ -166,9 +168,11 @@ impl WhaleSkillMetrics {
         };
 
         let std_dev = if pnl_history.len() > 1 {
-            let variance: f64 = pnl_history.iter()
+            let variance: f64 = pnl_history
+                .iter()
                 .map(|p| (p - avg_return).powi(2))
-                .sum::<f64>() / (pnl_history.len() - 1) as f64;
+                .sum::<f64>()
+                / (pnl_history.len() - 1) as f64;
             variance.sqrt()
         } else {
             0.0
@@ -181,7 +185,8 @@ impl WhaleSkillMetrics {
         };
 
         // Classify skill tier
-        let skill_tier = Self::classify_skill(win_rate, profit_factor, risk_adjusted_return, total_pnl);
+        let skill_tier =
+            Self::classify_skill(win_rate, profit_factor, risk_adjusted_return, total_pnl);
 
         Self {
             address: address.to_string(),
@@ -244,7 +249,10 @@ pub struct WhaleSkillAnalysis {
 impl WhaleSkillAnalysis {
     pub fn from_metrics(metrics: &[WhaleSkillMetrics], timestamp_ms: i64) -> Self {
         if metrics.is_empty() {
-            return Self { timestamp_ms, ..Default::default() };
+            return Self {
+                timestamp_ms,
+                ..Default::default()
+            };
         }
 
         let mut skilled = 0;
@@ -276,9 +284,8 @@ impl WhaleSkillAnalysis {
         };
 
         // Std dev
-        let variance: f64 = pnls.iter()
-            .map(|p| (p - avg_pnl).powi(2))
-            .sum::<f64>() / pnls.len() as f64;
+        let variance: f64 =
+            pnls.iter().map(|p| (p - avg_pnl).powi(2)).sum::<f64>() / pnls.len() as f64;
         let std_dev = variance.sqrt();
 
         Self {
@@ -315,7 +322,8 @@ fn calculate_gini(values: &[f64]) -> f64 {
 
     // Calculate Gini using the formula: G = (2 * sum(i * x_i) - (n+1) * sum(x_i)) / (n * sum(x_i))
     let sum_x: f64 = sorted.iter().sum();
-    let weighted_sum: f64 = sorted.iter()
+    let weighted_sum: f64 = sorted
+        .iter()
         .enumerate()
         .map(|(i, x)| (i + 1) as f64 * x)
         .sum();
@@ -354,13 +362,18 @@ impl WhaleHerdingMetric {
     /// Calculate herding from position changes
     pub fn calculate(position_changes: &[(String, f64)], timestamp_ms: i64) -> Self {
         if position_changes.is_empty() {
-            return Self { timestamp_ms, ..Default::default() };
+            return Self {
+                timestamp_ms,
+                ..Default::default()
+            };
         }
 
-        let long_count = position_changes.iter()
+        let long_count = position_changes
+            .iter()
             .filter(|(_, change)| *change > 0.0)
             .count();
-        let short_count = position_changes.iter()
+        let short_count = position_changes
+            .iter()
             .filter(|(_, change)| *change < 0.0)
             .count();
 
@@ -459,10 +472,10 @@ mod tests {
         let metrics = WhaleSkillMetrics::calculate(
             "0x123",
             &[100.0, 50.0, -30.0, 80.0, 20.0],
-            4,  // 4 wins
-            1,  // 1 loss
-            250.0,  // gross profit
-            30.0,   // gross loss
+            4,     // 4 wins
+            1,     // 1 loss
+            250.0, // gross profit
+            30.0,  // gross loss
         );
 
         assert!(metrics.win_rate > 0.5);

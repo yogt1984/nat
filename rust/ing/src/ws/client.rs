@@ -3,16 +3,11 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
-use tokio_tungstenite::{
-    connect_async,
-    tungstenite::Message,
-    MaybeTlsStream,
-    WebSocketStream,
-};
-use tracing::{debug, info, warn, error};
+use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tracing::{debug, error, info, warn};
 
-use crate::config::WebSocketConfig;
 use super::messages::{parse_ws_message, SubscriptionRequest, WsMessage};
+use crate::config::WebSocketConfig;
 
 /// Hyperliquid WebSocket client with keepalive and stale detection
 pub struct HyperliquidClient {
@@ -72,8 +67,7 @@ impl HyperliquidClient {
 
     /// Subscribe to all required channels
     async fn subscribe(&mut self) -> Result<()> {
-        let stream = self.stream.as_mut()
-            .context("Not connected")?;
+        let stream = self.stream.as_mut().context("Not connected")?;
 
         // Subscribe to L2 book
         let l2_sub = SubscriptionRequest::l2_book(&self.symbol);
@@ -105,8 +99,7 @@ impl HyperliquidClient {
             self.connect().await?;
         }
 
-        let stream = self.stream.as_mut()
-            .context("Not connected")?;
+        let stream = self.stream.as_mut().context("Not connected")?;
 
         match stream.next().await {
             Some(Ok(Message::Text(text))) => {
@@ -116,7 +109,8 @@ impl HyperliquidClient {
                         self.message_count += 1;
                         if !self.first_message_logged {
                             self.first_message_logged = true;
-                            let elapsed = self.connected_at
+                            let elapsed = self
+                                .connected_at
                                 .map(|t| t.elapsed().as_secs_f64())
                                 .unwrap_or(0.0);
                             info!(
@@ -217,10 +211,9 @@ impl HyperliquidClient {
     /// Sends a Close frame and waits up to 1 second for acknowledgement.
     pub async fn close(&mut self) {
         if let Some(ref mut stream) = self.stream {
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(1),
-                SinkExt::close(stream),
-            ).await {
+            match tokio::time::timeout(std::time::Duration::from_secs(1), SinkExt::close(stream))
+                .await
+            {
                 Ok(Ok(())) => info!(symbol = %self.symbol, "WebSocket closed"),
                 Ok(Err(e)) => warn!(symbol = %self.symbol, ?e, "WebSocket close error"),
                 Err(_) => warn!(symbol = %self.symbol, "WebSocket close timed out"),

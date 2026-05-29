@@ -40,10 +40,7 @@ pub async fn get_whale_summary(
                 let net_flow_4h = whale["net_flow_4h"].as_f64().unwrap_or(0.0);
                 let net_flow_24h = whale["net_flow_24h"].as_f64().unwrap_or(0.0);
                 let intensity = whale["intensity"].as_f64().unwrap_or(0.0);
-                let direction = whale["direction"]
-                    .as_str()
-                    .unwrap_or("NEUTRAL")
-                    .to_string();
+                let direction = whale["direction"].as_str().unwrap_or("NEUTRAL").to_string();
 
                 let interpretation = interpret_whale_activity(
                     net_flow_1h,
@@ -87,12 +84,7 @@ pub async fn get_whale_summary(
     }
 }
 
-fn interpret_whale_activity(
-    flow_1h: f64,
-    zscore: f64,
-    flow_4h: f64,
-    direction: &str,
-) -> String {
+fn interpret_whale_activity(flow_1h: f64, zscore: f64, flow_4h: f64, direction: &str) -> String {
     if zscore.abs() < 1.0 {
         return "Whale activity within normal range. No significant directional bias.".to_string();
     }

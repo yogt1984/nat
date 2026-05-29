@@ -7,17 +7,17 @@ use anyhow::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, watch, Mutex};
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
 use ing::alerts::{AlertConfig, AlertTracker};
 use ing::config::Config;
-use ing::dashboard::{BroadcastLayer, DashboardState, run_dashboard_server};
 use ing::dashboard::state::FeaturesSummary;
+use ing::dashboard::{run_dashboard_server, BroadcastLayer, DashboardState};
+use ing::features::CrossSymbolState;
 use ing::metrics::Metrics;
 use ing::output::ParquetWriter;
 use ing::redis_publisher::{RedisConfig, RedisPublisher};
-use ing::features::CrossSymbolState;
 use ing::state::MarketState;
 use ing::ws::{HyperliquidClient, WsMessage};
 use ing::FeatureVector;
@@ -47,9 +47,9 @@ const TRADE_STALE_WARN_SECS: u64 = 120;
 //
 // `BOOK_STALE_GATE_SECS` is the book_age above which we treat the situation
 // as compound rather than pure.
-const PRICE_FROZEN_WITH_BOOK_STALE_WARN_SECS:  u64 = 60;
+const PRICE_FROZEN_WITH_BOOK_STALE_WARN_SECS: u64 = 60;
 const PRICE_FROZEN_WITH_BOOK_STALE_ERROR_SECS: u64 = 300;
-const PRICE_FROZEN_BOOK_ALIVE_WARN_SECS:  u64 = 300;
+const PRICE_FROZEN_BOOK_ALIVE_WARN_SECS: u64 = 300;
 const PRICE_FROZEN_BOOK_ALIVE_ERROR_SECS: u64 = 900;
 const BOOK_STALE_GATE_SECS: u64 = 30;
 
@@ -67,8 +67,7 @@ async fn main() -> Result<()> {
     let dashboard_state = Arc::new(DashboardState::new());
 
     // Initialize logging with broadcast layer for dashboard
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
@@ -89,9 +88,8 @@ async fn main() -> Result<()> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     tokio::spawn(async move {
         let ctrl_c = tokio::signal::ctrl_c();
-        let mut sigterm = tokio::signal::unix::signal(
-            tokio::signal::unix::SignalKind::terminate(),
-        ).expect("failed to install SIGTERM handler");
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler");
         tokio::select! {
             _ = ctrl_c => info!("Received SIGINT (Ctrl+C), initiating shutdown..."),
             _ = sigterm.recv() => info!("Received SIGTERM, initiating shutdown..."),
@@ -130,10 +128,8 @@ async fn main() -> Result<()> {
     }
 
     // Initialize Redis publisher (optional - gracefully degrades if unavailable)
-    let redis_config = RedisConfig::from_env_with_toml(
-        Some(&config.redis.url),
-        config.redis.publish_interval_ms,
-    );
+    let redis_config =
+        RedisConfig::from_env_with_toml(Some(&config.redis.url), config.redis.publish_interval_ms);
     let redis_publisher: Option<Arc<Mutex<RedisPublisher>>> =
         match RedisPublisher::try_new(redis_config).await {
             Some(publisher) => {
@@ -164,9 +160,8 @@ async fn main() -> Result<()> {
     }
 
     // Initialize Parquet writer (with algorithm columns)
-    let writer = ParquetWriter::new_with_alg_features(
-        &config.output, config.data_dir(), alg_feature_names,
-    )?;
+    let writer =
+        ParquetWriter::new_with_alg_features(&config.output, config.data_dir(), alg_feature_names)?;
     let writer_handle = tokio::spawn(run_writer(writer, feature_rx));
 
     // Initialize market state for each symbol
@@ -195,7 +190,8 @@ async fn main() -> Result<()> {
                 alert_config,
                 cross_symbol,
                 shutdown_rx,
-            ).await
+            )
+            .await
         });
 
         handles.push(handle);
@@ -220,10 +216,7 @@ async fn main() -> Result<()> {
     info!("All symbol tasks stopped, waiting for writer flush...");
 
     // Writer's recv() returns None now that all senders are dropped → flushes buffer
-    match tokio::time::timeout(
-        tokio::time::Duration::from_secs(3),
-        writer_handle,
-    ).await {
+    match tokio::time::timeout(tokio::time::Duration::from_secs(3), writer_handle).await {
         Ok(Ok(Ok(()))) => info!("Writer flushed successfully"),
         Ok(Ok(Err(e))) => error!(?e, "Writer error during shutdown"),
         Ok(Err(e)) => error!(?e, "Writer task panicked"),
@@ -280,9 +273,8 @@ async fn run_symbol_ingestor(
     }
 
     // Feature emission interval
-    let emission_interval = tokio::time::Duration::from_millis(
-        config.features.emission_interval_ms
-    );
+    let emission_interval =
+        tokio::time::Duration::from_millis(config.features.emission_interval_ms);
     let mut emission_ticker = tokio::time::interval(emission_interval);
 
     // Health summary every 60 seconds
@@ -591,7 +583,7 @@ async fn run_symbol_ingestor(
                     // May-6 signature — fire on the original tight thresholds.
                     if let Some(age) = price_age {
                         let book_stale = book_age
-                            .map_or(false, |b| b >= BOOK_STALE_GATE_SECS);
+                            .is_some_and(|b| b >= BOOK_STALE_GATE_SECS);
                         let (warn_threshold, error_threshold, regime) = if book_stale {
                             (
                                 PRICE_FROZEN_WITH_BOOK_STALE_WARN_SECS,

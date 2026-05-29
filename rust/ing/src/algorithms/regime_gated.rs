@@ -7,13 +7,28 @@ use super::{AlgFeatureDesc, MicrostructureAlgorithm};
 use crate::features::Features;
 
 static DESCS: &[AlgFeatureDesc] = &[
-    AlgFeatureDesc { name: "alg_regime_gated_imbalance", warmup_ticks: 100 },
-    AlgFeatureDesc { name: "alg_regime_gate_active", warmup_ticks: 100 },
-    AlgFeatureDesc { name: "alg_regime_zscore", warmup_ticks: 100 },
+    AlgFeatureDesc {
+        name: "alg_regime_gated_imbalance",
+        warmup_ticks: 100,
+    },
+    AlgFeatureDesc {
+        name: "alg_regime_gate_active",
+        warmup_ticks: 100,
+    },
+    AlgFeatureDesc {
+        name: "alg_regime_zscore",
+        warmup_ticks: 100,
+    },
 ];
 
 pub struct RegimeGated {
     _tick_count: u64,
+}
+
+impl Default for RegimeGated {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RegimeGated {
@@ -23,8 +38,12 @@ impl RegimeGated {
 }
 
 impl MicrostructureAlgorithm for RegimeGated {
-    fn name(&self) -> &'static str { "regime_gated" }
-    fn alg_feature_descs(&self) -> &'static [AlgFeatureDesc] { DESCS }
+    fn name(&self) -> &'static str {
+        "regime_gated"
+    }
+    fn alg_feature_descs(&self) -> &'static [AlgFeatureDesc] {
+        DESCS
+    }
 
     fn step(&mut self, _features: &Features) -> Vec<f64> {
         self._tick_count += 1;

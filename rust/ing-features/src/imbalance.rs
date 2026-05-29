@@ -51,7 +51,9 @@ pub struct ImbalanceFeatures {
 }
 
 impl ImbalanceFeatures {
-    pub fn count() -> usize { 8 }
+    pub fn count() -> usize {
+        8
+    }
 
     pub fn names() -> Vec<&'static str> {
         vec![

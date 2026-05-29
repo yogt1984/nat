@@ -16,7 +16,7 @@
 //!
 //! - OBI dynamics: Biais, Hillion & Spatt (1995) — inflection in imbalance velocity
 
-use ing_types::{OrderBook, TradeBuffer, RingBuffer};
+use ing_types::{OrderBook, RingBuffer, TradeBuffer};
 
 /// Microstructure features (5 features)
 #[derive(Debug, Clone, Default)]
@@ -34,7 +34,9 @@ pub struct MicrostructureFeatures {
 }
 
 impl MicrostructureFeatures {
-    pub fn count() -> usize { 5 }
+    pub fn count() -> usize {
+        5
+    }
 
     pub fn names() -> Vec<&'static str> {
         vec![
@@ -71,14 +73,23 @@ pub fn compute(
     let (obi_velocity, obi_acceleration) = if n >= 20 {
         // Velocity: difference over ~10 samples (~1s at 100ms emission)
         let current = obi_buffer.last().copied().unwrap_or(0.0);
-        let past_1s = obi_buffer.get(n.saturating_sub(10)).copied().unwrap_or(current);
-        let past_2s = obi_buffer.get(n.saturating_sub(20)).copied().unwrap_or(past_1s);
+        let past_1s = obi_buffer
+            .get(n.saturating_sub(10))
+            .copied()
+            .unwrap_or(current);
+        let past_2s = obi_buffer
+            .get(n.saturating_sub(20))
+            .copied()
+            .unwrap_or(past_1s);
         let v1 = current - past_1s;
         let v0 = past_1s - past_2s;
         (v1, v1 - v0)
     } else if n >= 10 {
         let current = obi_buffer.last().copied().unwrap_or(0.0);
-        let past = obi_buffer.get(n.saturating_sub(10)).copied().unwrap_or(current);
+        let past = obi_buffer
+            .get(n.saturating_sub(10))
+            .copied()
+            .unwrap_or(current);
         (current - past, 0.0)
     } else {
         (0.0, 0.0)
@@ -88,7 +99,11 @@ pub fn compute(
     let avg_trade_size = {
         let vol = trade_buffer.volume_in_window(5); // 5s window
         let count = trade_buffer.count_in_window(5) as f64;
-        if count > 0.0 { vol / count } else { 0.0 }
+        if count > 0.0 {
+            vol / count
+        } else {
+            0.0
+        }
     };
 
     let queue_position_bid = if avg_trade_size > 0.0 {
@@ -113,7 +128,10 @@ pub fn compute(
     let current_depth = order_book.bid_depth(5) + order_book.ask_depth(5);
     let depth_n = depth_buffer.len();
     let depth_recovery_ratio = if depth_n >= 10 {
-        let past_depth = depth_buffer.get(depth_n.saturating_sub(10)).copied().unwrap_or(current_depth);
+        let past_depth = depth_buffer
+            .get(depth_n.saturating_sub(10))
+            .copied()
+            .unwrap_or(current_depth);
         if past_depth > 0.0 {
             current_depth / past_depth
         } else {

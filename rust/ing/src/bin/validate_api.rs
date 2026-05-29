@@ -142,8 +142,12 @@ async fn main() -> Result<()> {
     for symbol in SYMBOLS {
         stats.trade_count.insert(symbol.to_string(), 0);
         stats.trades_with_wallet.insert(symbol.to_string(), 0);
-        stats.unique_makers.insert(symbol.to_string(), HashSet::new());
-        stats.unique_takers.insert(symbol.to_string(), HashSet::new());
+        stats
+            .unique_makers
+            .insert(symbol.to_string(), HashSet::new());
+        stats
+            .unique_takers
+            .insert(symbol.to_string(), HashSet::new());
         stats.book_update_count.insert(symbol.to_string(), 0);
         stats.max_book_levels.insert(symbol.to_string(), 0);
         stats.asset_ctx_updates.insert(symbol.to_string(), 0);
@@ -171,7 +175,9 @@ async fn main() -> Result<()> {
                 "coin": symbol
             }),
         };
-        ws_stream.send(Message::Text(serde_json::to_string(&sub)?)).await?;
+        ws_stream
+            .send(Message::Text(serde_json::to_string(&sub)?))
+            .await?;
 
         // Subscribe to trades
         let sub = SubscriptionRequest {
@@ -181,7 +187,9 @@ async fn main() -> Result<()> {
                 "coin": symbol
             }),
         };
-        ws_stream.send(Message::Text(serde_json::to_string(&sub)?)).await?;
+        ws_stream
+            .send(Message::Text(serde_json::to_string(&sub)?))
+            .await?;
 
         // Subscribe to activeAssetCtx
         let sub = SubscriptionRequest {
@@ -191,13 +199,21 @@ async fn main() -> Result<()> {
                 "coin": symbol
             }),
         };
-        ws_stream.send(Message::Text(serde_json::to_string(&sub)?)).await?;
+        ws_stream
+            .send(Message::Text(serde_json::to_string(&sub)?))
+            .await?;
 
-        println!("  ✓ Subscribed to {} (l2Book, trades, activeAssetCtx)", symbol);
+        println!(
+            "  ✓ Subscribed to {} (l2Book, trades, activeAssetCtx)",
+            symbol
+        );
     }
 
     // Test 3: Collect data for TEST_DURATION_SECS
-    println!("\n[TEST 3] Collecting data for {} seconds...", TEST_DURATION_SECS);
+    println!(
+        "\n[TEST 3] Collecting data for {} seconds...",
+        TEST_DURATION_SECS
+    );
     let test_start = Instant::now();
     let test_duration = Duration::from_secs(TEST_DURATION_SECS);
 
@@ -225,17 +241,26 @@ async fn main() -> Result<()> {
 
                     match response.channel.as_str() {
                         "trades" => {
-                            if let Ok(trades) = serde_json::from_value::<Vec<WsTrade>>(response.data) {
+                            if let Ok(trades) =
+                                serde_json::from_value::<Vec<WsTrade>>(response.data)
+                            {
                                 for trade in trades {
                                     let symbol = trade.coin.clone();
                                     *stats.trade_count.entry(symbol.clone()).or_insert(0) += 1;
 
                                     if let Some((maker, taker)) = &trade.users {
-                                        *stats.trades_with_wallet.entry(symbol.clone()).or_insert(0) += 1;
-                                        stats.unique_makers.entry(symbol.clone())
+                                        *stats
+                                            .trades_with_wallet
+                                            .entry(symbol.clone())
+                                            .or_insert(0) += 1;
+                                        stats
+                                            .unique_makers
+                                            .entry(symbol.clone())
                                             .or_insert_with(HashSet::new)
                                             .insert(maker.clone());
-                                        stats.unique_takers.entry(symbol.clone())
+                                        stats
+                                            .unique_takers
+                                            .entry(symbol.clone())
                                             .or_insert_with(HashSet::new)
                                             .insert(taker.clone());
                                     }
@@ -276,8 +301,10 @@ async fn main() -> Result<()> {
                 if progress_counter % 1000 == 0 {
                     let elapsed = test_start.elapsed().as_secs();
                     let total_trades: usize = stats.trade_count.values().sum();
-                    print!("\r  {} messages | {} trades | {}s/{}s",
-                        progress_counter, total_trades, elapsed, TEST_DURATION_SECS);
+                    print!(
+                        "\r  {} messages | {} trades | {}s/{}s",
+                        progress_counter, total_trades, elapsed, TEST_DURATION_SECS
+                    );
                     std::io::stdout().flush().ok();
                 }
             }
@@ -335,12 +362,8 @@ fn generate_report(stats: &ValidationStats) -> ValidationReport {
         0.0
     };
 
-    let unique_makers: usize = stats.unique_makers.values()
-        .map(|s| s.len())
-        .sum();
-    let unique_takers: usize = stats.unique_takers.values()
-        .map(|s| s.len())
-        .sum();
+    let unique_makers: usize = stats.unique_makers.values().map(|s| s.len()).sum();
+    let unique_takers: usize = stats.unique_takers.values().map(|s| s.len()).sum();
 
     // Data quality score: 0-100
     let mut quality_score = 100.0;
@@ -363,12 +386,18 @@ fn generate_report(stats: &ValidationStats) -> ValidationReport {
         if wallet_coverage == 0.0 {
             blockers.push("CRITICAL: No wallet addresses in trade data. Public API may not include user field.".to_string());
         } else {
-            warnings.push(format!("Wallet coverage only {:.1}% - some trades missing user info", wallet_coverage));
+            warnings.push(format!(
+                "Wallet coverage only {:.1}% - some trades missing user info",
+                wallet_coverage
+            ));
         }
     }
 
     if stats.max_gap_ms > 5000 {
-        warnings.push(format!("Maximum message gap: {}ms (threshold: 5000ms)", stats.max_gap_ms));
+        warnings.push(format!(
+            "Maximum message gap: {}ms (threshold: 5000ms)",
+            stats.max_gap_ms
+        ));
     }
 
     if stats.gaps_over_5s > 0 {
@@ -376,11 +405,17 @@ fn generate_report(stats: &ValidationStats) -> ValidationReport {
     }
 
     if stats.connection_drops > 0 {
-        warnings.push(format!("{} connection drops during test", stats.connection_drops));
+        warnings.push(format!(
+            "{} connection drops during test",
+            stats.connection_drops
+        ));
     }
 
     if total_trades < 100 {
-        warnings.push(format!("Low trade volume: {} trades in {} seconds", total_trades, TEST_DURATION_SECS));
+        warnings.push(format!(
+            "Low trade volume: {} trades in {} seconds",
+            total_trades, TEST_DURATION_SECS
+        ));
     }
 
     // Determine go/no-go

@@ -1,6 +1,6 @@
 //! Metrics collection for monitoring
 
-use metrics::{counter, histogram, describe_counter, describe_histogram, Unit};
+use metrics::{counter, describe_counter, describe_histogram, histogram, Unit};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -52,7 +52,8 @@ impl Metrics {
             "ing_errors_total",
             "symbol" => symbol.to_string(),
             "type" => error_type.to_string()
-        ).increment(1);
+        )
+        .increment(1);
     }
 
     /// Record update processing latency
@@ -60,7 +61,8 @@ impl Metrics {
         histogram!(
             "ing_update_latency_seconds",
             "symbol" => symbol.to_string()
-        ).record(duration.as_secs_f64());
+        )
+        .record(duration.as_secs_f64());
     }
 
     /// Record feature computation latency
@@ -68,7 +70,8 @@ impl Metrics {
         histogram!(
             "ing_feature_latency_seconds",
             "symbol" => symbol.to_string()
-        ).record(duration.as_secs_f64());
+        )
+        .record(duration.as_secs_f64());
     }
 }
 

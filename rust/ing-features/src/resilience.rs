@@ -143,7 +143,9 @@ pub struct ResilienceFeatures {
 }
 
 impl ResilienceFeatures {
-    pub fn count() -> usize { 3 }
+    pub fn count() -> usize {
+        3
+    }
 
     pub fn names() -> Vec<&'static str> {
         vec![

@@ -22,10 +22,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace -- -W clippy::all
       - name: Build
-        run: cargo build --package ing
+        run: cargo build --workspace
       - name: Test
-        run: cargo test --package ing
+        run: cargo test --workspace
 
   frontend:
     name: Frontend build & tests

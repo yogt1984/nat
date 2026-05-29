@@ -86,10 +86,9 @@ impl RedisClient {
 
     /// Create a pub/sub subscription
     pub async fn subscribe(&self, channel: &str) -> Result<redis::aio::PubSub, redis::RedisError> {
-        let client = redis::Client::open(format!(
-            "{}",
-            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string())
-        ))?;
+        let client = redis::Client::open(
+            std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string()),
+        )?;
         let mut pubsub = client.get_async_pubsub().await?;
         pubsub.subscribe(channel).await?;
         Ok(pubsub)

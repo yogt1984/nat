@@ -155,9 +155,16 @@ impl ClassificationMetrics {
         };
 
         Self {
-            tp, fp, tn, fn_,
-            precision, recall, f1, accuracy,
-            lift, baseline_rate,
+            tp,
+            fp,
+            tn,
+            fn_,
+            precision,
+            recall,
+            f1,
+            accuracy,
+            lift,
+            baseline_rate,
         }
     }
 }
@@ -337,10 +344,14 @@ impl H3TestData {
 
     /// Check if cluster exists at given thresholds
     pub fn has_cluster(&self, idx: usize, amount: f64, distance_bucket: usize) -> (bool, bool) {
-        let above = self.liquidation_above.get(idx)
+        let above = self
+            .liquidation_above
+            .get(idx)
             .map(|a| a.get(distance_bucket).copied().unwrap_or(0.0) >= amount)
             .unwrap_or(false);
-        let below = self.liquidation_below.get(idx)
+        let below = self
+            .liquidation_below
+            .get(idx)
             .map(|a| a.get(distance_bucket).copied().unwrap_or(0.0) >= amount)
             .unwrap_or(false);
         (above, below)
@@ -348,10 +359,15 @@ impl H3TestData {
 
     /// Get distance bucket index for a threshold
     pub fn distance_to_bucket(distance: f64) -> usize {
-        if distance <= 0.01 { 0 }
-        else if distance <= 0.02 { 1 }
-        else if distance <= 0.05 { 2 }
-        else { 3 }
+        if distance <= 0.01 {
+            0
+        } else if distance <= 0.02 {
+            1
+        } else if distance <= 0.05 {
+            2
+        } else {
+            3
+        }
     }
 }
 
@@ -370,9 +386,10 @@ pub fn run_h3_liquidation_cascade_test(data: &H3TestData, config: &H3TestConfig)
     let cascade_count = cascades.iter().filter(|&&c| c).count();
 
     if cascade_count < 10 {
-        return make_error_result(config, &format!(
-            "Too few cascade events: {} (need 10+)", cascade_count
-        ));
+        return make_error_result(
+            config,
+            &format!("Too few cascade events: {} (need 10+)", cascade_count),
+        );
     }
 
     // Test all threshold combinations
@@ -380,9 +397,8 @@ pub fn run_h3_liquidation_cascade_test(data: &H3TestData, config: &H3TestConfig)
 
     for &amount in &config.amount_thresholds {
         for &distance in &config.distance_thresholds {
-            let result = test_threshold_combination(
-                data, &cascades, amount, distance, train_size, config
-            );
+            let result =
+                test_threshold_combination(data, &cascades, amount, distance, train_size, config);
             results.push(result);
         }
     }
@@ -392,22 +408,39 @@ pub fn run_h3_liquidation_cascade_test(data: &H3TestData, config: &H3TestConfig)
     let n_total = results.len();
 
     // Find best threshold
-    let best_threshold = results.iter()
+    let best_threshold = results
+        .iter()
         .filter(|r| r.passes)
         .max_by(|a, b| {
             // Rank by OOS F1 score
-            a.oos_metrics.f1.partial_cmp(&b.oos_metrics.f1)
+            a.oos_metrics
+                .f1
+                .partial_cmp(&b.oos_metrics.f1)
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .cloned();
 
     // Lead time analysis (using best threshold or first passing)
-    let lead_time = best_threshold.as_ref()
-        .map(|t| analyze_lead_time(data, &cascades, t.amount_threshold, t.distance_threshold, config));
+    let lead_time = best_threshold.as_ref().map(|t| {
+        analyze_lead_time(
+            data,
+            &cascades,
+            t.amount_threshold,
+            t.distance_threshold,
+            config,
+        )
+    });
 
     // Direction analysis
-    let direction = best_threshold.as_ref()
-        .map(|t| analyze_direction(data, &cascades, t.amount_threshold, t.distance_threshold, config));
+    let direction = best_threshold.as_ref().map(|t| {
+        analyze_direction(
+            data,
+            &cascades,
+            t.amount_threshold,
+            t.distance_threshold,
+            config,
+        )
+    });
 
     // Determine decision
     let decision = determine_h3_decision(&results, &best_threshold, config, n_passing);
@@ -415,8 +448,14 @@ pub fn run_h3_liquidation_cascade_test(data: &H3TestData, config: &H3TestConfig)
     // Generate outputs
     let summary = generate_h3_summary(&decision, &best_threshold, n_passing, n_total);
     let report = generate_h3_report(
-        &results, &best_threshold, &lead_time, &direction,
-        &decision, config, n, cascade_count
+        &results,
+        &best_threshold,
+        &lead_time,
+        &direction,
+        &decision,
+        config,
+        n,
+        cascade_count,
     );
 
     H3TestResult {
@@ -445,7 +484,10 @@ fn make_error_result(config: &H3TestConfig, error: &str) -> H3TestResult {
         n_total: 0,
         decision: H3Decision::NoGo,
         summary: format!("Data validation failed: {}", error),
-        report: format!("# H3 Test Report\n\n**Status:** FAILED\n\n**Reason:** {}", error),
+        report: format!(
+            "# H3 Test Report\n\n**Status:** FAILED\n\n**Reason:** {}",
+            error
+        ),
         n_samples: 0,
     }
 }
@@ -473,29 +515,16 @@ fn test_threshold_combination(
     let cascade_count = cascades.iter().filter(|&&c| c).count();
 
     // Split into train/test
-    let (train_preds, train_actuals) = (
-        &cluster_signals[..train_size],
-        &cascades[..train_size]
-    );
-    let (test_preds, test_actuals) = (
-        &cluster_signals[train_size..],
-        &cascades[train_size..]
-    );
+    let (train_preds, train_actuals) = (&cluster_signals[..train_size], &cascades[..train_size]);
+    let (test_preds, test_actuals) = (&cluster_signals[train_size..], &cascades[train_size..]);
 
     // Compute metrics
-    let is_metrics = ClassificationMetrics::compute(
-        &train_preds.to_vec(),
-        &train_actuals.to_vec()
-    );
-    let oos_metrics = ClassificationMetrics::compute(
-        &test_preds.to_vec(),
-        &test_actuals.to_vec()
-    );
+    let is_metrics = ClassificationMetrics::compute(train_preds, train_actuals);
+    let oos_metrics = ClassificationMetrics::compute(test_preds, test_actuals);
 
     // Conditional probabilities
-    let (p_cascade_cluster, p_cascade_no_cluster) = compute_conditional_probs(
-        &cluster_signals, cascades
-    );
+    let (p_cascade_cluster, p_cascade_no_cluster) =
+        compute_conditional_probs(&cluster_signals, cascades);
 
     let conditional_lift = if p_cascade_no_cluster > 1e-10 {
         p_cascade_cluster / p_cascade_no_cluster
@@ -507,7 +536,11 @@ fn test_threshold_combination(
 
     // Determine pass/fail
     let (passes, reason) = evaluate_threshold(
-        &is_metrics, &oos_metrics, conditional_lift, cluster_count, config
+        &is_metrics,
+        &oos_metrics,
+        conditional_lift,
+        cluster_count,
+        config,
     );
 
     ThresholdResult {
@@ -572,32 +605,45 @@ fn evaluate_threshold(
 ) -> (bool, String) {
     // Check cluster count
     if cluster_count < config.min_cluster_count {
-        return (false, format!(
-            "Too few clusters: {} < {}", cluster_count, config.min_cluster_count
-        ));
+        return (
+            false,
+            format!(
+                "Too few clusters: {} < {}",
+                cluster_count, config.min_cluster_count
+            ),
+        );
     }
 
     // Check lift
     if lift < config.min_lift {
-        return (false, format!(
-            "Lift too low: {:.2}x < {:.2}x", lift, config.min_lift
-        ));
+        return (
+            false,
+            format!("Lift too low: {:.2}x < {:.2}x", lift, config.min_lift),
+        );
     }
 
     // Check OOS precision
     if oos_metrics.precision < config.precision_failure {
-        return (false, format!(
-            "OOS precision too low: {:.1}% < {:.1}%",
-            oos_metrics.precision * 100.0, config.precision_failure * 100.0
-        ));
+        return (
+            false,
+            format!(
+                "OOS precision too low: {:.1}% < {:.1}%",
+                oos_metrics.precision * 100.0,
+                config.precision_failure * 100.0
+            ),
+        );
     }
 
     // Check for overfitting (OOS should be at least 50% of IS)
     if is_metrics.precision > 0.0 && oos_metrics.precision < is_metrics.precision * 0.5 {
-        return (false, format!(
-            "Overfitting: OOS precision {:.1}% < 50% of IS {:.1}%",
-            oos_metrics.precision * 100.0, is_metrics.precision * 100.0
-        ));
+        return (
+            false,
+            format!(
+                "Overfitting: OOS precision {:.1}% < 50% of IS {:.1}%",
+                oos_metrics.precision * 100.0,
+                is_metrics.precision * 100.0
+            ),
+        );
     }
 
     // Success criteria
@@ -606,18 +652,26 @@ fn evaluate_threshold(
     let _recall_passes = oos_metrics.recall >= config.min_recall;
 
     if lift_passes && precision_passes {
-        (true, format!(
-            "PASS: lift={:.2}x, precision={:.1}%, recall={:.1}%",
-            lift, oos_metrics.precision * 100.0, oos_metrics.recall * 100.0
-        ))
+        (
+            true,
+            format!(
+                "PASS: lift={:.2}x, precision={:.1}%, recall={:.1}%",
+                lift,
+                oos_metrics.precision * 100.0,
+                oos_metrics.recall * 100.0
+            ),
+        )
     } else {
         let mut reasons = Vec::new();
         if !lift_passes {
             reasons.push(format!("lift={:.2}x<{:.2}x", lift, config.min_lift));
         }
         if !precision_passes {
-            reasons.push(format!("prec={:.1}%<{:.1}%",
-                oos_metrics.precision * 100.0, config.min_precision * 100.0));
+            reasons.push(format!(
+                "prec={:.1}%<{:.1}%",
+                oos_metrics.precision * 100.0,
+                config.min_precision * 100.0
+            ));
         }
         (false, format!("Near-miss: {}", reasons.join(", ")))
     }
@@ -795,7 +849,9 @@ fn determine_h3_decision(
     }
 
     // Check if clusters are too rare
-    let all_rare = results.iter().all(|r| r.cluster_count < config.min_cluster_count);
+    let all_rare = results
+        .iter()
+        .all(|r| r.cluster_count < config.min_cluster_count);
     if all_rare {
         return H3Decision::Inconclusive;
     }
@@ -810,14 +866,16 @@ fn generate_h3_summary(
     n_total: usize,
 ) -> String {
     match best {
-        Some(b) => format!(
+        Some(b) => {
+            format!(
             "H3 {} - {}/{} thresholds pass. Best: ${:.0}M @ {:.0}%, lift={:.2}x, precision={:.1}%",
             decision, n_passing, n_total,
             b.amount_threshold / 1_000_000.0,
             b.distance_threshold * 100.0,
             b.conditional_lift,
             b.oos_metrics.precision * 100.0
-        ),
+        )
+        }
         None => format!(
             "H3 {} - {}/{} thresholds pass. No threshold met criteria.",
             decision, n_passing, n_total
@@ -837,7 +895,8 @@ fn generate_h3_report(
 ) -> String {
     let mut report = String::new();
 
-    report.push_str("# H3 Hypothesis Test Report: Does Liquidation Clustering Predict Cascades?\n\n");
+    report
+        .push_str("# H3 Hypothesis Test Report: Does Liquidation Clustering Predict Cascades?\n\n");
 
     // Decision banner
     report.push_str(&format!("## Decision: **{}**\n\n", decision));
@@ -845,20 +904,48 @@ fn generate_h3_report(
     // Data summary
     report.push_str("## Data Summary\n\n");
     report.push_str(&format!("- Total samples: {}\n", n_samples));
-    report.push_str(&format!("- Cascade events (>{:.0}% move): {}\n", config.cascade_threshold * 100.0, cascade_count));
-    report.push_str(&format!("- Cascade rate: {:.2}%\n", cascade_count as f64 / n_samples as f64 * 100.0));
-    report.push_str(&format!("- Cascade horizon: {} periods\n\n", config.cascade_horizon));
+    report.push_str(&format!(
+        "- Cascade events (>{:.0}% move): {}\n",
+        config.cascade_threshold * 100.0,
+        cascade_count
+    ));
+    report.push_str(&format!(
+        "- Cascade rate: {:.2}%\n",
+        cascade_count as f64 / n_samples as f64 * 100.0
+    ));
+    report.push_str(&format!(
+        "- Cascade horizon: {} periods\n\n",
+        config.cascade_horizon
+    ));
 
     // Configuration
     report.push_str("## Test Configuration\n\n");
-    report.push_str(&format!("- Amount thresholds: {:?}\n",
-        config.amount_thresholds.iter().map(|a| format!("${:.0}M", a / 1e6)).collect::<Vec<_>>()));
-    report.push_str(&format!("- Distance thresholds: {:?}\n",
-        config.distance_thresholds.iter().map(|d| format!("{:.0}%", d * 100.0)).collect::<Vec<_>>()));
+    report.push_str(&format!(
+        "- Amount thresholds: {:?}\n",
+        config
+            .amount_thresholds
+            .iter()
+            .map(|a| format!("${:.0}M", a / 1e6))
+            .collect::<Vec<_>>()
+    ));
+    report.push_str(&format!(
+        "- Distance thresholds: {:?}\n",
+        config
+            .distance_thresholds
+            .iter()
+            .map(|d| format!("{:.0}%", d * 100.0))
+            .collect::<Vec<_>>()
+    ));
     report.push_str(&format!("- Min lift: {:.1}x\n", config.min_lift));
-    report.push_str(&format!("- Min precision: {:.0}%\n", config.min_precision * 100.0));
-    report.push_str(&format!("- Train/test split: {:.0}%/{:.0}%\n\n",
-        config.train_ratio * 100.0, (1.0 - config.train_ratio) * 100.0));
+    report.push_str(&format!(
+        "- Min precision: {:.0}%\n",
+        config.min_precision * 100.0
+    ));
+    report.push_str(&format!(
+        "- Train/test split: {:.0}%/{:.0}%\n\n",
+        config.train_ratio * 100.0,
+        (1.0 - config.train_ratio) * 100.0
+    ));
 
     // Results matrix
     report.push_str("## Threshold Results Matrix\n\n");
@@ -871,20 +958,21 @@ fn generate_h3_report(
     for _ in &config.distance_thresholds {
         report.push_str("------|");
     }
-    report.push_str("\n");
+    report.push('\n');
 
     for amount in &config.amount_thresholds {
         report.push_str(&format!("| ${:.0}M |", amount / 1e6));
         for distance in &config.distance_thresholds {
-            let result = results.iter()
-                .find(|r| (r.amount_threshold - amount).abs() < 1.0
-                    && (r.distance_threshold - distance).abs() < 0.001);
+            let result = results.iter().find(|r| {
+                (r.amount_threshold - amount).abs() < 1.0
+                    && (r.distance_threshold - distance).abs() < 0.001
+            });
             match result {
                 Some(r) => report.push_str(&format!(" {:.2}x |", r.conditional_lift)),
                 None => report.push_str(" - |"),
             }
         }
-        report.push_str("\n");
+        report.push('\n');
     }
 
     // OOS Precision matrix
@@ -897,20 +985,21 @@ fn generate_h3_report(
     for _ in &config.distance_thresholds {
         report.push_str("-------|");
     }
-    report.push_str("\n");
+    report.push('\n');
 
     for amount in &config.amount_thresholds {
         report.push_str(&format!("| ${:.0}M |", amount / 1e6));
         for distance in &config.distance_thresholds {
-            let result = results.iter()
-                .find(|r| (r.amount_threshold - amount).abs() < 1.0
-                    && (r.distance_threshold - distance).abs() < 0.001);
+            let result = results.iter().find(|r| {
+                (r.amount_threshold - amount).abs() < 1.0
+                    && (r.distance_threshold - distance).abs() < 0.001
+            });
             match result {
                 Some(r) => report.push_str(&format!(" {:.1}% |", r.oos_metrics.precision * 100.0)),
                 None => report.push_str(" - |"),
             }
         }
-        report.push_str("\n");
+        report.push('\n');
     }
 
     // Cluster count matrix
@@ -923,55 +1012,101 @@ fn generate_h3_report(
     for _ in &config.distance_thresholds {
         report.push_str("------|");
     }
-    report.push_str("\n");
+    report.push('\n');
 
     for amount in &config.amount_thresholds {
         report.push_str(&format!("| ${:.0}M |", amount / 1e6));
         for distance in &config.distance_thresholds {
-            let result = results.iter()
-                .find(|r| (r.amount_threshold - amount).abs() < 1.0
-                    && (r.distance_threshold - distance).abs() < 0.001);
+            let result = results.iter().find(|r| {
+                (r.amount_threshold - amount).abs() < 1.0
+                    && (r.distance_threshold - distance).abs() < 0.001
+            });
             match result {
                 Some(r) => report.push_str(&format!(" {} |", r.cluster_count)),
                 None => report.push_str(" - |"),
             }
         }
-        report.push_str("\n");
+        report.push('\n');
     }
 
     // Best threshold details
     if let Some(best) = best {
         report.push_str("\n## Best Performing Threshold\n\n");
-        report.push_str(&format!("**Amount:** ${:.0}M\n", best.amount_threshold / 1e6));
-        report.push_str(&format!("**Distance:** {:.0}%\n", best.distance_threshold * 100.0));
-        report.push_str(&format!("**Cluster Occurrences:** {}\n\n", best.cluster_count));
+        report.push_str(&format!(
+            "**Amount:** ${:.0}M\n",
+            best.amount_threshold / 1e6
+        ));
+        report.push_str(&format!(
+            "**Distance:** {:.0}%\n",
+            best.distance_threshold * 100.0
+        ));
+        report.push_str(&format!(
+            "**Cluster Occurrences:** {}\n\n",
+            best.cluster_count
+        ));
 
         report.push_str("### Conditional Probabilities\n\n");
-        report.push_str(&format!("- P(cascade | cluster): {:.2}%\n", best.p_cascade_given_cluster * 100.0));
-        report.push_str(&format!("- P(cascade | no cluster): {:.2}%\n", best.p_cascade_given_no_cluster * 100.0));
+        report.push_str(&format!(
+            "- P(cascade | cluster): {:.2}%\n",
+            best.p_cascade_given_cluster * 100.0
+        ));
+        report.push_str(&format!(
+            "- P(cascade | no cluster): {:.2}%\n",
+            best.p_cascade_given_no_cluster * 100.0
+        ));
         report.push_str(&format!("- **Lift:** {:.2}x\n\n", best.conditional_lift));
 
         report.push_str("### Classification Metrics (OOS)\n\n");
-        report.push_str(&format!("- Precision: {:.1}%\n", best.oos_metrics.precision * 100.0));
-        report.push_str(&format!("- Recall: {:.1}%\n", best.oos_metrics.recall * 100.0));
+        report.push_str(&format!(
+            "- Precision: {:.1}%\n",
+            best.oos_metrics.precision * 100.0
+        ));
+        report.push_str(&format!(
+            "- Recall: {:.1}%\n",
+            best.oos_metrics.recall * 100.0
+        ));
         report.push_str(&format!("- F1 Score: {:.3}\n", best.oos_metrics.f1));
-        report.push_str(&format!("- Accuracy: {:.1}%\n\n", best.oos_metrics.accuracy * 100.0));
+        report.push_str(&format!(
+            "- Accuracy: {:.1}%\n\n",
+            best.oos_metrics.accuracy * 100.0
+        ));
 
         report.push_str("### Confusion Matrix (OOS)\n\n");
         report.push_str("| | Cascade | No Cascade |\n");
         report.push_str("|----------|---------|------------|\n");
-        report.push_str(&format!("| Cluster | {} (TP) | {} (FP) |\n", best.oos_metrics.tp, best.oos_metrics.fp));
-        report.push_str(&format!("| No Cluster | {} (FN) | {} (TN) |\n\n", best.oos_metrics.fn_, best.oos_metrics.tn));
+        report.push_str(&format!(
+            "| Cluster | {} (TP) | {} (FP) |\n",
+            best.oos_metrics.tp, best.oos_metrics.fp
+        ));
+        report.push_str(&format!(
+            "| No Cluster | {} (FN) | {} (TN) |\n\n",
+            best.oos_metrics.fn_, best.oos_metrics.tn
+        ));
     }
 
     // Lead time analysis
     if let Some(lt) = lead_time {
         report.push_str("## Lead Time Analysis\n\n");
-        report.push_str(&format!("- Mean lead time: {:.1} periods\n", lt.mean_lead_time));
-        report.push_str(&format!("- Median lead time: {:.1} periods\n", lt.median_lead_time));
-        report.push_str(&format!("- Range: {} - {} periods\n", lt.min_lead_time, lt.max_lead_time));
-        report.push_str(&format!("- Actionable (≥5 periods): {:.1}%\n", lt.pct_actionable_5 * 100.0));
-        report.push_str(&format!("- Actionable (≥10 periods): {:.1}%\n\n", lt.pct_actionable_10 * 100.0));
+        report.push_str(&format!(
+            "- Mean lead time: {:.1} periods\n",
+            lt.mean_lead_time
+        ));
+        report.push_str(&format!(
+            "- Median lead time: {:.1} periods\n",
+            lt.median_lead_time
+        ));
+        report.push_str(&format!(
+            "- Range: {} - {} periods\n",
+            lt.min_lead_time, lt.max_lead_time
+        ));
+        report.push_str(&format!(
+            "- Actionable (≥5 periods): {:.1}%\n",
+            lt.pct_actionable_5 * 100.0
+        ));
+        report.push_str(&format!(
+            "- Actionable (≥10 periods): {:.1}%\n\n",
+            lt.pct_actionable_10 * 100.0
+        ));
     }
 
     // Direction analysis
@@ -979,48 +1114,84 @@ fn generate_h3_report(
         report.push_str("## Direction Analysis\n\n");
         report.push_str(&format!("- Cascades up: {}\n", dir.cascades_up));
         report.push_str(&format!("- Cascades down: {}\n", dir.cascades_down));
-        report.push_str(&format!("- P(up | cluster above): {:.1}%\n", dir.p_up_given_cluster_above * 100.0));
-        report.push_str(&format!("- P(down | cluster below): {:.1}%\n", dir.p_down_given_cluster_below * 100.0));
-        report.push_str(&format!("- Asymmetry predictive: {}\n\n",
-            if dir.asymmetry_predictive { "Yes" } else { "No" }));
+        report.push_str(&format!(
+            "- P(up | cluster above): {:.1}%\n",
+            dir.p_up_given_cluster_above * 100.0
+        ));
+        report.push_str(&format!(
+            "- P(down | cluster below): {:.1}%\n",
+            dir.p_down_given_cluster_below * 100.0
+        ));
+        report.push_str(&format!(
+            "- Asymmetry predictive: {}\n\n",
+            if dir.asymmetry_predictive {
+                "Yes"
+            } else {
+                "No"
+            }
+        ));
     }
 
     // Success criteria evaluation
     report.push_str("## Success Criteria Evaluation\n\n");
 
     let n_passing = results.iter().filter(|r| r.passes).count();
-    let any_high_lift = results.iter().any(|r| r.conditional_lift >= config.min_lift);
-    let any_good_precision = results.iter().any(|r| r.oos_metrics.precision >= config.min_precision);
+    let any_high_lift = results
+        .iter()
+        .any(|r| r.conditional_lift >= config.min_lift);
+    let any_good_precision = results
+        .iter()
+        .any(|r| r.oos_metrics.precision >= config.min_precision);
 
     let lift_check = if any_high_lift { "✓" } else { "✗" };
     let precision_check = if any_good_precision { "✓" } else { "✗" };
     let passing_check = if n_passing > 0 { "✓" } else { "✗" };
 
-    report.push_str(&format!("- {} Lift ≥ {:.1}x for at least one threshold\n", lift_check, config.min_lift));
-    report.push_str(&format!("- {} OOS Precision ≥ {:.0}% for at least one threshold\n",
-        precision_check, config.min_precision * 100.0));
-    report.push_str(&format!("- {} At least one threshold passes all criteria: {}\n\n",
-        passing_check, n_passing));
+    report.push_str(&format!(
+        "- {} Lift ≥ {:.1}x for at least one threshold\n",
+        lift_check, config.min_lift
+    ));
+    report.push_str(&format!(
+        "- {} OOS Precision ≥ {:.0}% for at least one threshold\n",
+        precision_check,
+        config.min_precision * 100.0
+    ));
+    report.push_str(&format!(
+        "- {} At least one threshold passes all criteria: {}\n\n",
+        passing_check, n_passing
+    ));
 
     // Conclusion
     report.push_str("## Conclusion\n\n");
     match decision {
         H3Decision::Go => {
-            report.push_str("**ACCEPT H3:** Liquidation clustering demonstrates predictive power for \
+            report.push_str(
+                "**ACCEPT H3:** Liquidation clustering demonstrates predictive power for \
                 cascade events. The signal provides meaningful lift over baseline and maintains \
-                precision in out-of-sample testing.\n\n");
-            report.push_str("**Recommendation:** Use liquidation cluster signals for cascade prediction \
-                and risk management.\n");
+                precision in out-of-sample testing.\n\n",
+            );
+            report.push_str(
+                "**Recommendation:** Use liquidation cluster signals for cascade prediction \
+                and risk management.\n",
+            );
         }
         H3Decision::NoGo => {
-            report.push_str("**REJECT H3:** No evidence that liquidation clustering predicts cascades. \
-                Either lift is insufficient, precision is too low, or clusters are too rare.\n\n");
-            report.push_str("**Recommendation:** Do not rely on liquidation clusters for cascade prediction.\n");
+            report.push_str(
+                "**REJECT H3:** No evidence that liquidation clustering predicts cascades. \
+                Either lift is insufficient, precision is too low, or clusters are too rare.\n\n",
+            );
+            report.push_str(
+                "**Recommendation:** Do not rely on liquidation clusters for cascade prediction.\n",
+            );
         }
         H3Decision::Inconclusive => {
-            report.push_str("**INCONCLUSIVE:** Mixed results across thresholds. Some show promise but \
-                don't meet all criteria. More data or different parameters may help.\n\n");
-            report.push_str("**Recommendation:** Gather more data, especially during volatile periods.\n");
+            report.push_str(
+                "**INCONCLUSIVE:** Mixed results across thresholds. Some show promise but \
+                don't meet all criteria. More data or different parameters may help.\n\n",
+            );
+            report.push_str(
+                "**Recommendation:** Gather more data, especially during volatile periods.\n",
+            );
         }
     }
 
@@ -1064,13 +1235,17 @@ mod tests {
             // Higher values near cascade events
             let has_cluster = (i as f64 * 0.07).sin() > 0.5;
 
-            let base_liq = if has_cluster { 15_000_000.0 } else { 2_000_000.0 };
+            let base_liq = if has_cluster {
+                15_000_000.0
+            } else {
+                2_000_000.0
+            };
 
             liquidation_above.push([
-                base_liq * 0.3,  // 1%
-                base_liq * 0.5,  // 2%
-                base_liq * 0.8,  // 5%
-                base_liq * 1.0,  // 10%
+                base_liq * 0.3, // 1%
+                base_liq * 0.5, // 2%
+                base_liq * 0.8, // 5%
+                base_liq * 1.0, // 10%
             ]);
 
             liquidation_below.push([
@@ -1094,7 +1269,11 @@ mod tests {
             if (i as f64 * 0.13 + 0.5).sin() > (1.0 - cascade_prob * 2.0) {
                 // Simulate cascade: large price move
                 if i + 60 < n {
-                    let direction = if (i as f64 * 0.23).sin() > 0.0 { 1.0 } else { -1.0 };
+                    let direction = if (i as f64 * 0.23).sin() > 0.0 {
+                        1.0
+                    } else {
+                        -1.0
+                    };
                     for j in 1..=60 {
                         let idx = (i + j).min(n - 1);
                         prices[idx] = prices[i] * (1.0 + direction * 0.06 * (j as f64 / 60.0));
@@ -1216,12 +1395,12 @@ mod tests {
     #[test]
     fn test_distance_to_bucket() {
         assert_eq!(H3TestData::distance_to_bucket(0.005), 0); // <1%
-        assert_eq!(H3TestData::distance_to_bucket(0.01), 0);   // 1%
-        assert_eq!(H3TestData::distance_to_bucket(0.015), 1);  // 1.5%
-        assert_eq!(H3TestData::distance_to_bucket(0.02), 1);   // 2%
-        assert_eq!(H3TestData::distance_to_bucket(0.03), 2);   // 3%
-        assert_eq!(H3TestData::distance_to_bucket(0.05), 2);   // 5%
-        assert_eq!(H3TestData::distance_to_bucket(0.10), 3);   // 10%
+        assert_eq!(H3TestData::distance_to_bucket(0.01), 0); // 1%
+        assert_eq!(H3TestData::distance_to_bucket(0.015), 1); // 1.5%
+        assert_eq!(H3TestData::distance_to_bucket(0.02), 1); // 2%
+        assert_eq!(H3TestData::distance_to_bucket(0.03), 2); // 3%
+        assert_eq!(H3TestData::distance_to_bucket(0.05), 2); // 5%
+        assert_eq!(H3TestData::distance_to_bucket(0.10), 3); // 10%
     }
 
     #[test]
@@ -1320,20 +1499,16 @@ mod tests {
     #[test]
     fn test_has_cluster() {
         let data = H3TestData {
-            liquidation_above: vec![
-                [1_000_000.0, 5_000_000.0, 10_000_000.0, 15_000_000.0],
-            ],
-            liquidation_below: vec![
-                [2_000_000.0, 8_000_000.0, 12_000_000.0, 20_000_000.0],
-            ],
+            liquidation_above: vec![[1_000_000.0, 5_000_000.0, 10_000_000.0, 15_000_000.0]],
+            liquidation_below: vec![[2_000_000.0, 8_000_000.0, 12_000_000.0, 20_000_000.0]],
             prices: vec![50000.0],
             timestamps_ms: vec![0],
         };
 
         // Check 2% bucket (index 1) for $5M threshold
         let (above, below) = data.has_cluster(0, 5_000_000.0, 1);
-        assert!(above);  // 5M >= 5M
-        assert!(below);  // 8M >= 5M
+        assert!(above); // 5M >= 5M
+        assert!(below); // 8M >= 5M
 
         // Check 1% bucket (index 0) for $5M threshold
         let (above, below) = data.has_cluster(0, 5_000_000.0, 0);

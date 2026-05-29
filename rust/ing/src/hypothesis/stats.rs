@@ -98,10 +98,7 @@ pub fn spearman_correlation(x: &[f64], y: &[f64]) -> f64 {
 /// Compute ranks for a slice (handles ties by averaging)
 fn compute_ranks(values: &[f64]) -> Vec<f64> {
     let n = values.len();
-    let mut indexed: Vec<(usize, f64)> = values.iter()
-        .enumerate()
-        .map(|(i, &v)| (i, v))
-        .collect();
+    let mut indexed: Vec<(usize, f64)> = values.iter().enumerate().map(|(i, &v)| (i, v)).collect();
 
     indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -271,13 +268,10 @@ pub fn mutual_information_adaptive(x: &[f64], y: &[f64]) -> f64 {
     let n_bins = n_bins.max(5).min(50);
 
     // Try multiple bin sizes and take median (robust)
-    let bin_sizes = [
-        n_bins / 2,
-        n_bins,
-        n_bins * 2,
-    ];
+    let bin_sizes = [n_bins / 2, n_bins, n_bins * 2];
 
-    let mut mis: Vec<f64> = bin_sizes.iter()
+    let mut mis: Vec<f64> = bin_sizes
+        .iter()
         .filter(|&&b| b >= 3)
         .map(|&b| mutual_information(x, y, b))
         .collect();
@@ -297,7 +291,7 @@ pub fn walk_forward_correlation(
     x: &[f64],
     y: &[f64],
     n_folds: usize,
-    oos_ratio: f64, // Fraction of data for OOS in each fold
+    oos_ratio: f64,             // Fraction of data for OOS in each fold
     required_oos_is_ratio: f64, // Minimum OOS/IS ratio to pass
 ) -> WalkForwardResult {
     let n = x.len().min(y.len());
@@ -363,12 +357,16 @@ pub fn walk_forward_correlation(
     let mean_is = is_correlations.iter().sum::<f64>() / actual_folds as f64;
     let mean_oos = oos_correlations.iter().sum::<f64>() / actual_folds as f64;
 
-    let var_is: f64 = is_correlations.iter()
+    let var_is: f64 = is_correlations
+        .iter()
         .map(|c| (c - mean_is).powi(2))
-        .sum::<f64>() / actual_folds as f64;
-    let var_oos: f64 = oos_correlations.iter()
+        .sum::<f64>()
+        / actual_folds as f64;
+    let var_oos: f64 = oos_correlations
+        .iter()
         .map(|c| (c - mean_oos).powi(2))
-        .sum::<f64>() / actual_folds as f64;
+        .sum::<f64>()
+        / actual_folds as f64;
 
     let ratio = if mean_is.abs() > 1e-10 {
         mean_oos.abs() / mean_is.abs()
@@ -518,7 +516,11 @@ mod tests {
         let x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let y = vec![2.0, 4.0, 6.0, 8.0, 10.0];
         let r = pearson_correlation(&x, &y);
-        assert!((r - 1.0).abs() < 1e-10, "Perfect positive correlation, got {}", r);
+        assert!(
+            (r - 1.0).abs() < 1e-10,
+            "Perfect positive correlation, got {}",
+            r
+        );
     }
 
     #[test]
@@ -526,7 +528,11 @@ mod tests {
         let x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let y = vec![10.0, 8.0, 6.0, 4.0, 2.0];
         let r = pearson_correlation(&x, &y);
-        assert!((r - (-1.0)).abs() < 1e-10, "Perfect negative correlation, got {}", r);
+        assert!(
+            (r - (-1.0)).abs() < 1e-10,
+            "Perfect negative correlation, got {}",
+            r
+        );
     }
 
     #[test]
@@ -544,7 +550,11 @@ mod tests {
         let x = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let y = vec![1.0, 4.0, 9.0, 16.0, 25.0]; // y = x^2
         let r = spearman_correlation(&x, &y);
-        assert!((r - 1.0).abs() < 1e-10, "Monotonic should give r=1, got {}", r);
+        assert!(
+            (r - 1.0).abs() < 1e-10,
+            "Monotonic should give r=1, got {}",
+            r
+        );
     }
 
     #[test]
@@ -593,9 +603,9 @@ mod tests {
         // Create data where correlation holds across time
         let n = 500;
         let x: Vec<f64> = (0..n).map(|i| (i as f64 * 0.1).sin()).collect();
-        let y: Vec<f64> = (0..n).map(|i| {
-            (i as f64 * 0.1).sin() * 0.8 + (i as f64 * 0.3).cos() * 0.2
-        }).collect();
+        let y: Vec<f64> = (0..n)
+            .map(|i| (i as f64 * 0.1).sin() * 0.8 + (i as f64 * 0.3).cos() * 0.2)
+            .collect();
 
         let result = walk_forward_correlation(&x, &y, 5, 0.3, 0.5);
 
@@ -606,8 +616,12 @@ mod tests {
 
     #[test]
     fn test_correlation_test_comprehensive() {
-        let x: Vec<f64> = (0..100).map(|i| i as f64 + (i as f64 * 0.1).sin() * 10.0).collect();
-        let y: Vec<f64> = (0..100).map(|i| i as f64 * 0.9 + (i as f64 * 0.2).cos() * 5.0).collect();
+        let x: Vec<f64> = (0..100)
+            .map(|i| i as f64 + (i as f64 * 0.1).sin() * 10.0)
+            .collect();
+        let y: Vec<f64> = (0..100)
+            .map(|i| i as f64 * 0.9 + (i as f64 * 0.2).cos() * 5.0)
+            .collect();
 
         let result = correlation_test(&x, &y, 0.05);
 
@@ -623,7 +637,11 @@ mod tests {
         for r in [-0.9, -0.5, 0.0, 0.5, 0.9] {
             let z = fisher_z_transform(r);
             let r_back = fisher_z_inverse(z);
-            assert!((r - r_back).abs() < 1e-10, "Fisher roundtrip failed for r={}", r);
+            assert!(
+                (r - r_back).abs() < 1e-10,
+                "Fisher roundtrip failed for r={}",
+                r
+            );
         }
     }
 }

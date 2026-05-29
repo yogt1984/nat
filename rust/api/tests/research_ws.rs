@@ -42,8 +42,7 @@ async fn spawn_test_server() -> Result<String, Box<dyn std::error::Error>> {
 /// Get a Redis connection for publishing test events via XADD.
 async fn get_redis_publisher() -> Result<redis::aio::ConnectionManager, Box<dyn std::error::Error>>
 {
-    let url =
-        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+    let url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
     let client = redis::Client::open(url)?;
     let conn = redis::aio::ConnectionManager::new(client).await?;
     Ok(conn)
@@ -121,7 +120,9 @@ async fn test_hypothesis_started_event() {
         "agent": "micro",
         "claim": "test claim"
     });
-    xadd_event(&mut publisher, &event).await.expect("Failed to XADD");
+    xadd_event(&mut publisher, &event)
+        .await
+        .expect("Failed to XADD");
 
     let msg = tokio::time::timeout(Duration::from_secs(5), read.next())
         .await

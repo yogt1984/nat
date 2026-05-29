@@ -22,8 +22,8 @@
 //! On Hyperliquid, we can see all positions, enabling real-time
 //! concentration analysis that's impossible on CEXs.
 
-use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 
 /// Configuration for concentration computation
 #[derive(Debug, Clone)]
@@ -383,7 +383,7 @@ fn compute_gini(values: &[f64]) -> f64 {
         .sum();
 
     let gini = (2.0 * weighted_sum - (n + 1) as f64 * sum_x) / (n as f64 * sum_x);
-    gini.max(0.0).min(1.0)
+    gini.clamp(0.0, 1.0)
 }
 
 /// Compute Theil index (generalized entropy)
@@ -556,9 +556,7 @@ pub mod skeptical_tests {
         let correlation = pearson_correlation(&concentration[..n], &realized_volatility[..n]);
 
         // Significant if clear difference
-        let significant = (ratio - 1.0).abs() > 0.2
-            && vol_high.len() >= 20
-            && vol_low.len() >= 20;
+        let significant = (ratio - 1.0).abs() > 0.2 && vol_high.len() >= 20 && vol_low.len() >= 20;
 
         ConcentrationVolatilityTest {
             correlation,
@@ -781,11 +779,11 @@ mod tests {
     #[test]
     fn test_top_n_concentration() {
         let positions = vec![
-            make_position(1_000_000.0, true),  // 10%
-            make_position(900_000.0, true),    // 9%
-            make_position(800_000.0, true),    // 8%
-            make_position(700_000.0, false),   // 7%
-            make_position(600_000.0, false),   // 6%
+            make_position(1_000_000.0, true), // 10%
+            make_position(900_000.0, true),   // 9%
+            make_position(800_000.0, true),   // 8%
+            make_position(700_000.0, false),  // 7%
+            make_position(600_000.0, false),  // 6%
             // Rest is smaller positions
             make_position(100_000.0, false),
             make_position(100_000.0, false),
@@ -799,42 +797,55 @@ mod tests {
 
         // Top 5 = 1M + 0.9M + 0.8M + 0.7M + 0.6M = 4M
         // 4M / 4.5M = 0.889
-        assert!(features.top5_concentration > 0.85,
-            "Top 5 concentration should be ~89%, got {}", features.top5_concentration);
+        assert!(
+            features.top5_concentration > 0.85,
+            "Top 5 concentration should be ~89%, got {}",
+            features.top5_concentration
+        );
 
         // Top 10 includes all = 4.5M / 4.5M = 1.0
-        assert!(features.top10_concentration > 0.99,
-            "Top 10 should include all, got {}", features.top10_concentration);
+        assert!(
+            features.top10_concentration > 0.99,
+            "Top 10 should include all, got {}",
+            features.top10_concentration
+        );
     }
 
     #[test]
     fn test_equal_distribution() {
         // 100 equal positions
-        let positions: Vec<Position> = (0..100)
-            .map(|_| make_position(10_000.0, false))
-            .collect();
+        let positions: Vec<Position> = (0..100).map(|_| make_position(10_000.0, false)).collect();
 
         let total_oi = 1_000_000.0;
         let features = compute(&positions, total_oi);
 
         // Top 10 = 10% of positions = 10% of OI
-        assert!((features.top10_concentration - 0.1).abs() < 0.01,
-            "Top 10 of equal distribution should be 10%, got {}", features.top10_concentration);
+        assert!(
+            (features.top10_concentration - 0.1).abs() < 0.01,
+            "Top 10 of equal distribution should be 10%, got {}",
+            features.top10_concentration
+        );
 
         // Gini should be 0 (perfect equality)
-        assert!(features.gini_coefficient < 0.05,
-            "Gini should be near 0 for equal distribution, got {}", features.gini_coefficient);
+        assert!(
+            features.gini_coefficient < 0.05,
+            "Gini should be near 0 for equal distribution, got {}",
+            features.gini_coefficient
+        );
 
         // HHI should be 0.01 (1/100 for each = 100 * (0.01)² = 0.01)
-        assert!(features.herfindahl_index < 0.02,
-            "HHI should be low for equal distribution, got {}", features.herfindahl_index);
+        assert!(
+            features.herfindahl_index < 0.02,
+            "HHI should be low for equal distribution, got {}",
+            features.herfindahl_index
+        );
     }
 
     #[test]
     fn test_high_concentration() {
         // One dominant position
         let positions = vec![
-            make_position(9_000_000.0, true),  // 90%
+            make_position(9_000_000.0, true), // 90%
             make_position(100_000.0, false),
             make_position(100_000.0, false),
             make_position(100_000.0, false),
@@ -850,16 +861,25 @@ mod tests {
         let features = compute(&positions, total_oi);
 
         // Top 1 = 90%
-        assert!(features.top5_concentration > 0.9,
-            "Top 5 should be dominated by single whale, got {}", features.top5_concentration);
+        assert!(
+            features.top5_concentration > 0.9,
+            "Top 5 should be dominated by single whale, got {}",
+            features.top5_concentration
+        );
 
         // Gini should be high (near 1)
-        assert!(features.gini_coefficient > 0.7,
-            "Gini should be high for concentrated distribution, got {}", features.gini_coefficient);
+        assert!(
+            features.gini_coefficient > 0.7,
+            "Gini should be high for concentrated distribution, got {}",
+            features.gini_coefficient
+        );
 
         // HHI should be high (0.9² = 0.81)
-        assert!(features.herfindahl_index > 0.75,
-            "HHI should be high for concentrated distribution, got {}", features.herfindahl_index);
+        assert!(
+            features.herfindahl_index > 0.75,
+            "HHI should be high for concentrated distribution, got {}",
+            features.herfindahl_index
+        );
     }
 
     // ========================================================================
@@ -885,16 +905,24 @@ mod tests {
         let features = compute(&positions, total_oi);
 
         // Whale/Retail = 3M/1M = 3.0
-        assert!((features.whale_retail_ratio - 3.0).abs() < 0.1,
-            "Whale/retail ratio should be 3.0, got {}", features.whale_retail_ratio);
+        assert!(
+            (features.whale_retail_ratio - 3.0).abs() < 0.1,
+            "Whale/retail ratio should be 3.0, got {}",
+            features.whale_retail_ratio
+        );
 
         // Whale fraction = 3/8 = 0.375
-        assert!((features.whale_fraction - 0.375).abs() < 0.01,
-            "Whale fraction should be 0.375, got {}", features.whale_fraction);
+        assert!(
+            (features.whale_fraction - 0.375).abs() < 0.01,
+            "Whale fraction should be 0.375, got {}",
+            features.whale_fraction
+        );
 
         // Whale count = 3
-        assert_eq!(features.whale_position_count, 3.0,
-            "Should have 3 whale positions");
+        assert_eq!(
+            features.whale_position_count, 3.0,
+            "Should have 3 whale positions"
+        );
     }
 
     // ========================================================================
@@ -909,7 +937,7 @@ mod tests {
         // Create many small positions so top10 concentration is meaningful
         // First snapshot: distributed (top 10 holds ~50% of 10M OI)
         let mut positions1: Vec<Position> = (0..10)
-            .map(|_| make_position(500_000.0, false))  // 10 * 500k = 5M
+            .map(|_| make_position(500_000.0, false)) // 10 * 500k = 5M
             .collect();
         // Add 50 smaller positions (50 * 100k = 5M)
         positions1.extend((0..50).map(|_| make_position(100_000.0, false)));
@@ -919,7 +947,7 @@ mod tests {
 
         // Second snapshot: concentrated (top 10 holds ~70% of 10M OI)
         let mut positions2: Vec<Position> = (0..10)
-            .map(|_| make_position(700_000.0, true))  // 10 * 700k = 7M
+            .map(|_| make_position(700_000.0, true)) // 10 * 700k = 7M
             .collect();
         // Add 30 smaller positions (30 * 100k = 3M)
         positions2.extend((0..30).map(|_| make_position(100_000.0, false)));
@@ -927,12 +955,19 @@ mod tests {
         let features2 = buffer.compute(&positions2, 10_000_000.0);
 
         // Verify top10 increased
-        assert!(features2.top10_concentration > top10_first,
-            "Top10 should increase: {} -> {}", top10_first, features2.top10_concentration);
+        assert!(
+            features2.top10_concentration > top10_first,
+            "Top10 should increase: {} -> {}",
+            top10_first,
+            features2.top10_concentration
+        );
 
         // Concentration change should be positive
-        assert!(features2.concentration_change_1h > 0.0,
-            "Concentration should be increasing, got change {}", features2.concentration_change_1h);
+        assert!(
+            features2.concentration_change_1h > 0.0,
+            "Concentration should be increasing, got change {}",
+            features2.concentration_change_1h
+        );
     }
 
     // ========================================================================
@@ -965,8 +1000,11 @@ mod tests {
         let values = vec![100.0, 100.0, 100.0, 100.0];
         let gini = compute_gini(&values);
 
-        assert!(gini.abs() < 0.01,
-            "Gini of equal values should be 0, got {}", gini);
+        assert!(
+            gini.abs() < 0.01,
+            "Gini of equal values should be 0, got {}",
+            gini
+        );
     }
 
     #[test]
@@ -974,8 +1012,11 @@ mod tests {
         let values = vec![1.0, 1.0, 1.0, 97.0];
         let gini = compute_gini(&values);
 
-        assert!(gini > 0.7,
-            "Gini of highly unequal values should be high, got {}", gini);
+        assert!(
+            gini > 0.7,
+            "Gini of highly unequal values should be high, got {}",
+            gini
+        );
     }
 
     // ========================================================================
@@ -987,8 +1028,11 @@ mod tests {
         let positions = vec![1_000_000.0];
         let hhi = compute_herfindahl(&positions, 1_000_000.0);
 
-        assert!((hhi - 1.0).abs() < 0.01,
-            "HHI of monopoly should be 1.0, got {}", hhi);
+        assert!(
+            (hhi - 1.0).abs() < 0.01,
+            "HHI of monopoly should be 1.0, got {}",
+            hhi
+        );
     }
 
     #[test]
@@ -997,8 +1041,11 @@ mod tests {
         let hhi = compute_herfindahl(&positions, 1_000_000.0);
 
         // 0.5² + 0.5² = 0.5
-        assert!((hhi - 0.5).abs() < 0.01,
-            "HHI of equal duopoly should be 0.5, got {}", hhi);
+        assert!(
+            (hhi - 0.5).abs() < 0.01,
+            "HHI of equal duopoly should be 0.5, got {}",
+            hhi
+        );
     }
 
     // ========================================================================
@@ -1011,20 +1058,19 @@ mod tests {
 
         let n = 200;
         // High concentration -> high volatility
-        let concentration: Vec<f64> = (0..n)
-            .map(|i| if i % 2 == 0 { 0.6 } else { 0.3 })
-            .collect();
+        let concentration: Vec<f64> = (0..n).map(|i| if i % 2 == 0 { 0.6 } else { 0.3 }).collect();
 
         let volatility: Vec<f64> = (0..n)
-            .map(|i| {
-                if concentration[i] > 0.5 { 0.05 } else { 0.02 }
-            })
+            .map(|i| if concentration[i] > 0.5 { 0.05 } else { 0.02 })
             .collect();
 
         let result = test_concentration_volatility(&concentration, &volatility, 0.5);
 
-        assert!(result.volatility_ratio > 2.0,
-            "High concentration should have higher vol, got ratio {}", result.volatility_ratio);
+        assert!(
+            result.volatility_ratio > 2.0,
+            "High concentration should have higher vol, got ratio {}",
+            result.volatility_ratio
+        );
     }
 
     #[test]
@@ -1035,25 +1081,36 @@ mod tests {
         // Increasing concentration -> up moves
         let concentration_change: Vec<f64> = (0..n)
             .map(|i| {
-                if i % 3 == 0 { 0.05 }
-                else if i % 3 == 1 { -0.05 }
-                else { 0.0 }
+                if i % 3 == 0 {
+                    0.05
+                } else if i % 3 == 1 {
+                    -0.05
+                } else {
+                    0.0
+                }
             })
             .collect();
 
         let future_returns: Vec<f64> = (0..n)
             .map(|i| {
-                if concentration_change[i] > 0.02 { 0.02 }
-                else if concentration_change[i] < -0.02 { -0.02 }
-                else { 0.001 }
+                if concentration_change[i] > 0.02 {
+                    0.02
+                } else if concentration_change[i] < -0.02 {
+                    -0.02
+                } else {
+                    0.001
+                }
             })
             .collect();
 
         let result = test_concentration_direction(&concentration_change, &future_returns, 0.02);
 
-        assert!(result.prob_up_increasing > result.prob_up_decreasing,
+        assert!(
+            result.prob_up_increasing > result.prob_up_decreasing,
             "Increasing concentration should predict up, got inc={}, dec={}",
-            result.prob_up_increasing, result.prob_up_decreasing);
+            result.prob_up_increasing,
+            result.prob_up_decreasing
+        );
     }
 
     #[test]
@@ -1064,9 +1121,7 @@ mod tests {
         let horizon = 4;
 
         // Whale accumulation predicts positive returns
-        let whale_ratio_change: Vec<f64> = (0..n)
-            .map(|i| ((i as f64 * 0.1).sin() * 0.1))
-            .collect();
+        let whale_ratio_change: Vec<f64> = (0..n).map(|i| ((i as f64 * 0.1).sin() * 0.1)).collect();
 
         let future_returns: Vec<f64> = (0..n)
             .map(|i| {
@@ -1080,8 +1135,11 @@ mod tests {
 
         let result = test_whale_accumulation(&whale_ratio_change, &future_returns, horizon);
 
-        assert!(result.sample_size > 100,
-            "Should have enough samples, got {}", result.sample_size);
+        assert!(
+            result.sample_size > 100,
+            "Should have enough samples, got {}",
+            result.sample_size
+        );
     }
 
     // ========================================================================
@@ -1093,8 +1151,11 @@ mod tests {
         let values = vec![100.0, 100.0, 100.0, 100.0];
         let theil = compute_theil(&values);
 
-        assert!(theil.abs() < 0.01,
-            "Theil of equal values should be 0, got {}", theil);
+        assert!(
+            theil.abs() < 0.01,
+            "Theil of equal values should be 0, got {}",
+            theil
+        );
     }
 
     #[test]
@@ -1102,7 +1163,10 @@ mod tests {
         let values = vec![10.0, 20.0, 30.0, 140.0];
         let theil = compute_theil(&values);
 
-        assert!(theil > 0.1,
-            "Theil of unequal values should be positive, got {}", theil);
+        assert!(
+            theil > 0.1,
+            "Theil of unequal values should be positive, got {}",
+            theil
+        );
     }
 }
