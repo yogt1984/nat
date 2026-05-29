@@ -694,11 +694,15 @@ def run_daemon(config: dict, state: DiscoveryState, log: logging.Logger) -> None
     signal_mod.signal(signal_mod.SIGTERM, handle_signal)
     signal_mod.signal(signal_mod.SIGINT, handle_signal)
 
+    from utils.health import HealthWriter
+    health = HealthWriter("discovery")
+
     log.info("Discovery daemon started (cycle interval: %ds)",
              config["discovery"]["cycle_interval_s"])
 
     while not _shutdown:
         try:
+            health.beat(phase=state.current.value, cycle=state.cycle_count)
             run_cycle(config, state, log)
         except Exception as e:
             log.error("Cycle error: %s", e, exc_info=True)
@@ -709,12 +713,14 @@ def run_daemon(config: dict, state: DiscoveryState, log: logging.Logger) -> None
 
         interval = config["discovery"]["cycle_interval_s"]
         state.transition(Phase.SLEEPING, f"sleeping {interval}s")
+        health.beat(phase="sleeping", cycle=state.cycle_count)
         log.info("Sleeping %ds until next cycle...", interval)
         for _ in range(interval):
             if _shutdown:
                 break
             time.sleep(1)
 
+    health.shutdown()
     state.transition(Phase.STOPPED, "graceful shutdown")
     log.info("Discovery daemon stopped")
 

@@ -427,6 +427,9 @@ class ResearchAgent(ABC):
         self.queue = HypothesisQueue(store=self._store, agent=self.agent_type)
         self.gen_stats = self._load_gen_stats()
         self._shutdown = False
+        # Health heartbeat
+        from utils.health import HealthWriter
+        self._health = HealthWriter(f"agent_{self.agent_type}")
         # Inject Redis connection for research events (None = lazy-connect)
         if redis is not None:
             from .research_output import set_redis
@@ -515,6 +518,10 @@ class ResearchAgent(ABC):
 
         while not self._shutdown:
             try:
+                self._health.beat(
+                    phase=self.state.phase.value if hasattr(self.state, "phase") else "running",
+                    cycle=self.state.cycle_count,
+                )
                 self.run_cycle()
             except Exception as e:
                 log.error("Cycle error: %s", e, exc_info=True)
@@ -524,12 +531,14 @@ class ResearchAgent(ABC):
                 break
 
             self.state.transition(AgentPhase.SLEEPING, "waiting for next cycle")
+            self._health.beat(phase="sleeping", cycle=self.state.cycle_count)
             sleep_s = self.config["cycle_interval_s"]
             for _ in range(sleep_s):
                 if self._shutdown:
                     break
                 time.sleep(1)
 
+        self._health.shutdown()
         self.state.transition(AgentPhase.STOPPED, "graceful shutdown")
         log.info("%s agent stopped", self.agent_type)
 

@@ -132,6 +132,22 @@ class ContinuousSignalAdapter:
 
 
 @dataclass
+class ParameterStability:
+    """OOS metric stability across walk-forward folds.
+
+    Coefficient of variation (CV = std/|mean|) measures how much a metric
+    drifts between folds. High CV (> max_cv threshold) indicates the
+    strategy's performance is sensitive to the training window — a sign
+    of overfitting even when average metrics pass gates.
+    """
+    sharpe_cv: float          # CV of OOS Sharpe across folds
+    dd_cv: float              # CV of OOS max drawdown across folds
+    pf_cv: float              # CV of OOS profit factor across folds
+    sharpe_values: list[float]  # per-fold OOS Sharpe
+    stable: bool              # True if all CVs < threshold
+
+
+@dataclass
 class ValidationResult:
     """Full Step 4 validation output."""
     direction: str
@@ -143,19 +159,64 @@ class ValidationResult:
     profit_factor: float
     deflated_sharpe_p: float
     n_trials: int
+    # Parameter stability
+    stability: ParameterStability | None = None
     # Gates
-    gate_oos_sharpe_pass: bool       # > 0.5
-    gate_oos_is_ratio_pass: bool     # > 0.7
-    gate_deflated_sharpe_pass: bool  # p < 0.05
-    gate_max_dd_pass: bool           # < 5%
-    gate_min_trades_pass: bool       # >= 30
-    gate_profit_factor_pass: bool    # > 1.2
-    gate_pass: bool
+    gate_oos_sharpe_pass: bool = False       # > 0.5
+    gate_oos_is_ratio_pass: bool = False     # > 0.7
+    gate_deflated_sharpe_pass: bool = False  # p < 0.05
+    gate_max_dd_pass: bool = False           # < 5%
+    gate_min_trades_pass: bool = False       # >= 30
+    gate_profit_factor_pass: bool = False    # > 1.2
+    gate_stability_pass: bool = False        # CV < threshold
+    gate_pass: bool = False
 
 
 # ---------------------------------------------------------------------------
 # Validation pipeline
 # ---------------------------------------------------------------------------
+
+
+def compute_parameter_stability(
+    wf_result,
+    max_cv: float = 0.5,
+) -> ParameterStability:
+    """Measure OOS metric stability across walk-forward folds.
+
+    For each fold, extracts OOS Sharpe, max drawdown, and profit factor.
+    Computes coefficient of variation (CV = std / |mean|) for each metric.
+    A CV > max_cv indicates the parameter drifts too much across folds.
+    """
+    sharpes = []
+    dds = []
+    pfs = []
+    for fold in wf_result.fold_results:
+        tr = fold.test_result
+        sharpes.append(tr.sharpe_ratio)
+        dds.append(tr.max_drawdown_pct)
+        pfs.append(tr.profit_factor)
+
+    def _cv(values):
+        arr = np.array(values, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        if len(arr) < 2:
+            return 0.0
+        mean = np.mean(arr)
+        if abs(mean) < 1e-12:
+            return float("inf") if np.std(arr) > 1e-12 else 0.0
+        return float(np.std(arr) / abs(mean))
+
+    s_cv = _cv(sharpes)
+    d_cv = _cv(dds)
+    p_cv = _cv(pfs)
+
+    return ParameterStability(
+        sharpe_cv=round(s_cv, 4),
+        dd_cv=round(d_cv, 4),
+        pf_cv=round(p_cv, 4),
+        sharpe_values=[round(s, 4) for s in sharpes],
+        stable=s_cv < max_cv and d_cv < max_cv and p_cv < max_cv,
+    )
 
 
 def run_validation(
@@ -218,6 +279,9 @@ def run_validation(
             n_trials=n_trials,
         )
 
+        # Parameter stability across folds
+        stability = compute_parameter_stability(wf_result)
+
         # Quality gates
         g_sharpe = oos_sharpe > 0.5
         g_ratio = oos_is_ratio > 0.7
@@ -225,6 +289,7 @@ def run_validation(
         g_dd = max_dd < 5.0
         g_trades = total_oos_trades >= 30
         g_pf = profit_factor > 1.2
+        g_stable = stability.stable
 
         vr = ValidationResult(
             direction=direction,
@@ -236,13 +301,15 @@ def run_validation(
             profit_factor=profit_factor,
             deflated_sharpe_p=deflated_p,
             n_trials=n_trials,
+            stability=stability,
             gate_oos_sharpe_pass=g_sharpe,
             gate_oos_is_ratio_pass=g_ratio,
             gate_deflated_sharpe_pass=g_deflated,
             gate_max_dd_pass=g_dd,
             gate_min_trades_pass=g_trades,
             gate_profit_factor_pass=g_pf,
-            gate_pass=all([g_sharpe, g_ratio, g_deflated, g_dd, g_trades, g_pf]),
+            gate_stability_pass=g_stable,
+            gate_pass=all([g_sharpe, g_ratio, g_deflated, g_dd, g_trades, g_pf, g_stable]),
         )
         results.append(vr)
 
@@ -256,6 +323,8 @@ def run_validation(
         print(f"    Max drawdown:     {max_dd:.2f}% vs 5%  [{_g(g_dd)}]")
         print(f"    OOS trades:       {total_oos_trades} vs 30  [{_g(g_trades)}]")
         print(f"    Profit factor:    {profit_factor:.2f} vs 1.2  [{_g(g_pf)}]")
+        print(f"    Stability:        Sharpe CV={stability.sharpe_cv:.2f}, DD CV={stability.dd_cv:.2f}, PF CV={stability.pf_cv:.2f}  [{_g(g_stable)}]")
+        print(f"      Per-fold Sharpe: {stability.sharpe_values}")
         print(f"    Overall:          [{_g(vr.gate_pass)}]")
 
     if output:

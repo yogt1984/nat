@@ -6,7 +6,12 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import pytest
-from alpha.adapter import ContinuousSignalAdapter, ValidationResult
+from alpha.adapter import (
+    ContinuousSignalAdapter,
+    ValidationResult,
+    ParameterStability,
+    compute_parameter_stability,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -125,3 +130,75 @@ class TestValidationResult:
             gate_pass=False,
         )
         assert vr.gate_pass is False
+
+
+# ---------------------------------------------------------------------------
+# Parameter Stability
+# ---------------------------------------------------------------------------
+
+
+class _MockTestResult:
+    """Minimal mock for BacktestResult with the fields stability needs."""
+    def __init__(self, sharpe, dd, pf):
+        self.sharpe_ratio = sharpe
+        self.max_drawdown_pct = dd
+        self.profit_factor = pf
+
+
+class _MockFold:
+    def __init__(self, sharpe, dd, pf):
+        self.test_result = _MockTestResult(sharpe, dd, pf)
+
+
+class _MockWFResult:
+    def __init__(self, folds):
+        self.fold_results = folds
+
+
+class TestComputeParameterStability:
+    def test_stable_folds(self):
+        """Consistent metrics across folds → stable."""
+        folds = [_MockFold(1.0, 3.0, 1.5) for _ in range(5)]
+        wf = _MockWFResult(folds)
+        s = compute_parameter_stability(wf)
+        assert s.sharpe_cv == 0.0
+        assert s.dd_cv == 0.0
+        assert s.pf_cv == 0.0
+        assert s.stable is True
+
+    def test_unstable_sharpe(self):
+        """Sharpe varies wildly across folds → unstable."""
+        folds = [
+            _MockFold(2.0, 3.0, 1.5),
+            _MockFold(0.1, 3.0, 1.5),
+            _MockFold(1.5, 3.0, 1.5),
+            _MockFold(-0.5, 3.0, 1.5),
+            _MockFold(1.0, 3.0, 1.5),
+        ]
+        wf = _MockWFResult(folds)
+        s = compute_parameter_stability(wf)
+        assert s.sharpe_cv > 0.5  # high variance → unstable
+        assert s.stable is False
+
+    def test_single_fold(self):
+        """Single fold → CV=0, stable by default."""
+        folds = [_MockFold(1.0, 3.0, 1.5)]
+        wf = _MockWFResult(folds)
+        s = compute_parameter_stability(wf)
+        assert s.sharpe_cv == 0.0
+        assert s.stable is True
+
+    def test_sharpe_values_recorded(self):
+        folds = [_MockFold(0.5, 2.0, 1.3), _MockFold(1.5, 4.0, 1.8)]
+        wf = _MockWFResult(folds)
+        s = compute_parameter_stability(wf)
+        assert s.sharpe_values == [0.5, 1.5]
+
+    def test_custom_threshold(self):
+        """Tighter threshold flags moderate variance."""
+        folds = [_MockFold(1.0, 3.0, 1.5), _MockFold(1.3, 3.5, 1.7)]
+        wf = _MockWFResult(folds)
+        s_loose = compute_parameter_stability(wf, max_cv=1.0)
+        s_tight = compute_parameter_stability(wf, max_cv=0.05)
+        assert s_loose.stable is True
+        assert s_tight.stable is False

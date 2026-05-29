@@ -32,6 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 
 from data.state import StateStore
+from utils.health import HealthWriter
 
 log = logging.getLogger("nat.agent_cascade")
 
@@ -480,18 +481,24 @@ class CascadeAgent:
 
     def run(self):
         """Main loop: validate → monitor → sleep → repeat."""
+        health = HealthWriter("cascade_agent")
         log.info("Cascade agent starting (cycle interval: %ds)",
                  self.config["cycle_interval_s"])
+        cycle = 0
         while not self._shutdown:
+            cycle += 1
+            health.beat(phase="VALIDATE", cycle=cycle)
             self.run_cycle()
             if self._shutdown:
                 break
             interval = self.config["cycle_interval_s"]
             log.info("Sleeping %ds until next cycle", interval)
+            health.beat(phase="SLEEP", cycle=cycle)
             for _ in range(interval):
                 if self._shutdown:
                     break
                 time.sleep(1)
+        health.shutdown()
 
     def run_cycle(self):
         """Single validation cycle."""

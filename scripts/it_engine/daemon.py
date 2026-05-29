@@ -36,6 +36,7 @@ from .config import ITEngineConfig
 from .estimators import ksg_mi, cmi, interaction_info, linear_te, ksg_te, min_info_bits
 from .feature_selector import greedy_select
 from .state import ITState
+from utils.health import HealthWriter
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +82,8 @@ class ITEngine:
         self.state = ITState.load(symbol, config.state_dir)
         self.state.symbol = symbol
         self._running = True
+        self._health = HealthWriter(f"it_engine_{symbol}")
+        self._cycle_count = 0
 
         # Resolve feature columns from first data batch
         self._feature_cols: Optional[list[str]] = None
@@ -141,6 +144,8 @@ class ITEngine:
 
     def cycle(self):
         """Run one IT computation cycle."""
+        self._cycle_count += 1
+        self._health.beat(phase="COMPUTE", cycle=self._cycle_count)
         df = self.buffer.to_dataframe()
         if len(df) < 100:
             log.debug("Buffer too small (%d rows), skipping cycle", len(df))
@@ -408,6 +413,7 @@ class ITEngine:
         log.info("IT engine stopped for %s", self.symbol)
 
     def stop(self):
+        self._health.shutdown()
         self._running = False
 
 
