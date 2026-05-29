@@ -13,9 +13,6 @@ Usage:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parent.parent.parent
 
 from agent.base import ResearchAgent, BaseRunner, cli_main, load_agent_config
 from agent.hypothesis import Hypothesis, GeneratorStats
@@ -37,10 +34,6 @@ class MacroAgent(ResearchAgent):
         "max_cycle_runtime_s": 7200,
     }
 
-    @property
-    def root(self) -> Path:
-        return ROOT
-
     # 1h bar rolling IC
     _rolling_ic_bar_period = "1h"
     _rolling_ic_horizon_default = 3600.0  # 1 hour
@@ -58,16 +51,16 @@ class MacroAgent(ResearchAgent):
                            store=self._store, agent=self.agent_type)
 
 
-# Backward compatibility — module-level path constants
-MACRO_STATE_PATH = ROOT / "data" / "agent_macro" / "agent_state.json"
-MACRO_STATS_PATH = ROOT / "data" / "agent_macro" / "generator_stats.json"
-MACRO_REGISTRY_PATH = ROOT / "data" / "agent_macro" / "registry.json"
+# Backward compatibility
+_inst = MacroAgent.__new__(MacroAgent)
+MACRO_STATE_PATH = _inst.state_path
+MACRO_STATS_PATH = _inst.stats_path
+MACRO_REGISTRY_PATH = _inst.registry_path
 
 
 def load_config() -> dict:
-    """Load macro agent config from TOML or return defaults."""
     return load_agent_config(
-        ROOT / "config" / "agent.toml",
+        _inst.root / "config" / "agent.toml",
         "agent_macro",
         MacroAgent.BASE_CONFIG,
     )

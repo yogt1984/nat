@@ -13,9 +13,6 @@ Usage:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parent.parent.parent
 
 from agent.base import (
     ResearchAgent, BaseRunner, AgentPhase, AgentState,  # re-export for compat
@@ -41,10 +38,6 @@ class MicrostructureAgent(ResearchAgent):
         "cross_asset", "recycler", "ensemble",
     ]
     generator_module_prefix = "agent.generators"
-
-    @property
-    def root(self) -> Path:
-        return ROOT
 
     # Tick-level rolling IC (no bar resampling)
     _rolling_ic_bar_period = None
@@ -82,16 +75,16 @@ class MicrostructureAgent(ResearchAgent):
             print()
 
 
-# Backward compatibility aliases and module-level constants
+# Backward compatibility aliases
 AgentDaemon = MicrostructureAgent
-STATE_PATH = ROOT / "data" / "agent" / "agent_state.json"
-STATS_PATH = ROOT / "data" / "agent" / "generator_stats.json"
+_inst = MicrostructureAgent.__new__(MicrostructureAgent)
+STATE_PATH = _inst.state_path
+STATS_PATH = _inst.stats_path
 
 
 def load_config() -> dict:
-    """Load agent config from TOML or return defaults."""
     return load_agent_config(
-        ROOT / "config" / "agent.toml",
+        _inst.root / "config" / "agent.toml",
         "agent",
         MicrostructureAgent.BASE_CONFIG,
     )
