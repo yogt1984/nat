@@ -243,10 +243,10 @@ def simulate_portfolio(
     return port_pnl, per_symbol_pnl, dd_control
 
 
-def _sharpe(pnl: np.ndarray) -> float:
-    if len(pnl) < 2 or np.std(pnl) < 1e-15:
-        return 0.0
-    return float(np.mean(pnl) / np.std(pnl) * np.sqrt(252 * 96))
+def _sharpe(pnl: np.ndarray, bars_per_day: float = 96) -> float:
+    """Annualized Sharpe from intraday bar PnL."""
+    from utils.metrics import sharpe_intraday
+    return sharpe_intraday(pnl, bars_per_day=bars_per_day)
 
 
 def _max_dd(pnl: np.ndarray) -> float:
@@ -279,9 +279,12 @@ def run_portfolio(
     """
     from cluster_pipeline.loader import load_parquet
     from cluster_pipeline.preprocess import aggregate_bars
+    from utils.metrics import bars_per_day_for_timeframe
 
     if symbols is None:
         symbols = ["BTC", "ETH", "SOL"]
+
+    bpd = bars_per_day_for_timeframe(timeframe)
 
     df_all = load_parquet(data_dir)
 
@@ -358,8 +361,8 @@ def run_portfolio(
             symbol=sym,
             raw_weight=raw_weights.get(sym, 0.0),
             adjusted_weight=adj_weights.get(sym, 0.0),
-            volatility=float(np.std(returns[sym]) * np.sqrt(252 * 96)),
-            sharpe=_sharpe(pnl),
+            volatility=float(np.std(returns[sym]) * np.sqrt(252 * bpd)),
+            sharpe=_sharpe(pnl, bpd),
             max_dd=_max_dd(pnl),
         )
         allocations.append(alloc)
@@ -369,7 +372,7 @@ def run_portfolio(
         signals, all_prices, adj_weights,
     )
 
-    port_sharpe = _sharpe(port_pnl)
+    port_sharpe = _sharpe(port_pnl, bpd)
     port_dd = _max_dd(port_pnl)
     max_ind_sharpe = max(a.sharpe for a in allocations)
     worst_ind_dd = max(a.max_dd for a in allocations)

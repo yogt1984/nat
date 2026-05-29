@@ -193,15 +193,13 @@ def print_evaluation_report(result: EvaluationResult):
     print(f"  EAMM beats best fixed:     {'YES' if result.eamm_beats_best_fixed else 'NO'}")
 
 
-def _sharpe(pnl: np.ndarray) -> float:
-    """Compute Sharpe ratio of PnL series."""
+def _sharpe(pnl: np.ndarray, bars_per_day: float = None) -> float:
+    """Annualized Sharpe from per-bar PnL (default: 10Hz emission, 24h)."""
+    from utils.metrics import sharpe_intraday, BARS_PER_DAY_10HZ
+    if bars_per_day is None:
+        bars_per_day = BARS_PER_DAY_10HZ
     valid = pnl[~np.isnan(pnl)]
-    if len(valid) < 2:
-        return 0.0
-    std = np.std(valid)
-    if std < 1e-12:
-        return 0.0
-    return float(np.mean(valid) / std * np.sqrt(len(valid)))
+    return sharpe_intraday(valid, bars_per_day=bars_per_day)
 
 
 def _max_drawdown(pnl: np.ndarray) -> float:

@@ -356,8 +356,8 @@ def run_batch(
             daily_pnl = np.array([s.total_net_bps for s in daily_summaries])
             total_trades = sum(s.n_trades for s in daily_summaries)
             total_pnl = float(np.sum(daily_pnl))
-            daily_std = np.std(daily_pnl)
-            sharpe = float(np.mean(daily_pnl) / daily_std * np.sqrt(252)) if daily_std > 0 else 0.0
+            from utils.metrics import sharpe_daily
+            sharpe = sharpe_daily(daily_pnl)
             n_positive = int(np.sum(daily_pnl > 0))
 
             ref = BACKTEST_REFERENCE.get(symbol, {})

@@ -561,7 +561,8 @@ pub mod skeptical_tests {
         cov / denom
     }
 
-    /// Compute Sharpe ratio (annualized, assuming daily returns)
+    /// Compute Sharpe ratio (annualized, assuming daily returns).
+    /// Uses sample std (N-1) and Sharpe = (mean / std) * sqrt(252).
     fn compute_sharpe(returns: &[f64]) -> f64 {
         if returns.len() < 2 {
             return 0.0;
@@ -577,11 +578,7 @@ pub mod skeptical_tests {
             return 0.0;
         }
 
-        // Annualize (assuming ~252 trading days worth of samples)
-        let annualized_mean = mean * 252.0_f64.sqrt();
-        let annualized_std = std * 252.0_f64.sqrt();
-
-        annualized_mean / annualized_std
+        (mean / std) * 252.0_f64.sqrt()
     }
 }
 

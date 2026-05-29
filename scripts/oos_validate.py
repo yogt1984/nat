@@ -131,8 +131,10 @@ def compute_metrics(daily: list[dict], baseline_sharpe: float) -> dict:
     pnl = np.array([d["total_net_bps"] for d in daily])
     n = len(pnl)
 
+    from utils.metrics import sharpe_daily
+
     # Overall Sharpe
-    current_sharpe = float(np.mean(pnl) / np.std(pnl) * np.sqrt(252)) if np.std(pnl) > 0 else 0.0
+    current_sharpe = sharpe_daily(pnl)
 
     # Cumulative PnL
     cum_pnl = np.cumsum(pnl)
@@ -148,7 +150,7 @@ def compute_metrics(daily: list[dict], baseline_sharpe: float) -> dict:
     rolling_sharpe = []
     for i in range(window - 1, n):
         w = pnl[i - window + 1:i + 1]
-        s = float(np.mean(w) / np.std(w) * np.sqrt(252)) if np.std(w) > 0 else 0.0
+        s = sharpe_daily(w)
         rolling_sharpe.append({
             "date": daily[i]["date"],
             "sharpe": round(s, 2),

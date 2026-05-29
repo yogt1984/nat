@@ -124,11 +124,10 @@ def run_algorithm_backtest(
 
     n_trades = int(np.sum(position_changes > 0))
     total_return = float(np.sum(net_returns_clean))
-    mean_return = float(np.mean(net_returns_clean))
-    std_return = float(np.std(net_returns_clean)) + 1e-20
 
-    # Sharpe (annualized at 10Hz)
-    sharpe = mean_return / std_return * np.sqrt(86400 * 10)
+    # Sharpe (annualized from 10Hz data: 864,000 bars/day)
+    from utils.metrics import sharpe_intraday, BARS_PER_DAY_10HZ
+    sharpe = sharpe_intraday(net_returns_clean, bars_per_day=BARS_PER_DAY_10HZ)
 
     # Max drawdown
     equity = np.cumsum(net_returns_clean)
