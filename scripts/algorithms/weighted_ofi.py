@@ -179,7 +179,11 @@ class WeightedOFI(MicrostructureAlgorithm):
         return float(np.clip(lam, 0.05, 1.0))
 
     def run_batch(self, df: "pd.DataFrame") -> "pd.DataFrame":
-        """Vectorized override with regime-conditional decay estimation."""
+        """Vectorized override with regime-conditional decay estimation.
+
+        Causal: each segment uses the *previous* segment's estimated lambda.
+        The first segment uses the constructor default.
+        """
         import pandas as pd
         from .regime_retune import has_regime_column, segment_by_regime, REGIME_COL
 
@@ -192,21 +196,24 @@ class WeightedOFI(MicrostructureAlgorithm):
         decay_arr = np.full(n, self._decay)
         if self._auto_tune and "raw_midprice" in df.columns:
             mid = df["raw_midprice"].values.astype(np.float64)
-            fwd_ret = np.empty_like(mid)
-            fwd_ret[:-1] = mid[1:] / mid[:-1] - 1.0
-            fwd_ret[-1] = np.nan
+            # Use lagged returns (t-1 → t) instead of forward returns
+            lag_ret = np.empty_like(mid)
+            lag_ret[0] = np.nan
+            lag_ret[1:] = mid[1:] / mid[:-1] - 1.0
 
             if has_regime_column(df):
                 segments = segment_by_regime(df[REGIME_COL].values)
             else:
                 segments = [(0, n, -1)]
 
+            # Causal: apply previous segment's lambda to current segment
+            prev_lam = self._decay
             for start, end, _regime in segments:
-                lam = self.estimate_decay(
+                decay_arr[start:end] = prev_lam
+                prev_lam = self.estimate_decay(
                     {1: l1[start:end], 5: l5[start:end], 10: l10[start:end]},
-                    fwd_ret[start:end],
+                    lag_ret[start:end],
                 )
-                decay_arr[start:end] = lam
         decay = decay_arr
 
         w1 = np.exp(-decay * 1)

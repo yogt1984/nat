@@ -292,11 +292,13 @@ class HawkesIntensity(MicrostructureAlgorithm):
         alpha_arr = np.full(n, self._alpha)
         beta_arr = np.full(n, self._beta)
 
+        # Causal: apply previous segment's params to current segment
+        prev_params = {"alpha_fraction": self._alpha, "decay_beta": self._beta}
         for start, end, _regime in segments:
             if self._auto_tune:
-                params = self.estimate_params(count[start:end], dt=self._dt)
-                alpha_arr[start:end] = params["alpha_fraction"]
-                beta_arr[start:end] = params["decay_beta"]
+                alpha_arr[start:end] = prev_params["alpha_fraction"]
+                beta_arr[start:end] = prev_params["decay_beta"]
+                prev_params = self.estimate_params(count[start:end], dt=self._dt)
 
         # Recursive loop (continuous state across segments)
         A_total = np.zeros(n)

@@ -96,16 +96,20 @@ class KalmanImbalance(MicrostructureAlgorithm):
         innovs = np.full(n, np.nan)
 
         # Regime-conditional: re-tune at each regime transition
+        # Causal: each segment uses parameters estimated from the *previous* segment
         if self._auto_tune and has_regime_column(df):
             segments = segment_by_regime(df[REGIME_COL].values)
+            prev_obs = np.array([])  # first segment uses constructor defaults
             for start, end, _regime in segments:
-                kf = self._make_kf(obs[start:end])
+                kf = self._make_kf(prev_obs)
                 s, u, iv = kf.filter_series_full(obs[start:end])
                 states[start:end] = s
                 uncerts[start:end] = u
                 innovs[start:end] = iv
+                prev_obs = obs[start:end]
         else:
-            kf = self._make_kf(obs)
+            # Single segment: first pass uses defaults, no lookahead
+            kf = self._make_kf(np.array([]))
             states, uncerts, innovs = kf.filter_series_full(obs)
 
         strengths = states / (np.sqrt(uncerts) + 1e-12)

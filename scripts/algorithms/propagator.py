@@ -251,12 +251,15 @@ class Propagator(MicrostructureAlgorithm):
         else:
             segments = []
 
+        # Causal: apply previous segment's decay exponent to current segment
         decay_exp_arr = np.full(n, self._decay_exp)
+        prev_exp = self._decay_exp
         for start, end, _regime in segments:
+            decay_exp_arr[start:end] = prev_exp
             valid_sv = signed_vol[start:end]
             valid_sv = valid_sv[np.isfinite(valid_sv)]
             if len(valid_sv) > 200:
-                decay_exp_arr[start:end] = self.estimate_decay_exponent(valid_sv)
+                prev_exp = self.estimate_decay_exponent(valid_sv)
 
         # Convolve with per-tick decay exponent (causal)
         transient = np.full(n, np.nan)
