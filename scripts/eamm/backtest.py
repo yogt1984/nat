@@ -200,9 +200,15 @@ def run_backtest(
     equity[-1] = cumulative_pnl
     inventory[-1] = q
 
-    # Metrics
-    pnl_per_trade = np.diff(equity[equity != 0]) if np.any(equity != 0) else np.array([0.0])
-    sharpe = _sharpe(pnl_per_trade)
+    # Metrics — aggregate equity curve to daily PnL, then annualize
+    from utils.metrics import sharpe_daily
+    days = (timestamps // 86_400_000_000_000).astype(np.int64)
+    unique_days = np.unique(days)
+    if len(unique_days) >= 2:
+        daily_equity = np.array([equity[days == d][-1] for d in unique_days])
+        sharpe = sharpe_daily(np.diff(daily_equity))
+    else:
+        sharpe = 0.0
     max_dd = _max_drawdown_curve(equity)
     fill_rate_bid = n_bid_fills / n_bid_quotes if n_bid_quotes > 0 else 0.0
     fill_rate_ask = n_ask_fills / n_ask_quotes if n_ask_quotes > 0 else 0.0
@@ -241,15 +247,6 @@ def print_backtest_report(result: BacktestResult):
     print(f"  Avg spread quoted:   {result.avg_spread_quoted:.2f} bps")
     print(f"  Adverse selection:   {result.adverse_selection_rate:.1%}")
     print(f"  Final inventory:     {result.inventory_curve[-1]:.4f}")
-
-
-def _sharpe(pnl: np.ndarray) -> float:
-    if len(pnl) < 2:
-        return 0.0
-    std = np.std(pnl)
-    if std < 1e-12:
-        return 0.0
-    return float(np.mean(pnl) / std * np.sqrt(len(pnl)))
 
 
 def _max_drawdown_curve(equity: np.ndarray) -> float:

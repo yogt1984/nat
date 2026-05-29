@@ -449,18 +449,21 @@ def _compute_metrics(
     drawdowns = (equity - running_max) / running_max * 100
     max_drawdown_pct = abs(drawdowns.min())
 
-    # Sharpe ratio (based on trade returns)
-    # This is a simplified calculation - proper Sharpe needs time normalization
-    pnl_array = np.array(pnls)
-    if len(pnl_array) > 1 and pnl_array.std() > 0:
-        # Approximate annualization factor based on trade frequency
-        # Assume average of 1 trade per day, 252 trading days
-        trades_per_year = 252
-        sharpe_ratio = (pnl_array.mean() / pnl_array.std()) * np.sqrt(
-            min(len(pnls), trades_per_year)
-        )
-    else:
-        sharpe_ratio = 0.0
+    # Sharpe ratio — aggregate per-trade PnL to daily, then annualize
+    from utils.metrics import sharpe_daily
+    sharpe_ratio = 0.0
+    closed = [(t.exit_time, t.pnl_pct) for t in trades
+              if t.exit_time is not None and t.pnl_pct is not None]
+    if len(closed) >= 2:
+        exit_times = np.array([c[0] for c in closed], dtype=np.int64)
+        trade_pnls = np.array([c[1] for c in closed])
+        days = exit_times // 86_400_000  # ms -> day
+        first_day, last_day = int(days.min()), int(days.max())
+        daily_pnl = np.zeros(last_day - first_day + 1)
+        for pnl_val, day in zip(trade_pnls, days):
+            daily_pnl[int(day) - first_day] += pnl_val
+        if len(daily_pnl) >= 2:
+            sharpe_ratio = sharpe_daily(daily_pnl)
 
     # Average holding time
     holding_bars = [t.holding_bars for t in trades if t.exit_idx is not None]

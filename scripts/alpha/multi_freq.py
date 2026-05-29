@@ -144,8 +144,8 @@ def align_macro_to_micro(
     n_micro = len(micro_df)
     n_macro = len(macro_filter)
 
-    # Bars per day approximation
-    bars_per_day = {"15min": 96, "5min": 288, "1h": 24, "4h": 6}.get(micro_timeframe, 96)
+    from utils.metrics import bars_per_day_for_timeframe
+    bars_per_day = bars_per_day_for_timeframe(micro_timeframe)
 
     result = np.zeros((n_micro, 3))
 
@@ -250,10 +250,10 @@ def _compute_signal_pnl(signal: np.ndarray, prices: np.ndarray) -> np.ndarray:
     return pnl
 
 
-def _sharpe(pnl: np.ndarray) -> float:
-    if len(pnl) < 2 or np.std(pnl) < 1e-15:
-        return 0.0
-    return float(np.mean(pnl) / np.std(pnl) * np.sqrt(252 * 96))  # annualized at 15min
+def _sharpe(pnl: np.ndarray, bars_per_day: float = 96) -> float:
+    """Annualized Sharpe from intraday bar PnL."""
+    from utils.metrics import sharpe_intraday
+    return sharpe_intraday(pnl, bars_per_day=bars_per_day)
 
 
 def _max_dd(pnl: np.ndarray) -> float:
@@ -288,6 +288,9 @@ def run_multi_freq(
     from data.macro import fetch_candles, add_indicators
     from cluster_pipeline.loader import load_parquet
     from cluster_pipeline.preprocess import aggregate_bars
+    from utils.metrics import bars_per_day_for_timeframe
+
+    bpd = bars_per_day_for_timeframe(timeframe)
 
     # Load micro data
     df = load_parquet(data_dir)
@@ -335,8 +338,8 @@ def run_multi_freq(
             n_bars_long_allowed=len(bars_pd),
             n_bars_short_allowed=len(bars_pd),
             n_bars_flat_only=0,
-            micro_sharpe=_sharpe(pnl), macro_sharpe=0.0,
-            composite_sharpe=_sharpe(pnl),
+            micro_sharpe=_sharpe(pnl, bpd), macro_sharpe=0.0,
+            composite_sharpe=_sharpe(pnl, bpd),
             micro_max_dd=_max_dd(pnl), macro_max_dd=0.0,
             composite_max_dd=_max_dd(pnl),
             gate_sharpe_improves=False, gate_dd_improves=False,
@@ -351,20 +354,20 @@ def run_multi_freq(
 
     # Micro-only PnL
     micro_pnl = _compute_signal_pnl(micro_signal, prices)
-    micro_s = _sharpe(micro_pnl)
+    micro_s = _sharpe(micro_pnl, bpd)
     micro_dd = _max_dd(micro_pnl)
 
     # Macro-only PnL (buy-and-hold when long_allowed)
     macro_signal = np.where(macro_state[:, 0], 1.0, -1.0)
     macro_pnl = _compute_signal_pnl(macro_signal, prices)
-    macro_s = _sharpe(macro_pnl)
+    macro_s = _sharpe(macro_pnl, bpd)
     macro_dd = _max_dd(macro_pnl)
 
     # Composite: macro-gated micro + profit-sensitive exit
     gated = apply_macro_gate(micro_signal, macro_state)
     composite = profit_sensitive_exit(gated, prices)
     comp_pnl = _compute_signal_pnl(composite, prices)
-    comp_s = _sharpe(comp_pnl)
+    comp_s = _sharpe(comp_pnl, bpd)
     comp_dd = _max_dd(comp_pnl)
 
     # Count bars

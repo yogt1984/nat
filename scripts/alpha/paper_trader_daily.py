@@ -307,8 +307,8 @@ def compute_rolling_stats(reports_dir: Path, current_date: str) -> dict:
 
                 pnl_arr = np.array(daily_pnl)
                 total = float(np.sum(pnl_arr))
-                std = float(np.std(pnl_arr))
-                sharpe = float(np.mean(pnl_arr) / std * np.sqrt(252)) if std > 0 else 0.0
+                from utils.metrics import sharpe_daily
+                sharpe = sharpe_daily(pnl_arr)
                 sym_pnl[sym] = {
                     "total_bps": round(total, 1),
                     "sharpe": round(sharpe, 2),
