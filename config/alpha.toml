@@ -28,7 +28,8 @@ it_prefilter = false            # If true, only screen IT-selected features
 # ── Step 2: Signal Combination ──
 [combiner]
 top_n = 20                     # Top features by |IC| to combine
-max_corr = 0.8                 # Correlation dedup threshold
+max_corr = 0.7                 # Correlation dedup threshold (hierarchical clustering)
+dedup_method = "cluster"       # "cluster" (hierarchical) or "pairwise" (legacy greedy)
 method = "equal"               # "equal" or "ic_weighted"
 
 # ── Step 3: Position Sizing ──

@@ -110,7 +110,7 @@ class TestDeduplicateByCorrelation:
             FeatureSpec("feat_1", "BTC", "4h", 16, 0.04, 0.5),
             FeatureSpec("feat_2", "BTC", "4h", 16, 0.03, 0.5),
         ]
-        result = deduplicate_by_correlation(df, specs, max_corr=0.8)
+        result = deduplicate_by_correlation(df, specs, max_corr=0.7)
         assert len(result) == 3  # all uncorrelated → all kept
 
     def test_drops_highly_correlated(self):
@@ -126,7 +126,7 @@ class TestDeduplicateByCorrelation:
             FeatureSpec("feat_1", "BTC", "4h", 16, 0.03, 0.5),
             FeatureSpec("feat_2", "BTC", "4h", 16, 0.04, 0.5),
         ]
-        result = deduplicate_by_correlation(df, specs, max_corr=0.8)
+        result = deduplicate_by_correlation(df, specs, max_corr=0.7)
         names = [s.name for s in result]
         # feat_1 should be dropped (lower IC than correlated feat_0)
         assert "feat_0" in names
@@ -136,7 +136,7 @@ class TestDeduplicateByCorrelation:
     def test_single_feature(self):
         df = pl.DataFrame({"feat_0": np.random.randn(100)})
         specs = [FeatureSpec("feat_0", "BTC", "4h", 16, 0.05, 0.5)]
-        result = deduplicate_by_correlation(df, specs, max_corr=0.8)
+        result = deduplicate_by_correlation(df, specs, max_corr=0.7)
         assert len(result) == 1
 
     def test_missing_column_skipped(self):
@@ -145,9 +145,68 @@ class TestDeduplicateByCorrelation:
             FeatureSpec("feat_0", "BTC", "4h", 16, 0.05, 0.5),
             FeatureSpec("feat_missing", "BTC", "4h", 16, 0.03, 0.5),
         ]
-        result = deduplicate_by_correlation(df, specs, max_corr=0.8)
+        result = deduplicate_by_correlation(df, specs, max_corr=0.7)
         assert len(result) == 1
         assert result[0].name == "feat_0"
+
+    def test_cluster_transitive_correlation(self):
+        """A~B=0.75, B~C=0.75 should all land in one cluster at max_corr=0.7."""
+        np.random.seed(42)
+        n = 500
+        a = np.random.randn(n)
+        b = 0.75 * a + 0.25 * np.random.randn(n)  # corr ~0.95 with a
+        c = 0.75 * b + 0.25 * np.random.randn(n)  # corr ~0.95 with b, ~0.7 with a
+        d = np.random.randn(n)  # independent
+        df = pl.DataFrame({"f_a": a, "f_b": b, "f_c": c, "f_d": d})
+        specs = [
+            FeatureSpec("f_a", "BTC", "4h", 16, 0.05, 0.5),
+            FeatureSpec("f_b", "BTC", "4h", 16, 0.04, 0.5),
+            FeatureSpec("f_c", "BTC", "4h", 16, 0.03, 0.5),
+            FeatureSpec("f_d", "BTC", "4h", 16, 0.02, 0.5),
+        ]
+        result = deduplicate_by_correlation(df, specs, max_corr=0.7, method="cluster")
+        names = [s.name for s in result]
+        # Cluster should keep f_a (best IC) and f_d (independent)
+        assert "f_a" in names
+        assert "f_d" in names
+        # At most one from the {a, b, c} group
+        assert len([n for n in names if n in ("f_a", "f_b", "f_c")]) == 1
+
+    def test_pairwise_misses_transitive(self):
+        """Pairwise can miss transitive correlations — more features survive."""
+        np.random.seed(42)
+        n = 500
+        a = np.random.randn(n)
+        b = 0.75 * a + 0.25 * np.random.randn(n)
+        c = 0.75 * b + 0.25 * np.random.randn(n)
+        d = np.random.randn(n)
+        df = pl.DataFrame({"f_a": a, "f_b": b, "f_c": c, "f_d": d})
+        specs = [
+            FeatureSpec("f_a", "BTC", "4h", 16, 0.05, 0.5),
+            FeatureSpec("f_b", "BTC", "4h", 16, 0.04, 0.5),
+            FeatureSpec("f_c", "BTC", "4h", 16, 0.03, 0.5),
+            FeatureSpec("f_d", "BTC", "4h", 16, 0.02, 0.5),
+        ]
+        result_cluster = deduplicate_by_correlation(df, specs, max_corr=0.7, method="cluster")
+        result_pairwise = deduplicate_by_correlation(df, specs, max_corr=0.7, method="pairwise")
+        # Cluster should be at least as aggressive as pairwise
+        assert len(result_cluster) <= len(result_pairwise)
+
+    def test_cluster_all_identical(self):
+        """All identical features → only one survives."""
+        np.random.seed(42)
+        base = np.random.randn(500)
+        df = pl.DataFrame({
+            "f_0": base, "f_1": base, "f_2": base,
+        })
+        specs = [
+            FeatureSpec("f_0", "BTC", "4h", 16, 0.05, 0.5),
+            FeatureSpec("f_1", "BTC", "4h", 16, 0.04, 0.5),
+            FeatureSpec("f_2", "BTC", "4h", 16, 0.03, 0.5),
+        ]
+        result = deduplicate_by_correlation(df, specs, max_corr=0.7, method="cluster")
+        assert len(result) == 1
+        assert result[0].name == "f_0"  # highest IC
 
 
 # ---------------------------------------------------------------------------
