@@ -10,7 +10,7 @@ te_top_n = 20               # compute transfer entropy for top-N features
 te_lag = 1                  # TE source lags
 te_order = 1                # TE target AR order
 te_method = "ksg"           # "ksg" (nonparametric CMI) or "linear" (Gaussian AR)
-cmi_min_samples = 200       # minimum samples for reliable CMI estimation
+cmi_min_samples = 500       # minimum samples for reliable CMI estimation (5D conditioning)
 cmi_max_z_dims = 5          # cap conditioning dimensionality
 # symbols: loaded from config/symbols.toml via load_symbols()
 

@@ -86,7 +86,7 @@ class ITEngineConfig:
     te_method: str = "ksg"  # "ksg" (nonparametric) or "linear" (Gaussian AR)
 
     # CMI sample guard
-    cmi_min_samples: int = 200  # minimum N for reliable CMI estimation
+    cmi_min_samples: int = 500  # minimum N for reliable CMI estimation (5D conditioning)
     cmi_max_z_dims: int = 5     # cap Z dimensionality to prevent curse of dimensionality
 
     # Redis
