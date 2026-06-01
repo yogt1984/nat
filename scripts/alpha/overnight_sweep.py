@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
 """
-Overnight OOS Sweep — run all algorithms across all available dates.
+Gauntlet — multi-day OOS sweep across all algorithms.
 
-Tests every algorithm on every date that has ≥4h of data, using the prior
-3 dates as walk-forward training. Produces a per-date report and a final
-aggregate summary with cumulative PnL and Sharpe per algorithm per symbol.
+Subcommands:
+  run         Run the sweep (saves incrementally after each date)
+  stop        Kill a running gauntlet, print partial results
+  report      Print the latest gauntlet report
+  report_all  Merge all gauntlet reports into one combined summary
 
 Usage:
-  # Full sweep (all dates with enough data):
-  nohup python scripts/alpha/overnight_sweep.py > reports/overnight.log 2>&1 &
-
-  # Last N days only:
-  python scripts/alpha/overnight_sweep.py --last 7
-
-  # Specific date range:
-  python scripts/alpha/overnight_sweep.py --from 2026-05-20 --to 2026-06-01
+  python scripts/alpha/overnight_sweep.py run                    # full sweep
+  python scripts/alpha/overnight_sweep.py run --last 7           # last 7 days
+  python scripts/alpha/overnight_sweep.py stop                   # kill + report
+  python scripts/alpha/overnight_sweep.py report                 # latest report
+  python scripts/alpha/overnight_sweep.py report_all             # merge all runs
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import sys
 import time
 from datetime import datetime, timezone
@@ -31,95 +32,45 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from algorithms import discover_all
-from alpha.paper_trader_daily import (
-    DAILY_ALGOS,
-    DEFAULT_COST,
-    SYMBOLS,
-    run_3f_liquidity,
-    run_algo_single_date,
-)
-from alpha.paper_trader_generic import (
-    BAR_SECONDS,
-    TRAIN_WINDOW,
-    discover_dates,
-)
-from backtest.costs import CostModel
-
 REPORTS_DIR = ROOT / "reports"
+PID_FILE = REPORTS_DIR / ".gauntlet.pid"
+LATEST_FILE = REPORTS_DIR / "gauntlet_latest.json"
 MIN_HOURS = 4.0
+SYMBOLS_DEFAULT = ["BTC", "ETH", "SOL"]
 
 
-def check_date_hours(data_dir: Path, date: str, symbol: str) -> float:
-    """Return hours of data for a date, or 0 if insufficient."""
-    from data.features import load_features
-    df = load_features(
-        symbols=[symbol], date_range=(date, date),
-        columns=["timestamp_ns", "symbol"], data_dir=data_dir, validate=False,
-    )
-    if df.empty:
+def _json_default(o):
+    if isinstance(o, (np.floating, np.integer)):
+        return float(o)
+    return str(o)
+
+
+def _sharpe(daily_pnl: np.ndarray) -> float:
+    """Annualized Sharpe from daily PnL array."""
+    if len(daily_pnl) < 2:
         return 0.0
-    ts = df["timestamp_ns"].values
-    return float((ts[-1] - ts[0]) / 1e9 / 3600)
+    mu = np.mean(daily_pnl)
+    sigma = np.std(daily_pnl, ddof=1)
+    if sigma < 1e-12:
+        return 0.0
+    return float(mu / sigma * np.sqrt(252))
 
 
-def run_one_date(data_dir: Path, all_dates: list[str], test_date: str,
-                 symbols: list[str], cost_model: CostModel) -> dict | None:
-    """Run all algorithms on a single test date. Returns report dict or None."""
-    test_idx = all_dates.index(test_date)
-    if test_idx < TRAIN_WINDOW:
-        return None
+# ── Shared report printing ────────────────────────────────────────────────
 
-    train_dates = all_dates[test_idx - TRAIN_WINDOW:test_idx]
-
-    hours = check_date_hours(data_dir, test_date, symbols[0])
-    if hours < MIN_HOURS:
-        print(f"  [{test_date}] Skipping — only {hours:.1f}h (need {MIN_HOURS}h)")
-        return None
-
-    n_bars = int(hours * 3600 / BAR_SECONDS)
-    print(f"\n  [{test_date}] {hours:.1f}h, ~{n_bars} bars | train: {train_dates}")
-
-    t0 = time.time()
-    algo_results = {}
-
-    # 3f liquidity
-    r = run_3f_liquidity(data_dir, train_dates, test_date, symbols, cost_model=cost_model)
-    if r:
-        algo_results["3f_liquidity"] = r
-
-    # All generic algorithms
-    for algo_name in DAILY_ALGOS:
-        r = run_algo_single_date(algo_name, data_dir, train_dates, test_date, symbols, cost_model=cost_model)
-        if r:
-            algo_results[algo_name] = r
-
-    elapsed = time.time() - t0
-    print(f"  [{test_date}] Done in {elapsed:.0f}s — {len(algo_results)} algos produced results")
-
-    return {
-        "date": test_date,
-        "hours": round(hours, 1),
-        "bars": n_bars,
-        "train_dates": train_dates,
-        "elapsed_s": round(elapsed, 1),
-        "algorithms": algo_results,
-    }
-
-
-def print_summary(daily_reports: list[dict], symbols: list[str]):
+def print_summary(daily_reports: list[dict], symbols: list[str], title: str = "GAUNTLET SUMMARY"):
     """Print aggregate summary across all dates."""
-    # Collect per-algo, per-symbol daily PnL series
     algo_names = set()
     for report in daily_reports:
         algo_names.update(report["algorithms"].keys())
     algo_names = sorted(algo_names)
 
     dates = [r["date"] for r in daily_reports]
+    total_hours = sum(r.get("hours", 0) for r in daily_reports)
 
     print(f"\n{'=' * 80}")
-    print(f"  OVERNIGHT SWEEP SUMMARY")
-    print(f"  {len(daily_reports)} test dates: {dates[0]} → {dates[-1]}")
+    print(f"  {title}")
+    print(f"  {len(daily_reports)} test dates: {dates[0]} -> {dates[-1]}  ({total_hours:.1f}h total)")
     print(f"{'=' * 80}")
 
     # Build PnL matrix: algo -> symbol -> [daily_bps]
@@ -137,8 +88,8 @@ def print_summary(daily_reports: list[dict], symbols: list[str]):
     # Summary table
     header = f"  {'Algorithm':<24s}"
     for sym in symbols:
-        header += f" {'Σ'+sym:>10s} {'SR'+sym:>7s}"
-    header += f" {'Σ Total':>10s} {'SR Tot':>7s} {'Win%':>6s}"
+        header += f" {'S'+sym:>10s} {'SR'+sym:>7s}"
+    header += f" {'S Total':>10s} {'SR Tot':>7s} {'Win%':>6s}"
     print(f"\n{header}")
     print(f"  {'-' * (len(header) - 2)}")
 
@@ -159,18 +110,17 @@ def print_summary(daily_reports: list[dict], symbols: list[str]):
         line = f"  {algo:<24s} {' '.join(cols)} {total_all:>+10.1f} {total_sr:>+6.2f} {win_pct:>5.0f}%"
         rows.append((total_sr, line))
 
-    # Sort by total Sharpe descending
     rows.sort(key=lambda x: -x[0])
     for _, line in rows:
         print(line)
 
     # Per-date breakdown
-    print(f"\n  Per-date totals (sum across all algos, all symbols):")
+    print(f"\n  Per-date breakdown:")
     print(f"  {'Date':<14s} {'Hours':>6s} {'Total bps':>10s} {'Algos':>6s}")
     print(f"  {'-' * 40}")
     for report in daily_reports:
         date = report["date"]
-        hours = report["hours"]
+        hours = report.get("hours", 0)
         total = 0.0
         n_algos = len(report["algorithms"])
         for algo_data in report["algorithms"].values():
@@ -181,47 +131,56 @@ def print_summary(daily_reports: list[dict], symbols: list[str]):
     print()
 
 
-def _sharpe(daily_pnl: np.ndarray) -> float:
-    """Annualized Sharpe from daily PnL array."""
-    if len(daily_pnl) < 2:
-        return 0.0
-    mu = np.mean(daily_pnl)
-    sigma = np.std(daily_pnl, ddof=1)
-    if sigma < 1e-12:
-        return 0.0
-    return float(mu / sigma * np.sqrt(252))
+def _save_report(report: dict, path: Path):
+    """Save report JSON atomically."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w") as f:
+        json.dump(report, f, indent=2, default=_json_default)
+    tmp.rename(path)
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Overnight OOS Sweep")
-    parser.add_argument("--data-dir", default="data/features",
-                        help="Feature data directory")
-    parser.add_argument("--last", type=int, default=None,
-                        help="Only test the last N dates")
-    parser.add_argument("--from", dest="date_from", type=str, default=None,
-                        help="Start date (YYYY-MM-DD)")
-    parser.add_argument("--to", dest="date_to", type=str, default=None,
-                        help="End date (YYYY-MM-DD)")
-    parser.add_argument("--symbols", nargs="+", default=SYMBOLS)
-    parser.add_argument("--cost-mode", choices=["binance_vip9", "taker", "maker"],
-                        default="binance_vip9")
-    args = parser.parse_args()
+def _load_report(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+# ── run ───────────────────────────────────────────────────────────────────
+
+def cmd_run(args):
+    """Run the full gauntlet sweep with incremental saves."""
+    from algorithms import discover_all
+    from alpha.paper_trader_daily import (
+        DAILY_ALGOS,
+        DEFAULT_COST,
+        run_3f_liquidity,
+        run_algo_single_date,
+    )
+    from alpha.paper_trader_generic import (
+        BAR_SECONDS,
+        TRAIN_WINDOW,
+        discover_dates,
+    )
 
     data_dir = Path(args.data_dir)
     if not data_dir.exists():
         print(f"Data directory not found: {data_dir}")
-        sys.exit(1)
+        return 1
 
     discover_all()
     all_dates = discover_dates(data_dir)
+    symbols = args.symbols
 
     if len(all_dates) < TRAIN_WINDOW + 1:
         print(f"Need at least {TRAIN_WINDOW + 1} dates, have {len(all_dates)}")
-        sys.exit(1)
+        return 1
 
-    # Determine testable dates
     testable = all_dates[TRAIN_WINDOW:]
-
     if args.date_from:
         testable = [d for d in testable if d >= args.date_from]
     if args.date_to:
@@ -231,49 +190,298 @@ def main():
 
     if not testable:
         print("No testable dates in range.")
-        sys.exit(1)
+        return 1
 
     cost_model = DEFAULT_COST
-    print(f"Overnight OOS Sweep")
-    print(f"  Dates to test: {len(testable)} ({testable[0]} → {testable[-1]})")
+
+    # Write PID file
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(str(os.getpid()))
+
+    print(f"Gauntlet Sweep")
+    print(f"  PID: {os.getpid()}")
+    print(f"  Dates to test: {len(testable)} ({testable[0]} -> {testable[-1]})")
     print(f"  Algorithms: {len(DAILY_ALGOS) + 1} (18 generic + 3f_liquidity)")
-    print(f"  Symbols: {args.symbols}")
+    print(f"  Symbols: {symbols}")
     print(f"  Cost: {cost_model.round_trip_cost_bps:.2f} bps RT ({args.cost_mode})")
     print(f"  Started: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+    sys.stdout.flush()
 
     daily_reports = []
     t_total = time.time()
 
+    def _save_incremental():
+        """Save current progress to gauntlet_latest.json."""
+        elapsed = time.time() - t_total
+        report = {
+            "generated": datetime.now(timezone.utc).isoformat(),
+            "status": "running",
+            "dates_tested": len(daily_reports),
+            "dates_total": len(testable),
+            "cost_bps_rt": cost_model.round_trip_cost_bps,
+            "symbols": symbols,
+            "elapsed_min": round(elapsed / 60, 1),
+            "daily": daily_reports,
+        }
+        _save_report(report, LATEST_FILE)
+
     for test_date in testable:
-        report = run_one_date(data_dir, all_dates, test_date, args.symbols, cost_model)
-        if report is not None:
-            daily_reports.append(report)
+        # Check hours
+        from data.features import load_features
+        df = load_features(
+            symbols=[symbols[0]], date_range=(test_date, test_date),
+            columns=["timestamp_ns", "symbol"], data_dir=data_dir, validate=False,
+        )
+        if df.empty:
+            print(f"  [{test_date}] Skipping — no data")
+            sys.stdout.flush()
+            continue
+        ts = df["timestamp_ns"].values
+        hours = float((ts[-1] - ts[0]) / 1e9 / 3600)
+        if hours < MIN_HOURS:
+            print(f"  [{test_date}] Skipping — only {hours:.1f}h (need {MIN_HOURS}h)")
+            sys.stdout.flush()
+            continue
+
+        test_idx = all_dates.index(test_date)
+        train_dates = all_dates[test_idx - TRAIN_WINDOW:test_idx]
+        n_bars = int(hours * 3600 / BAR_SECONDS)
+
+        print(f"\n  [{test_date}] {hours:.1f}h, ~{n_bars} bars | train: {train_dates}")
+        sys.stdout.flush()
+
+        t0 = time.time()
+        algo_results = {}
+
+        r = run_3f_liquidity(data_dir, train_dates, test_date, symbols, cost_model=cost_model)
+        if r:
+            algo_results["3f_liquidity"] = r
+
+        for algo_name in DAILY_ALGOS:
+            r = run_algo_single_date(algo_name, data_dir, train_dates, test_date, symbols, cost_model=cost_model)
+            if r:
+                algo_results[algo_name] = r
+
+        elapsed = time.time() - t0
+        print(f"  [{test_date}] Done in {elapsed:.0f}s — {len(algo_results)} algos produced results")
+        sys.stdout.flush()
+
+        daily_reports.append({
+            "date": test_date,
+            "hours": round(hours, 1),
+            "bars": n_bars,
+            "train_dates": train_dates,
+            "elapsed_s": round(elapsed, 1),
+            "algorithms": algo_results,
+        })
+
+        # Save after every date
+        _save_incremental()
 
     elapsed_total = time.time() - t_total
     print(f"\n  Total elapsed: {elapsed_total / 60:.1f} min")
 
     if not daily_reports:
         print("No dates had sufficient data.")
-        sys.exit(1)
+        PID_FILE.unlink(missing_ok=True)
+        return 1
 
-    # Print summary
-    print_summary(daily_reports, args.symbols)
-
-    # Save full results
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = REPORTS_DIR / f"overnight_{testable[0]}_{testable[-1]}.json"
-    out = {
+    # Final save with status=complete
+    final = {
         "generated": datetime.now(timezone.utc).isoformat(),
+        "status": "complete",
         "dates_tested": len(daily_reports),
+        "dates_total": len(testable),
         "cost_bps_rt": cost_model.round_trip_cost_bps,
+        "symbols": symbols,
         "elapsed_min": round(elapsed_total / 60, 1),
         "daily": daily_reports,
     }
-    with open(out_path, "w") as f:
-        json.dump(out, f, indent=2, default=lambda o: float(o) if isinstance(o, (np.floating, np.integer)) else str(o))
-    print(f"  Full results saved: {out_path}")
+    _save_report(final, LATEST_FILE)
+
+    # Also save a timestamped copy
+    ts_path = REPORTS_DIR / f"gauntlet_{testable[0]}_{testable[-1]}.json"
+    _save_report(final, ts_path)
+
+    print_summary(daily_reports, symbols)
+    print(f"  Saved: {LATEST_FILE}")
+    print(f"  Saved: {ts_path}")
+
+    PID_FILE.unlink(missing_ok=True)
+    return 0
+
+
+# ── stop ──────────────────────────────────────────────────────────────────
+
+def cmd_stop(args):
+    """Kill a running gauntlet and print partial results."""
+    if PID_FILE.exists():
+        pid = int(PID_FILE.read_text().strip())
+        try:
+            os.kill(pid, signal.SIGTERM)
+            print(f"  Stopped gauntlet (PID {pid})")
+            # Give it a moment to flush
+            time.sleep(1)
+        except ProcessLookupError:
+            print(f"  Gauntlet (PID {pid}) was not running")
+        PID_FILE.unlink(missing_ok=True)
+    else:
+        # Try to find it by process name
+        import subprocess
+        r = subprocess.run(["pgrep", "-f", "overnight_sweep.py run"],
+                           capture_output=True, text=True)
+        if r.returncode == 0 and r.stdout.strip():
+            for pid_str in r.stdout.strip().split("\n"):
+                pid = int(pid_str)
+                if pid != os.getpid():
+                    os.kill(pid, signal.SIGTERM)
+                    print(f"  Stopped gauntlet (PID {pid})")
+            time.sleep(1)
+        else:
+            print("  No running gauntlet found")
+
+    # Print latest report
+    return cmd_report(args)
+
+
+# ── report ────────────────────────────────────────────────────────────────
+
+def cmd_report(args):
+    """Print the latest gauntlet report."""
+    report = _load_report(LATEST_FILE)
+    if report is None:
+        print("  No gauntlet report found. Run `nat gauntlet` first.")
+        return 1
+
+    daily = report.get("daily", [])
+    if not daily:
+        print("  Report exists but has no completed dates yet.")
+        return 1
+
+    symbols = report.get("symbols", SYMBOLS_DEFAULT)
+    status = report.get("status", "unknown")
+    tested = report.get("dates_tested", len(daily))
+    total = report.get("dates_total", tested)
+    elapsed = report.get("elapsed_min", 0)
+    cost = report.get("cost_bps_rt", 0)
+
+    title = f"GAUNTLET REPORT ({status})"
+    if status == "running":
+        title += f" — {tested}/{total} dates, {elapsed:.0f} min elapsed"
+
+    print(f"\n  Generated: {report.get('generated', '?')}")
+    print(f"  Cost: {cost} bps RT")
+
+    print_summary(daily, symbols, title=title)
+    return 0
+
+
+# ── report_all ────────────────────────────────────────────────────────────
+
+def cmd_report_all(args):
+    """Merge all gauntlet reports into one combined summary."""
+    if not REPORTS_DIR.exists():
+        print("  No reports directory found.")
+        return 1
+
+    # Collect all gauntlet_*.json files (timestamped runs) + latest
+    report_files = sorted(REPORTS_DIR.glob("gauntlet_*.json"))
+    # Also include overnight_*.json from the old naming convention
+    report_files += sorted(REPORTS_DIR.glob("overnight_*.json"))
+
+    if not report_files:
+        print("  No gauntlet reports found.")
+        return 1
+
+    # Gather all daily entries, dedup by date (keep latest run's version)
+    date_to_daily = {}
+    all_symbols = set()
+    total_cost = None
+
+    for rf in report_files:
+        report = _load_report(rf)
+        if report is None:
+            continue
+        total_cost = report.get("cost_bps_rt", total_cost)
+        for sym in report.get("symbols", SYMBOLS_DEFAULT):
+            all_symbols.add(sym)
+        for daily in report.get("daily", []):
+            date = daily.get("date")
+            if date:
+                date_to_daily[date] = daily
+
+    if not date_to_daily:
+        print("  Reports found but no daily data inside them.")
+        return 1
+
+    # Sort by date
+    merged_daily = [date_to_daily[d] for d in sorted(date_to_daily.keys())]
+    symbols = sorted(all_symbols)
+
+    n_files = len(report_files)
+    n_dates = len(merged_daily)
+    total_hours = sum(d.get("hours", 0) for d in merged_daily)
+
+    print(f"\n  Merged {n_files} report files -> {n_dates} unique dates ({total_hours:.1f}h total)")
+    if total_cost:
+        print(f"  Cost: {total_cost} bps RT")
+
+    print_summary(merged_daily, symbols, title=f"GAUNTLET COMBINED — {n_dates} dates")
+
+    # Save combined report
+    combined = {
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "status": "combined",
+        "source_files": [str(f.name) for f in report_files],
+        "dates_tested": n_dates,
+        "cost_bps_rt": total_cost,
+        "symbols": symbols,
+        "daily": merged_daily,
+    }
+    out_path = REPORTS_DIR / "gauntlet_combined.json"
+    _save_report(combined, out_path)
+    print(f"  Saved: {out_path}")
 
     return 0
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(description="Gauntlet — multi-day OOS sweep")
+    sub = parser.add_subparsers(dest="command")
+
+    # run
+    run_p = sub.add_parser("run", help="Run the gauntlet sweep")
+    run_p.add_argument("--data-dir", default="data/features")
+    run_p.add_argument("--last", type=int, default=None, help="Only test the last N dates")
+    run_p.add_argument("--from", dest="date_from", type=str, default=None)
+    run_p.add_argument("--to", dest="date_to", type=str, default=None)
+    run_p.add_argument("--symbols", nargs="+", default=SYMBOLS_DEFAULT)
+    run_p.add_argument("--cost-mode", choices=["binance_vip9", "taker", "maker"],
+                       default="binance_vip9")
+    run_p.set_defaults(func=cmd_run)
+
+    # stop
+    stop_p = sub.add_parser("stop", help="Stop a running gauntlet, print partial results")
+    stop_p.set_defaults(func=cmd_stop)
+
+    # report
+    report_p = sub.add_parser("report", help="Print the latest gauntlet report")
+    report_p.set_defaults(func=cmd_report)
+
+    # report_all
+    report_all_p = sub.add_parser("report_all", help="Merge all reports into combined summary")
+    report_all_p.set_defaults(func=cmd_report_all)
+
+    args = parser.parse_args()
+
+    if not hasattr(args, "func"):
+        # Default to run if no subcommand given (backwards compat)
+        # Re-parse with "run" prepended
+        args = parser.parse_args(["run"] + sys.argv[1:])
+
+    return args.func(args)
 
 
 if __name__ == "__main__":
