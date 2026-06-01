@@ -2127,6 +2127,35 @@ def cmd_oos30(args):
     return 0
 
 
+# ── Gauntlet: Multi-Day OOS Sweep ────────────────────────────────────────────
+
+def cmd_gauntlet(args):
+    """Run all algorithms across multiple OOS days with aggregate statistics."""
+    _banner("Gauntlet: Multi-Day OOS Sweep")
+    sys.stdout.flush()
+
+    data_dir = getattr(args, 'data_dir', 'data/features')
+    symbols = getattr(args, 'symbols', ['BTC', 'ETH', 'SOL'])
+    cost_mode = getattr(args, 'cost_mode', 'binance_vip9')
+
+    cmd = f"scripts/alpha/overnight_sweep.py --data-dir {data_dir}"
+    cmd += f" --symbols {' '.join(symbols)}"
+    cmd += f" --cost-mode {cost_mode}"
+
+    last = getattr(args, 'last', None)
+    date_from = getattr(args, 'date_from', None)
+    date_to = getattr(args, 'date_to', None)
+    if last:
+        cmd += f" --last {last}"
+    if date_from:
+        cmd += f" --from {date_from}"
+    if date_to:
+        cmd += f" --to {date_to}"
+
+    r = _py(cmd)
+    return r.returncode
+
+
 # ── Discovery orchestrator ──────────────────────────────────────────────────
 
 def cmd_health(args):
@@ -3895,6 +3924,40 @@ def build_parser():
     daily_p.add_argument('--cost-mode', choices=['binance_vip9', 'taker', 'maker', 'config'],
                          default='binance_vip9', help='Cost model (default: binance_vip9 = 1.61 bps RT)')
     daily_p.set_defaults(func=cmd_daily)
+
+    # ── gauntlet (multi-day OOS sweep) ──
+    gauntlet_p = sub.add_parser('gauntlet', help='Multi-day OOS sweep across all algorithms',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Runs all 19 algorithms (18 generic + 3f_liquidity) across multiple
+        OOS dates with walk-forward z-score calibration. Produces a ranked
+        summary table with cumulative PnL, Sharpe ratio, and win rate.
+
+        Each date uses the prior 3 days as training. Dates with <4h of data
+        are skipped automatically. Results saved to reports/overnight_*.json.
+
+        Designed for overnight runs — full sweep can take several hours.
+
+        Example:
+          nat gauntlet                           # all available dates
+          nat gauntlet --last 7                  # last 7 days only
+          nat gauntlet --from 2026-05-20         # from a specific date
+          nat gauntlet --last 3 --cost-mode taker  # 3 days, taker fees
+        """))
+    gauntlet_p.add_argument('--last', type=int, default=None,
+                            help='Only test the last N dates')
+    gauntlet_p.add_argument('--from', dest='date_from', type=str, default=None,
+                            help='Start date (YYYY-MM-DD)')
+    gauntlet_p.add_argument('--to', dest='date_to', type=str, default=None,
+                            help='End date (YYYY-MM-DD)')
+    gauntlet_p.add_argument('--data-dir', default='data/features',
+                            help='Feature data directory')
+    gauntlet_p.add_argument('--symbols', nargs='+', default=['BTC', 'ETH', 'SOL'],
+                            help='Symbols to test')
+    gauntlet_p.add_argument('--cost-mode', choices=['binance_vip9', 'taker', 'maker'],
+                            default='binance_vip9',
+                            help='Cost model (default: binance_vip9 = 1.61 bps RT)')
+    gauntlet_p.set_defaults(func=cmd_gauntlet)
 
     # ── kalman ──
     kal_p = sub.add_parser('kalman', help='Kalman filter research (OU filter IC + drift analysis)')

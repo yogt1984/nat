@@ -137,6 +137,16 @@ ALGO_CONFIG = {
         "polarity": "low_long",  # low entropy surprise → stable regime → long
         "bar_agg": "mean",
     },
+    "cascade_probability": {
+        "primary": "alg_cascade_prob",
+        "polarity": "high_long",  # high cascade prob → expect liquidation-driven move
+        "bar_agg": "mean",
+    },
+    "convolver": {
+        "primary": "alg_conv_best_score",
+        "polarity": "high_long",  # high score → strong pattern match
+        "bar_agg": "mean",
+    },
 }
 
 P_LONG_HIGH = 80  # for high_long polarity

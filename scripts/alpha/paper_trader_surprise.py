@@ -110,7 +110,7 @@ def discover_dates(data_dir: Path) -> list[str]:
 
 def compute_surprise_features(ticks: pd.DataFrame) -> pd.DataFrame:
     """Run SurpriseSignal algorithm on tick data, return features aligned to ticks."""
-    algo = SurpriseSignal(roc_window=50, transition_threshold=2.0)
+    algo = SurpriseSignal(roc_window=50)
     features = algo.run_batch(ticks)
     return features
 
