@@ -1,0 +1,28 @@
+# Tournament — continuous algorithm testing engine configuration.
+
+[tournament]
+cycle_time = "23:30"              # UTC, daily evaluation time
+sleep_interval_s = 3600           # check interval when in daemon mode
+min_hours_per_date = 4.0          # skip dates with less data
+symbols = ["BTC", "ETH", "SOL"]
+max_workers = 4                   # parallel evaluation workers
+train_window = 3                  # prior dates for walk-forward calibration
+
+[tournament.scoring]
+sharpe_weight = 0.4
+win_rate_weight = 0.3
+ic_weight = 0.3
+
+[tournament.degradation]
+probation_after_days = 5          # consecutive underperformance → probation
+retire_after_days = 14            # consecutive probation → retired
+min_sharpe_7d = 0.0               # below this = underperforming
+min_win_rate_7d = 0.40            # below this = underperforming
+activation_days = 3               # profitable days before candidate → active
+recovery_days = 3                 # profitable days to leave probation
+
+[tournament.promotion]
+min_days_active = 14              # minimum testing period
+min_sharpe_30d = 1.0              # sustained positive Sharpe
+min_win_rate_30d = 0.50           # sustained win rate
+min_symbols_profitable = 2        # profitable on ≥N symbols
