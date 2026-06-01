@@ -1,0 +1,276 @@
+================================================================================
+  ALGORITHM DEFINITION: hawkes_spread_gate
+  Hawkes Directional Signal Gated by Adverse Selection Safety
+================================================================================
+
+Status:       PROPOSED
+Created:      2026-06-01
+Motivation:   Gauntlet 2026-06-01 results — hawkes_intensity (#1 total PnL,
+              +955.8 bps, +36.8 bps/trade) and spread_decomp (#3, +456.3 bps,
+              3/3 symbols positive) measure orthogonal properties of order flow.
+
+================================================================================
+1. THESIS
+================================================================================
+
+Two observations from the gauntlet:
+
+  hawkes_intensity  — detects DIRECTION via self-exciting bid/ask cascade
+                      asymmetry. High conviction (+36.8 bps/trade) but low
+                      frequency (26 trades / 4.7h). Risk: fires during
+                      informed-flow periods where the cascade is adversely
+                      selected against.
+
+  spread_decomp     — detects SAFETY via adverse selection decomposition.
+                      Consistent across all 3 symbols (3/3 positive, +10.1
+                      bps/trade). Does not provide direction — it measures
+                      whether the current flow environment is safe to trade.
+
+Combined hypothesis: trade the hawkes directional signal ONLY when the spread
+decomposition indicates low adverse selection (uninformed flow dominance).
+This filters out periods where hawkes fires during informed cascades — the
+ones most likely to reverse against us.
+
+Analogy: hawkes is the compass (which way), spread_decomp is the weather
+report (is it safe to sail). You need both.
+
+================================================================================
+2. SIGNAL CONSTRUCTION
+================================================================================
+
+Inputs (from parent algorithms):
+  - alg_bid_ask_hawkes_imbalance  HI(t)  in (-1, 1)    [from hawkes_intensity]
+  - alg_hawkes_excitement         phi(t) in [0, 1)      [from hawkes_intensity]
+  - alg_adverse_component         AS(t)  in (-inf, inf)  [from spread_decomp]
+  - alg_spread_regime             R(t)   in {0, 1}       [from spread_decomp]
+
+Required upstream features (union of both parent algorithms):
+  - flow_count_1s
+  - flow_intensity
+  - imbalance_pressure_bid
+  - imbalance_pressure_ask
+  - toxic_effective_spread
+  - toxic_realized_spread
+
+Step 1 — Safety gate (from spread_decomp):
+
+    safe(t) = 1  if  alg_spread_regime(t) == 0       (low informed trading)
+              0  otherwise
+
+  When spread_regime = 1 (adverse selection > P70), informed traders are
+  active and market maker spreads are not being realized. Any directional
+  cascade in this regime is likely driven by informed flow — trading alongside
+  it means being adversely selected against.
+
+  Alternative (softer gate): instead of binary, use a continuous safety score:
+
+    safety(t) = 1 - AS_percentile(t)
+
+  where AS_percentile is the rolling percentile rank of the adverse component.
+  safety = 1 when AS is at historical minimum, 0 when at maximum.
+
+Step 2 — Direction signal (from hawkes_intensity):
+
+    direction(t) = HI(t)     in (-1, 1)
+
+  Positive = ask-side clustering dominates = long.
+  Negative = bid-side clustering dominates = short.
+
+Step 3 — Conviction filter (from hawkes_intensity):
+
+    excited(t) = 1  if  phi(t) > excitement_threshold  (default 0.3)
+                 0  otherwise
+
+  Only trade when a meaningful fraction of intensity comes from self-excitation
+  rather than baseline. When phi is low, the hawkes imbalance is mostly noise
+  in the baseline estimate.
+
+Step 4 — Combined signal:
+
+    signal(t) = direction(t) * safe(t) * excited(t)
+
+  Or with the soft gate:
+
+    signal(t) = direction(t) * safety(t) * excited(t)
+
+  The signal is:
+    - Positive and large: ask-side cascade in safe (uninformed) environment
+    - Negative and large: bid-side cascade in safe environment
+    - Zero: either no directional cascade, or cascade during informed flow
+    - Between -1 and 1 (soft gate version)
+
+  Polarity: high_long (positive signal = go long)
+
+================================================================================
+3. OUTPUT FEATURES
+================================================================================
+
+  Name                              Range       Description
+  -----------------------------------------------------------------------
+  alg_hawkes_spread_signal          (-1, 1)     Gated directional signal
+  alg_hawkes_spread_safe            {0, 1}      Safety gate status
+  alg_hawkes_spread_conviction      [0, 1)      Excitement * (1 - AS_pct)
+
+The primary trading feature is alg_hawkes_spread_signal.
+
+================================================================================
+4. PARAMETERS
+================================================================================
+
+  Parameter               Default   Source        Tunable
+  -----------------------------------------------------------------------
+  excitement_threshold    0.3       hawkes        Yes — sweep [0.1, 0.5]
+  regime_percentile       70        spread_decomp Yes — sweep [50, 80]
+  baseline_window         300       hawkes        Inherited
+  decay_beta              0.1       hawkes        Auto-tuned per regime
+  alpha_fraction          0.5       hawkes        Auto-tuned per regime
+  ema_span                100       spread_decomp Inherited
+  gate_mode               "hard"    new           "hard" (binary) or "soft"
+
+================================================================================
+5. EXPECTED BEHAVIOR
+================================================================================
+
+Trade frequency:
+
+  hawkes alone fires ~26 trades / 4.7h = ~5.5 trades/h.
+  The safety gate (spread_regime = 0 roughly 70% of the time by construction)
+  will filter some of these, yielding ~15-20 trades / 4.7h.
+
+  This is acceptable — the parent hawkes signal already shows high conviction
+  per trade. Reducing frequency while improving hit rate is the goal.
+
+Expected improvement:
+
+  The hypothesis is that the gated signal retains the winning trades (cascades
+  in uninformed environments) while filtering the losing trades (cascades
+  during informed flow). If hawkes alone has +36.8 bps/trade on 26 trades,
+  the gated version should have higher bps/trade on fewer trades.
+
+  Failure mode: if hawkes wins BECAUSE of informed cascades (riding momentum
+  from smart money), then gating those out would hurt. This would mean the
+  thesis is wrong — test and measure.
+
+When the signal does NOT fire:
+
+  1. No directional cascade (phi < threshold) — normal market, no signal
+  2. Cascade exists but adverse selection is high — informed flow, stand aside
+  3. Cascade in safe environment — this is where we trade
+
+================================================================================
+6. IMPLEMENTATION PLAN
+================================================================================
+
+File: scripts/algorithms/hawkes_spread_gate.py
+
+  class HawkesSpreadGate(MicrostructureAlgorithm):
+
+      def __init__(self, excitement_threshold=0.3, gate_mode="hard", **kwargs):
+          self._hawkes = HawkesIntensity(**kwargs)
+          self._spread = SpreadDecomp()
+          self._excitement_threshold = excitement_threshold
+          self._gate_mode = gate_mode
+
+      def required_columns(self) -> list[str]:
+          return list(set(
+              self._hawkes.required_columns() +
+              self._spread.required_columns()
+          ))
+
+      def step(self, tick):
+          h = self._hawkes.step(tick)
+          s = self._spread.step(tick)
+
+          direction = h["alg_bid_ask_hawkes_imbalance"]
+          excitement = h["alg_hawkes_excitement"]
+          regime = s["alg_spread_regime"]
+
+          safe = 1.0 if regime == 0.0 else 0.0
+          excited = 1.0 if excitement > self._excitement_threshold else 0.0
+
+          signal = direction * safe * excited
+
+          return {
+              "alg_hawkes_spread_signal": signal,
+              "alg_hawkes_spread_safe": safe,
+              "alg_hawkes_spread_conviction": excitement * safe,
+          }
+
+  Register with @register decorator.
+
+ALGO_CONFIG entry for paper_trader_generic.py:
+
+  "hawkes_spread_gate": {
+      "primary": "alg_hawkes_spread_signal",
+      "polarity": "high_long",
+      "bar_agg": "mean",
+  }
+
+================================================================================
+7. VALIDATION PROTOCOL
+================================================================================
+
+Phase 1 — Smoke test:
+  pytest scripts/tests/test_algorithm_smoke.py -k hawkes_spread_gate
+  Verify: shape, NaN handling, reset idempotency, step/batch consistency
+
+Phase 2 — Single-day OOS:
+  nat daily --date 2026-06-01
+  Compare gated vs ungated hawkes on same date.
+  Success criterion: higher bps/trade, comparable or better total PnL.
+
+Phase 3 — Multi-day gauntlet:
+  nat gauntlet run --last 7
+  Success criterion: positive Sharpe on >= 2/3 symbols, Sharpe > 1.0.
+
+Phase 4 — Complementarity check:
+  Compute Spearman correlation between hawkes_spread_gate and:
+    - hawkes_intensity (should be < 0.7 — adds information beyond parent)
+    - spread_decomp (should be < 0.5 — not just spread_decomp with extra steps)
+    - optimal_entry (should be < 0.3 — if uncorrelated, good for portfolio)
+
+================================================================================
+8. RISK CONSIDERATIONS
+================================================================================
+
+Overfitting risk: LOW
+  This combines two existing signals with a simple multiplicative gate.
+  No new parameters are fitted to data (excitement_threshold is a hyperparameter
+  chosen from domain knowledge, not optimized on returns).
+
+Complexity risk: LOW
+  Two parent algorithms composed via multiplication. No new mathematical
+  machinery. The step() function is ~10 lines of logic.
+
+Correlation risk: MEDIUM
+  The gated signal may be too correlated with hawkes_intensity (r > 0.8)
+  if the safety gate rarely fires. Monitor correlation in Phase 4.
+
+Data requirements:
+  Both parent algorithms need the same upstream features already computed
+  by the Rust ingestor. No new data sources required.
+
+================================================================================
+9. REFERENCES
+================================================================================
+
+Parent algorithm references:
+
+  Hawkes process:
+  - Bacry, E., Mastromatteo, I. & Muzy, J.-F. (2015) — "Hawkes processes
+    in finance", Market Microstructure and Liquidity 1(1), 1550005.
+  - Lu, X. & Abergel, F. (2018) — "High-dimensional Hawkes processes for
+    limit order books", Quantitative Finance 18(2), 177-188.
+
+  Spread decomposition:
+  - Huang, R.D. & Stoll, H.R. (1997) — "The components of the bid-ask
+    spread: A general approach", Review of Financial Studies 10(4), 995-1034.
+  - Hendershott, T., Jones, C.M. & Menkveld, A.J. (2011) — "Does algorithmic
+    trading improve liquidity?", Journal of Finance 66(1), 1-33.
+
+  Combined informed-flow gating concept:
+  - Easley, D., Lopez de Prado, M. & O'Hara, M. (2012) — "Flow toxicity
+    and liquidity in a high-frequency world", Review of Financial Studies
+    25(5), 1457-1493.
+  - Cont, R. & Kukanov, A. (2017) — "Optimal order placement in limit
+    order markets", Quantitative Finance 17(1), 21-39.
