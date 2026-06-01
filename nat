@@ -2129,7 +2129,7 @@ def cmd_oos30(args):
 
 # ── Gauntlet: Multi-Day OOS Sweep ────────────────────────────────────────────
 
-def cmd_gauntlet(args):
+def cmd_gauntlet_run(args):
     """Run all algorithms across multiple OOS days with aggregate statistics."""
     _banner("Gauntlet: Multi-Day OOS Sweep")
     sys.stdout.flush()
@@ -2138,7 +2138,7 @@ def cmd_gauntlet(args):
     symbols = getattr(args, 'symbols', ['BTC', 'ETH', 'SOL'])
     cost_mode = getattr(args, 'cost_mode', 'binance_vip9')
 
-    cmd = f"scripts/alpha/overnight_sweep.py --data-dir {data_dir}"
+    cmd = f"scripts/alpha/overnight_sweep.py run --data-dir {data_dir}"
     cmd += f" --symbols {' '.join(symbols)}"
     cmd += f" --cost-mode {cost_mode}"
 
@@ -2153,6 +2153,24 @@ def cmd_gauntlet(args):
         cmd += f" --to {date_to}"
 
     r = _py(cmd)
+    return r.returncode
+
+
+def cmd_gauntlet_stop(args):
+    """Stop a running gauntlet and print partial results."""
+    r = _py("scripts/alpha/overnight_sweep.py stop")
+    return r.returncode
+
+
+def cmd_gauntlet_report(args):
+    """Print the latest gauntlet report."""
+    r = _py("scripts/alpha/overnight_sweep.py report")
+    return r.returncode
+
+
+def cmd_gauntlet_report_all(args):
+    """Merge all gauntlet reports into a combined summary."""
+    r = _py("scripts/alpha/overnight_sweep.py report_all")
     return r.returncode
 
 
@@ -3934,30 +3952,46 @@ def build_parser():
         summary table with cumulative PnL, Sharpe ratio, and win rate.
 
         Each date uses the prior 3 days as training. Dates with <4h of data
-        are skipped automatically. Results saved to reports/overnight_*.json.
-
-        Designed for overnight runs — full sweep can take several hours.
+        are skipped automatically. Saves incrementally after each date.
 
         Example:
           nat gauntlet                           # all available dates
           nat gauntlet --last 7                  # last 7 days only
-          nat gauntlet --from 2026-05-20         # from a specific date
-          nat gauntlet --last 3 --cost-mode taker  # 3 days, taker fees
+          nat gauntlet stop                      # kill + print partial results
+          nat gauntlet report                    # print latest report
+          nat gauntlet report_all                # merge all runs into one
         """))
-    gauntlet_p.add_argument('--last', type=int, default=None,
-                            help='Only test the last N dates')
-    gauntlet_p.add_argument('--from', dest='date_from', type=str, default=None,
-                            help='Start date (YYYY-MM-DD)')
-    gauntlet_p.add_argument('--to', dest='date_to', type=str, default=None,
-                            help='End date (YYYY-MM-DD)')
-    gauntlet_p.add_argument('--data-dir', default='data/features',
-                            help='Feature data directory')
-    gauntlet_p.add_argument('--symbols', nargs='+', default=['BTC', 'ETH', 'SOL'],
-                            help='Symbols to test')
-    gauntlet_p.add_argument('--cost-mode', choices=['binance_vip9', 'taker', 'maker'],
-                            default='binance_vip9',
-                            help='Cost model (default: binance_vip9 = 1.61 bps RT)')
-    gauntlet_p.set_defaults(func=cmd_gauntlet)
+    gauntlet_p.set_defaults(func=lambda a: gauntlet_p.print_help())
+    gsub = gauntlet_p.add_subparsers(dest='gauntlet_cmd')
+
+    # gauntlet run (also default when no subcommand)
+    g_run = gsub.add_parser('run', help='Start the sweep')
+    g_run.add_argument('--last', type=int, default=None,
+                       help='Only test the last N dates')
+    g_run.add_argument('--from', dest='date_from', type=str, default=None,
+                       help='Start date (YYYY-MM-DD)')
+    g_run.add_argument('--to', dest='date_to', type=str, default=None,
+                       help='End date (YYYY-MM-DD)')
+    g_run.add_argument('--data-dir', default='data/features',
+                       help='Feature data directory')
+    g_run.add_argument('--symbols', nargs='+', default=['BTC', 'ETH', 'SOL'],
+                       help='Symbols to test')
+    g_run.add_argument('--cost-mode', choices=['binance_vip9', 'taker', 'maker'],
+                       default='binance_vip9',
+                       help='Cost model (default: binance_vip9 = 1.61 bps RT)')
+    g_run.set_defaults(func=cmd_gauntlet_run)
+
+    # gauntlet stop
+    g_stop = gsub.add_parser('stop', help='Stop running gauntlet, print partial results')
+    g_stop.set_defaults(func=cmd_gauntlet_stop)
+
+    # gauntlet report
+    g_report = gsub.add_parser('report', help='Print the latest gauntlet report')
+    g_report.set_defaults(func=cmd_gauntlet_report)
+
+    # gauntlet report_all
+    g_all = gsub.add_parser('report_all', help='Merge all gauntlet runs into combined summary')
+    g_all.set_defaults(func=cmd_gauntlet_report_all)
 
     # ── kalman ──
     kal_p = sub.add_parser('kalman', help='Kalman filter research (OU filter IC + drift analysis)')
