@@ -1,0 +1,548 @@
+================================================================================
+  ALGORITHM DEFINITION: aegis_maker
+  Regime-Aware Adverse-Selection-Protected Market Maker
+================================================================================
+
+Status:       PROPOSED
+Created:      2026-06-01
+Name origin:  Aegis — the shield of Zeus/Athena. The algorithm shields
+              against adverse selection while making markets.
+Motivation:   All 6 analyzed algorithms (hawkes, spread_decomp, optimal_entry,
+              funding_reversion, kalman_imbalance, switching_ou) are ingredients
+              for a single intelligent market maker. Instead of treating them
+              as independent directional signals, compose them into a quoting
+              engine that earns the spread while managing inventory, regime,
+              and toxicity risk.
+
+================================================================================
+1. THESIS
+================================================================================
+
+A market maker posts limit orders on both sides of the book, earning the
+bid-ask spread when both fill. The three ways to lose money:
+
+  1. ADVERSE SELECTION — an informed trader takes your quote and the price
+     moves against you (your fill becomes the losing side of the trade)
+  2. INVENTORY RISK — you accumulate a directional position that loses
+     value before you can flatten it
+  3. REGIME MISMATCH — your quoting strategy assumes range-bound behavior
+     during a trending market, or vice versa
+
+We have algorithms that detect each of these risks:
+
+  spread_decomp     -> measures adverse selection in real time
+  kalman_imbalance  -> tracks inventory pressure direction
+  switching_ou      -> identifies the current regime
+  hawkes_intensity  -> detects directional cascades (informed flow)
+  optimal_entry     -> detects when a drift is starting
+  funding_reversion -> provides macro-level positioning bias
+
+The aegis_maker composes all six into a quoting engine:
+
+  WHEN to quote     -> only when adverse selection is low AND no cascade
+  WHERE to quote    -> mid adjusted by kalman imbalance + inventory
+  HOW WIDE to quote -> spread adapts to regime (tight in range, wide in trend)
+  WHICH WAY to lean -> skew toward the hawkes direction + funding bias
+
+This is the Avellaneda-Stoikov (2008) framework enriched with real-time
+microstructure intelligence.
+
+================================================================================
+2. THE AVELLANEDA-STOIKOV FOUNDATION
+================================================================================
+
+The classical market-making model (Avellaneda & Stoikov 2008):
+
+  Reservation price (inventory-adjusted mid):
+
+    r(t) = s(t) - q(t) * gamma * sigma^2 * (T - t)
+
+    s(t)  = current mid-price
+    q(t)  = current inventory (positive = long, negative = short)
+    gamma = risk aversion parameter
+    sigma = price volatility
+    T - t = time to end of session (or rebalance horizon)
+
+  Optimal quotes:
+
+    bid = r(t) - delta/2
+    ask = r(t) + delta/2
+
+    delta = gamma * sigma^2 * (T - t) + (2/gamma) * ln(1 + gamma/kappa)
+
+    kappa = order arrival intensity parameter
+
+  This gives:
+    - Wider spread when volatility is high (more risk per fill)
+    - Wider spread near end of session (less time to flatten inventory)
+    - Mid skewed AWAY from inventory direction (incentivize fills that
+      reduce inventory)
+
+The aegis_maker replaces each generic parameter with a microstructure-
+informed estimate from our algorithms:
+
+  sigma^2        <- from switching_ou effective speed (regime-adaptive vol)
+  kappa          <- from hawkes total intensity (order arrival rate)
+  q(t) direction <- from kalman_imbalance (denoised inventory pressure)
+  gamma          <- time-varying, scaled by adverse selection risk
+
+================================================================================
+3. SIGNAL ARCHITECTURE
+================================================================================
+
+                  ┌──────────────────────────────────────────────┐
+                  │              AEGIS MAKER ENGINE              │
+                  └──────────────────────────────────────────────┘
+                                       │
+                  ┌────────────────────┼────────────────────────┐
+                  │                    │                        │
+            QUOTE GATE          QUOTE PLACEMENT          INVENTORY
+            (binary: quote       (continuous:             MANAGEMENT
+             or don't)           where + how wide)        (position
+                                                          targets)
+                  │                    │                        │
+          ┌───────┴───────┐    ┌───────┴───────┐       ┌───────┴────────┐
+          │ spread_decomp │    │switching_ou   │       │kalman_imbalance│
+          │ -> AS regime  │    │-> vol regime  │       │-> direction    │
+          │               │    │               │       │                │
+          │ hawkes        │    │hawkes         │       │funding_rev     │
+          │ -> excitement │    │-> intensity   │       │-> macro bias   │
+          │               │    │-> imbalance   │       │                │
+          │ optimal_entry │    │               │       │optimal_entry   │
+          │ -> drift      │    │               │       │-> drift signal │
+          └───────────────┘    └───────────────┘       └────────────────┘
+
+
+3.1  QUOTE GATE — should we quote at all?
+---------------------------------------------------------------------
+
+  Inputs:
+    AS   = alg_spread_regime         {0, 1}
+    phi  = alg_hawkes_excitement     [0, 1)
+    drift = alg_entry_signal         {-1, 0, +1}
+
+  Gate logic:
+
+    quoting_enabled = True
+
+    # Rule 1: stop quoting during high adverse selection
+    if AS == 1:
+        quoting_enabled = False
+        reason = "informed flow detected"
+
+    # Rule 2: stop quoting during cascade
+    if phi > excitement_cap:     # default 0.6
+        quoting_enabled = False
+        reason = "self-exciting cascade active"
+
+    # Rule 3: stop quoting when strong directional drift detected
+    if drift != 0 and evidence > 0.8:
+        quoting_enabled = False
+        reason = "SPRT fired — directional move starting"
+
+  When quoting is disabled, the maker:
+    - Cancels all resting orders
+    - Optionally takes a small directional position (via hawkes imbalance
+      direction) to profit from the move it's stepping aside from
+
+  Expected quoting uptime: ~60-70% of ticks. The remaining 30-40% is
+  time spent safely on the sidelines during dangerous flow.
+
+3.2  QUOTE PLACEMENT — where to post bids and asks
+---------------------------------------------------------------------
+
+  Inputs:
+    regime   = alg_switching_ou_regime    [0, 1] P(fast)
+    speed    = alg_switching_ou_speed     [0.05, 0.5]
+    lambda_t = alg_hawkes_intensity       [0, inf)
+    HI       = alg_bid_ask_hawkes_imbalance  (-1, 1)
+    x_kalman = alg_kalman_filtered_imb    (-inf, inf)
+    q        = current inventory          (tracked internally)
+
+  Step A — Regime-adaptive volatility:
+
+    In fast regime (P(fast) high):
+      sigma_eff = sigma_base * (1 - regime_discount)     # tighter
+    In slow regime (P(fast) low):
+      sigma_eff = sigma_base * (1 + regime_premium)      # wider
+
+    sigma_base estimated from recent price returns (rolling 100-tick std).
+    regime_discount = 0.3 (default), regime_premium = 0.5 (default)
+
+  Step B — Reservation price (Avellaneda-Stoikov with enrichments):
+
+    r = mid - q * gamma * sigma_eff^2 * tau
+
+    where:
+      mid = current midprice
+      q   = inventory (updated on fills)
+      gamma = risk_aversion * (1 + adverse_selection_boost)
+      tau = time to next rebalance (funding period: 8h on Hyperliquid)
+
+    adverse_selection_boost:
+      When alg_adverse_trend is rising (AS getting worse), increase gamma
+      to widen spread and penalize inventory more aggressively:
+
+        AS_trend = alg_adverse_trend
+        adverse_selection_boost = max(0, AS_trend / AS_scale)  # default AS_scale = 10
+
+  Step C — Directional skew:
+
+    # Hawkes imbalance skew: lean INTO the cascade direction
+    hawkes_skew = HI * hawkes_skew_weight     # default weight = 0.3
+
+    # Kalman imbalance skew: lean AWAY from inventory pressure
+    # (if we're already long, skew ask lower to get filled faster)
+    inventory_skew = -sign(q) * |x_kalman| * kalman_skew_weight
+
+    total_skew = hawkes_skew + inventory_skew
+
+  Step D — Spread width:
+
+    base_spread = gamma * sigma_eff^2 * tau + (2/gamma) * ln(1 + gamma/kappa)
+
+    kappa = lambda_t    # order arrival intensity from hawkes
+
+    # Regime adjustment
+    if regime > 0.7:    # fast/range-bound
+        spread_mult = 0.8    # tighter (more fills, safe environment)
+    elif regime < 0.3:  # slow/trending
+        spread_mult = 1.5    # wider (protect against directional risk)
+    else:
+        spread_mult = 1.0
+
+    final_spread = base_spread * spread_mult
+
+    # Floor: never quote tighter than 2x maker fee
+    min_spread = 2 * maker_fee_bps     # 2 * 0.2 = 0.4 bps on Hyperliquid
+    final_spread = max(final_spread, min_spread)
+
+  Step E — Final quotes:
+
+    bid = r + total_skew - final_spread / 2
+    ask = r + total_skew + final_spread / 2
+
+    Post bid and ask as limit orders.
+
+3.3  INVENTORY MANAGEMENT
+---------------------------------------------------------------------
+
+  Inputs:
+    x_kalman = alg_kalman_filtered_imb
+    funding  = alg_funding_signal
+    q        = current inventory
+
+  Target inventory:
+
+    q_target = funding_bias * max_inventory
+
+    funding_bias = alg_funding_signal   in [-1, 1]
+    max_inventory = configurable per symbol (e.g., 0.1 BTC, 10 ETH, 50 SOL)
+
+    When funding is extremely positive (crowd long), the maker's target
+    inventory is negative (short) — earning both spread AND funding.
+
+  Inventory bounds:
+
+    |q| <= max_inventory
+
+    If |q| exceeds max_inventory * urgency_threshold (default 0.8):
+      Switch from passive (limit) to aggressive (market order) flattening
+      on the over-exposed side.
+
+  Inventory half-life:
+
+    If no fills for inventory_timeout (default 60s), begin aggressive
+    unwinding. Stale inventory = risk without purpose.
+
+================================================================================
+4. PROFIT SOURCES
+================================================================================
+
+The aegis maker earns from four distinct sources:
+
+  1. SPREAD CAPTURE (primary)
+     Post bid and ask, earn the spread when both sides fill.
+     Expected: ~0.2-0.5 bps per round trip on Hyperliquid.
+     Hyperliquid maker fee: 0.2 bps rebate (we GET PAID to post).
+
+  2. ADVERSE SELECTION AVOIDANCE
+     By canceling quotes during high AS / cascades / SPRT drift,
+     we avoid the fills that would be most costly. This doesn't
+     generate profit directly but prevents the #1 cause of maker losses.
+
+  3. DIRECTIONAL ALPHA (secondary)
+     When the gate shuts down quoting during a cascade, optionally
+     take a directional position via the hawkes imbalance signal.
+     This converts dangerous periods into small alpha trades.
+
+  4. FUNDING INCOME
+     By biasing inventory toward the funding_reversion signal, the
+     maker collects funding payments when the crowd is positioned
+     against us. On Hyperliquid, funding is paid every 8 hours.
+
+  Cost structure:
+    Maker fee: -0.2 bps (REBATE — Hyperliquid pays us)
+    Taker fee: +3.5 bps (only when aggressively flattening inventory)
+    Expected P&L per trade: spread/2 + rebate - adverse_selection_loss
+
+================================================================================
+5. PARAMETERS
+================================================================================
+
+  Parameter              Default   Source / Calibration
+  -----------------------------------------------------------------------
+  # Quote gate
+  excitement_cap         0.6       Hawkes excitement threshold to stop quoting
+  drift_evidence_cap     0.8       SPRT evidence threshold to stop quoting
+
+  # Quote placement
+  risk_aversion (gamma)  0.1       Grid search on OOS Sharpe
+  regime_discount        0.3       Spread tightening in fast regime
+  regime_premium         0.5       Spread widening in slow regime
+  hawkes_skew_weight     0.3       How much to skew toward cascade direction
+  kalman_skew_weight     0.2       How much to skew against inventory
+  AS_scale               10.0      Normalization for adverse selection boost
+
+  # Inventory management
+  max_inventory          varies    Per-symbol (e.g., 0.1 BTC, 10 ETH, 50 SOL)
+  urgency_threshold      0.8       Fraction of max before aggressive flatten
+  inventory_timeout_s    60        Seconds before stale inventory unwinding
+
+  # Cost parameters (from config/costs.toml)
+  maker_fee_bps          0.2       Hyperliquid maker rebate
+  taker_fee_bps          3.5       Hyperliquid taker fee
+
+  Calibration via adaptive_calibrator:
+    gamma <- walk-forward optimization (target: max Sharpe with drawdown cap)
+    regime thresholds <- from switching_ou calibrated params
+    skew weights <- from correlation analysis of signals vs forward P&L
+
+================================================================================
+6. RISK MANAGEMENT
+================================================================================
+
+6.1  Position limits
+  Hard cap: |q| <= max_inventory per symbol, enforced at order submission.
+  Soft cap: urgency_threshold triggers aggressive flatten.
+  Total portfolio: sum(|q_i * price_i|) <= max_notional.
+
+6.2  Loss limits
+  Per-session drawdown limit: if unrealized P&L < -max_session_loss,
+  flatten all positions and stop quoting for cooldown_period (default 300s).
+
+  Per-trade stop: if a single fill moves against us by > stop_loss_bps
+  (default 20 bps), immediately flatten that position at market.
+
+6.3  Latency protection
+  If quote update latency exceeds latency_cap_ms (default 500ms), cancel
+  all quotes. Stale quotes are free options for informed traders.
+
+6.4  Correlation risk
+  If making markets on multiple symbols simultaneously, monitor cross-
+  symbol inventory correlation. If all three symbols accumulate the same
+  direction, the portfolio is effectively a leveraged directional bet —
+  not market making. Trigger: corr(inventory_BTC, inventory_ETH) > 0.8
+  for > 60s -> flatten the minority position.
+
+================================================================================
+7. IMPLEMENTATION ARCHITECTURE
+================================================================================
+
+  scripts/algorithms/aegis_maker.py:
+
+    class AegisMaker(MicrostructureAlgorithm):
+        """Regime-aware AS-protected market maker."""
+
+        def __init__(self, **params):
+            # Compose child algorithms
+            self._hawkes = HawkesIntensity()
+            self._spread = SpreadDecomp()
+            self._kalman = KalmanImbalance()
+            self._switching = SwitchingOU()
+            self._entry = OptimalEntry()
+            self._funding = FundingReversion()
+
+            # Internal state
+            self._inventory = 0.0
+            self._last_mid = np.nan
+            self._session_pnl = 0.0
+
+        def required_columns(self) -> list[str]:
+            # Union of all child algorithms' required columns
+            return list(set(
+                self._hawkes.required_columns() +
+                self._spread.required_columns() +
+                self._kalman.required_columns() +
+                self._switching.required_columns() +
+                self._entry.required_columns() +
+                self._funding.required_columns()
+            ))
+
+        def step(self, tick) -> dict:
+            # 1. Run all child algorithms
+            h = self._hawkes.step(tick)
+            s = self._spread.step(tick)
+            k = self._kalman.step(tick)
+            sw = self._switching.step(tick)
+            e = self._entry.step(tick)
+            f = self._funding.step(tick)
+
+            # 2. Quote gate
+            quoting = self._compute_gate(s, h, e)
+
+            # 3. Quote placement
+            bid, ask, skew = self._compute_quotes(h, k, sw, f, tick)
+
+            # 4. Output signals
+            return {
+                "alg_aegis_quoting":    1.0 if quoting else 0.0,
+                "alg_aegis_bid_offset": bid,
+                "alg_aegis_ask_offset": ask,
+                "alg_aegis_skew":       skew,
+                "alg_aegis_inventory":  self._inventory,
+                "alg_aegis_regime":     sw["alg_switching_ou_regime"],
+            }
+
+  For backtesting:
+    Extend paper_trader to simulate a MAKER execution model:
+    - Orders fill only when price touches the posted level
+    - Partial fills based on queue position
+    - Slippage model for aggressive flattening
+    - Funding income/expense on inventory every 8 hours
+
+  For live execution:
+    Use Hyperliquid's REST API for order management:
+    - Place/cancel limit orders via POST /exchange
+    - Track fills via WebSocket user events
+    - Inventory tracked from fill stream, reconciled with position API
+
+================================================================================
+8. BACKTESTING CONSIDERATIONS
+================================================================================
+
+Market-making backtest is fundamentally harder than directional backtest:
+
+  1. QUEUE POSITION — in a real order book, your limit order is behind
+     other orders at the same price. You don't get filled just because
+     price touched your level. Model: assume fill probability =
+     min(1, volume_at_level / your_order_size).
+
+  2. MARKET IMPACT — your quotes change the book. Posting a large bid
+     improves depth, potentially attracting flow that wouldn't otherwise
+     exist. Cannot model in historical replay.
+
+  3. ADVERSE SELECTION BIAS — in backtest, you get filled on ALL your
+     quotes. In reality, you get adversely selected: filled mostly when
+     the market moves against you. Conservative model: assume 60% of
+     fills are adversely selected (price moves against you by spread/2).
+
+  4. FUNDING INCOME — straightforward to model: if holding inventory q
+     at funding time, collect/pay q * funding_rate * notional.
+
+  Recommended approach:
+    Phase 1: Paper trade via paper_trader with conservative fill model
+    Phase 2: Live paper trade on Hyperliquid testnet (no real capital)
+    Phase 3: Live with minimum size (1 contract) on mainnet
+
+================================================================================
+9. EXPECTED PERFORMANCE PROFILE
+================================================================================
+
+  Metric              Target          Rationale
+  -----------------------------------------------------------------------
+  Sharpe ratio        > 3.0           Spread capture is high-frequency, low vol
+  Win rate            > 55%           Most round-trips should be profitable
+  Max drawdown        < 200 bps/day   Position limits + loss limits
+  Trades/day          > 200           High frequency, both sides
+  Avg PnL/trade       0.5-2.0 bps    Thin but consistent
+  Quoting uptime      60-70%          Sideline during danger periods
+  Inventory turnover  < 60s avg       Don't hold stale positions
+
+  Revenue breakdown (expected):
+    Spread capture:   60% of total P&L
+    Maker rebate:     15% of total P&L
+    Directional alpha: 15% of total P&L (from cascade-period positions)
+    Funding income:   10% of total P&L
+
+================================================================================
+10. COMPETITIVE ADVANTAGE
+================================================================================
+
+What makes this maker different from a naive Avellaneda-Stoikov:
+
+  1. REGIME-ADAPTIVE SPREAD — switching_ou detects fast/slow regimes and
+     adjusts spread width. Naive maker uses constant spread.
+
+  2. ADVERSE SELECTION GATE — spread_decomp + hawkes_excitement detect
+     informed flow and shut down quoting. Naive maker quotes through
+     toxic flow and gets picked off.
+
+  3. INTELLIGENT SKEW — hawkes directional imbalance provides real-time
+     information about which side has more flow. Naive maker skews only
+     based on inventory, missing directional intelligence.
+
+  4. DRIFT-AWARE SHUTDOWN — optimal_entry's SPRT detects the START of
+     directional moves before they fully develop. Naive maker reacts only
+     after accumulating adverse inventory.
+
+  5. MACRO BIAS — funding_reversion provides a longer-timescale view of
+     crowd positioning. Naive maker has no view on macro direction.
+
+  6. ALL SIGNALS ARE ALREADY VALIDATED — each component has OOS evidence
+     from the gauntlet. This is not speculative composition; each piece
+     has demonstrated predictive power independently.
+
+================================================================================
+11. DEVELOPMENT PHASES
+================================================================================
+
+  Phase 1 — Algorithm implementation (scripts/algorithms/aegis_maker.py)
+    Compose child algorithms, implement gate + placement + inventory logic.
+    Output features for backtesting. No execution.
+    Test: smoke tests, step/batch consistency.
+
+  Phase 2 — Maker backtest engine
+    Extend paper_trader with maker execution model (queue position,
+    adverse fill probability, funding income).
+    Test: backtest on 30 days of data, compare Sharpe vs directional algos.
+
+  Phase 3 — Parameter calibration
+    Use adaptive_calibrator to tune gamma, skew weights, gate thresholds.
+    Walk-forward optimization on 7-day rolling windows.
+
+  Phase 4 — Paper trading
+    Live paper trading on Hyperliquid mainnet with zero-size orders
+    (or minimum 1-contract size). Monitor fills, inventory, P&L.
+
+  Phase 5 — Live deployment
+    Gradually increase size. Start with 1 symbol (ETH — most liquid
+    after BTC, best maker conditions). Monitor all risk limits.
+
+================================================================================
+12. REFERENCES
+================================================================================
+
+Market making theory:
+  - Avellaneda, M. & Stoikov, S. (2008) — "High-frequency trading in a
+    limit order book", Quantitative Finance 8(3), 217-224.
+  - Gueant, O., Lehalle, C.A. & Fernandez-Tapia, J. (2013) — "Dealing
+    with the inventory risk: a solution to the market making problem",
+    Mathematics and Financial Economics 7(4), 477-507.
+  - Cartea, A., Jaimungal, S. & Penalva, J. (2015) — "Algorithmic and
+    High-Frequency Trading", Cambridge University Press, Ch. 10-11.
+
+Adverse selection:
+  - Glosten, L. & Milgrom, P. (1985) — "Bid, ask and transaction prices
+    in a specialist market with heterogeneously informed traders",
+    Journal of Financial Economics 14(1), 71-100.
+  - Kyle, A. (1985) — "Continuous auctions and insider trading",
+    Econometrica 53(6), 1315-1335.
+
+Regime switching:
+  - Hamilton, J.D. (1989) — "A new approach to the economic analysis of
+    nonstationary time series and the business cycle", Econometrica 57(2).
+
+Crypto market making:
+  - Cartea, A., Drissi, F. & Monga, M. (2023) — "Decentralised finance
+    and automated market making", working paper.
