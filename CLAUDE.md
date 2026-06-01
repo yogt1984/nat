@@ -54,7 +54,7 @@ See `FEATURES.md` for the complete feature manifest with formulas, paper referen
 ```
 Hyperliquid WebSocket → HyperliquidClient (ws/client.rs)
     → MarketState (state/mod.rs) [OrderBook + TradeBuffer + MarketContext]
-    → FeatureComputer (features/*.rs) [220 features across 20 categories]
+    → FeatureComputer (features/*.rs) [236 features across 21 categories]
     → mpsc channel → ParquetWriter (output/writer.rs)
     → data/features/YYYY-MM-DD/*.parquet (rotated hourly)
 ```
@@ -63,7 +63,7 @@ Each symbol (BTC, ETH, SOL) runs in its own tokio task. Features are emitted eve
 
 ### Feature Vector Contract
 
-`Features` (features/mod.rs) has 13 base categories (always computed) + 7 optional categories (whale_flow, liquidation_risk, concentration, regime, gmm_classification, cross_symbol, heatmap). `to_vec()` always returns exactly `count_all()` elements (220), padding NaN for missing optionals. `names_all()` must match `to_vec()` length exactly — the Parquet schema is built from `names_all()` in `output/schema.rs`.
+`Features` (features/mod.rs) has 14 base categories (always computed) + 7 optional categories (whale_flow, liquidation_risk, concentration, regime, gmm_classification, cross_symbol, heatmap). `to_vec()` always returns exactly `count_all()` elements (236), padding NaN for missing optionals. `names_all()` must match `to_vec()` length exactly — the Parquet schema is built from `names_all()` in `output/schema.rs`.
 
 When adding a new feature category:
 1. Create struct with `count()`, `names()`, `to_vec()` methods

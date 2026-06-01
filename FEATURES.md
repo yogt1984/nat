@@ -1,12 +1,12 @@
 # Feature Manifest
 
-212 features extracted from Hyperliquid WebSocket market data at 100ms intervals.
+236 features extracted from Hyperliquid WebSocket market data at 100ms intervals.
 
 ## Overview
 
-- **Base features** (138): Always computed from order book, trades, and market context.
-- **Optional features** (71): Require additional data sources or warmup. Padded with NaN when absent.
-- **Data contract**: `Features::to_vec()` returns exactly 212 elements. `Features::names_all()` returns matching column names. Parquet schema built from `names_all()` in `output/schema.rs`.
+- **Base features** (154): Always computed from order book, trades, and market context.
+- **Optional features** (82): Require additional data sources or warmup. Padded with NaN when absent.
+- **Data contract**: `Features::to_vec()` returns exactly 236 elements. `Features::names_all()` returns matching column names. Parquet schema built from `names_all()` in `output/schema.rs`.
 - **Emission rate**: ~10 rows/sec per symbol (30 rows/sec for 3 symbols). Buffer flushes every 10,000 rows (~5.5 min).
 
 ## Summary
@@ -20,14 +20,15 @@
 | 5 | Entropy | 27 | `ent_` | `features/entropy.rs` | All warmup-dependent | Bandt & Pompe (2002) |
 | 6 | Context | 9 | `ctx_` | `features/context.rs` | All working | — |
 | 7 | Trend | 15 | `trend_` | `features/trend.rs` | All working | Jegadeesh & Titman (1993) |
-| 8 | Illiquidity | 12 | `illiq_` | `features/illiquidity.rs` | All working | Kyle (1985), Amihud (2002) |
-| 9 | Toxicity | 10 | `toxic_` | `features/toxicity.rs` | All working | Easley et al. (2012) |
-| 10 | Derived | 15 | `derived_` | `features/derived.rs` | All working | — |
-| 11 | Whale Flow | 12 | `whale_` | `features/whale_flow.rs` | Optional | — |
-| 12 | Liquidation | 13 | `liquidation_` | `features/liquidation.rs` | Optional | — |
-| 13 | Concentration | 15 | `top`/`conc_` | `features/concentration.rs` | Optional | — |
-| 14 | Regime | 20 | `regime_` | `features/regime/mod.rs` | Optional | — |
-| 15 | GMM | 8 | `regime`/`prob_` | `ml/regime.rs` | Optional | — |
+| 8 | Medium Freq | 16 | `mf_` | `features/medium_freq.rs` | All warmup-dependent | Wilder (1978), Bollinger (2001) |
+| 9 | Illiquidity | 12 | `illiq_` | `features/illiquidity.rs` | All working | Kyle (1985), Amihud (2002) |
+| 10 | Toxicity | 10 | `toxic_` | `features/toxicity.rs` | All working | Easley et al. (2012) |
+| 11 | Derived | 15 | `derived_` | `features/derived.rs` | All working | — |
+| 12 | Whale Flow | 12 | `whale_` | `features/whale_flow.rs` | Optional | — |
+| 13 | Liquidation | 13 | `liquidation_` | `features/liquidation.rs` | Optional | — |
+| 14 | Concentration | 15 | `top`/`conc_` | `features/concentration.rs` | Optional | — |
+| 15 | Regime | 20 | `regime_` | `features/regime/mod.rs` | Optional | — |
+| 16 | GMM | 8 | `regime`/`prob_` | `ml/regime.rs` | Optional | — |
 
 All module paths are relative to `rust/ing/src/`.
 

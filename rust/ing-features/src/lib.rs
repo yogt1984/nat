@@ -1,6 +1,6 @@
 //! Feature Computation Module
 //!
-//! Extracts 220 features from Hyperliquid WebSocket market data across 20 categories.
+//! Extracts 236 features from Hyperliquid WebSocket market data across 21 categories.
 //! See `FEATURES.md` at the project root for the full feature manifest with formulas,
 //! interpretation, and paper references.
 //!
@@ -15,6 +15,7 @@
 //! | Entropy | 24 | `ent_` | All warmup-dependent | Bandt & Pompe (2002) |
 //! | Context | 12 | `ctx_` | All working | — |
 //! | Trend | 15 | `trend_` | All working | Jegadeesh & Titman (1993) |
+//! | Medium Freq | 16 | `mf_` | All warmup-dependent | Wilder (1978), Bollinger (2001) |
 //! | Illiquidity | 12 | `illiq_` | All working | Kyle (1985) |
 //! | Toxicity | 10 | `toxic_` | All working | Easley et al. (2012) |
 //! | Derived | 15 | `derived_` | All working | — |
@@ -29,12 +30,12 @@
 //! | *Cross-Symbol* | 3 | `cross_` | Optional (NaN if absent) | — |
 //! | *Heatmap* | 8 | `hm_` | Optional (NaN if absent) | Cont & Wagalath (2016) |
 //!
-//! Base features (138) are always computed. Optional features (79) require
+//! Base features (154) are always computed. Optional features (82) require
 //! additional data sources or warmup time and are NaN-padded when absent.
 //!
 //! # Data Contract
 //!
-//! `Features::to_vec()` always returns exactly `count_all()` = 220 elements.
+//! `Features::to_vec()` always returns exactly `count_all()` = 236 elements.
 //! `Features::names_all()` returns the corresponding column names.
 //! The Parquet schema is built from `names_all()` in `output/schema.rs`.
 
@@ -48,6 +49,7 @@ mod hawkes;
 pub mod heatmap;
 mod illiquidity;
 mod imbalance;
+mod medium_freq;
 pub mod liquidation;
 mod microstructure;
 mod raw;
@@ -71,6 +73,7 @@ pub use hawkes::HawkesFeatures;
 pub use heatmap::{HeatmapBuffer, HeatmapConfig, HeatmapFeatures};
 pub use illiquidity::IlliquidityFeatures;
 pub use imbalance::ImbalanceFeatures;
+pub use medium_freq::{MediumFreqFeatures, MediumFreqState};
 pub use liquidation::{LiquidationPosition, LiquidationRiskConfig, LiquidationRiskFeatures};
 pub use microstructure::MicrostructureFeatures;
 pub use raw::RawFeatures;
@@ -98,6 +101,7 @@ pub struct Features {
     pub entropy: EntropyFeatures,
     pub context: ContextFeatures,
     pub trend: TrendFeatures,
+    pub medium_freq: MediumFreqFeatures,
     pub illiquidity: IlliquidityFeatures,
     pub toxicity: ToxicityFeatures,
     pub derived: DerivedFeatures,
@@ -133,6 +137,7 @@ impl Features {
             + EntropyFeatures::count()
             + ContextFeatures::count()
             + TrendFeatures::count()
+            + MediumFreqFeatures::count()
             + IlliquidityFeatures::count()
             + ToxicityFeatures::count()
             + DerivedFeatures::count()
@@ -177,6 +182,7 @@ impl Features {
         v.extend(self.entropy.to_vec());
         v.extend(self.context.to_vec());
         v.extend(self.trend.to_vec());
+        v.extend(self.medium_freq.to_vec());
         v.extend(self.illiquidity.to_vec());
         v.extend(self.toxicity.to_vec());
         v.extend(self.derived.to_vec());
@@ -234,6 +240,7 @@ impl Features {
         names.extend(EntropyFeatures::names());
         names.extend(ContextFeatures::names());
         names.extend(TrendFeatures::names());
+        names.extend(MediumFreqFeatures::names());
         names.extend(IlliquidityFeatures::names());
         names.extend(ToxicityFeatures::names());
         names.extend(DerivedFeatures::names());
@@ -330,6 +337,8 @@ pub struct FeatureComputer {
     resilience_tracker: ResilienceTracker,
     /// Hourly vol_1m history for z-score normalization (1 hour at 100ms = 36,000 samples)
     vol_1m_buffer: RingBuffer<f64>,
+    /// Medium-frequency state (EMAs + bar aggregators for 1m/5m/15m)
+    medium_freq_state: MediumFreqState,
 }
 
 impl FeatureComputer {
@@ -345,6 +354,7 @@ impl FeatureComputer {
             depth_buffer: RingBuffer::new(600),  // 1 minute at 100ms for depth recovery
             resilience_tracker: ResilienceTracker::new(),
             vol_1m_buffer: RingBuffer::new(36_000), // 1 hour at 100ms for vol z-score
+            medium_freq_state: MediumFreqState::new(),
         }
     }
 
@@ -399,6 +409,13 @@ impl FeatureComputer {
 
         let context = context::compute(market_context);
         let trend = trend::compute(price_buffer);
+
+        // Medium-frequency features: continuous EMAs + bar-based RSI/Bollinger/ATR
+        let medium_freq = if let Some(mid) = order_book.midprice() {
+            self.medium_freq_state.update_and_compute(mid)
+        } else {
+            MediumFreqFeatures::default()
+        };
         let illiquidity = illiquidity::compute(trade_buffer);
         // Use previous mid-price for causal realized spread (Huang & Stoll 1997)
         let prev_mid = if self.midprice_buffer.len() >= 2 {
@@ -438,6 +455,7 @@ impl FeatureComputer {
             entropy,
             context,
             trend,
+            medium_freq,
             illiquidity,
             toxicity,
             derived,
