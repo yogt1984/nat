@@ -16,7 +16,7 @@ import pandas as pd
 # Meta columns (always present)
 BASE_COLUMNS = ["timestamp_ns", "symbol", "sequence_id"]
 
-# Base features: 13 categories, always computed by ingestor (138 features)
+# Base features: 14 categories, always computed by ingestor (154 features)
 BASE_FEATURES = {
     "raw": [
         "raw_midprice", "raw_spread", "raw_spread_bps", "raw_microprice",
@@ -63,6 +63,14 @@ BASE_FEATURES = {
         "trend_monotonicity_600", "trend_hurst_600",
         "trend_ma_crossover", "trend_ma_crossover_norm",
         "trend_ema_short", "trend_ema_long",
+    ],
+    "medium_freq": [
+        "mf_ema_1m", "mf_ema_5m", "mf_ema_15m",
+        "mf_ema_cross_1m_5m", "mf_ema_cross_5m_15m",
+        "mf_rsi_1m", "mf_rsi_5m", "mf_rsi_15m",
+        "mf_bb_pctb_1m", "mf_bb_pctb_5m", "mf_bb_pctb_15m",
+        "mf_bb_width_1m", "mf_bb_width_5m", "mf_bb_width_15m",
+        "mf_atr_5m", "mf_atr_15m",
     ],
     "illiquidity": [
         "illiq_kyle_100", "illiq_amihud_100", "illiq_hasbrouck_100", "illiq_roll_100",
