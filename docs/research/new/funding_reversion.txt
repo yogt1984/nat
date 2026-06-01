@@ -1,0 +1,267 @@
+================================================================================
+  ALGORITHM ANALYSIS: funding_reversion
+  Funding Rate Mean-Reversion on Perpetual Futures
+================================================================================
+
+Status:       VALIDATED (Tier 1 winner from May experiments, confirmed June 1)
+Created:      2026-06-01
+Source:       scripts/algorithms/funding_reversion.py
+Signal:       alg_funding_signal
+Polarity:     high_long
+
+Gauntlet 2026-06-01 results:
+  BTC: -11.2 bps (35 trades)  — breakeven
+  ETH: +159.8 bps (35 trades) — strong
+  SOL: +124.3 bps (35 trades) — strong
+  Total: +272.9 bps, 105 trades, 2/3 symbols positive, +2.6 bps/trade
+
+================================================================================
+1. THESIS
+================================================================================
+
+Perpetual futures have no expiry date. To keep the perpetual price anchored
+to spot, exchanges use a funding rate mechanism: every 8 hours, one side of
+the market pays the other.
+
+  - Perp > Spot (positive premium): longs pay shorts
+  - Perp < Spot (negative premium): shorts pay longs
+
+When the funding rate becomes extreme, it reveals that the market is heavily
+positioned in one direction and paying dearly to maintain it. These crowded
+positions tend to unwind, causing price to revert.
+
+The algorithm enters opposite to the extreme: when funding is extremely
+positive (crowd is long, paying to stay long), go short — the crowd will
+eventually capitulate. When funding is extremely negative (crowd is short),
+go long.
+
+This signal is crypto-native. Traditional futures use physical delivery at
+expiry to anchor basis; perpetual futures use the funding rate instead. The
+funding rate essentially reveals the cost of the consensus trade — when that
+cost becomes extreme, the consensus is about to break.
+
+================================================================================
+2. SIGNAL CONSTRUCTION
+================================================================================
+
+Inputs (from Rust ingestor, ctx_* features):
+  - ctx_funding_rate      Current 8h funding rate (annualized)
+  - ctx_funding_zscore    Z-score of funding rate vs rolling history
+  - ctx_premium_bps       Spot-perpetual premium in basis points
+
+2.1  Reversion signal (primary)
+---------------------------------------------------------------------
+
+  if |z| >= z_entry:
+      signal = -sign(z) * min(|z| / z_entry, 3.0) / 3.0
+  else:
+      signal = 0.0
+
+  where z = ctx_funding_zscore, z_entry = 2.0 (default)
+
+  Output range: [-1.0, +1.0]
+
+  Examples:
+    z = +3.0  ->  signal = -sign(3) * min(3/2, 3) / 3 = -1.0 * 1.5/3 = -0.50
+    z = +6.0  ->  signal = -sign(6) * min(6/2, 3) / 3 = -1.0 * 3.0/3 = -1.00
+    z = -4.0  ->  signal = -sign(-4) * min(4/2, 3) / 3 = +1.0 * 2.0/3 = +0.67
+    z = +1.5  ->  signal = 0.0  (below threshold, no trade)
+
+  Key properties:
+    - The -sign(z) is the contrarian core: go OPPOSITE to the crowd
+    - Linear scaling between z_entry and 3*z_entry (conviction grows with
+      extremity, capped to prevent overcommitting in tail events)
+    - Dead zone below z_entry: normal funding is not tradeable
+    - The 3.0 cap means max conviction requires funding to be 6 standard
+      deviations from normal — truly extreme positioning
+
+2.2  Funding momentum (trend detection)
+---------------------------------------------------------------------
+
+  ema_funding(t) = alpha * rate(t) + (1 - alpha) * ema_funding(t-1)
+
+  where alpha = 2 / (momentum_span + 1), momentum_span = 100
+
+  This tracks the funding rate trend. Rising EMA = funding becoming more
+  positive = crowd accumulating longs. The momentum itself is not used in
+  the primary signal but is exposed as alg_funding_momentum for downstream
+  combination or analysis.
+
+2.3  Premium divergence
+---------------------------------------------------------------------
+
+  premium_z = ctx_premium_bps / 10.0    (rough normalization)
+  divergence = 0.7 * zscore + 0.3 * premium_z
+
+  Combines funding rate with spot-perp premium:
+    - Agreement (both positive): crowd is unambiguously long, strong signal
+    - Divergence (funding positive, premium negative): unusual state,
+      weaker signal — something structural may be happening
+
+  Exposed as alg_premium_divergence for downstream use.
+
+2.4  OU half-life (reversion speed estimation)
+---------------------------------------------------------------------
+
+  From a rolling buffer of ctx_funding_zscore (200 ticks):
+
+    rho = lag-1 autocorrelation of z-score
+    half_life = -ln(2) / ln(rho)
+
+  Interpretation:
+    rho in (0, 1):  mean-reverting, half_life = ticks to revert halfway
+    rho <= 0:       anti-persistent, instant reversion (half_life = 0)
+    rho >= 1:       trending / random walk, no reversion (half_life = inf)
+
+  This tells us whether the fundamental assumption (funding mean-reverts)
+  holds right now. If half_life is very long, the reversion trade may not
+  work in the current regime.
+
+  Exposed as alg_funding_halflife_ticks for regime filtering.
+
+================================================================================
+3. OUTPUT FEATURES
+================================================================================
+
+  Name                          Range         Description
+  -----------------------------------------------------------------------
+  alg_funding_signal            [-1, 1]       Reversion signal (PRIMARY)
+  alg_funding_momentum          (-inf, inf)   EMA of raw funding rate
+  alg_premium_divergence        (-inf, inf)   Weighted funding + premium
+  alg_funding_halflife_ticks    [0, 1e6]      OU half-life of z-score
+
+================================================================================
+4. PARAMETERS
+================================================================================
+
+  Parameter          Default   Meaning
+  -----------------------------------------------------------------------
+  zscore_entry       2.0       Funding z-score threshold to trigger trade
+  momentum_span      100       EMA span for funding rate trend
+  premium_weight     0.3       Weight of premium_bps in divergence score
+  halflife_window    200       Rolling window for OU half-life estimation
+
+  Calibration (via adaptive_calibrator):
+    zscore_entry  ->  RT_cost / sigma_funding (cost-derived)
+    halflife_window -> adaptive from estimate_ou_params() on funding series
+
+================================================================================
+5. WHY IT IS CRYPTO-NATIVE
+================================================================================
+
+In traditional finance:
+  - Futures expire. The basis between futures and spot converges mechanically
+    at expiry via physical or cash delivery.
+  - There is no funding rate. The basis is the cost of carry (interest +
+    storage - convenience yield).
+  - Position crowding is visible only through COT reports (weekly, delayed).
+
+In crypto perpetual futures:
+  - No expiry, no delivery. The funding rate IS the anchoring mechanism.
+  - Funding rate is public, real-time, and directly reveals crowd positioning.
+  - Extreme funding = crowd paying to hold a directional bet = mean-reversion
+    opportunity.
+  - 8-hour funding cycles create periodic forced cash flows that pressure
+    overleveraged positions to unwind.
+
+No traditional finance algorithm exploits this signal because the mechanism
+does not exist in traditional markets.
+
+================================================================================
+6. PERFORMANCE ANALYSIS
+================================================================================
+
+Gauntlet results (2026-06-01, 1.61 bps RT cost):
+
+  Symbol   Total bps   Trades   bps/trade   Win rate
+  ---------------------------------------------------
+  BTC      -11.2       35       -0.32       45.7%
+  ETH      +159.8      35       +4.57       45.7%
+  SOL      +124.3      35       +3.55       45.7%
+
+Historical (May experiments, 13 OOS dates):
+
+  Symbol   Total bps   Trades   Sharpe   Win rate
+  ---------------------------------------------------
+  BTC      +429        1,678    0.4      38%
+  ETH      +10,265     1,678    6.1      54%
+  SOL      +3,766      1,678    1.7      54%
+
+Observations:
+  - ETH and SOL dominate. These have more volatile funding rates than BTC
+    (thinner markets, more retail leverage), creating more extreme z-score
+    events and faster reversions.
+  - BTC funding is usually near equilibrium — fewer opportunities, smaller
+    edge. BTC is essentially breakeven after costs.
+  - Win rate is moderate (38-54%) but winners are larger than losers —
+    classic mean-reversion profile.
+
+================================================================================
+7. COMPLEMENTARITY WITH OTHER ALGORITHMS
+================================================================================
+
+  Algorithm           Input            Signal type       Timescale
+  -----------------------------------------------------------------------
+  hawkes_intensity    Trade flow       Cascade direction  Seconds
+  spread_decomp       Bid-ask spread   Safety filter      Seconds
+  optimal_entry       L1 imbalance     Entry timing       Seconds
+  funding_reversion   Funding rate     Crowd positioning  Hours-days
+
+  Correlation with microstructure signals: expected to be near zero.
+  Funding rate is determined by aggregate positioning over hours, while
+  microstructure signals respond to book events over milliseconds-seconds.
+  This makes funding_reversion an ideal portfolio diversifier.
+
+  Portfolio implication: blend funding_reversion with microstructure signals
+  (e.g., optimal_entry) for a multi-timescale alpha source. The signals
+  will rarely agree or disagree — they operate on orthogonal information.
+
+================================================================================
+8. RESEARCH DIRECTIONS
+================================================================================
+
+8.1  Half-life gating
+  Only trade when alg_funding_halflife_ticks < threshold (e.g., < 100 ticks).
+  This would filter out periods where funding is trending rather than
+  mean-reverting, improving hit rate at the cost of fewer trades.
+
+8.2  Asymmetric entry
+  Funding reversion may be asymmetric: shorts capitulate faster than longs
+  (liquidation cascades are more violent for shorts in crypto because of
+  the long-bias of the market). Test separate z_entry thresholds for
+  positive vs negative funding.
+
+8.3  Funding rate prediction
+  Rather than trading the current z-score, predict the NEXT funding rate
+  change using order flow features. If microstructure signals (hawkes,
+  OFI) can predict funding rate changes before they happen, the entry
+  can be earlier and more profitable.
+
+8.4  Cross-symbol funding arbitrage
+  When BTC funding is extremely positive but ETH funding is neutral,
+  it may signal BTC-specific crowding. The cross-symbol funding spread
+  (BTC funding - ETH funding) could be a standalone signal.
+
+8.5  8-hour cycle exploitation
+  Funding payments occur every 8 hours (00:00, 08:00, 16:00 UTC on
+  Hyperliquid). Position unwinds tend to cluster in the 1-2 hours before
+  funding payment as leveraged traders reduce exposure. Time-of-day
+  conditioning could improve the signal.
+
+================================================================================
+9. REFERENCES
+================================================================================
+
+Perpetual futures mechanics:
+  - Hyperliquid documentation: funding rate calculation and payment schedule
+  - Alexander, C. & Heck, D. (2020) — "Price discovery in Bitcoin: the
+    role of perpetual swaps", working paper (discusses funding rate dynamics)
+
+Mean-reversion theory:
+  - Avellaneda, M. & Lee, J.H. (2010) — "Statistical arbitrage in the US
+    equities market", Quantitative Finance 10(7), 761-782.
+    (OU-based mean-reversion framework, applicable to funding rate)
+
+Crowd positioning:
+  - Cont, R. & Bouchaud, J.P. (2000) — "Herd behavior and aggregate
+    fluctuations in financial markets", Macroeconomic Dynamics 4(2), 170-196.
