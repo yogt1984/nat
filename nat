@@ -2823,10 +2823,14 @@ def cmd_help(args=None):
     nat alg1 paper             Paper trader batch replay + watch (--symbol, --poll)
     nat alg1 live              LIVE orders on Hyperliquid (requires HL_PRIVATE_KEY)
 
-  {BOLD}OOS30 (30-Day Out-of-Sample Validation){W}
-    Runs all 5 winning algorithms through walk-forward paper trading.
-    Re-run periodically as new data accumulates (target: >=30 OOS days).
-    nat oos30                  Run all 5 winners on BTC/ETH/SOL (--symbols, --data-dir)
+  {BOLD}OOS Validation{W}
+    Walk-forward paper trading with z-score calibration and cost modeling.
+    nat daily                  Single-date OOS snapshot (latest or --date)
+    nat oos30                  30-day batch OOS for 5 winners (--symbols, --data-dir)
+    nat gauntlet run           Multi-day sweep, all 19 algos (--last N, --from, --to)
+    nat gauntlet stop          Kill running gauntlet, print partial results
+    nat gauntlet report        Print latest gauntlet report
+    nat gauntlet report_all    Merge all gauntlet runs into combined summary
 
   {BOLD}AI Agent Integration{W}
     nat commands               List all 177 commands (--json for structured catalog)
