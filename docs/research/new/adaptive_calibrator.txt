@@ -1,0 +1,396 @@
+================================================================================
+  ALGORITHM DEFINITION: adaptive_calibrator
+  Continuous Parameter Learning for Microstructure Algorithms
+================================================================================
+
+Status:       PROPOSED
+Created:      2026-06-01
+Motivation:   All algorithm parameters (half-lives, noise levels, drift
+              thresholds, error rates) are currently fixed defaults or
+              coarsely estimated. Each has a natural estimation method from
+              data. A nightly calibration process learns per-symbol optimal
+              parameters and writes them to config, closing the loop between
+              OOS results and parameter selection.
+
+================================================================================
+1. THESIS
+================================================================================
+
+Algorithm parameters are not magic constants — they are statistical properties
+of the market that change over time. The OU mean-reversion speed differs
+between BTC (deeper book, slower) and SOL (thinner book, faster). The SPRT
+drift threshold should be tied to transaction costs, not a universal constant.
+The Hawkes decay rate reflects how quickly cascades dissipate in each market.
+
+A nightly calibration pipeline that estimates these from recent data and
+writes per-symbol configs converts static algorithms into adaptive ones
+without touching the algorithm logic itself. The algorithms read their
+parameters from config; the calibrator updates that config.
+
+================================================================================
+2. SCOPE — ALGORITHMS AND THEIR LEARNABLE PARAMETERS
+================================================================================
+
+2.1  optimal_entry (SPRT on Kalman OU innovations)
+---------------------------------------------------------------------
+
+  Parameter          Default   Estimation Method
+  -----------------------------------------------------------------------
+  theta              0.1       AR(1) regression on imbalance_qty_l1:
+                               x(t+1) = a + b*x(t) + eps
+                               theta = -ln(b) / dt
+                               Already implemented: ou_filter.estimate_ou_params()
+
+  sigma_process      0.01      OU diffusion coefficient from AR(1) residuals:
+                               sigma = sqrt(2 * theta * var(eps) / (1 - b^2))
+                               Already implemented: ou_filter.estimate_ou_params()
+
+  sigma_obs          0.1       Observation noise from prediction residuals:
+                               sigma_obs = std(z(t+1) - F*z(t) - (1-F)*mu)
+                               Already implemented: ou_filter.auto_tune_filter()
+
+  sprt_drift (mu)    0.001     Cost-derived minimum profitable drift:
+                               mu_min = RT_cost_frac / (sigma_obs * sqrt(E[bars]))
+                               where RT_cost_frac = cost_bps / 10000
+                               and E[bars] = expected holding period in bars
+                               NEW — not yet implemented
+
+  alpha_error        0.05      Walk-forward grid search over {0.01, 0.05, 0.10}
+  beta_error         0.20      paired with beta in {0.10, 0.20, 0.30}
+                               Maximize OOS Sharpe, not total PnL (avoids
+                               overfitting to outlier days)
+                               NEW — not yet implemented
+
+  Estimated quantities per symbol:
+    BTC: theta_BTC, sigma_process_BTC, sigma_obs_BTC, mu_BTC
+    ETH: theta_ETH, sigma_process_ETH, sigma_obs_ETH, mu_ETH
+    SOL: theta_SOL, sigma_process_SOL, sigma_obs_SOL, mu_SOL
+
+
+2.2  hawkes_intensity (self-exciting bid/ask cascade)
+---------------------------------------------------------------------
+
+  Parameter          Default   Estimation Method
+  -----------------------------------------------------------------------
+  decay_beta         0.1       Lag-1 autocorrelation of flow_count_1s:
+                               beta = -ln(autocorr) / dt
+                               Already implemented: HawkesIntensity.estimate_params()
+
+  alpha_fraction     0.5       Dispersion index (branching ratio):
+                               branching = var(count) / mean(count) - 1
+                               alpha = branching * beta
+                               Already implemented: HawkesIntensity.estimate_params()
+
+  baseline_window    300       Cross-validation on window in {100, 200, 300, 500}:
+                               pick window that minimizes prediction error of
+                               baseline mu vs realized intensity next hour
+                               NEW — not yet implemented
+
+  FUTURE — MLE estimation:
+    Hawkes log-likelihood has a closed-form recursion:
+      L = -integral(lambda(t), 0, T) + sum(log(lambda(t_i)))
+    where lambda(t) = mu + alpha * A(t). Optimize (mu, alpha, beta) via
+    scipy.minimize on -L. This is the statistically efficient estimator,
+    replacing the method-of-moments approximation.
+    Reference: Ozaki (1979), "Maximum likelihood estimation of Hawkes'
+    self-exciting point processes"
+
+
+2.3  spread_decomp (adverse selection safety gate)
+---------------------------------------------------------------------
+
+  Parameter          Default   Estimation Method
+  -----------------------------------------------------------------------
+  ema_span           100       Optimize IC of alg_adverse_trend vs forward
+                               returns at 5-min horizon. Sweep {50, 100, 200}.
+                               NEW
+
+  regime_percentile  70        Optimize such that spread_regime=0 days have
+                               significantly higher mean returns than regime=1
+                               days. Sweep {50, 60, 70, 80}.
+                               NEW
+
+
+2.4  hawkes_spread_gate (proposed combined algorithm)
+---------------------------------------------------------------------
+
+  Parameter              Default   Estimation Method
+  -----------------------------------------------------------------------
+  excitement_threshold   0.3       Sweep {0.1, 0.2, 0.3, 0.4, 0.5} via
+                                   walk-forward OOS Sharpe maximization
+                                   NEW
+
+  gate_mode              "hard"    Compare hard vs soft gate on OOS data
+                                   NEW
+
+  All parent parameters inherited from hawkes + spread_decomp calibration.
+
+
+2.5  funding_reversion
+---------------------------------------------------------------------
+
+  Parameter          Default   Estimation Method
+  -----------------------------------------------------------------------
+  hl_window          500       OU half-life of funding rate series:
+                               theta = -ln(b) / dt from AR(1) regression
+                               hl_window = int(half_life / dt)
+                               Use estimate_ou_params() on funding rate
+
+  z_entry            2.0       Cost-derived: z_entry = RT_cost / sigma_funding
+                               Only enter when expected reversion > cost
+
+  z_exit             0.5       Fixed fraction of z_entry (0.25 * z_entry)
+
+
+================================================================================
+3. CALIBRATION PIPELINE
+================================================================================
+
+                   ┌──────────────────────────────────┐
+                   │     nat calibrate [--symbol]     │
+                   │   Runs nightly or before gauntlet │
+                   └──────────────┬───────────────────┘
+                                  │
+                 ┌────────────────┼────────────────┐
+                 ▼                ▼                ▼
+            BTC params       ETH params       SOL params
+                 │                │                │
+                 ▼                ▼                ▼
+
+  Step 1: LOAD DATA
+    Load last N days of parquet data (default N=7) per symbol.
+    Required columns: imbalance_qty_l1, flow_count_1s, flow_intensity,
+    imbalance_pressure_bid/ask, toxic_effective/realized_spread,
+    funding_rate (if available).
+
+  Step 2: ESTIMATE OU PARAMETERS (for optimal_entry, funding_reversion)
+    For each symbol:
+      params = estimate_ou_params(imbalance_series, dt=0.1)
+      -> theta, sigma_process, sigma_obs, mu, half_life
+    Also estimate on funding rate series for funding_reversion.
+
+  Step 3: ESTIMATE HAWKES PARAMETERS
+    For each symbol:
+      params = HawkesIntensity.estimate_params(count_series, dt=0.1)
+      -> decay_beta, alpha_fraction
+    FUTURE: replace with MLE when implemented.
+
+  Step 4: CALIBRATE COST-DERIVED THRESHOLDS
+    Load RT cost from config/costs.toml (single source of truth).
+    For optimal_entry:
+      mu_min = RT_cost_frac / (sigma_obs * sqrt(expected_holding_bars))
+      expected_holding_bars estimated from median inter-signal gap in
+      recent data, or default to 20 bars (100 min at 5-min bars).
+    For funding_reversion:
+      z_entry = RT_cost / sigma_funding
+
+  Step 5: SWEEP ERROR RATES (optional, slower)
+    If --full flag is set:
+      For each (alpha_error, beta_error) combo in grid:
+        Run walk-forward OOS on last 7 days
+        Record Sharpe per combo
+      Pick combo with highest median Sharpe across symbols.
+    If not --full: keep current alpha/beta.
+
+  Step 6: STABILITY CHECK
+    For each parameter:
+      delta = |new - current| / |current|
+      if delta > 0.50:
+        FLAG for review (print warning, don't auto-apply)
+        Log: "theta_BTC shifted 62% (0.10 -> 0.162), flagged"
+      else:
+        AUTO-APPLY
+
+  Step 7: WRITE CONFIG
+    Update config/algorithms.toml with per-symbol sections:
+
+      [optimal_entry]
+      sprt_drift = 0.001          # global default
+
+      [optimal_entry.BTC]
+      theta = 0.087
+      sigma_process = 0.0083
+      sigma_obs = 0.092
+      sprt_drift = 0.00078
+      alpha_error = 0.05
+      beta_error = 0.20
+      calibrated_at = "2026-06-01T08:00:00Z"
+      calibrated_from = "2026-05-25"
+      calibrated_to = "2026-06-01"
+
+      [optimal_entry.ETH]
+      theta = 0.124
+      sigma_process = 0.0112
+      ...
+
+      [hawkes_intensity.BTC]
+      decay_beta = 0.073
+      alpha_fraction = 0.41
+      ...
+
+  Step 8: REPORT
+    Print summary table:
+
+      Algorithm          Param           BTC      ETH      SOL    Delta
+      ----------------------------------------------------------------
+      optimal_entry      theta           0.087    0.124    0.156  +12%
+      optimal_entry      sigma_obs       0.092    0.134    0.201  -8%
+      optimal_entry      sprt_drift      0.00078  0.00061  0.00049 NEW
+      hawkes_intensity   decay_beta      0.073    0.091    0.112  +27%
+      hawkes_intensity   alpha_fraction  0.41     0.53     0.38   -18%
+      spread_decomp      ema_span        100      100      100    0%
+      ...
+
+    Save full report to reports/calibration_YYYY-MM-DD.json.
+
+================================================================================
+4. NAT CLI INTEGRATION
+================================================================================
+
+  nat calibrate                     Run calibration for all algorithms, all symbols
+  nat calibrate --symbol BTC        Single symbol
+  nat calibrate --algo optimal_entry  Single algorithm
+  nat calibrate --full              Include error rate sweep (slower)
+  nat calibrate --dry-run           Estimate and report but don't write config
+  nat calibrate report              Print latest calibration report
+
+Nightly workflow:
+
+  # Ingestor stops at ~06:00 UTC (after overnight collection)
+  nat calibrate                     # ~5 min, estimates from last 7 days
+  nat gauntlet run                  # uses freshly calibrated params
+
+  # Or as a cron job:
+  0 6 * * * cd /home/onat/nat && nat calibrate >> reports/calibrate.log 2>&1
+
+================================================================================
+5. ALGORITHM PARAMETER LOADING
+================================================================================
+
+Each algorithm's __init__ needs to support loading from config:
+
+  class OptimalEntry(MicrostructureAlgorithm):
+      def __init__(self, theta=0.1, ..., symbol=None):
+          if symbol:
+              # Load per-symbol overrides from config/algorithms.toml
+              overrides = load_algo_config("optimal_entry", symbol)
+              theta = overrides.get("theta", theta)
+              sigma_process = overrides.get("sigma_process", sigma_process)
+              ...
+
+The load_algo_config() function reads config/algorithms.toml and returns
+the per-symbol section if it exists, falling back to the global defaults.
+
+This keeps the algorithm code clean — it doesn't know about calibration,
+it just reads its parameters from config. The calibrator writes to config.
+The separation is: algorithms consume parameters, calibrator produces them.
+
+================================================================================
+6. WHAT IS NOT LEARNED
+================================================================================
+
+Some parameters should remain fixed by design:
+
+  - dt (tick interval) = 0.1s — hardware/ingestor constraint
+  - baseline_window floor = 10 — numerical stability guard
+  - hard caps (A_total <= 1000) — overflow protection
+  - warmup periods — minimum ticks before output is valid
+  - epsilon values (1e-12) — numerical stability
+
+These are engineering constants, not statistical properties of the market.
+
+================================================================================
+7. VALIDATION OF CALIBRATED PARAMETERS
+================================================================================
+
+After calibration, verify the parameters make sense:
+
+  Sanity checks:
+  - theta > 0 (mean-reverting, not explosive)
+  - theta < 10 (half-life > 0.07s, not faster than tick grid)
+  - alpha/beta branching ratio < 0.95 (Hawkes stationarity)
+  - sigma_obs > sigma_process (observation noisier than state, otherwise
+    the Kalman filter over-trusts observations)
+  - sprt_drift > 0 and < 0.1 (detectable but not absurd)
+  - SPRT boundaries: A > 0, B < 0
+
+  If any check fails, fall back to the previous calibrated value (or
+  the hardcoded default if no prior calibration exists).
+
+  Cross-symbol consistency check:
+  - theta should be ordered: theta_BTC < theta_ETH < theta_SOL
+    (deeper books mean-revert slower). If violated, flag for review.
+  - decay_beta should follow similar ordering.
+
+================================================================================
+8. DECAY AND RECALIBRATION FREQUENCY
+================================================================================
+
+Market microstructure parameters are not stationary but they change slowly
+(weekly/monthly timescale, not per-tick). Recommended schedule:
+
+  Frequency       What
+  -----------------------------------------------------------------------
+  Nightly         OU params (theta, sigma), Hawkes params (alpha, beta)
+  Weekly          SPRT error rates (alpha/beta grid search)
+  After regime    Full recalibration if regime detector flags a structural
+  change          break (e.g., spread regime flips from 0 to 1 for >24h,
+                  or volatility doubles)
+
+  Staleness guard: if calibrated_at is older than 7 days, print a warning
+  when the algorithm loads its config. Do not silently use stale parameters.
+
+================================================================================
+9. IMPLEMENTATION PLAN
+================================================================================
+
+File structure:
+
+  scripts/calibration/
+    __init__.py
+    calibrator.py          Main calibration pipeline
+    ou_calibrator.py       OU param estimation (wraps ou_filter.estimate_ou_params)
+    hawkes_calibrator.py   Hawkes param estimation (wraps estimate_params + future MLE)
+    cost_calibrator.py     Cost-derived threshold calculation
+    sweep.py               Walk-forward error rate grid search
+    config_writer.py       Atomic TOML writer for config/algorithms.toml
+    report.py              Calibration report generation
+
+  nat CLI addition (in nat script):
+    cmd_calibrate()        Dispatches to calibrator.py
+    Parser: nat calibrate [--symbol] [--algo] [--full] [--dry-run]
+           nat calibrate report
+
+Estimated implementation effort:
+  - ou_calibrator: 1h (wraps existing code)
+  - hawkes_calibrator: 1h (wraps existing code)
+  - cost_calibrator: 2h (new logic, needs cost config loading)
+  - config_writer: 1h (TOML read-modify-write)
+  - sweep: 3h (walk-forward grid search, reuses paper_trader machinery)
+  - CLI integration: 1h
+  - Tests: 2h
+
+Total: ~11h estimated, can be done in 2-3 sessions.
+
+================================================================================
+10. REFERENCES
+================================================================================
+
+Parameter estimation:
+  - Hamilton, J.D. (1994) — "Time Series Analysis", Ch. 13 (state-space
+    models, Kalman filter parameter estimation)
+  - Ozaki, T. (1979) — "Maximum likelihood estimation of Hawkes' self-
+    exciting point processes", Annals of the Institute of Statistical
+    Mathematics 31(1), 145-155.
+
+Sequential testing:
+  - Wald, A. (1947) — "Sequential Analysis", Wiley.
+  - Tartakovsky, A., Nikiforov, I. & Basseville, M. (2014) — "Sequential
+    Analysis: Hypothesis Testing and Changepoint Detection", CRC Press.
+
+Adaptive methods in finance:
+  - Avellaneda, M. & Lee, J.H. (2010) — "Statistical arbitrage in the US
+    equities market", Quantitative Finance 10(7), 761-782.
+    (OU parameter estimation for pairs trading)
+  - Cartea, A., Jaimungal, S. & Penalva, J. (2015) — "Algorithmic and
+    High-Frequency Trading", Ch. 10 (adaptive execution parameters)
