@@ -46,8 +46,14 @@ from backtest.costs import CostModel
 
 # ── Config ────────────────────────────────────────────────────────────────
 
-DAILY_ALGOS = ["jump_detector", "optimal_entry", "funding_reversion"]
-SURPRISE_ALGO = "surprise_signal"
+DAILY_ALGOS = [
+    "jump_detector", "optimal_entry", "funding_reversion",
+    "surprise_signal", "bipower_jump", "cascade_probability", "convolver",
+    "entropy_momentum", "hawkes_intensity", "kalman_imbalance",
+    "oi_divergence", "propagator", "regime_gated", "spread_decomp",
+    "switching_ou", "trade_through", "vpin_regime", "weighted_ofi",
+]
+SURPRISE_ALGO = None  # now included in DAILY_ALGOS
 SYMBOLS = ["BTC", "ETH", "SOL"]
 MIN_HOURS = 4.0
 REPORTS_DIR = ROOT / "reports"
@@ -470,11 +476,12 @@ def main():
         if r:
             algo_results[algo_name] = r
 
-    # 3. Surprise signal
-    print(f"  Running {SURPRISE_ALGO}...")
-    r = run_algo_single_date(SURPRISE_ALGO, data_dir, train_dates, test_date, args.symbols, cost_model=cost_model)
-    if r:
-        algo_results[SURPRISE_ALGO] = r
+    # 3. Surprise signal (now included in DAILY_ALGOS, skip if None)
+    if SURPRISE_ALGO:
+        print(f"  Running {SURPRISE_ALGO}...")
+        r = run_algo_single_date(SURPRISE_ALGO, data_dir, train_dates, test_date, args.symbols, cost_model=cost_model)
+        if r:
+            algo_results[SURPRISE_ALGO] = r
 
     elapsed = time.time() - t0
 
