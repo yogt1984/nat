@@ -1,0 +1,237 @@
+================================================================================
+  ALGORITHM ANALYSIS: kalman_imbalance
+  OU Kalman Filter on L1 Order Book Imbalance
+================================================================================
+
+Status:       TESTING (positive on gauntlet 2026-06-01, needs multi-day)
+Created:      2026-06-01
+Source:       scripts/algorithms/kalman_imbalance.py
+Signal:       alg_kalman_signal_strength
+Polarity:     high_long
+
+Gauntlet 2026-06-01 results:
+  BTC: -8.5 bps (10 trades)   — slight loss, very few trades
+  ETH: -19.2 bps (10 trades)  — slight loss, very few trades
+  SOL: +270.6 bps (10 trades) — strong
+  Total: +242.9 bps, 30 trades, 1/3 symbols positive, +8.1 bps/trade
+
+================================================================================
+1. THESIS
+================================================================================
+
+Raw order book imbalance (bid volume minus ask volume at best level) is noisy
+and mean-reverting. Most of the tick-to-tick variation is observation noise,
+not genuine directional pressure. Trading raw imbalance is like trading noise.
+
+A Kalman filter with an Ornstein-Uhlenbeck process prior extracts the slow
+(persistent) component of imbalance while filtering out the fast noise. The
+key insight is that the filter produces not just an estimate but also a
+measure of UNCERTAINTY about that estimate.
+
+The trading signal is the ratio of the filtered estimate to its uncertainty:
+
+  signal_strength = filtered_imbalance / sqrt(uncertainty)
+
+This is analogous to a t-statistic: large positive means "I am confident
+the slow imbalance is genuinely positive (buyers dominating)." The algorithm
+only trades when confidence is high — when the filter has accumulated enough
+consistent evidence that the imbalance is real, not noise.
+
+================================================================================
+2. THE KALMAN FILTER LAYER
+================================================================================
+
+State-space model:
+
+  State transition (OU process):
+    x(t+1) = F * x(t) + (1 - F) * mu + w
+
+    F = exp(-theta * dt)         discrete-time OU transition
+    mu = 0                       long-run mean (imbalance is zero-centered)
+    w ~ N(0, Q)                  process noise
+    Q = sigma_proc^2 * (1 - F^2) / (2 * theta)
+
+  Observation:
+    z(t) = x(t) + v,   v ~ N(0, R)
+
+    z(t) = imbalance_qty_l1 (raw observation from order book)
+    R = sigma_obs^2
+
+The filter alternates between:
+
+  Predict:
+    x_pred = F * x_prev + (1 - F) * mu
+    P_pred = F^2 * P_prev + Q
+
+  Update:
+    innovation = z(t) - x_pred
+    K = P_pred / (P_pred + R)        Kalman gain
+    x_filt = x_pred + K * innovation
+    P_filt = (1 - K) * P_pred
+
+Default parameters:
+  theta = 0.1          half-life ~ 7s (how fast imbalance mean-reverts)
+  sigma_process = 0.01 process noise (slow state changes)
+  sigma_obs = 0.1      observation noise (tick-to-tick jitter)
+  dt = 0.1s            100ms tick interval
+
+When sigma_obs >> sigma_process, the filter heavily smooths: it trusts its
+model more than individual observations. This is correct for L1 imbalance
+where individual ticks are very noisy but the underlying directional
+pressure changes slowly.
+
+================================================================================
+3. SIGNAL CONSTRUCTION
+================================================================================
+
+3.1  Filtered imbalance (alg_kalman_filtered_imb)
+---------------------------------------------------------------------
+
+  x_filt(t) = Kalman posterior mean after observing z(t)
+
+  This is the "denoised" imbalance — the filter's best estimate of where
+  the true (slow) imbalance sits. Positive = buyers dominating, negative
+  = sellers dominating. Smoother than raw imbalance by a factor of ~10x.
+
+3.2  Uncertainty (alg_kalman_uncertainty)
+---------------------------------------------------------------------
+
+  P(t) = Kalman posterior variance
+
+  Starts high (uncertain), converges to a steady state as the filter
+  accumulates observations. Lower P = more confident estimate.
+
+3.3  Innovation (alg_kalman_innovation)
+---------------------------------------------------------------------
+
+  innovation(t) = z(t) - x_pred(t)
+
+  Prediction error — how surprised the filter is by the new observation.
+  Large innovations signal a regime change that the filter hasn't yet
+  absorbed. This is the same innovation used by optimal_entry's SPRT.
+
+3.4  Signal strength (alg_kalman_signal_strength) — PRIMARY
+---------------------------------------------------------------------
+
+  strength(t) = x_filt(t) / sqrt(P(t))
+
+  This is the TRADING SIGNAL. It normalizes the directional estimate by
+  its uncertainty, producing a confidence-weighted signal:
+
+    strength >> 0:  confidently positive imbalance (strong buy pressure)
+    strength << 0:  confidently negative imbalance (strong sell pressure)
+    strength ~ 0:   uncertain or balanced (no trade)
+
+  Interpretation: "how many standard deviations is the filtered imbalance
+  from zero, measured in the filter's own uncertainty?"
+
+================================================================================
+4. OUTPUT FEATURES
+================================================================================
+
+  Name                          Range           Description
+  -----------------------------------------------------------------------
+  alg_kalman_filtered_imb       (-inf, inf)     Denoised L1 imbalance
+  alg_kalman_uncertainty        (0, inf)        Filter uncertainty (P)
+  alg_kalman_innovation         (-inf, inf)     Prediction error
+  alg_kalman_signal_strength    (-inf, inf)     PRIMARY — filtered/sqrt(P)
+
+================================================================================
+5. PARAMETERS
+================================================================================
+
+  Parameter       Default   Meaning
+  -----------------------------------------------------------------------
+  theta           0.1       OU mean-reversion speed (half-life ~ 7s)
+  r_mult          1.0       Multiplier on observation noise (sigma_obs * r_mult)
+  dt              0.1       Tick interval in seconds
+  auto_tune       True      Re-estimate params per regime from data
+
+  When auto_tune = True:
+    run_batch() calls estimate_ou_params() on each regime segment's data
+    to get (theta, sigma_process, sigma_obs) per segment. Parameters from
+    the PREVIOUS segment are used for the CURRENT segment (causal, no
+    lookahead). The first segment uses constructor defaults.
+
+================================================================================
+6. RELATIONSHIP TO optimal_entry
+================================================================================
+
+kalman_imbalance and optimal_entry share the same Kalman filter layer but
+use its outputs differently:
+
+  kalman_imbalance:
+    Uses the FILTERED STATE (x_filt) normalized by uncertainty (P)
+    Signal = "is there persistent directional imbalance?"
+    Trades when the slow component is confidently non-zero
+
+  optimal_entry:
+    Uses the INNOVATION (prediction error) fed into an SPRT
+    Signal = "has the innovation process developed a drift?"
+    Trades when cumulative evidence of drift crosses Wald boundary
+
+  Same filter, different questions:
+    kalman_imbalance = WHERE is the imbalance? (level)
+    optimal_entry    = IS the imbalance changing? (drift detection)
+
+  These signals are correlated (r ~ 0.5-0.7 expected) because a drifting
+  innovation eventually moves the filtered state. But they fire at different
+  times: optimal_entry fires EARLY (when drift begins), kalman_imbalance
+  fires LATE (when the filter has converged to the new level).
+
+  Portfolio implication: using both may not add much diversification.
+  Better to pick one or combine them (e.g., optimal_entry for timing,
+  kalman_imbalance for sizing).
+
+================================================================================
+7. PERFORMANCE ANALYSIS
+================================================================================
+
+Gauntlet 2026-06-01:
+  30 trades total, heavily concentrated in SOL (+270.6 bps on 10 trades)
+  BTC and ETH barely traded and lost slightly.
+
+  The low trade count (10 per symbol) means the z-score threshold is
+  rarely breached — the signal is highly selective. SOL's thinner book
+  produces larger imbalance swings that cross the threshold more
+  convincingly.
+
+  The +8.1 bps/trade is high conviction but 30 trades from 4.7 hours
+  is statistically unreliable. Needs multi-day gauntlet.
+
+================================================================================
+8. RESEARCH DIRECTIONS
+================================================================================
+
+8.1  Adaptive observation noise
+  Currently sigma_obs is fixed at 0.1. In volatile periods, observation
+  noise increases — the filter should trust individual ticks less. Use
+  a GARCH-like model on innovation variance to make R(t) time-varying.
+
+8.2  Multi-level imbalance
+  Currently uses only L1 (best bid/ask). Extend to weighted average of
+  L1-L5 imbalance: the Kalman filter can track a weighted composite that
+  captures deeper book dynamics.
+
+8.3  Entry/exit asymmetry
+  Use kalman_imbalance for position SIZING (larger when signal_strength
+  is high) combined with optimal_entry for TIMING (enter when SPRT fires).
+  This exploits both algorithms' strengths without doubling up on the
+  same information.
+
+8.4  Kalman smoother (backward pass)
+  For backtesting only: run the Rauch-Tung-Striebel backward pass after
+  the forward filter to get the smoothed state estimate. This uses future
+  data and cannot be used live, but gives the theoretical best-case signal
+  for evaluating how much the filter is leaving on the table.
+
+================================================================================
+9. REFERENCES
+================================================================================
+
+  Hamilton, J.D. (1994) — "Time Series Analysis", Ch. 13 (state-space
+    models, Kalman filtering)
+  Harvey, A.C. (1989) — "Forecasting, Structural Time Series Models and
+    the Kalman Filter", Cambridge University Press
+  Cartea, A., Jaimungal, S. & Penalva, J. (2015) — "Algorithmic and
+    High-Frequency Trading", Ch. 3 (order book imbalance and prediction)

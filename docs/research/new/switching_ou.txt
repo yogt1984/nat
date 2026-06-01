@@ -1,0 +1,276 @@
+================================================================================
+  ALGORITHM ANALYSIS: switching_ou
+  Two-State Switching OU with Bayesian Regime Filtering
+================================================================================
+
+Status:       TESTING (marginal positive on gauntlet 2026-06-01, needs multi-day)
+Created:      2026-06-01
+Source:       scripts/algorithms/switching_ou.py
+Signal:       alg_switching_ou_state
+Polarity:     high_long
+
+Gauntlet 2026-06-01 results:
+  BTC: -31.0 bps (11 trades) — loss
+  ETH: +78.8 bps (17 trades) — gain
+  SOL: +16.4 bps (11 trades) — marginal gain
+  Total: +64.2 bps, 39 trades, 2/3 symbols positive, +1.6 bps/trade
+
+================================================================================
+1. THESIS
+================================================================================
+
+Markets alternate between two regimes:
+
+  Regime 0 — FAST mean-reversion (range-bound):
+    Order book imbalance is quickly corrected by market makers refilling
+    the depleted side. Prices oscillate around a stable level. Fade
+    extremes, sell rallies, buy dips.
+
+  Regime 1 — SLOW mean-reversion (trending):
+    Directional flow overwhelms market maker replenishment. Imbalance
+    persists and prices trend. Follow momentum, don't fight the flow.
+
+The problem: you don't know which regime you're in. The switching OU
+algorithm solves this by running TWO parallel Kalman filters (one tuned for
+fast, one for slow mean-reversion) and using Bayesian inference (Hamilton
+filter) to estimate the probability of being in each regime at every tick.
+
+The trading signal is the regime-weighted state estimate:
+
+  state = P(fast) * x_fast + P(slow) * x_slow
+
+When the slow regime dominates (P(slow) -> 1), the state tracks a trending
+imbalance — positive state means follow the trend upward. When the fast
+regime dominates, the state reflects a transient imbalance that will revert.
+
+The signal is traded as high_long: positive state = go long.
+
+================================================================================
+2. THE HIDDEN MARKOV MODEL
+================================================================================
+
+2.1  Two parallel OU processes
+---------------------------------------------------------------------
+
+  Regime 0 (fast):  theta_0 = 0.5   half-life ~ 1.4s
+  Regime 1 (slow):  theta_1 = 0.05  half-life ~ 14s
+
+  Both observe the same imbalance_qty_l1, but each Kalman filter
+  interprets it through its own OU dynamics:
+
+  Fast filter: "this imbalance is a temporary deviation, it will
+               mean-revert quickly"
+  Slow filter: "this imbalance is a persistent shift, it will
+               take a long time to revert"
+
+  The two filters produce different state estimates (x_fast, x_slow)
+  and different innovations (innov_fast, innov_slow).
+
+2.2  Transition matrix
+---------------------------------------------------------------------
+
+  The regime follows a Markov chain with per-tick transition probability:
+
+    P = [[1 - rho,  rho  ],
+         [rho,    1 - rho]]
+
+  rho = 0.01 (default)
+
+  Meaning: 1% chance of switching regime at each tick (100ms).
+  Expected duration in each regime: 1/rho = 100 ticks = 10 seconds.
+
+  The symmetric matrix means both regimes have equal persistence. This
+  is a simplifying assumption — in practice, trending regimes may be
+  shorter-lived than range-bound regimes.
+
+2.3  Hamilton filter (Bayesian update)
+---------------------------------------------------------------------
+
+  At each tick, 4 steps:
+
+  Step 1 — PRIOR (predict regime probabilities via transition matrix):
+    pi_fast_prior = P[0,0] * pi_fast(t-1) + P[1,0] * pi_slow(t-1)
+    pi_slow_prior = 1 - pi_fast_prior
+
+  Step 2 — KALMAN UPDATE (run both filters on the new observation):
+    (x_fast, P_fast, innov_fast) = KF_fast.step(z)
+    (x_slow, P_slow, innov_slow) = KF_slow.step(z)
+
+  Step 3 — LIKELIHOOD (how well does each regime explain the observation):
+    L_fast = N(innov_fast; 0, P_fast)
+    L_slow = N(innov_slow; 0, P_slow)
+
+    The regime whose filter is less surprised by the observation gets a
+    higher likelihood. If imbalance is reverting quickly, L_fast > L_slow.
+    If imbalance persists, L_slow > L_fast.
+
+  Step 4 — POSTERIOR (Bayes rule):
+    pi_fast(t) = L_fast * pi_fast_prior / (L_fast * pi_fast_prior + L_slow * pi_slow_prior)
+
+  This is the Hamilton (1989) filter — the standard method for online
+  regime detection in hidden Markov models.
+
+================================================================================
+3. SIGNAL CONSTRUCTION
+================================================================================
+
+3.1  Regime-weighted state (alg_switching_ou_state) — PRIMARY
+---------------------------------------------------------------------
+
+  state(t) = pi_fast(t) * x_fast(t) + (1 - pi_fast(t)) * x_slow(t)
+
+  This blends the two Kalman estimates by their regime probability.
+  When the market is trending (pi_slow high), the slow filter's estimate
+  dominates — it tracks the persistent imbalance direction.
+
+3.2  Regime probability (alg_switching_ou_regime)
+---------------------------------------------------------------------
+
+  regime(t) = pi_fast(t)    in [0, 1]
+
+  Close to 1.0: fast regime (mean-reverting, range-bound)
+  Close to 0.0: slow regime (trending, directional)
+
+  This is useful as a standalone regime indicator for gating other
+  algorithms: only trade momentum signals when regime ~ 0, only trade
+  mean-reversion signals when regime ~ 1.
+
+3.3  Effective speed (alg_switching_ou_speed)
+---------------------------------------------------------------------
+
+  speed(t) = pi_fast(t) * theta_fast + (1 - pi_fast(t)) * theta_slow
+
+  Blended mean-reversion speed. High speed (near 0.5) = fast regime.
+  Low speed (near 0.05) = slow regime. Continuous interpolation.
+
+3.4  Transition rate (alg_regime_transition_rate)
+---------------------------------------------------------------------
+
+  trate(t) = |pi_fast(t) - pi_fast(t-1)| / dt
+
+  How fast the regime belief is changing. Spikes when the market flips
+  between regimes. High transition rate = regime uncertainty = danger zone
+  for any directional signal.
+
+================================================================================
+4. OUTPUT FEATURES
+================================================================================
+
+  Name                            Range           Description
+  -----------------------------------------------------------------------
+  alg_switching_ou_state          (-inf, inf)     Regime-weighted state (PRIMARY)
+  alg_switching_ou_regime         [0, 1]          P(fast regime)
+  alg_switching_ou_speed          [0.05, 0.5]     Effective theta
+  alg_regime_transition_rate      [0, inf)        Regime change speed
+
+================================================================================
+5. PARAMETERS
+================================================================================
+
+  Parameter          Default   Meaning
+  -----------------------------------------------------------------------
+  theta_fast         0.5       OU speed in fast regime (half-life 1.4s)
+  theta_slow         0.05      OU speed in slow regime (half-life 14s)
+  transition_rate    0.01      Per-tick switching probability
+  dt                 0.1       Tick interval (100ms)
+  sigma_process      0.02      Process noise (hardcoded, both regimes)
+  sigma_obs          0.1       Observation noise (hardcoded, both regimes)
+
+================================================================================
+6. HOW IT DIFFERS FROM OTHER ALGORITHMS
+================================================================================
+
+  Algorithm           What it asks                         Method
+  -----------------------------------------------------------------------
+  kalman_imbalance    "Is imbalance persistent?"           Single Kalman
+  optimal_entry       "Is imbalance STARTING to shift?"    SPRT on Kalman
+  switching_ou        "WHICH REGIME is the market in?"     Two Kalman + HMM
+
+  kalman_imbalance assumes one regime with fixed parameters.
+  switching_ou admits the market has two modes and infers which one is
+  active. This is a strictly richer model — it nests kalman_imbalance as
+  a special case when pi_fast = 1 or pi_fast = 0 permanently.
+
+  The cost of this richness: more parameters (theta_fast, theta_slow,
+  transition_rate) and slower convergence (the Hamilton filter needs
+  ~50 ticks to form a confident regime estimate after a switch).
+
+================================================================================
+7. PERFORMANCE ANALYSIS
+================================================================================
+
+Gauntlet 2026-06-01:
+  +64.2 bps total on 39 trades (1.6 bps/trade). Marginal.
+
+  The algorithm is the weakest of the top 7 by total PnL. However:
+  - 2/3 symbols positive (ETH strong, SOL marginal, BTC loss)
+  - The regime probability (alg_switching_ou_regime) may be more
+    valuable as a META-SIGNAL for gating other algorithms than as a
+    standalone trading signal
+
+  The regime detection aspect is potentially more valuable than the
+  directional signal itself.
+
+================================================================================
+8. RESEARCH DIRECTIONS
+================================================================================
+
+8.1  Use as a regime gate, not a standalone signal
+  The most promising application may be as a filter for other algorithms:
+    - Trade optimal_entry only when P(slow regime) > 0.7
+      (imbalance is trending, entry timing matters)
+    - Trade 3f_liquidity only when P(fast regime) > 0.7
+      (mean-reverting regime, liquidity signals work)
+
+  This is analogous to how spread_decomp gates hawkes_intensity —
+  switching_ou provides regime context for timing algorithms.
+
+8.2  Asymmetric transition rates
+  Replace the symmetric transition matrix with:
+    P[fast->slow] = rho_1
+    P[slow->fast] = rho_2
+
+  In practice, trending regimes (slow) tend to be shorter than
+  range-bound regimes (fast). Learning rho_1 != rho_2 from data
+  (via the adaptive_calibrator) could improve regime detection.
+
+8.3  Three-regime model
+  Add a third regime: VOLATILE (high theta, high sigma_process).
+  This captures market microstructure around news events or liquidation
+  cascades where imbalance is both fast-moving AND highly volatile.
+  The current two-regime model conflates calm-fast with chaotic-fast.
+
+8.4  Volume-dependent regime transitions
+  Condition the transition matrix on volume: P(switch to trending) should
+  be higher when volume spikes. Currently, rho is constant regardless of
+  market conditions.
+
+8.5  Cross-algorithm regime consensus
+  Combine switching_ou regime with spread_decomp regime and hawkes
+  excitement to build a composite regime indicator:
+    - switching_ou says "trending"
+    - spread_decomp says "low adverse selection"
+    - hawkes says "high excitement"
+    -> All three agree: high-conviction directional environment
+
+8.6  Learn theta_fast and theta_slow from data
+  The current defaults (0.5 and 0.05) are fixed. Use the adaptive
+  calibrator to estimate per-symbol:
+    - theta_fast from the autocorrelation of imbalance during
+      low-volatility periods
+    - theta_slow from the autocorrelation during high-volatility periods
+  This adapts the regime definitions to each market's characteristics.
+
+================================================================================
+9. REFERENCES
+================================================================================
+
+  Hamilton, J.D. (1989) — "A new approach to the economic analysis of
+    nonstationary time series and the business cycle", Econometrica 57(2),
+    357-384.
+  Elliott, R.J., Aggoun, L. & Moore, J.B. (2005) — "Hidden Markov Models:
+    Estimation and Control", Springer, 2nd ed.
+  Kim, C.J. & Nelson, C.R. (1999) — "State-Space Models with Regime
+    Switching", MIT Press.
+  Bollen, N.P., Gray, S.F. & Whaley, R.E. (2000) — "Regime switching in
+    foreign exchange rates", Journal of Econometrics 94(1-2), 239-276.
