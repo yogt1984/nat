@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
     info!(?config, "Configuration loaded");
 
     // Graceful shutdown: watch channel broadcasts to all symbol tasks
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     tokio::spawn(async move {
         let ctrl_c = tokio::signal::ctrl_c();
         let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
@@ -200,6 +200,11 @@ async fn main() -> Result<()> {
     // Drop the original sender so writer knows when to stop
     // (once all symbol tasks also drop their clones)
     drop(feature_tx);
+
+    // Block until SIGINT/SIGTERM — this is where the process lives
+    // during normal operation. Symbol tasks emit features in the
+    // background; on signal they break their loops and drop senders.
+    let _ = shutdown_rx.changed().await;
 
     // Wait for symbol tasks to exit (3s deadline)
     let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(3);
