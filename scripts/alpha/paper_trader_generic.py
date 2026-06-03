@@ -145,7 +145,7 @@ ALGO_CONFIG = {
     "convolver": {
         "primary": "alg_conv_best_score",
         "polarity": "high_long",  # high score → strong pattern match
-        "bar_agg": "mean",
+        "bar_agg": "max",
     },
 }
 
@@ -221,6 +221,8 @@ def aggregate_to_bars(ticks: pd.DataFrame, features: pd.DataFrame,
     }
     if agg_method == "last":
         agg_dict["signal"] = ("_signal", "last")
+    elif agg_method == "max":
+        agg_dict["signal"] = ("_signal", "max")
     else:
         agg_dict["signal_mean"] = ("_signal", "mean")
         agg_dict["signal_std"] = ("_signal", "std")
@@ -228,7 +230,7 @@ def aggregate_to_bars(ticks: pd.DataFrame, features: pd.DataFrame,
     bars = ticks.groupby("bar_id").agg(**agg_dict).reset_index(drop=True)
     bars = bars[bars["n_ticks"] >= 10].reset_index(drop=True)
 
-    if agg_method == "last":
+    if agg_method in ("last", "max"):
         bars["signal"] = bars["signal"].astype(float)
     else:
         bars["signal"] = bars["signal_mean"].astype(float)
