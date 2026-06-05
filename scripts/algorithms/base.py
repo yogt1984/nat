@@ -35,7 +35,14 @@ class MicrostructureAlgorithm(ABC):
     - Avoid pandas overhead per tick
     - Match the Rust trait's step(&Features) interface
     - Enable direct porting to Rust later
+
+    Bar-level algorithms (ML models) set bar_level = True. The runner
+    aggregates ticks to bars before calling run_batch(), so the algorithm
+    receives bar-aggregated columns (e.g. ent_tick_1m_mean, vol_returns_5m_last).
     """
+
+    bar_level: bool = False
+    bar_timeframe: str = "5min"
 
     @abstractmethod
     def name(self) -> str:

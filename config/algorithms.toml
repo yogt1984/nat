@@ -105,6 +105,64 @@ lr_decay = 0.9999            # per-update LR decay
 l2_reg = 0.001               # L2 regularization
 max_class_weight = 50.0      # cap on inverse-frequency class weight
 
+# ── Group J: ML Wave 1 ──────────────────────────────────────────
+
+[change_point_detector]
+cusum_threshold = 5.0        # CUSUM alarm threshold
+cusum_drift = 0.05           # CUSUM drift subtracted per step
+hazard_rate = 0.005          # Bayesian OCD prior P(change-point)
+max_run_length = 500         # truncate run-length distribution
+calibration_window = 200     # rolling window for CUSUM normalization
+
+[momentum_continuation]
+model_path = "models/momentum_continuation"
+entropy_ceiling = 0.85       # entropy gate threshold
+p_long = 0.6                 # P(continuation) threshold for long
+p_short = 0.4                # P(continuation) threshold for short
+
+[regime_state_machine]
+accum_thresh = 0.70          # accumulation score threshold
+distrib_thresh = 0.70        # distribution score threshold
+entropy_low = 0.30           # low entropy boundary (trending)
+entropy_high = 0.60          # high entropy boundary (ranging)
+hurst_trend = 0.55           # Hurst exponent for trending regimes
+vol_noise_mult = 2.0         # vol > mult * median -> volatile noise
+min_duration = 5             # minimum bars before regime transition
+
+# ── Wave 2b: Mean-Reversion Detector ───────────────────────────
+
+[mean_reversion_detector]
+model_path = "models/mean_reversion_detector"
+entropy_threshold = 0.70       # inverted gate: active when ent > threshold
+zscore_threshold = 2.0         # maximum abs(zscore) for signal
+reversion_prob_thresh = 0.65   # minimum P(reversion) for nonzero signal
+
+# ── Wave 2c: Meta-Labeling ─────────────────────────────────────
+
+[meta_labeling]
+model_path = "models/meta_labeling"
+meta_threshold = 0.55          # minimum P(success) for nonzero size
+profit_target_bps = 5.0        # triple-barrier upper target
+stop_loss_bps = 10.0           # triple-barrier lower stop
+max_holding_bars = 100         # triple-barrier time horizon
+
+# ── Wave 3a: Regime-Conditioned LightGBM ──────────────────────
+
+[regime_conditioned_lgbm]
+model_dir = "models/regime_conditioned_lgbm"
+confidence_threshold = 0.60    # min RSM confidence for per-regime routing
+min_samples_regime = 500       # min training samples per regime group
+
+# ── Wave 3b: KNN Retrieval ────────────────────────────────────
+
+[knn_retrieval]
+k = 20                         # number of nearest neighbors
+buffer_size = 5000             # max historical states in ring buffer
+time_decay_halflife = 500      # halflife for time-decay weighting (bars)
+refit_interval = 100           # bars between KD-tree + covariance rebuilds
+cost_threshold_bps = 2.0       # min |expected_return| for signal (bps)
+win_rate_threshold = 0.60      # min win rate for signal
+
 # ── Group I: Pattern Convolver ──────────────────────────────────
 
 [convolver]

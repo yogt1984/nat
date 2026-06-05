@@ -147,6 +147,41 @@ ALGO_CONFIG = {
         "polarity": "high_long",  # high score → strong pattern match
         "bar_agg": "max",
     },
+    "change_point_detector": {
+        "primary": "alg_cpd_cusum_signal",
+        "polarity": "high_long",
+        "bar_agg": "last",
+    },
+    "momentum_continuation": {
+        "primary": "alg_mc_signal",
+        "polarity": "high_long",
+        "bar_agg": "last",
+    },
+    "regime_state_machine": {
+        "primary": "alg_rsm_regime",
+        "polarity": "high_long",
+        "bar_agg": "last",
+    },
+    "mean_reversion_detector": {
+        "primary": "alg_mr_signal",
+        "polarity": "high_long",
+        "bar_agg": "mean",
+    },
+    "meta_labeling": {
+        "primary": "alg_meta_probability",
+        "polarity": "high_long",
+        "bar_agg": "last",
+    },
+    "regime_conditioned_lgbm": {
+        "primary": "alg_rlgbm_signal",
+        "polarity": "high_long",
+        "bar_agg": "last",
+    },
+    "knn_retrieval": {
+        "primary": "alg_knn_signal",
+        "polarity": "high_long",
+        "bar_agg": "last",
+    },
 }
 
 P_LONG_HIGH = 80  # for high_long polarity

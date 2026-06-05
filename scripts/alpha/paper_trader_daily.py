@@ -52,6 +52,13 @@ DAILY_ALGOS = [
     "entropy_momentum", "hawkes_intensity", "kalman_imbalance",
     "oi_divergence", "propagator", "regime_gated", "spread_decomp",
     "switching_ou", "trade_through", "vpin_regime", "weighted_ofi",
+    "change_point_detector",
+    "momentum_continuation",
+    "regime_state_machine",
+    "mean_reversion_detector",
+    "meta_labeling",
+    "regime_conditioned_lgbm",
+    "knn_retrieval",
 ]
 SURPRISE_ALGO = None  # now included in DAILY_ALGOS
 SYMBOLS = ["BTC", "ETH", "SOL"]
