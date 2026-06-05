@@ -812,6 +812,17 @@ def cmd_test_eamm(args):
         _exec(f"{PY} -m pytest eamm/tests/ -v", cwd=ROOT / "scripts")
 
 
+def cmd_test_snapshot(args):
+    data_dir = getattr(args, 'data_dir', str(ROOT / "data" / "features"))
+    symbol = getattr(args, 'symbol', 'BTC')
+    hours = getattr(args, 'hours', 1)
+    _py(f"scripts/test_regression.py snapshot --data-dir {data_dir} --symbol {symbol} --hours {hours}")
+
+
+def cmd_test_regression(args):
+    _py("scripts/test_regression.py check")
+
+
 # ── Backtest commands ────────────────────────────────────────────────────────
 
 def cmd_backtest(args):
@@ -3609,6 +3620,12 @@ def build_parser():
     tvz = tsub.add_parser('viz', help='Scanner visualization tests')
     tvz.add_argument('--coverage', action='store_true', help='Run with coverage reporting')
     tvz.set_defaults(func=cmd_test_viz)
+    tsnap = tsub.add_parser('snapshot', help='Capture data snapshot + save algorithm baseline')
+    tsnap.add_argument('--data-dir', default=str(ROOT / "data" / "features"))
+    tsnap.add_argument('--symbol', default='BTC')
+    tsnap.add_argument('--hours', type=int, default=1)
+    tsnap.set_defaults(func=cmd_test_snapshot)
+    tsub.add_parser('regression', help='Run algorithms and compare against baseline').set_defaults(func=cmd_test_regression)
 
     # ── backtest ──
     bt_p = sub.add_parser('backtest', help='Backtesting',
