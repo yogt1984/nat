@@ -7,6 +7,20 @@ cascade event from the 8 heatmap spatial features plus 3 interaction terms.
 Target: binary cascade event y_t = 1 if |price_move| > X% AND liq_volume > Y
 within T ticks. Uses delayed SGD (target observed at t + T).
 
+Known limitation — liquidation data proxy:
+  Hyperliquid does not expose a public WebSocket channel for real-time
+  liquidation events. The `userFills` and `userEvents` channels are
+  authenticated and user-scoped (only your own account's liquidations).
+  The public `trades` feed has no liquidation marker.
+
+  As a result, cascade targets are approximated using price moves alone
+  (|log_return| > CASCADE_PRICE_THRESH), without actual liquidation volume.
+  This proxy is adequate for detecting large dislocations but may miss
+  low-volume cascades or false-flag sharp but non-liquidation moves.
+
+  If Hyperliquid adds a public liquidation feed, update step() to use
+  real liquidation volume in the target construction (line ~187).
+
 References:
   Cont & Wagalath (2016) - Fire sales forensics
   Brunnermeier & Pedersen (2009) - Market liquidity and funding liquidity
