@@ -44,6 +44,10 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - RUST_LOG=info
+      - ING_PROMETHEUS_ADDR=0.0.0.0:9090
+      - ING_DASHBOARD_ENABLED=true
+    ports:
+      - "8080:8080"
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
@@ -103,8 +107,44 @@ services:
       - NEXT_PUBLIC_API_URL=http://api:3000
     restart: unless-stopped
 
+  # Prometheus metrics
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: nat-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=90d'
+    restart: unless-stopped
+
+  # Grafana dashboards
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: nat-grafana
+    depends_on:
+      - prometheus
+    ports:
+      - "3002:3000"
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=nat
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    restart: unless-stopped
+
 volumes:
   redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
     driver: local
 
 networks:

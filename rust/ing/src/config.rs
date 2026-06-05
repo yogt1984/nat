@@ -201,9 +201,12 @@ impl Config {
             }
         }
 
-        // Allow environment variable override for dashboard
+        // Allow environment variable overrides
         if let Ok(val) = std::env::var("ING_DASHBOARD_ENABLED") {
             config.dashboard.enabled = val == "true" || val == "1";
+        }
+        if let Ok(val) = std::env::var("ING_PROMETHEUS_ADDR") {
+            config.metrics.prometheus_addr = Some(val);
         }
 
         config.validate()?;
