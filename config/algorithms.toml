@@ -146,6 +146,13 @@ profit_target_bps = 5.0        # triple-barrier upper target
 stop_loss_bps = 10.0           # triple-barrier lower stop
 max_holding_bars = 100         # triple-barrier time horizon
 
+# ── Wave 3a: Regime-Conditioned LightGBM ──────────────────────
+
+[regime_conditioned_lgbm]
+model_dir = "models/regime_conditioned_lgbm"
+confidence_threshold = 0.60    # min RSM confidence for per-regime routing
+min_samples_regime = 500       # min training samples per regime group
+
 # ── Group I: Pattern Convolver ──────────────────────────────────
 
 [convolver]

@@ -112,6 +112,13 @@ def make_bar_df(n_bars: int = 400, seed: int = 42) -> pd.DataFrame:
         "regime_accumulation_score_mean": rng.uniform(0, 1, n_bars),
         # Medium-frequency EMA
         "mf_ema_15m_last": midprice * (1 + rng.normal(0, 0.0005, n_bars)),
+        # Trend momentum
+        "trend_momentum_300_mean": rng.normal(0, 0.01, n_bars),
+        # Bollinger %B
+        "mf_bb_pctb_5m_last": rng.uniform(0, 1, n_bars),
+        # Regime label (from RSM or GMM)
+        "alg_rsm_regime_last": rng.choice([0, 1, 2, 3, 4, 5], n_bars).astype(float),
+        "alg_rsm_confidence_last": rng.uniform(0.3, 0.9, n_bars),
     }
 
     return pd.DataFrame(data)

@@ -172,6 +172,11 @@ ALGO_CONFIG = {
         "polarity": "high_long",
         "bar_agg": "last",
     },
+    "regime_conditioned_lgbm": {
+        "primary": "alg_rlgbm_signal",
+        "polarity": "high_long",
+        "bar_agg": "last",
+    },
 }
 
 P_LONG_HIGH = 80  # for high_long polarity
