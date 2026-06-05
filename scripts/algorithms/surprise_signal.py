@@ -123,8 +123,10 @@ class SurpriseSignal(MicrostructureAlgorithm):
 
         # Z-score of ROC
         roc_s = pd.Series(roc)
-        roc_mean = roc_s.rolling(self._roc_window * 2, min_periods=20).mean().values
-        roc_std = roc_s.rolling(self._roc_window * 2, min_periods=20).std().values
+        roc_roll_window = self._roc_window * 2
+        roc_min_periods = min(20, roc_roll_window)
+        roc_mean = roc_s.rolling(roc_roll_window, min_periods=roc_min_periods).mean().values
+        roc_std = roc_s.rolling(roc_roll_window, min_periods=roc_min_periods).std().values
         surprise = (roc - roc_mean) / (roc_std + 1e-12)
 
         # Transition probability: erf(|z| / sqrt(2)), no free parameters

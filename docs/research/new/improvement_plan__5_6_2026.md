@@ -200,11 +200,27 @@ If not available via API, document as a known limitation and close.
 
 ## Deferred (Low severity, opportunistic)
 
-| ID | Item | Trigger |
-|----|------|---------|
-| I5 | Horizontal scaling | When symbol count exceeds 10 or single-machine CPU saturates |
-| C2 | Perf regression tests | After 3.1 benchmark exists; add CI step that checks no regression > 10% |
-| C3 | Config combination tests | When a config-related bug is found in production |
+| ID | Item | Trigger | Status |
+|----|------|---------|--------|
+| I5 | Horizontal scaling | When symbol count > 10 | Design notes below; not needed yet |
+| C2 | Perf regression tests | After 3.1 benchmark exists | **Done** — CI bench job added |
+| C3 | Config combination tests | When a config-related bug is found | **Done** — 97 parametrized tests; found + fixed surprise_signal min_periods bug |
+
+### I5 — Horizontal Scaling Design Notes
+
+**Current state:** 3 symbols (BTC, ETH, SOL) running as tokio tasks in one process on su-35. Benchmark shows p99 feature computation at ~285µs/tick, well within the 100ms emission budget. No scaling pressure exists.
+
+**Bottleneck when scaling to >10 symbols:** Cross-symbol features (`ing-features/src/cross_symbol.rs`) use `Arc<Mutex<HashMap>>` — contention grows linearly with symbol count. At ~30 symbols the lock becomes hot.
+
+**Scaling strategy when needed:**
+
+1. **Short-term (10-30 symbols):** Replace `Mutex` with `DashMap` (lock-free concurrent map) for cross-symbol state. Per-symbol tokio tasks already parallelize well. Expected capacity: ~30 symbols on current hardware.
+
+2. **Medium-term (30-100 symbols):** Shard by symbol group. Run N ingestor processes, each handling a disjoint symbol set. Cross-symbol features either (a) compute within-shard only (loses cross-group correlation) or (b) use shared-memory ring buffer (e.g., memmap) for price feeds across shards.
+
+3. **Long-term (100+ symbols):** Separate ingestion (WS → MarketState) from feature computation (MarketState → Features). Ingestion runs per-symbol. Feature computation runs on a dedicated machine with all MarketState snapshots replicated via Redis pub/sub (already in place for `FeatureSnapshot`). Parquet writing moves to a dedicated writer process consuming feature vectors from a channel.
+
+**No code changes needed until symbol count exceeds 10.**
 
 ---
 
