@@ -12,7 +12,7 @@
      ╔══════════════════════════════════════════════════════════════╗            
      ║  Autonomous Alpha Discovery for Crypto Perpetual Futures    ║            
      ║  ─────────────────────────────────────────────────────────── ║            
-     ║  209 features · 100ms resolution · 27 algorithms            ║            
+     ║  209 features · 100ms resolution · 31 algorithms            ║            
      ║  4 research agents · 5-gate replication · FDR control       ║            
      ║  From order book to deployment — zero human intervention    ║            
      ╚══════════════════════════════════════════════════════════════╝            
@@ -35,7 +35,7 @@ NAT is a fully autonomous quantitative research platform that discovers tradeabl
 - [Architecture](#architecture)
 - [Data Ingestion Layer (Rust)](#data-ingestion-layer-rust)
 - [Feature Vector (209 Dimensions)](#feature-vector-209-dimensions)
-- [Microstructure Algorithm Library (27 Algorithms)](#microstructure-algorithm-library-27-algorithms)
+- [Microstructure Algorithm Library (29 Algorithms)](#microstructure-algorithm-library-29-algorithms)
 - [Autonomous Research Agents](#autonomous-research-agents)
 - [Alpha Pipeline](#alpha-pipeline)
 - [Information-Theoretic Engine](#information-theoretic-engine)
@@ -237,9 +237,9 @@ When adding a new feature category:
 
 ---
 
-## Microstructure Algorithm Library (27 Algorithms)
+## Microstructure Algorithm Library (29 Algorithms)
 
-NAT includes 27 configurable microstructure algorithms that compute derived signals from the 209-dimensional base feature vector. Each algorithm implements the `MicrostructureAlgorithm` interface.
+NAT includes 29 configurable microstructure algorithms that compute derived signals from the 209-dimensional base feature vector. Each algorithm implements the `MicrostructureAlgorithm` interface.
 
 ```bash
 nat algorithm list                              # all algorithms and features
@@ -273,6 +273,34 @@ nat backtest algorithm --algorithm weighted_ofi --symbol BTC
 | 20 | `cascade_probability` | Liquidation cascade prediction | — |
 | 21 | `spectral` | Spectral momentum extraction | — |
 | 22-27 | Various | Additional signal algorithms | See `scripts/algorithms/` |
+| 28 | `change_point_detector` | CUSUM + Bayesian OCD | Page (1954), Adams & MacKay (2007) |
+| 29 | `momentum_continuation` | Logistic Regression momentum classifier | Moskowitz, Ooi & Pedersen (2012) |
+| 30 | `regime_state_machine` | 6-state manual threshold classifier | Hamilton (1989) |
+| 31 | `mean_reversion_detector` | LightGBM false-breakout detector | Avellaneda & Lee (2010) |
+| 32 | `meta_labeling` | De Prado meta-label precision filter | De Prado (2018) |
+
+### ML Algorithms (Wave-Gated Pipeline)
+
+NAT's ML algorithm pipeline is implemented in waves with hard decision gates.
+Each wave must demonstrate positive OOS alpha before the next begins.
+See `docs/research/new/ml_specs/` for per-algorithm specifications.
+
+| Wave | Algorithm | Method | Status |
+|------|-----------|--------|--------|
+| 0 | Infrastructure | bar_level support, WelfordNormalizer | Done |
+| 1 | `change_point_detector` | CUSUM + Bayesian OCD | Done |
+| 1 | `momentum_continuation` | Logistic Regression (7 features) | Done (awaiting training) |
+| 2 | `regime_state_machine` | Manual threshold 6-state classifier | Gated |
+| 2 | `mean_reversion_detector` | LightGBM false-breakout detector | Done (awaiting training) |
+| 2 | `meta_labeling` | De Prado triple-barrier precision filter | Done (awaiting training) |
+| 3 | `regime_conditioned_lgbm` | Per-regime LightGBM ensemble | Gated |
+| 3 | `knn_retrieval` | Mahalanobis nearest-neighbor | Gated |
+
+Developer guide: `docs/research/new/ml_specs/ML_DEVELOPER_GUIDE.md`
+
+**Bar-level algorithms:** ML algorithms set `bar_level = True`. The runner
+automatically calls `aggregate_bars()` before `run_batch()` and forward-fills
+results to tick-level. No per-algorithm aggregation code needed.
 
 ### Top Performer Algorithms — `nat oos30`
 
@@ -1098,6 +1126,15 @@ nat validate skeptical                  # 20+ statistical tests (FDR, bootstrap,
 # Smoke tests
 nat 15m                                 # 15-minute live smoke test
 nat 15m offline                         # offline smoke test on parquet data
+
+# Data sufficiency (run before ML training)
+python scripts/check_data_sufficiency.py --symbol BTC --data-dir data/features
+
+# Wave 1 decision gate evaluation
+python scripts/evaluate_wave1_gate.py --data-dir data/features --symbols BTC,ETH,SOL
+
+# Wave 2 decision gate evaluation
+python scripts/evaluate_wave2_gate.py --data-dir data/features
 ```
 
 ### Hypothesis Testing (H1-H5)
