@@ -147,9 +147,12 @@ class Propagator(MicrostructureAlgorithm):
         self._price_buffer.append(mid)
         if len(self._signed_vol_buffer) > self._window:
             self._signed_vol_buffer.pop(0)
+        # Price buffer keeps one extra entry so that buffer[0] = mid[i - window],
+        # matching run_batch()'s mid.shift(window) lookback.
+        if len(self._price_buffer) > self._window + 1:
             self._price_buffer.pop(0)
 
-        if len(self._signed_vol_buffer) < 10:
+        if len(self._signed_vol_buffer) < self._window or len(self._price_buffer) <= self._window:
             return {f.name: np.nan for f in self.alg_features()}
 
         n = len(self._signed_vol_buffer)
@@ -275,7 +278,7 @@ class Propagator(MicrostructureAlgorithm):
         mid_s = pd.Series(mid)
         permanent = np.log(mid_s / mid_s.shift(self._window)).values
         perm_ema = pd.Series(permanent).ewm(
-            span=self._perm_span, min_periods=1
+            span=self._perm_span, min_periods=1, adjust=False
         ).mean().values
 
         decay_ratio = transient / (np.abs(perm_ema) + 1e-12)

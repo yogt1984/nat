@@ -173,7 +173,6 @@ class TestStepBatchConsistency:
         # Columns where ratio of two divergent quantities amplifies differences
         ratio_skip_cols = {
             "alg_predictability_score",  # rolling mean of binary, boundary-sensitive
-            "alg_impact_decay_ratio",    # ratio of transient/permanent, both diverge
         }
 
         alg = get_algorithm(algorithm_name)
@@ -216,6 +215,6 @@ class TestStepBatchConsistency:
             corr = np.corrcoef(batch_vals[mask], step_vals[mask])[0, 1]
             if np.isnan(corr):
                 continue
-            assert corr > 0.7, (
+            assert corr > 0.9, (
                 f"Step/batch correlation too low for {col} in {algorithm_name}: {corr:.3f}"
             )
