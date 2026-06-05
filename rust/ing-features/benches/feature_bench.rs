@@ -5,7 +5,7 @@
 //! - Normal: 10-level book, 30 trades in buffer
 //! - Stress: 10-level book, 300 trades, all buffers warmed
 //!
-//! Run: `cd rust && cargo bench --package ing`
+//! Run: `cd rust && cargo bench --package ing-features`
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
@@ -50,7 +50,11 @@ fn make_trades(n: usize, base_ts: u64) -> TradeBuffer {
     for i in 0..n {
         let trade = WsTrade {
             coin: "BTC".to_string(),
-            side: if i % 3 == 0 { "A".to_string() } else { "B".to_string() },
+            side: if i % 3 == 0 {
+                "A".to_string()
+            } else {
+                "B".to_string()
+            },
             px: format!("{:.1}", 67000.0 + (i as f64 * 0.1).sin()),
             sz: format!("{:.4}", 0.01 + (i as f64 * 0.001)),
             hash: format!("0x{:016x}", i),
