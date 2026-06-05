@@ -12,7 +12,7 @@
      ╔══════════════════════════════════════════════════════════════╗            
      ║  Autonomous Alpha Discovery for Crypto Perpetual Futures    ║            
      ║  ─────────────────────────────────────────────────────────── ║            
-     ║  209 features · 100ms resolution · 32 algorithms            ║            
+     ║  209 features · 100ms resolution · 33 algorithms            ║            
      ║  4 research agents · 5-gate replication · FDR control       ║            
      ║  From order book to deployment — zero human intervention    ║            
      ╚══════════════════════════════════════════════════════════════╝            
@@ -279,6 +279,7 @@ nat backtest algorithm --algorithm weighted_ofi --symbol BTC
 | 31 | `mean_reversion_detector` | LightGBM false-breakout detector | Avellaneda & Lee (2010) |
 | 32 | `meta_labeling` | De Prado meta-label precision filter | De Prado (2018) |
 | 33 | `regime_conditioned_lgbm` | Per-regime LightGBM ensemble | Gu, Kelly & Xiu (2020) |
+| 34 | `knn_retrieval` | Mahalanobis nearest-neighbor retrieval | Cover & Hart (1967) |
 
 ### ML Algorithms (Wave-Gated Pipeline)
 
@@ -295,7 +296,7 @@ See `docs/research/new/ml_specs/` for per-algorithm specifications.
 | 2 | `mean_reversion_detector` | LightGBM false-breakout detector | Done (awaiting training) |
 | 2 | `meta_labeling` | De Prado triple-barrier precision filter | Done (awaiting training) |
 | 3 | `regime_conditioned_lgbm` | Per-regime LightGBM ensemble | Done (awaiting training) |
-| 3 | `knn_retrieval` | Mahalanobis nearest-neighbor | Gated |
+| 3 | `knn_retrieval` | Mahalanobis nearest-neighbor | Done |
 
 Developer guide: `docs/research/new/ml_specs/ML_DEVELOPER_GUIDE.md`
 

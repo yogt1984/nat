@@ -58,6 +58,7 @@ DAILY_ALGOS = [
     "mean_reversion_detector",
     "meta_labeling",
     "regime_conditioned_lgbm",
+    "knn_retrieval",
 ]
 SURPRISE_ALGO = None  # now included in DAILY_ALGOS
 SYMBOLS = ["BTC", "ETH", "SOL"]

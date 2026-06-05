@@ -153,6 +153,16 @@ model_dir = "models/regime_conditioned_lgbm"
 confidence_threshold = 0.60    # min RSM confidence for per-regime routing
 min_samples_regime = 500       # min training samples per regime group
 
+# ── Wave 3b: KNN Retrieval ────────────────────────────────────
+
+[knn_retrieval]
+k = 20                         # number of nearest neighbors
+buffer_size = 5000             # max historical states in ring buffer
+time_decay_halflife = 500      # halflife for time-decay weighting (bars)
+refit_interval = 100           # bars between KD-tree + covariance rebuilds
+cost_threshold_bps = 2.0       # min |expected_return| for signal (bps)
+win_rate_threshold = 0.60      # min win rate for signal
+
 # ── Group I: Pattern Convolver ──────────────────────────────────
 
 [convolver]

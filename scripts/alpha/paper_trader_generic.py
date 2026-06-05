@@ -177,6 +177,11 @@ ALGO_CONFIG = {
         "polarity": "high_long",
         "bar_agg": "last",
     },
+    "knn_retrieval": {
+        "primary": "alg_knn_signal",
+        "polarity": "high_long",
+        "bar_agg": "last",
+    },
 }
 
 P_LONG_HIGH = 80  # for high_long polarity
