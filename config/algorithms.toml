@@ -165,6 +165,16 @@ win_rate_threshold = 0.60      # min win rate for signal
 
 # ── Group I: Pattern Convolver ──────────────────────────────────
 
+# ── Ensemble ────────────────────────────────────────────────────
+
+[ensemble]
+algorithms = ["jump_detector", "optimal_entry", "funding_reversion", "surprise_signal", "weighted_ofi"]
+method = "equal_weight"         # "equal_weight", "ic_weight", or "regime_switch"
+ic_lookback = 5000              # trailing window for ic_weight method
+regime_column = "ent_book_shape" # column for regime_switch method
+
+# ── Group I: Pattern Convolver ──────────────────────────────────
+
 [convolver]
 kernel_path = "models/convolver_kernels"
 candle_ticks = 600            # 60s candles (600 × 100ms)
