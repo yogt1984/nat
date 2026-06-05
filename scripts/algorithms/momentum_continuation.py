@@ -42,7 +42,7 @@ class MomentumContinuation(MicrostructureAlgorithm):
 
     bar_level = True
 
-    FEATURE_COLS = [
+    _BASE_FEATURE_COLS = [
         "ent_tick_1m_mean",
         "ent_permutation_returns_16_mean",
         "trend_hurst_300_mean",
@@ -51,6 +51,12 @@ class MomentumContinuation(MicrostructureAlgorithm):
         "regime_accumulation_score_mean",
         "vol_returns_5m_last",
     ]
+
+    _OPTIONAL_FEATURE_COLS = [
+        "alg_conv_best_score_max",
+    ]
+
+    FEATURE_COLS = _BASE_FEATURE_COLS + _OPTIONAL_FEATURE_COLS
 
     def __init__(
         self,
@@ -90,13 +96,14 @@ class MomentumContinuation(MicrostructureAlgorithm):
         ]
 
     def required_columns(self) -> list[str]:
-        return list(self.FEATURE_COLS)
+        return list(self._BASE_FEATURE_COLS)
 
     def step(self, tick: dict[str, float]) -> dict[str, float]:
         nan_out = {f.name: np.nan for f in self.alg_features()}
 
-        # Extract features
-        x = np.array([tick.get(c, np.nan) for c in self.FEATURE_COLS])
+        # Extract features (optional cols default to 0.0 = no pattern detected)
+        opt = set(self._OPTIONAL_FEATURE_COLS)
+        x = np.array([tick.get(c, 0.0 if c in opt else np.nan) for c in self.FEATURE_COLS])
         if not np.all(np.isfinite(x)):
             return nan_out
 
@@ -146,17 +153,18 @@ class MomentumContinuation(MicrostructureAlgorithm):
         confidences = np.full(n, np.nan)
         gates = np.full(n, np.nan)
 
-        # Check all required columns exist
-        missing = [c for c in self.FEATURE_COLS if c not in df.columns]
-        if missing:
+        # Check base columns exist (optional cols filled with 0.0 if absent)
+        missing_base = [c for c in self._BASE_FEATURE_COLS if c not in df.columns]
+        if missing_base:
             return pd.DataFrame({
                 "alg_mc_signal": signals,
                 "alg_mc_confidence": confidences,
                 "alg_mc_entropy_gate": gates,
             }, index=df.index)
 
-        # Build feature matrix
-        X = df[list(self.FEATURE_COLS)].values
+        # Build feature matrix — fill missing optional columns with 0.0
+        feat_df = df.reindex(columns=self.FEATURE_COLS, fill_value=0.0)
+        X = feat_df.values
         valid = np.all(np.isfinite(X), axis=1)
 
         # Entropy gate (vectorized)

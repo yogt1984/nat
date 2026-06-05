@@ -59,6 +59,8 @@ _SUM_COLUMNS = {
     "positions_at_risk_count",
 }
 
+_MAX_COLUMNS = {"alg_conv_best_score"}
+
 _ENTROPY_PREFIX = "ent_"
 
 
@@ -429,6 +431,12 @@ def _build_agg_plan(
                 ("low", "min"),
                 ("close", "last"),
                 ("mean", "mean"),
+            ]
+        elif col in _MAX_COLUMNS:
+            plan[col] = [
+                ("max", "max"),
+                ("mean", "mean"),
+                ("last", "last"),
             ]
         elif col in _SUM_COLUMNS or any(col.startswith(p) for p in _SUM_PREFIXES):
             plan[col] = [("sum", "sum")]

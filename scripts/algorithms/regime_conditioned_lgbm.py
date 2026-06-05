@@ -41,6 +41,7 @@ TRENDING_FEATURES = [
     "whale_net_flow_4h_sum",
     "regime_accumulation_score_mean",
     "trend_momentum_300_mean",
+    "alg_conv_best_score_max",
 ]
 
 RANGING_FEATURES = [
@@ -48,7 +49,11 @@ RANGING_FEATURES = [
     "vol_returns_5m_last",
     "imbalance_qty_l1_mean",
     "mf_bb_pctb_5m_last",
+    "alg_conv_best_score_max",
 ]
+
+# Optional features not required to be present — handled by feat_cols_available filter
+_OPTIONAL_FEATURES = {"alg_conv_best_score_max"}
 
 VOLATILE_FEATURES = [
     "vol_returns_5m_last",
@@ -126,7 +131,8 @@ class RegimeConditionedLGBM(MicrostructureAlgorithm):
 
     def required_columns(self) -> list[str]:
         # Union of all per-regime features + regime label + confidence
-        cols = set(GLOBAL_FEATURES)
+        # Exclude optional features (convolver outputs may not be present)
+        cols = set(GLOBAL_FEATURES) - _OPTIONAL_FEATURES
         cols.add("alg_rsm_regime_last")
         cols.add("alg_rsm_confidence_last")
         return sorted(cols)
@@ -156,17 +162,25 @@ class RegimeConditionedLGBM(MicrostructureAlgorithm):
     def step(self, tick: dict[str, float]) -> dict[str, float]:
         nan_out = {f.name: np.nan for f in self.alg_features()}
 
-        # Check all global features are finite
-        x_all = np.array([tick.get(c, np.nan) for c in GLOBAL_FEATURES])
+        # Check required global features are finite (optional default to 0.0)
+        x_all = np.array([
+            tick.get(c, 0.0 if c in _OPTIONAL_FEATURES else np.nan)
+            for c in GLOBAL_FEATURES
+        ])
         if not np.all(np.isfinite(x_all)):
             return nan_out
 
         regime = tick.get("alg_rsm_regime_last", np.nan)
         confidence = tick.get("alg_rsm_confidence_last", 0.0)
 
-        # No models loaded -> all NaN
+        # No models loaded -> neutral output (no edge)
         if not self._models:
-            return nan_out
+            return {
+                "alg_rlgbm_signal": 0.0,
+                "alg_rlgbm_predicted_return": 0.0,
+                "alg_rlgbm_regime_used": float(regime) if np.isfinite(regime) else np.nan,
+                "alg_rlgbm_regime_confidence": confidence if np.isfinite(confidence) else 0.0,
+            }
 
         model, feature_cols, regime_used = self._get_model_and_features(regime, confidence)
         if model is None:
@@ -209,8 +223,9 @@ class RegimeConditionedLGBM(MicrostructureAlgorithm):
                 "alg_rlgbm_regime_confidence": confidences,
             }, index=df.index)
 
-        # Global feature validity
-        X_global = df[GLOBAL_FEATURES].values
+        # Global feature validity (only check required features)
+        required_global = [c for c in GLOBAL_FEATURES if c not in _OPTIONAL_FEATURES]
+        X_global = df[required_global].values
         valid = np.all(np.isfinite(X_global), axis=1)
 
         regime_col = df["alg_rsm_regime_last"].values
@@ -218,12 +233,18 @@ class RegimeConditionedLGBM(MicrostructureAlgorithm):
         confidences = np.where(valid, np.where(np.isfinite(conf_col), conf_col, 0.0), np.nan)
 
         if not self._models or not np.any(valid):
-            return pd.DataFrame({
-                "alg_rlgbm_signal": signals,
-                "alg_rlgbm_predicted_return": pred_returns,
+            # No models loaded -> neutral output (0.0 signal, 0.0 return)
+            regimes_used = np.where(valid & np.isfinite(regime_col), regime_col, np.nan)
+            result_df = pd.DataFrame({
+                "alg_rlgbm_signal": np.where(valid, 0.0, np.nan),
+                "alg_rlgbm_predicted_return": np.where(valid, 0.0, np.nan),
                 "alg_rlgbm_regime_used": regimes_used,
                 "alg_rlgbm_regime_confidence": confidences,
             }, index=df.index)
+            warmup = self.warmup
+            if warmup > 0 and warmup < n:
+                result_df.iloc[:warmup] = np.nan
+            return result_df
 
         # Process each regime group in batch
         for group_name, group_features in GROUP_FEATURES.items():

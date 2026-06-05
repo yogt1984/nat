@@ -29,6 +29,46 @@ class AlgorithmResult:
     elapsed_s: float
 
 
+def run_chain(
+    df: pd.DataFrame,
+    algorithms: list[MicrostructureAlgorithm],
+) -> list[AlgorithmResult]:
+    """Run algorithms in dependency order: tick-level first, then bar-level.
+
+    Tick-level algorithm outputs are appended to the DataFrame so that
+    bar-level algorithms (which consume aggregated bars) can see them.
+    This enables chaining, e.g. convolver (tick) → momentum_continuation (bar).
+
+    Args:
+        df: Raw tick-level DataFrame.
+        algorithms: List of algorithm instances to run.
+
+    Returns:
+        List of AlgorithmResult, one per algorithm.
+    """
+    tick_algos = [a for a in algorithms if not a.bar_level]
+    bar_algos = [a for a in algorithms if a.bar_level]
+
+    enriched = df.copy()
+    results: list[AlgorithmResult] = []
+
+    # Phase 1: tick-level algorithms — append outputs to enriched df
+    for algo in tick_algos:
+        runner = AlgorithmRunner(algo)
+        result = runner.run_on_dataframe(enriched)
+        results.append(result)
+        for col in result.features_df.columns:
+            enriched[col] = result.features_df[col]
+
+    # Phase 2: bar-level algorithms — see tick algo outputs via aggregate_bars
+    for algo in bar_algos:
+        runner = AlgorithmRunner(algo)
+        result = runner.run_on_dataframe(enriched)
+        results.append(result)
+
+    return results
+
+
 class AlgorithmRunner:
     """Run a MicrostructureAlgorithm over data."""
 

@@ -554,60 +554,23 @@ def aggregate_ticks_to_candles(
 # ---------------------------------------------------------------------------
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Convolver Discovery: Event-Aligned SVD for Pattern Kernel Discovery"
-    )
-    parser.add_argument("--data-dir", default="data/features",
-                        help="Path to tick parquet directory")
-    parser.add_argument("--symbol", default="BTC",
-                        help="Symbol to analyze")
-    parser.add_argument("--candle-ticks", type=int, default=600,
-                        help="Ticks per candle (600 = 60s at 100ms)")
-    parser.add_argument("--window", type=int, default=20,
-                        help="W: candles in pattern window")
-    parser.add_argument("--lookback", type=int, default=20,
-                        help="N: range lookback for event detection")
-    parser.add_argument("--atr-period", type=int, default=14,
-                        help="ATR period")
-    parser.add_argument("--horizons", type=int, nargs="+", default=[10, 50, 100],
-                        help="Forward-return horizons (in candles)")
-    parser.add_argument("--evr-threshold", type=float, default=0.80,
-                        help="Cumulative EVR for SVD truncation")
-    parser.add_argument("--ic-threshold", type=float, default=0.03,
-                        help="Minimum |IC| for kernel retention")
-    parser.add_argument("--fdr-q", type=float, default=0.05,
-                        help="BH-FDR significance level")
-    parser.add_argument("--min-events", type=int, default=100,
-                        help="Minimum events per type for SVD")
-    parser.add_argument("--save", action="store_true",
-                        help="Save kernel library to models/convolver_kernels")
-    parser.add_argument("--output-dir", default="models",
-                        help="Directory for kernel library output")
-    parser.add_argument("--max-memory-mb", type=float, default=2000.0,
-                        help="Max memory for parquet loading")
-    args = parser.parse_args()
+def _run_single_symbol(
+    symbol: str,
+    args: argparse.Namespace,
+    params: dict,
+) -> tuple[list[ConvolverKernel], dict]:
+    """Run full discovery pipeline for one symbol.
 
-    params = {
-        "window_width": args.window,
-        "range_lookback": args.lookback,
-        "atr_period": args.atr_period,
-        "volume_multiplier": 1.5,
-        "trap_confirmation_lag": 3,
-        "trap_atr_threshold": 1.0,
-        "evr_threshold": args.evr_threshold,
-        "ic_threshold": args.ic_threshold,
-        "fdr_q": args.fdr_q,
-        "min_events": args.min_events,
-    }
-
+    Returns (surviving_kernels, report_dict).
+    """
     # --- Load data ---
-    print(f"Loading data from {args.data_dir} for {args.symbol}...")
+    print(f"\n{'='*60}")
+    print(f"Loading data from {args.data_dir} for {symbol}...")
     try:
         from cluster_pipeline.loader import load_parquet
         df = load_parquet(
             args.data_dir,
-            symbols=[args.symbol],
+            symbols=[symbol],
             columns=["raw_midprice", "flow_volume_1s", "symbol", "timestamp_ns"],
             max_memory_mb=args.max_memory_mb,
         )
@@ -620,7 +583,7 @@ def main():
         for f in files:
             t = pq.read_table(f, columns=["raw_midprice", "flow_volume_1s", "symbol"])
             d = t.to_pandas()
-            d = d[d["symbol"] == args.symbol]
+            d = d[d["symbol"] == symbol]
             if len(d) > 0:
                 dfs.append(d)
         df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
@@ -628,14 +591,14 @@ def main():
     print(f"Loaded {len(df):,} ticks")
 
     # --- Aggregate to candles ---
-    O, H, L, C, V = aggregate_ticks_to_candles(df, args.candle_ticks, args.symbol)
+    O, H, L, C, V = aggregate_ticks_to_candles(df, args.candle_ticks, symbol)
     n_candles = len(O)
     print(f"Aggregated to {n_candles:,} candles ({args.candle_ticks} ticks each)")
 
     if n_candles < args.window + args.atr_period + args.min_events:
-        print("ERROR: Not enough candles for discovery. Need at least "
+        print(f"ERROR: Not enough candles for {symbol}. Need at least "
               f"{args.window + args.atr_period + args.min_events}.")
-        sys.exit(1)
+        return [], {}
 
     # --- ATR ---
     atr = compute_atr(H, L, C, args.atr_period)
@@ -774,15 +737,15 @@ def main():
             horizons=args.horizons,
         )
 
-        out_path = Path(args.output_dir) / "convolver_kernels"
+        out_path = Path(args.output_dir) / f"convolver_kernels_{symbol}"
         save_kernel_library(library, out_path)
         print(f"\nKernel library saved to {out_path}.npz + .json")
 
-    # --- Save JSON report ---
+    # --- Build report ---
     report = {
         "title": "Convolver Discovery: Event-Aligned SVD",
         "generated": datetime.now(timezone.utc).isoformat(),
-        "symbol": args.symbol,
+        "symbol": symbol,
         "n_ticks": len(df),
         "n_candles": n_candles,
         "candle_ticks": args.candle_ticks,
@@ -804,10 +767,142 @@ def main():
 
     report_dir = Path("reports")
     report_dir.mkdir(exist_ok=True)
-    report_path = report_dir / f"convolver_discovery_{args.symbol}.json"
+    report_path = report_dir / f"convolver_discovery_{symbol}.json"
     with open(report_path, "w") as f:
         json.dump(report, f, indent=2, default=str)
     print(f"Report saved to {report_path}")
+
+    return surviving, report
+
+
+def _cross_symbol_similarity(
+    all_kernels: dict[str, list[ConvolverKernel]],
+) -> None:
+    """Print cross-symbol cosine similarity matrix for shared kernel types."""
+    symbols = sorted(all_kernels.keys())
+    if len(symbols) < 2:
+        return
+
+    print(f"\n{'='*60}")
+    print("Cross-Symbol Kernel Similarity")
+    print(f"{'='*60}")
+
+    # Group kernels by (event_type, channel, component_idx)
+    by_key: dict[tuple[str, str, int], dict[str, np.ndarray]] = {}
+    for sym, kernels in all_kernels.items():
+        for ck in kernels:
+            key = (ck.event_type, ck.channel, ck.component_idx)
+            by_key.setdefault(key, {})[sym] = ck.kernel
+
+    # Compute pairwise similarity for shared keys
+    shared = {k: v for k, v in by_key.items() if len(v) >= 2}
+    if not shared:
+        print("  No shared kernel types across symbols.")
+        return
+
+    print(f"\n  {'Kernel':40s}", end="")
+    for i, s1 in enumerate(symbols):
+        for s2 in symbols[i + 1:]:
+            print(f"  {s1}-{s2:>5s}", end="")
+    print()
+    print(f"  {'-'*40}", end="")
+    for i in range(len(symbols)):
+        for _ in symbols[i + 1:]:
+            print(f"  {'-'*9}", end="")
+    print()
+
+    similarities = []
+    for key in sorted(shared.keys()):
+        kernels_map = shared[key]
+        et, ch, k = key
+        label = f"{et}/{ch}/k{k}"
+        print(f"  {label:40s}", end="")
+        for i, s1 in enumerate(symbols):
+            for s2 in symbols[i + 1:]:
+                if s1 in kernels_map and s2 in kernels_map:
+                    cos_sim = abs(float(np.dot(kernels_map[s1], kernels_map[s2])))
+                    similarities.append(cos_sim)
+                    print(f"  {cos_sim:9.3f}", end="")
+                else:
+                    print(f"  {'n/a':>9s}", end="")
+        print()
+
+    if similarities:
+        mean_sim = float(np.mean(similarities))
+        print(f"\n  Mean cross-symbol similarity: {mean_sim:.3f}")
+        if mean_sim >= 0.7:
+            print("  -> HIGH universality: pooled discovery justified")
+        elif mean_sim >= 0.4:
+            print("  -> MODERATE universality: per-symbol kernels recommended")
+        else:
+            print("  -> LOW universality: patterns are symbol-specific")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Convolver Discovery: Event-Aligned SVD for Pattern Kernel Discovery"
+    )
+    parser.add_argument("--data-dir", default="data/features",
+                        help="Path to tick parquet directory")
+    parser.add_argument("--symbol", default=None,
+                        help="Single symbol to analyze (backward compat)")
+    parser.add_argument("--symbols", default=None,
+                        help="Comma-separated symbols (e.g. BTC,ETH,SOL)")
+    parser.add_argument("--candle-ticks", type=int, default=600,
+                        help="Ticks per candle (600 = 60s at 100ms)")
+    parser.add_argument("--window", type=int, default=20,
+                        help="W: candles in pattern window")
+    parser.add_argument("--lookback", type=int, default=20,
+                        help="N: range lookback for event detection")
+    parser.add_argument("--atr-period", type=int, default=14,
+                        help="ATR period")
+    parser.add_argument("--horizons", type=int, nargs="+", default=[10, 50, 100],
+                        help="Forward-return horizons (in candles)")
+    parser.add_argument("--evr-threshold", type=float, default=0.80,
+                        help="Cumulative EVR for SVD truncation")
+    parser.add_argument("--ic-threshold", type=float, default=0.03,
+                        help="Minimum |IC| for kernel retention")
+    parser.add_argument("--fdr-q", type=float, default=0.05,
+                        help="BH-FDR significance level")
+    parser.add_argument("--min-events", type=int, default=100,
+                        help="Minimum events per type for SVD")
+    parser.add_argument("--save", action="store_true",
+                        help="Save kernel library to models/convolver_kernels")
+    parser.add_argument("--output-dir", default="models",
+                        help="Directory for kernel library output")
+    parser.add_argument("--max-memory-mb", type=float, default=2000.0,
+                        help="Max memory for parquet loading")
+    args = parser.parse_args()
+
+    # Resolve symbol list
+    if args.symbols:
+        symbol_list = [s.strip() for s in args.symbols.split(",")]
+    elif args.symbol:
+        symbol_list = [args.symbol]
+    else:
+        symbol_list = ["BTC"]
+
+    params = {
+        "window_width": args.window,
+        "range_lookback": args.lookback,
+        "atr_period": args.atr_period,
+        "volume_multiplier": 1.5,
+        "trap_confirmation_lag": 3,
+        "trap_atr_threshold": 1.0,
+        "evr_threshold": args.evr_threshold,
+        "ic_threshold": args.ic_threshold,
+        "fdr_q": args.fdr_q,
+        "min_events": args.min_events,
+    }
+
+    all_kernels: dict[str, list[ConvolverKernel]] = {}
+    for symbol in symbol_list:
+        surviving, _ = _run_single_symbol(symbol, args, params)
+        all_kernels[symbol] = surviving
+
+    # Cross-symbol comparison
+    if len(symbol_list) > 1:
+        _cross_symbol_similarity(all_kernels)
 
 
 if __name__ == "__main__":
