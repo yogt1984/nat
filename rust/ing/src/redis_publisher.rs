@@ -380,4 +380,339 @@ mod tests {
         assert!(json.contains("WhaleAccumulation"));
         assert!(json.contains("BTC"));
     }
+
+    // --- Regime summary edge cases ---
+
+    #[test]
+    fn test_regime_summary_unclear_when_low_clarity() {
+        // clarity = |accum - distrib| = |0.4 - 0.5| = 0.1 < 0.3 → UNCLEAR
+        let regime = RegimeFeatures {
+            accumulation_score: 0.4,
+            distribution_score: 0.5,
+            ..Default::default()
+        };
+        let summary = RegimeSummary::from_features(&regime);
+        assert_eq!(summary.regime_type, "UNCLEAR");
+        assert!((summary.clarity - 0.1).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_regime_summary_boundary_at_clarity_threshold() {
+        // clarity = |0.65 - 0.35| = 0.3 — exactly at threshold → UNCLEAR (< 0.3 is false)
+        let regime = RegimeFeatures {
+            accumulation_score: 0.65,
+            distribution_score: 0.35,
+            ..Default::default()
+        };
+        let summary = RegimeSummary::from_features(&regime);
+        // 0.3 is NOT < 0.3, so clarity check passes → ACCUMULATION
+        assert_eq!(summary.regime_type, "ACCUMULATION");
+    }
+
+    #[test]
+    fn test_regime_summary_just_below_clarity_threshold() {
+        // clarity = |0.649 - 0.351| = 0.298 < 0.3 → UNCLEAR
+        let regime = RegimeFeatures {
+            accumulation_score: 0.649,
+            distribution_score: 0.351,
+            ..Default::default()
+        };
+        let summary = RegimeSummary::from_features(&regime);
+        assert_eq!(summary.regime_type, "UNCLEAR");
+    }
+
+    #[test]
+    fn test_regime_summary_equal_scores_unclear() {
+        // clarity = |0.5 - 0.5| = 0.0 < 0.3 → UNCLEAR
+        let regime = RegimeFeatures {
+            accumulation_score: 0.5,
+            distribution_score: 0.5,
+            ..Default::default()
+        };
+        let summary = RegimeSummary::from_features(&regime);
+        assert_eq!(summary.regime_type, "UNCLEAR");
+    }
+
+    #[test]
+    fn test_regime_summary_propagates_all_fields() {
+        let regime = RegimeFeatures {
+            accumulation_score: 0.9,
+            distribution_score: 0.1,
+            range_position_24h: 0.75,
+            absorption_zscore: 1.5,
+            divergence_zscore: -0.8,
+            churn_zscore: 2.1,
+            ..Default::default()
+        };
+        let summary = RegimeSummary::from_features(&regime);
+        assert_eq!(summary.accumulation_score, 0.9);
+        assert_eq!(summary.distribution_score, 0.1);
+        assert_eq!(summary.range_position_24h, 0.75);
+        assert_eq!(summary.absorption_zscore, 1.5);
+        assert_eq!(summary.divergence_zscore, -0.8);
+        assert_eq!(summary.churn_zscore, 2.1);
+        assert_eq!(summary.regime_type, "ACCUMULATION");
+    }
+
+    // --- Whale summary ---
+
+    #[test]
+    fn test_whale_summary_accumulating() {
+        let whale = WhaleFlowFeatures {
+            whale_flow_normalized_1h: 1.5, // > 1.0
+            whale_net_flow_1h: 5000.0,
+            whale_net_flow_4h: 12000.0,
+            whale_net_flow_24h: 30000.0,
+            whale_flow_intensity: 2.3,
+            ..Default::default()
+        };
+        let summary = WhaleSummary::from_features(&whale);
+        assert_eq!(summary.direction, "ACCUMULATING");
+        assert_eq!(summary.net_flow_1h, 5000.0);
+        assert_eq!(summary.net_flow_4h, 12000.0);
+        assert_eq!(summary.net_flow_24h, 30000.0);
+        assert_eq!(summary.intensity, 2.3);
+    }
+
+    #[test]
+    fn test_whale_summary_distributing() {
+        let whale = WhaleFlowFeatures {
+            whale_flow_normalized_1h: -1.5, // < -1.0
+            ..Default::default()
+        };
+        let summary = WhaleSummary::from_features(&whale);
+        assert_eq!(summary.direction, "DISTRIBUTING");
+    }
+
+    #[test]
+    fn test_whale_summary_neutral() {
+        let whale = WhaleFlowFeatures {
+            whale_flow_normalized_1h: 0.5, // between -1.0 and 1.0
+            ..Default::default()
+        };
+        let summary = WhaleSummary::from_features(&whale);
+        assert_eq!(summary.direction, "NEUTRAL");
+    }
+
+    #[test]
+    fn test_whale_summary_neutral_at_boundary() {
+        // Exactly 1.0 — not > 1.0, so NEUTRAL
+        let whale = WhaleFlowFeatures {
+            whale_flow_normalized_1h: 1.0,
+            ..Default::default()
+        };
+        let summary = WhaleSummary::from_features(&whale);
+        assert_eq!(summary.direction, "NEUTRAL");
+
+        // Exactly -1.0 — not < -1.0, so NEUTRAL
+        let whale_neg = WhaleFlowFeatures {
+            whale_flow_normalized_1h: -1.0,
+            ..Default::default()
+        };
+        let summary_neg = WhaleSummary::from_features(&whale_neg);
+        assert_eq!(summary_neg.direction, "NEUTRAL");
+    }
+
+    #[test]
+    fn test_whale_summary_zscore_propagated() {
+        let whale = WhaleFlowFeatures {
+            whale_flow_normalized_1h: 2.5,
+            ..Default::default()
+        };
+        let summary = WhaleSummary::from_features(&whale);
+        assert_eq!(summary.net_flow_1h_zscore, 2.5);
+    }
+
+    // --- QuickMetrics ---
+
+    #[test]
+    fn test_quick_metrics_from_features() {
+        let mut features = Features::default();
+        features.raw.midprice = 67500.0;
+        features.raw.spread_bps = 0.15;
+        features.toxicity.vpin_10 = 0.63;
+        features.entropy.tick_entropy_1m = 0.89;
+        features.volatility.returns_1m = 0.0012;
+        features.imbalance.qty_l1 = 0.35;
+
+        let metrics = QuickMetrics::from_features(&features);
+        assert_eq!(metrics.midprice, 67500.0);
+        assert_eq!(metrics.spread_bps, 0.15);
+        assert_eq!(metrics.vpin, 0.63);
+        assert_eq!(metrics.tick_entropy, 0.89);
+        assert_eq!(metrics.realized_vol_1m, 0.0012);
+        assert_eq!(metrics.imbalance_l1, 0.35);
+    }
+
+    #[test]
+    fn test_quick_metrics_default_features() {
+        let features = Features::default();
+        let metrics = QuickMetrics::from_features(&features);
+        assert_eq!(metrics.midprice, 0.0);
+        assert_eq!(metrics.spread_bps, 0.0);
+    }
+
+    // --- FeatureSnapshot serialization ---
+
+    #[test]
+    fn test_feature_snapshot_serialization() {
+        let snapshot = FeatureSnapshot {
+            timestamp_ms: 1717574400000,
+            symbol: "BTC".to_string(),
+            features: serde_json::json!([1.0, 2.0, 3.0]),
+            regime: None,
+            whale: None,
+            metrics: QuickMetrics {
+                midprice: 67000.0,
+                spread_bps: 0.12,
+                vpin: 0.5,
+                tick_entropy: 0.9,
+                realized_vol_1m: 0.001,
+                imbalance_l1: 0.3,
+            },
+        };
+
+        let json = serde_json::to_string(&snapshot).unwrap();
+        assert!(json.contains("1717574400000"));
+        assert!(json.contains("BTC"));
+        assert!(json.contains("67000"));
+        // regime and whale should be null
+        assert!(json.contains("\"regime\":null"));
+        assert!(json.contains("\"whale\":null"));
+    }
+
+    #[test]
+    fn test_feature_snapshot_with_regime_and_whale() {
+        let regime = RegimeSummary {
+            accumulation_score: 0.8,
+            distribution_score: 0.2,
+            clarity: 0.6,
+            regime_type: "ACCUMULATION".to_string(),
+            range_position_24h: 0.7,
+            absorption_zscore: 1.2,
+            divergence_zscore: -0.5,
+            churn_zscore: 0.3,
+        };
+
+        let whale = WhaleSummary {
+            net_flow_1h: 5000.0,
+            net_flow_1h_zscore: 2.1,
+            net_flow_4h: 15000.0,
+            net_flow_24h: 40000.0,
+            intensity: 3.0,
+            direction: "ACCUMULATING".to_string(),
+        };
+
+        let snapshot = FeatureSnapshot {
+            timestamp_ms: 1717574400000,
+            symbol: "ETH".to_string(),
+            features: serde_json::json!([]),
+            regime: Some(regime),
+            whale: Some(whale),
+            metrics: QuickMetrics {
+                midprice: 3500.0,
+                spread_bps: 0.2,
+                vpin: 0.4,
+                tick_entropy: 0.85,
+                realized_vol_1m: 0.002,
+                imbalance_l1: -0.1,
+            },
+        };
+
+        let json = serde_json::to_string(&snapshot).unwrap();
+        assert!(json.contains("ACCUMULATION"));
+        assert!(json.contains("ACCUMULATING"));
+        assert!(json.contains("ETH"));
+        // Verify it round-trips
+        let _: serde_json::Value = serde_json::from_str(&json).unwrap();
+    }
+
+    // --- RedisConfig ---
+
+    #[test]
+    fn test_redis_config_from_env_defaults() {
+        // Without any env vars set, should use defaults
+        // (relies on env vars not being set in test environment)
+        let config = RedisConfig::from_env_with_toml(None, None);
+        assert_eq!(config.channel_prefix, "nat");
+        assert_eq!(config.cache_ttl_seconds, 60);
+        assert_eq!(config.publish_interval_ms, 500);
+    }
+
+    #[test]
+    fn test_redis_config_toml_url_fallback() {
+        let config = RedisConfig::from_env_with_toml_url(Some("redis://custom:6380"));
+        // If REDIS_URL env var is not set, should use the toml_url
+        if std::env::var("REDIS_URL").is_err() {
+            assert_eq!(config.url, "redis://custom:6380");
+        }
+    }
+
+    #[test]
+    fn test_redis_config_toml_interval_fallback() {
+        let config = RedisConfig::from_env_with_toml(None, Some(250));
+        if std::env::var("REDIS_PUBLISH_INTERVAL_MS").is_err() {
+            assert_eq!(config.publish_interval_ms, 250);
+        }
+    }
+
+    // --- Alert types ---
+
+    #[test]
+    fn test_all_alert_types_serialize() {
+        let types = vec![
+            AlertType::WhaleAccumulation,
+            AlertType::WhaleDistribution,
+            AlertType::LiquidationCluster,
+            AlertType::RegimeChange,
+            AlertType::EntropyDrop,
+            AlertType::ConcentrationSpike,
+            AlertType::Custom("TestAlert".to_string()),
+        ];
+
+        for alert_type in types {
+            let alert = AlertTrigger {
+                timestamp_ms: 0,
+                symbol: "BTC".to_string(),
+                alert_type,
+                severity: AlertSeverity::Info,
+                message: "test".to_string(),
+                data: serde_json::json!(null),
+            };
+            let json = serde_json::to_string(&alert).unwrap();
+            assert!(!json.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_all_alert_severities_serialize() {
+        for severity in [AlertSeverity::Info, AlertSeverity::Warning, AlertSeverity::Critical] {
+            let alert = AlertTrigger {
+                timestamp_ms: 0,
+                symbol: "BTC".to_string(),
+                alert_type: AlertType::RegimeChange,
+                severity,
+                message: "test".to_string(),
+                data: serde_json::json!(null),
+            };
+            let json = serde_json::to_string(&alert).unwrap();
+            assert!(!json.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_alert_custom_type_preserves_string() {
+        let alert = AlertTrigger {
+            timestamp_ms: 0,
+            symbol: "SOL".to_string(),
+            alert_type: AlertType::Custom("VolumeAnomaly".to_string()),
+            severity: AlertSeverity::Critical,
+            message: "Unusual volume detected".to_string(),
+            data: serde_json::json!({"volume_ratio": 5.2}),
+        };
+        let json = serde_json::to_string(&alert).unwrap();
+        assert!(json.contains("VolumeAnomaly"));
+        assert!(json.contains("Critical"));
+        assert!(json.contains("5.2"));
+    }
 }

@@ -284,4 +284,308 @@ mod tests {
             _ => panic!("Expected Trades message"),
         }
     }
+
+    // ========================================================================
+    // Message parsing: edge cases and malformed input
+    // ========================================================================
+
+    #[test]
+    fn test_parse_empty_string() {
+        assert!(parse_ws_message("").is_none());
+    }
+
+    #[test]
+    fn test_parse_invalid_json() {
+        assert!(parse_ws_message("{not valid json}").is_none());
+    }
+
+    #[test]
+    fn test_parse_valid_json_missing_channel() {
+        assert!(parse_ws_message(r#"{"data": {}}"#).is_none());
+    }
+
+    #[test]
+    fn test_parse_valid_json_missing_data() {
+        assert!(parse_ws_message(r#"{"channel": "l2Book"}"#).is_none());
+    }
+
+    #[test]
+    fn test_parse_unknown_channel() {
+        let json = r#"{"channel": "someNewChannel", "data": {}}"#;
+        let msg = parse_ws_message(json).unwrap();
+        match msg {
+            WsMessage::Unknown(ch) => assert_eq!(ch, "someNewChannel"),
+            _ => panic!("Expected Unknown message"),
+        }
+    }
+
+    #[test]
+    fn test_parse_book_wrong_data_shape() {
+        // channel is l2Book but data is not a valid WsBook
+        let json = r#"{"channel": "l2Book", "data": {"wrong": "shape"}}"#;
+        assert!(parse_ws_message(json).is_none());
+    }
+
+    #[test]
+    fn test_parse_trades_wrong_data_shape() {
+        // channel is trades but data is not a valid Vec<WsTrade>
+        let json = r#"{"channel": "trades", "data": "not_an_array"}"#;
+        assert!(parse_ws_message(json).is_none());
+    }
+
+    #[test]
+    fn test_parse_asset_ctx_wrong_data_shape() {
+        let json = r#"{"channel": "activeAssetCtx", "data": 42}"#;
+        assert!(parse_ws_message(json).is_none());
+    }
+
+    #[test]
+    fn test_parse_asset_ctx_message() {
+        let json = r#"{
+            "channel": "activeAssetCtx",
+            "data": {
+                "coin": "ETH",
+                "ctx": {
+                    "dayNtlVlm": "5000000.0",
+                    "funding": "0.00015",
+                    "openInterest": "2500000.0",
+                    "oraclePx": "3200.0",
+                    "prevDayPx": "3100.0",
+                    "markPx": "3201.5",
+                    "premium": "1.5"
+                }
+            }
+        }"#;
+
+        let msg = parse_ws_message(json).unwrap();
+        match msg {
+            WsMessage::AssetCtx(ctx) => {
+                assert_eq!(ctx.coin, "ETH");
+                assert!((ctx.ctx.funding_rate() - 0.00015).abs() < 1e-10);
+                assert!((ctx.ctx.open_interest() - 2500000.0).abs() < 1e-6);
+                assert!((ctx.ctx.oracle_price() - 3200.0).abs() < 1e-6);
+                assert!((ctx.ctx.mark_price() - 3201.5).abs() < 1e-6);
+                assert!((ctx.ctx.volume_24h() - 5000000.0).abs() < 1e-6);
+                assert!((ctx.ctx.premium() - 1.5).abs() < 1e-6);
+            }
+            _ => panic!("Expected AssetCtx message"),
+        }
+    }
+
+    #[test]
+    fn test_parse_asset_ctx_optional_fields_missing() {
+        let json = r#"{
+            "channel": "activeAssetCtx",
+            "data": {
+                "coin": "SOL",
+                "ctx": {
+                    "dayNtlVlm": "100000.0",
+                    "funding": "-0.0001",
+                    "openInterest": "500000.0",
+                    "oraclePx": "150.0",
+                    "prevDayPx": "148.0"
+                }
+            }
+        }"#;
+
+        let msg = parse_ws_message(json).unwrap();
+        match msg {
+            WsMessage::AssetCtx(ctx) => {
+                assert_eq!(ctx.coin, "SOL");
+                // mark_px missing -> falls back to oracle_px
+                assert!((ctx.ctx.mark_price() - 150.0).abs() < 1e-6);
+                // premium missing -> 0.0
+                assert!((ctx.ctx.premium() - 0.0).abs() < 1e-10);
+            }
+            _ => panic!("Expected AssetCtx"),
+        }
+    }
+
+    #[test]
+    fn test_parse_trade_sell_aggressor() {
+        let json = r#"{
+            "channel": "trades",
+            "data": [{
+                "coin": "BTC",
+                "side": "A",
+                "px": "49999.5",
+                "sz": "2.5",
+                "hash": "0xabc",
+                "time": 1704067200000,
+                "tid": 99999
+            }]
+        }"#;
+
+        let msg = parse_ws_message(json).unwrap();
+        match msg {
+            WsMessage::Trades(trades) => {
+                assert!(!trades[0].is_buy());
+                assert_eq!(trades[0].side, "A");
+                assert!((trades[0].size() - 2.5).abs() < 1e-10);
+            }
+            _ => panic!("Expected Trades"),
+        }
+    }
+
+    #[test]
+    fn test_parse_trade_with_wallet_info() {
+        let json = r#"{
+            "channel": "trades",
+            "data": [{
+                "coin": "BTC",
+                "side": "B",
+                "px": "50000.0",
+                "sz": "1.0",
+                "hash": "0x123",
+                "time": 1704067200000,
+                "tid": 1,
+                "users": ["0xmaker_addr", "0xtaker_addr"]
+            }]
+        }"#;
+
+        let msg = parse_ws_message(json).unwrap();
+        match msg {
+            WsMessage::Trades(trades) => {
+                assert!(trades[0].has_wallet_info());
+                assert_eq!(trades[0].maker_address(), Some("0xmaker_addr"));
+                assert_eq!(trades[0].taker_address(), Some("0xtaker_addr"));
+            }
+            _ => panic!("Expected Trades"),
+        }
+    }
+
+    #[test]
+    fn test_parse_trade_without_wallet_info() {
+        let json = r#"{
+            "channel": "trades",
+            "data": [{
+                "coin": "BTC",
+                "side": "B",
+                "px": "50000.0",
+                "sz": "1.0",
+                "hash": "0x123",
+                "time": 1704067200000,
+                "tid": 1
+            }]
+        }"#;
+
+        let msg = parse_ws_message(json).unwrap();
+        match msg {
+            WsMessage::Trades(trades) => {
+                assert!(!trades[0].has_wallet_info());
+                assert_eq!(trades[0].maker_address(), None);
+                assert_eq!(trades[0].taker_address(), None);
+            }
+            _ => panic!("Expected Trades"),
+        }
+    }
+
+    #[test]
+    fn test_parse_multiple_trades() {
+        let json = r#"{
+            "channel": "trades",
+            "data": [
+                {"coin": "BTC", "side": "B", "px": "50000", "sz": "1.0", "hash": "0x1", "time": 100, "tid": 1},
+                {"coin": "BTC", "side": "A", "px": "49999", "sz": "0.5", "hash": "0x2", "time": 101, "tid": 2},
+                {"coin": "BTC", "side": "B", "px": "50001", "sz": "2.0", "hash": "0x3", "time": 102, "tid": 3}
+            ]
+        }"#;
+
+        let msg = parse_ws_message(json).unwrap();
+        match msg {
+            WsMessage::Trades(trades) => {
+                assert_eq!(trades.len(), 3);
+                assert!(trades[0].is_buy());
+                assert!(!trades[1].is_buy());
+                assert!(trades[2].is_buy());
+                assert_eq!(trades[0].tid, 1);
+                assert_eq!(trades[2].tid, 3);
+            }
+            _ => panic!("Expected Trades"),
+        }
+    }
+
+    #[test]
+    fn test_parse_empty_trades_array() {
+        let json = r#"{"channel": "trades", "data": []}"#;
+        let msg = parse_ws_message(json).unwrap();
+        match msg {
+            WsMessage::Trades(trades) => assert!(trades.is_empty()),
+            _ => panic!("Expected Trades"),
+        }
+    }
+
+    #[test]
+    fn test_parse_book_multi_level() {
+        let json = r#"{
+            "channel": "l2Book",
+            "data": {
+                "coin": "BTC",
+                "levels": [
+                    [
+                        {"px": "50000.0", "sz": "1.0", "n": 3},
+                        {"px": "49999.5", "sz": "2.0", "n": 5},
+                        {"px": "49999.0", "sz": "3.0", "n": 2}
+                    ],
+                    [
+                        {"px": "50001.0", "sz": "1.5", "n": 4},
+                        {"px": "50001.5", "sz": "0.5", "n": 1}
+                    ]
+                ],
+                "time": 1704067200000
+            }
+        }"#;
+
+        let msg = parse_ws_message(json).unwrap();
+        match msg {
+            WsMessage::Book(book) => {
+                assert_eq!(book.levels.0.len(), 3); // 3 bid levels
+                assert_eq!(book.levels.1.len(), 2); // 2 ask levels
+                // Best bid/ask
+                assert!((book.levels.0[0].price() - 50000.0).abs() < 1e-6);
+                assert!((book.levels.1[0].price() - 50001.0).abs() < 1e-6);
+                // Deeper level
+                assert_eq!(book.levels.0[1].n, 5);
+                assert!((book.levels.0[2].size() - 3.0).abs() < 1e-6);
+            }
+            _ => panic!("Expected Book"),
+        }
+    }
+
+    #[test]
+    fn test_ws_level_unparseable_defaults_to_zero() {
+        let level = WsLevel {
+            px: "not_a_number".to_string(),
+            sz: "also_bad".to_string(),
+            n: 1,
+        };
+        assert_eq!(level.price(), 0.0);
+        assert_eq!(level.size(), 0.0);
+    }
+
+    #[test]
+    fn test_parse_nested_json_garbage_in_data() {
+        // Valid JSON structure but data is a nested object that doesn't match any schema
+        let json = r#"{"channel": "l2Book", "data": {"deeply": {"nested": {"garbage": true}}}}"#;
+        assert!(parse_ws_message(json).is_none());
+    }
+
+    #[test]
+    fn test_subscription_request_serialization() {
+        let req = SubscriptionRequest::l2_book("ETH");
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("subscribe"));
+        assert!(json.contains("l2Book"));
+        assert!(json.contains("ETH"));
+
+        let req = SubscriptionRequest::trades("SOL");
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("trades"));
+        assert!(json.contains("SOL"));
+
+        let req = SubscriptionRequest::active_asset_ctx("BTC");
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("activeAssetCtx"));
+        assert!(json.contains("BTC"));
+    }
 }

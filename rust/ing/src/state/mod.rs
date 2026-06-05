@@ -420,4 +420,191 @@ mod tests {
         // Regime should be valid
         assert_ne!(regime, Regime::Unknown, "Should classify to a valid regime");
     }
+
+    // ========================================================================
+    // End-to-end integration: WsMessage -> MarketState -> Features -> validate
+    // ========================================================================
+
+    fn make_book(bid_px: f64, ask_px: f64, depth: usize, timestamp_ms: u64) -> WsMessage {
+        let mut bids = Vec::with_capacity(depth);
+        let mut asks = Vec::with_capacity(depth);
+        for i in 0..depth {
+            bids.push(ing_types::WsLevel {
+                px: format!("{:.1}", bid_px - i as f64 * 0.5),
+                sz: format!("{:.1}", 5.0 + i as f64),
+                n: 3,
+            });
+            asks.push(ing_types::WsLevel {
+                px: format!("{:.1}", ask_px + i as f64 * 0.5),
+                sz: format!("{:.1}", 5.0 + i as f64),
+                n: 3,
+            });
+        }
+        WsMessage::Book(ing_types::WsBook {
+            coin: "BTC".to_string(),
+            levels: (bids, asks),
+            time: timestamp_ms,
+        })
+    }
+
+    fn make_trade(price: f64, size: f64, is_buy: bool, timestamp_ms: u64, tid: u64) -> WsMessage {
+        WsMessage::Trades(vec![ing_types::WsTrade {
+            coin: "BTC".to_string(),
+            side: if is_buy { "B" } else { "A" }.to_string(),
+            px: format!("{:.1}", price),
+            sz: format!("{:.2}", size),
+            hash: format!("0x{:016x}", tid),
+            time: timestamp_ms,
+            tid,
+            users: None,
+        }])
+    }
+
+    fn make_asset_ctx(funding: f64, oi: f64, oracle_px: f64, timestamp_ms: u64) -> WsMessage {
+        WsMessage::AssetCtx(ing_types::WsAssetCtx {
+            coin: "BTC".to_string(),
+            ctx: ing_types::AssetCtxData {
+                day_ntl_vlm: "50000000.0".to_string(),
+                funding: format!("{:.8}", funding),
+                open_interest: format!("{:.2}", oi),
+                oracle_px: format!("{:.1}", oracle_px),
+                prev_day_px: format!("{:.1}", oracle_px - 100.0),
+                mark_px: Some(format!("{:.1}", oracle_px + 0.5)),
+                premium: Some("0.00001".to_string()),
+            },
+        })
+    }
+
+    #[test]
+    fn test_e2e_uninit_returns_none() {
+        let config = default_config();
+        let mut state = MarketState::new("BTC", &config);
+        assert!(state.compute_features().is_none(), "Should return None before first Book");
+    }
+
+    #[test]
+    fn test_e2e_single_book_produces_features() {
+        let config = default_config();
+        let mut state = MarketState::new("BTC", &config);
+
+        state.update(&make_book(50000.0, 50001.0, 10, 1_700_000_000_000));
+
+        let (features, alg_values) = state.compute_features().expect("Should produce features");
+        let vec = features.to_vec();
+
+        // Feature vector length contract
+        assert_eq!(
+            vec.len(),
+            Features::count_all(),
+            "to_vec must return exactly count_all() elements"
+        );
+        assert_eq!(
+            Features::names_all().len(),
+            Features::count_all(),
+            "names_all must match count_all"
+        );
+
+        // Raw features should be populated
+        assert!(features.raw.midprice > 0.0, "Midprice should be positive");
+        assert!(features.raw.spread > 0.0, "Spread should be positive");
+        assert!((features.raw.midprice - 50000.5).abs() < 0.1, "Midprice ~ 50000.5");
+
+        // No algorithms registered, so alg_values is empty
+        assert!(alg_values.is_empty());
+    }
+
+    #[test]
+    fn test_e2e_multi_tick_sequence() {
+        let config = default_config();
+        let mut state = MarketState::new("BTC", &config);
+
+        let base_time: u64 = 1_700_000_000_000;
+        let mut all_vecs = Vec::new();
+
+        // Simulate 50 ticks: book updates + trades + context
+        for i in 0u64..50 {
+            let t = base_time + i * 100;
+            let mid = 50000.0 + (i as f64 * 0.1); // slow drift up
+
+            // Book every tick
+            state.update(&make_book(mid - 0.5, mid + 0.5, 10, t));
+
+            // Trades every 3rd tick
+            if i % 3 == 0 {
+                state.update(&make_trade(mid, 0.5, i % 2 == 0, t, i));
+            }
+
+            // Context once at start
+            if i == 0 {
+                state.update(&make_asset_ctx(0.0001, 1_000_000.0, mid, t));
+            }
+
+            let (features, _) = state.compute_features().expect("Should produce features");
+            all_vecs.push(features.to_vec());
+        }
+
+        // All vectors same length
+        let expected_len = Features::count_all();
+        for (i, vec) in all_vecs.iter().enumerate() {
+            assert_eq!(vec.len(), expected_len, "Tick {} wrong vector length", i);
+        }
+
+        // Base features (first 154) should have no NaN after warmup (tick 10+)
+        let base_count = Features::count();
+        for (i, vec) in all_vecs.iter().enumerate().skip(10) {
+            let base_nans = vec[..base_count].iter().filter(|v| v.is_nan()).count();
+            // Allow some NaN in entropy/trend features that need longer warmup
+            assert!(
+                base_nans < base_count / 2,
+                "Tick {} has {} NaN out of {} base features (too many)",
+                i, base_nans, base_count
+            );
+        }
+
+        // Midprice should be monotonically increasing (we drifted up)
+        for i in 1..all_vecs.len() {
+            assert!(
+                all_vecs[i][0] >= all_vecs[i - 1][0],
+                "Midprice should be non-decreasing (tick {})",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_e2e_optional_features_are_nan() {
+        let config = default_config();
+        let mut state = MarketState::new("BTC", &config);
+
+        state.update(&make_book(50000.0, 50001.0, 10, 1_700_000_000_000));
+        let (features, _) = state.compute_features().unwrap();
+        let vec = features.to_vec();
+
+        // Optional categories (whale, liquidation, concentration, regime, gmm,
+        // cross_symbol, heatmap) should all be NaN since no data sources
+        assert!(features.whale_flow.is_none());
+        assert!(features.liquidation_risk.is_none());
+        assert!(features.concentration.is_none());
+        assert!(features.regime.is_none());
+        assert!(features.gmm_classification.is_none());
+        assert!(features.cross_symbol.is_none());
+        assert!(features.heatmap.is_none());
+
+        // Their slots in to_vec should be NaN
+        let base_count = Features::count();
+        let optional_slice = &vec[base_count..];
+        assert!(
+            optional_slice.iter().all(|v| v.is_nan()),
+            "All optional feature slots should be NaN when data sources absent"
+        );
+    }
+
+    #[test]
+    fn test_e2e_symbol_preserved() {
+        let config = default_config();
+        for sym in &["BTC", "ETH", "SOL"] {
+            let state = MarketState::new(sym, &config);
+            assert_eq!(state.symbol(), *sym);
+        }
+    }
 }
