@@ -478,6 +478,32 @@ def _resample_group(
             else:
                 result_cols[out_name] = resampler[col].agg(func)
 
+    # --- Microstructure summary stats (cross-column, within-bar) ---
+
+    # jump_count: number of ticks where alg_jump_detected == 1
+    if "alg_jump_detected" in group.columns:
+        result_cols["bar_jump_count"] = resampler["alg_jump_detected"].apply(
+            lambda s: int((s == 1.0).sum())
+        )
+
+    # max_abs_return: largest |tick return| from raw_midprice
+    if "raw_midprice" in group.columns:
+        result_cols["bar_max_abs_return"] = resampler["raw_midprice"].apply(
+            _max_abs_return
+        )
+
+    # obi_range: max - min of imbalance_qty_l1 (order book imbalance range)
+    if "imbalance_qty_l1" in group.columns:
+        result_cols["bar_obi_range"] = resampler["imbalance_qty_l1"].apply(
+            lambda s: s.max() - s.min() if len(s.dropna()) >= 2 else 0.0
+        )
+
+    # trade_cluster_count: number of ticks where flow_count_1s > 5
+    if "flow_count_1s" in group.columns:
+        result_cols["bar_trade_cluster_count"] = resampler["flow_count_1s"].apply(
+            lambda s: int((s > 5).sum())
+        )
+
     # Tick count per bar
     # Use the first feature column as proxy for tick counting
     if feature_cols and feature_cols[0] in group.columns:
@@ -499,6 +525,15 @@ def _resample_group(
     result = result.reset_index(drop=True)
 
     return result
+
+
+def _max_abs_return(series: pd.Series) -> float:
+    """Maximum absolute tick-to-tick return within a bar window."""
+    vals = series.dropna()
+    if len(vals) < 2:
+        return 0.0
+    returns = np.abs(np.diff(vals.values))
+    return float(np.max(returns))
 
 
 def _linear_slope(series: pd.Series) -> float:

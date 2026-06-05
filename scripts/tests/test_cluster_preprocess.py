@@ -33,6 +33,7 @@ from cluster_pipeline.preprocess import (
     _build_agg_plan,
     _linear_slope,
     _match_vector_columns,
+    _max_abs_return,
     _resolve_freq,
     _PRICE_COLUMNS,
     _SUM_COLUMNS,
@@ -873,3 +874,146 @@ class TestEndToEnd:
             assert X.shape[0] >= 1, f"No rows for {tf}"
             assert X.shape[1] >= 1, f"No columns for {tf}"
             assert not np.any(np.isnan(X)), f"NaN in {tf}"
+
+
+# ---------------------------------------------------------------------------
+# TestMicrostructureBarStats — bar_jump_count, bar_max_abs_return, etc.
+# ---------------------------------------------------------------------------
+
+
+def _make_microstructure_tick_df(
+    n_ticks: int = 3000,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """Tick data with columns needed for microstructure bar stats."""
+    rng = np.random.default_rng(seed)
+    start_ns = 1_700_000_000_000_000_000
+    interval_ns = 100_000_000  # 100ms
+    ts = np.arange(start_ns, start_ns + n_ticks * interval_ns, interval_ns, dtype=np.int64)
+
+    price = 50000.0 + rng.normal(0, 10, n_ticks).cumsum()
+
+    # alg_jump_detected: sparse binary (5% jump rate)
+    jumps = (rng.random(n_ticks) > 0.95).astype(float)
+
+    # imbalance_qty_l1: order book imbalance
+    obi = rng.normal(0, 100, n_ticks)
+
+    # flow_count_1s: Poisson trade count (some bursts > 5)
+    flow_count = rng.poisson(4, n_ticks).astype(float)
+    # Force some bursts
+    burst_idx = rng.choice(n_ticks, size=200, replace=False)
+    flow_count[burst_idx] = rng.integers(6, 20, size=200).astype(float)
+
+    return pd.DataFrame({
+        "timestamp_ns": ts,
+        "symbol": "BTC",
+        "raw_midprice": price,
+        "alg_jump_detected": jumps,
+        "imbalance_qty_l1": obi,
+        "flow_count_1s": flow_count,
+        # Need at least one standard feature for tick_count
+        "trend_momentum_60": rng.normal(0, 0.01, n_ticks),
+    })
+
+
+class TestMicrostructureBarStats:
+    """Verify the four microstructure summary stats added to bar aggregation."""
+
+    def test_jump_count_present(self):
+        df = _make_microstructure_tick_df()
+        bars = aggregate_bars(df, timeframe="5min")
+        assert "bar_jump_count" in bars.columns
+
+    def test_jump_count_correct(self):
+        df = _make_microstructure_tick_df()
+        bars = aggregate_bars(df, timeframe="5min")
+        # Manually verify first bar
+        dt = pd.to_datetime(df["timestamp_ns"], unit="ns")
+        bar0_start = bars["bar_start"].iloc[0]
+        bar0_end = bars["bar_end"].iloc[0]
+        mask = (dt >= bar0_start) & (dt < bar0_end)
+        expected = int((df.loc[mask, "alg_jump_detected"] == 1.0).sum())
+        assert bars["bar_jump_count"].iloc[0] == expected
+
+    def test_jump_count_zero_when_no_jumps(self):
+        df = _make_microstructure_tick_df()
+        df["alg_jump_detected"] = 0.0
+        bars = aggregate_bars(df, timeframe="5min")
+        assert (bars["bar_jump_count"] == 0).all()
+
+    def test_max_abs_return_present(self):
+        df = _make_microstructure_tick_df()
+        bars = aggregate_bars(df, timeframe="5min")
+        assert "bar_max_abs_return" in bars.columns
+
+    def test_max_abs_return_nonnegative(self):
+        df = _make_microstructure_tick_df()
+        bars = aggregate_bars(df, timeframe="5min")
+        assert (bars["bar_max_abs_return"] >= 0).all()
+
+    def test_max_abs_return_correct(self):
+        df = _make_microstructure_tick_df()
+        bars = aggregate_bars(df, timeframe="5min")
+        dt = pd.to_datetime(df["timestamp_ns"], unit="ns")
+        bar0_start = bars["bar_start"].iloc[0]
+        bar0_end = bars["bar_end"].iloc[0]
+        mask = (dt >= bar0_start) & (dt < bar0_end)
+        prices = df.loc[mask, "raw_midprice"].values
+        expected = float(np.max(np.abs(np.diff(prices))))
+        assert bars["bar_max_abs_return"].iloc[0] == pytest.approx(expected)
+
+    def test_obi_range_present(self):
+        df = _make_microstructure_tick_df()
+        bars = aggregate_bars(df, timeframe="5min")
+        assert "bar_obi_range" in bars.columns
+
+    def test_obi_range_nonnegative(self):
+        df = _make_microstructure_tick_df()
+        bars = aggregate_bars(df, timeframe="5min")
+        assert (bars["bar_obi_range"] >= 0).all()
+
+    def test_obi_range_correct(self):
+        df = _make_microstructure_tick_df()
+        bars = aggregate_bars(df, timeframe="5min")
+        dt = pd.to_datetime(df["timestamp_ns"], unit="ns")
+        bar0_start = bars["bar_start"].iloc[0]
+        bar0_end = bars["bar_end"].iloc[0]
+        mask = (dt >= bar0_start) & (dt < bar0_end)
+        obi = df.loc[mask, "imbalance_qty_l1"]
+        expected = obi.max() - obi.min()
+        assert bars["bar_obi_range"].iloc[0] == pytest.approx(expected)
+
+    def test_trade_cluster_count_present(self):
+        df = _make_microstructure_tick_df()
+        bars = aggregate_bars(df, timeframe="5min")
+        assert "bar_trade_cluster_count" in bars.columns
+
+    def test_trade_cluster_count_correct(self):
+        df = _make_microstructure_tick_df()
+        bars = aggregate_bars(df, timeframe="5min")
+        dt = pd.to_datetime(df["timestamp_ns"], unit="ns")
+        bar0_start = bars["bar_start"].iloc[0]
+        bar0_end = bars["bar_end"].iloc[0]
+        mask = (dt >= bar0_start) & (dt < bar0_end)
+        expected = int((df.loc[mask, "flow_count_1s"] > 5).sum())
+        assert bars["bar_trade_cluster_count"].iloc[0] == expected
+
+    def test_columns_absent_when_source_missing(self):
+        """Stats should not appear when source columns are absent."""
+        df = _make_microstructure_tick_df()
+        df = df.drop(columns=["alg_jump_detected", "imbalance_qty_l1"])
+        bars = aggregate_bars(df, timeframe="5min")
+        assert "bar_jump_count" not in bars.columns
+        assert "bar_obi_range" not in bars.columns
+        # flow_count_1s still present
+        assert "bar_trade_cluster_count" in bars.columns
+
+    def test_max_abs_return_helper_empty(self):
+        assert _max_abs_return(pd.Series([], dtype=float)) == 0.0
+
+    def test_max_abs_return_helper_single(self):
+        assert _max_abs_return(pd.Series([100.0])) == 0.0
+
+    def test_max_abs_return_helper_two_values(self):
+        assert _max_abs_return(pd.Series([100.0, 110.0])) == pytest.approx(10.0)
