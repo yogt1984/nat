@@ -22,36 +22,8 @@ use ing::state::MarketState;
 use ing::ws::{HyperliquidClient, WsMessage};
 use ing::FeatureVector;
 
-// Health thresholds — silent-failure detection.
-//
-// Background: on 2026-05-06 ~08:25 UTC, the orderbook stream silently froze
-// for all three symbols simultaneously while trade ticks kept flowing. The
-// existing message-based staleness check (`client.is_stale()`) did not fire
-// because the WebSocket connection was alive; only the Book channel was dead.
-// 69% of the data collected after that point had stale prices, undetected for
-// four days. These thresholds let the periodic health timer notice the same
-// failure mode within minutes instead of days.
-const BOOK_STALE_WARN_SECS: u64 = 60;
-const BOOK_STALE_ERROR_SECS: u64 = 300;
-const TRADE_STALE_WARN_SECS: u64 = 120;
-
-// Midprice-frozen detection is two-tiered.
-//
-// (a) Compound freeze: book channel is also stale. This is the May-6
-//     signature — both signals raised together, fire fast.
-// (b) Pure freeze: book channel is alive but the L1 inside quote hasn't
-//     moved. Empirically (1h48 watch on 2026-05-10) this happens 70–84s
-//     naturally on BTC/ETH at low-volatility moments and is benign market
-//     microstructure, not corruption. Use a much higher threshold so quiet
-//     periods don't pollute logs but a true multi-minute desync still trips.
-//
-// `BOOK_STALE_GATE_SECS` is the book_age above which we treat the situation
-// as compound rather than pure.
-const PRICE_FROZEN_WITH_BOOK_STALE_WARN_SECS: u64 = 60;
-const PRICE_FROZEN_WITH_BOOK_STALE_ERROR_SECS: u64 = 300;
-const PRICE_FROZEN_BOOK_ALIVE_WARN_SECS: u64 = 300;
-const PRICE_FROZEN_BOOK_ALIVE_ERROR_SECS: u64 = 900;
-const BOOK_STALE_GATE_SECS: u64 = 30;
+// Health thresholds moved to health.rs — see `ChannelHealth` and its tests.
+use ing::health::{ChannelHealth, Severity};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -295,23 +267,8 @@ async fn run_symbol_ingestor(
     let mut first_feature_logged = false;
     let mut no_data_warned = false;
 
-    // Per-channel liveness tracking — Book and Trade streams must be checked
-    // independently because the failure mode on 2026-05-06 was Book-only.
-    let mut last_book_msg_at: Option<std::time::Instant> = None;
-    let mut last_trade_msg_at: Option<std::time::Instant> = None;
-    let mut book_msg_count: u64 = 0;
-    let mut trade_msg_count: u64 = 0;
-
-    // Midprice-change tracking — the actual data corruption signal. If midprice
-    // does not change for many consecutive emissions, downstream features are
-    // being written with stale orderbook state regardless of WS connection state.
-    let mut last_midprice: Option<f64> = None;
-    let mut last_midprice_change_at: Option<std::time::Instant> = None;
-
-    // Latching flags so we emit ERROR-level lines once per stuck episode
-    // rather than every health tick.
-    let mut book_stale_error_logged = false;
-    let mut price_frozen_error_logged = false;
+    // Per-channel liveness tracking — see health.rs for thresholds and docs.
+    let mut channel_health = ChannelHealth::new();
 
     loop {
         tokio::select! {
@@ -326,18 +283,10 @@ async fn run_symbol_ingestor(
                         state.update(&ws_msg);
                         message_count += 1;
 
-                        // Track per-channel liveness independently — see
-                        // BOOK_STALE_WARN_SECS comment for the failure mode this
-                        // catches.
+                        // Track per-channel liveness independently
                         match &ws_msg {
-                            WsMessage::Book(_) => {
-                                last_book_msg_at = Some(std::time::Instant::now());
-                                book_msg_count += 1;
-                            }
-                            WsMessage::Trades(_) => {
-                                last_trade_msg_at = Some(std::time::Instant::now());
-                                trade_msg_count += 1;
-                            }
+                            WsMessage::Book(_) => channel_health.on_book(),
+                            WsMessage::Trades(_) => channel_health.on_trade(),
                             _ => {}
                         }
 
@@ -408,21 +357,8 @@ async fn run_symbol_ingestor(
                         );
                     }
 
-                    // Midprice-change detection: any motion at all resets the
-                    // freeze timer. Exact equality is intentional — orderbook
-                    // ticks are integers in price-precision units, so genuine
-                    // motion always yields a different f64.
-                    let mid = features.raw.midprice;
-                    if mid.is_finite() {
-                        let changed = match last_midprice {
-                            Some(prev) => prev != mid,
-                            None => true,
-                        };
-                        if changed {
-                            last_midprice = Some(mid);
-                            last_midprice_change_at = Some(std::time::Instant::now());
-                        }
-                    }
+                    // Midprice-change detection via ChannelHealth
+                    channel_health.on_midprice(features.raw.midprice);
 
                     // Update dashboard with feature summary
                     dashboard_state.update_symbol(&symbol, |s| {
@@ -521,123 +457,92 @@ async fn run_symbol_ingestor(
                         "Health: NO DATA FLOWING"
                     );
                 } else {
-                    let now = std::time::Instant::now();
-                    let book_age = last_book_msg_at
-                        .map(|t| now.saturating_duration_since(t).as_secs());
-                    let trade_age = last_trade_msg_at
-                        .map(|t| now.saturating_duration_since(t).as_secs());
-                    let price_age = last_midprice_change_at
-                        .map(|t| now.saturating_duration_since(t).as_secs());
+                    let hs = channel_health.check_health(uptime);
 
-                    // Book-stream silence — the May-6 failure signature. Trade
-                    // ticks may keep flowing while book updates are dead, so
-                    // generic ws-staleness misses this.
-                    match book_age {
-                        Some(age) if age >= BOOK_STALE_WARN_SECS => {
+                    // Book-stream health
+                    match hs.book.severity {
+                        Severity::Error => {
                             warn!(
                                 %symbol,
-                                book_silence_s = age,
-                                book_msgs = book_msg_count,
-                                last_midprice = ?last_midprice,
+                                book_silence_s = ?hs.book.age_secs,
+                                book_msgs = hs.book.msg_count,
+                                last_midprice = ?channel_health.last_midprice,
                                 "Health: BOOK STREAM STALE — orderbook updates have stopped"
                             );
-                            if age >= BOOK_STALE_ERROR_SECS && !book_stale_error_logged {
-                                book_stale_error_logged = true;
-                                error!(
-                                    %symbol,
-                                    book_silence_s = age,
-                                    threshold_s = BOOK_STALE_ERROR_SECS,
-                                    "Health: BOOK STREAM DEAD — collected data is corrupted; \
-                                     reconnect/resubscribe required"
-                                );
+                            if !channel_health.book_stale_error_logged() {
+                                // Latch was just set by check_health
                             }
-                        }
-                        Some(_) => {
-                            book_stale_error_logged = false;
-                        }
-                        None if uptime >= 60 => {
-                            warn!(
+                            error!(
                                 %symbol,
-                                uptime_s = uptime,
-                                "Health: NO BOOK MESSAGES received yet — \
-                                 book subscription may have failed"
+                                book_silence_s = ?hs.book.age_secs,
+                                "Health: BOOK STREAM DEAD — collected data is corrupted"
                             );
                         }
-                        None => {}
-                    }
-
-                    // Trade-stream silence — secondary signal; trades are bursty,
-                    // so the threshold is more lenient.
-                    if let Some(age) = trade_age {
-                        if age >= TRADE_STALE_WARN_SECS {
+                        Severity::Warn => {
                             warn!(
                                 %symbol,
-                                trade_silence_s = age,
-                                trade_msgs = trade_msg_count,
-                                "Health: TRADE STREAM QUIET — no trades in over {}s",
-                                TRADE_STALE_WARN_SECS
+                                book_silence_s = ?hs.book.age_secs,
+                                book_msgs = hs.book.msg_count,
+                                last_midprice = ?channel_health.last_midprice,
+                                "Health: BOOK STREAM STALE — orderbook updates have stopped"
                             );
                         }
+                        Severity::Ok => {}
                     }
 
-                    // Midprice-frozen — gated on book health. A pure midprice
-                    // freeze with the book channel still updating is a benign
-                    // quiet inside-quote period (typical 70-84s for liquid
-                    // majors); only WARN on multi-minute persistence. A
-                    // compound freeze (book stale AND midprice frozen) is the
-                    // May-6 signature — fire on the original tight thresholds.
-                    if let Some(age) = price_age {
-                        let book_stale = book_age
-                            .is_some_and(|b| b >= BOOK_STALE_GATE_SECS);
-                        let (warn_threshold, error_threshold, regime) = if book_stale {
-                            (
-                                PRICE_FROZEN_WITH_BOOK_STALE_WARN_SECS,
-                                PRICE_FROZEN_WITH_BOOK_STALE_ERROR_SECS,
-                                "book_stale",
-                            )
-                        } else {
-                            (
-                                PRICE_FROZEN_BOOK_ALIVE_WARN_SECS,
-                                PRICE_FROZEN_BOOK_ALIVE_ERROR_SECS,
-                                "book_alive",
-                            )
-                        };
-                        if age >= warn_threshold {
+                    // Trade-stream health
+                    if hs.trade.severity == Severity::Warn {
+                        warn!(
+                            %symbol,
+                            trade_silence_s = ?hs.trade.age_secs,
+                            trade_msgs = hs.trade.msg_count,
+                            "Health: TRADE STREAM QUIET"
+                        );
+                    }
+
+                    // Price-frozen health
+                    match hs.price_frozen.severity {
+                        Severity::Error => {
                             warn!(
                                 %symbol,
-                                price_frozen_s = age,
-                                last_midprice = ?last_midprice,
-                                book_silence_s = ?book_age,
-                                regime,
+                                price_frozen_s = ?hs.price_frozen.age_secs,
+                                last_midprice = ?hs.price_frozen.last_midprice,
+                                book_silence_s = ?hs.book.age_secs,
+                                regime = hs.price_frozen.regime,
                                 "Health: MIDPRICE FROZEN — features are being written with stale prices"
                             );
-                            if age >= error_threshold && !price_frozen_error_logged {
-                                price_frozen_error_logged = true;
-                                error!(
-                                    %symbol,
-                                    price_frozen_s = age,
-                                    threshold_s = error_threshold,
-                                    regime,
-                                    "Health: MIDPRICE FROZEN past threshold — \
-                                     collected data is unusable; investigate immediately"
-                                );
-                            }
-                        } else {
-                            price_frozen_error_logged = false;
+                            error!(
+                                %symbol,
+                                price_frozen_s = ?hs.price_frozen.age_secs,
+                                regime = hs.price_frozen.regime,
+                                "Health: MIDPRICE FROZEN past threshold — \
+                                 collected data is unusable; investigate immediately"
+                            );
                         }
+                        Severity::Warn => {
+                            warn!(
+                                %symbol,
+                                price_frozen_s = ?hs.price_frozen.age_secs,
+                                last_midprice = ?hs.price_frozen.last_midprice,
+                                book_silence_s = ?hs.book.age_secs,
+                                regime = hs.price_frozen.regime,
+                                "Health: MIDPRICE FROZEN — features are being written with stale prices"
+                            );
+                        }
+                        Severity::Ok => {}
                     }
 
                     info!(
                         %symbol,
                         connected = client.is_connected(),
                         messages = ws_msgs,
-                        book_msgs = book_msg_count,
-                        trade_msgs = trade_msg_count,
+                        book_msgs = channel_health.book_msg_count,
+                        trade_msgs = channel_health.trade_msg_count,
                         features = sequence_id,
-                        book_age_s = ?book_age,
-                        trade_age_s = ?trade_age,
-                        price_change_age_s = ?price_age,
-                        last_midprice = ?last_midprice,
+                        book_age_s = ?hs.book.age_secs,
+                        trade_age_s = ?hs.trade.age_secs,
+                        price_change_age_s = ?hs.price_frozen.age_secs,
+                        last_midprice = ?channel_health.last_midprice,
                         uptime = format!("{}m{}s", mins, secs),
                         "Health summary"
                     );

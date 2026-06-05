@@ -9,6 +9,7 @@ pub mod config;
 pub mod dashboard;
 pub mod error;
 pub mod features;
+pub mod health;
 pub mod hypothesis;
 pub mod metrics;
 pub mod ml;

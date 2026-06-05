@@ -571,6 +571,28 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_empty_object() {
+        assert!(parse_ws_message("{}").is_none());
+    }
+
+    #[test]
+    fn test_parse_null_literal() {
+        assert!(parse_ws_message("null").is_none());
+    }
+
+    #[test]
+    fn test_parse_array_instead_of_object() {
+        assert!(parse_ws_message("[1, 2, 3]").is_none());
+    }
+
+    #[test]
+    fn test_parse_very_long_string_no_crash() {
+        // 100KB of garbage — must not panic or OOM
+        let long = "x".repeat(100_000);
+        assert!(parse_ws_message(&long).is_none());
+    }
+
+    #[test]
     fn test_subscription_request_serialization() {
         let req = SubscriptionRequest::l2_book("ETH");
         let json = serde_json::to_string(&req).unwrap();

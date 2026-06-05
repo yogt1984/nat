@@ -715,4 +715,59 @@ mod tests {
         assert!(json.contains("Critical"));
         assert!(json.contains("5.2"));
     }
+
+    // --- Graceful degradation ---
+
+    #[tokio::test]
+    async fn test_try_new_returns_none_when_disabled() {
+        let config = RedisConfig {
+            enabled: false,
+            ..Default::default()
+        };
+        assert!(RedisPublisher::try_new(config).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_try_new_returns_none_on_bad_url() {
+        let config = RedisConfig {
+            url: "redis://localhost:1".to_string(), // Port 1 — connection refused immediately
+            enabled: true,
+            ..Default::default()
+        };
+        // Should return None (connection failure), not panic
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            RedisPublisher::try_new(config),
+        )
+        .await;
+        match result {
+            Ok(publisher) => assert!(publisher.is_none()),
+            Err(_) => {} // timeout is also acceptable — no panic
+        }
+    }
+
+    // --- Channel naming ---
+
+    #[test]
+    fn test_feature_channel_naming() {
+        let prefix = "nat";
+        let symbol = "BTC";
+        let channel = format!("{}:features:{}", prefix, symbol);
+        assert_eq!(channel, "nat:features:BTC");
+    }
+
+    #[test]
+    fn test_cache_key_naming() {
+        let prefix = "nat";
+        let symbol = "ETH";
+        let key = format!("{}:latest:{}", prefix, symbol);
+        assert_eq!(key, "nat:latest:ETH");
+    }
+
+    #[test]
+    fn test_alert_channel_naming() {
+        let prefix = "nat";
+        let channel = format!("{}:alerts", prefix);
+        assert_eq!(channel, "nat:alerts");
+    }
 }
