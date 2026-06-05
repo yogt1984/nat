@@ -8,6 +8,8 @@ WORKDIR /app
 
 # Copy workspace files
 COPY rust/Cargo.toml rust/Cargo.lock ./
+COPY rust/ing-types ./ing-types
+COPY rust/ing-features ./ing-features
 COPY rust/ing ./ing
 COPY rust/api ./api
 
