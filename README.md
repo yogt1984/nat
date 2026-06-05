@@ -1142,6 +1142,15 @@ python scripts/evaluate_wave1_gate.py --data-dir data/features --symbols BTC,ETH
 
 # Wave 2 decision gate evaluation
 python scripts/evaluate_wave2_gate.py --data-dir data/features
+
+# ML algorithm verification (all phases)
+bash scripts/run_ml_verification.sh
+
+# ML-specific parametrized tests only
+cd scripts && python -m pytest algorithms/tests/test_ml_algorithms.py -v
+
+# Constraint validation only
+cd scripts && python validate_all_algorithms.py
 ```
 
 ### Hypothesis Testing (H1-H5)
