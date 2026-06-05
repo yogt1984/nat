@@ -216,3 +216,41 @@ class TestStepBatchConsistency:
             assert corr > 0.9, (
                 f"Step/batch correlation too low for {col} in {algorithm_name}: {corr:.3f}"
             )
+
+
+class TestNaNAvailabilityGuard:
+    """Verify AlgorithmRunner warns when required columns are >95% NaN."""
+
+    def test_warns_on_high_nan_column(self, algorithm_name, caplog):
+        import logging
+        from algorithms.runner import AlgorithmRunner
+
+        alg = get_algorithm(algorithm_name)
+        cols = alg.required_columns()
+        if not cols:
+            pytest.skip("No required columns")
+
+        df = make_synthetic_ticks(100, cols)
+        # Set first required column to all NaN
+        target_col = cols[0]
+        df[target_col] = np.nan
+
+        with caplog.at_level(logging.WARNING, logger="algorithms.runner"):
+            AlgorithmRunner(alg).run_on_dataframe(df)
+
+        assert any(target_col in msg and "NaN" in msg for msg in caplog.messages), (
+            f"Expected warning about '{target_col}' being NaN"
+        )
+
+    def test_no_warning_on_clean_data(self, algorithm_name, caplog):
+        import logging
+        from algorithms.runner import AlgorithmRunner
+
+        alg = get_algorithm(algorithm_name)
+        df = make_synthetic_ticks(100, alg.required_columns())
+
+        with caplog.at_level(logging.WARNING, logger="algorithms.runner"):
+            AlgorithmRunner(alg).run_on_dataframe(df)
+
+        nan_warnings = [m for m in caplog.messages if "NaN" in m and alg.name() in m]
+        assert len(nan_warnings) == 0, f"Unexpected NaN warning: {nan_warnings}"

@@ -20,12 +20,17 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
+import logging
+import warnings
+
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 from .config import FEATURE_VECTORS, COMPOSITE_VECTORS, META_COLUMNS, get_vector_columns
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +53,61 @@ def read_schema_version(path: Union[str, Path]) -> Optional[int]:
         return int(ver) if ver is not None else None
     except Exception:
         return None
+
+
+def normalize_schema(
+    df: pd.DataFrame,
+    files: List[Path],
+) -> pd.DataFrame:
+    """Pad missing expected columns with NaN and warn on version mismatch.
+
+    Reads schema_version from the first file's metadata. If files pre-date
+    versioning (legacy) or have a different version than CURRENT_SCHEMA_VERSION,
+    a warning is logged and missing base columns are padded with NaN.
+
+    Unknown columns (e.g. alg_* algorithm outputs or new features from a
+    newer schema) are kept — never dropped.
+    """
+    from data.schema import ALL_BASE, ALL_OPTIONAL
+
+    # Read version from first file
+    version = read_schema_version(files[0]) if files else None
+
+    if version is None:
+        logger.warning(
+            "Parquet file %s has no schema_version metadata (legacy file). "
+            "Expected version %d. Missing columns will be padded with NaN.",
+            files[0].name, CURRENT_SCHEMA_VERSION,
+        )
+    elif version < CURRENT_SCHEMA_VERSION:
+        logger.warning(
+            "Parquet schema version %d < current %d. "
+            "Missing columns will be padded with NaN.",
+            version, CURRENT_SCHEMA_VERSION,
+        )
+    elif version > CURRENT_SCHEMA_VERSION:
+        logger.warning(
+            "Parquet schema version %d > current %d. "
+            "Loader may not recognize all columns. Consider updating.",
+            version, CURRENT_SCHEMA_VERSION,
+        )
+
+    # Pad missing base columns with NaN (optional columns too, for completeness)
+    expected = ALL_BASE + ALL_OPTIONAL
+    missing = [c for c in expected if c not in df.columns]
+    if missing:
+        logger.info(
+            "Padding %d missing columns with NaN: %s%s",
+            len(missing),
+            ", ".join(missing[:5]),
+            f" (+{len(missing)-5} more)" if len(missing) > 5 else "",
+        )
+        pad = pd.DataFrame(
+            np.nan, index=df.index, columns=missing, dtype=np.float64,
+        )
+        df = pd.concat([df, pad], axis=1)
+
+    return df
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +344,9 @@ def load_parquet(
     # Concatenate
     combined = pa.concat_tables(tables, promote_options="default")
     df = combined.to_pandas()
+
+    # Schema compat: warn on version mismatch, pad missing columns
+    df = normalize_schema(df, files)
 
     # Apply max_rows after concatenation if needed
     if max_rows is not None and len(df) > max_rows:
