@@ -39,6 +39,10 @@ PIPELINE_CONFIG ?= config/pipeline.toml
 ALPHA_CONFIG ?= config/alpha.toml
 DISCOVERY_CONFIG ?= config/discovery.toml
 
+# Deploy target (SSH alias or IP)
+DEPLOY_HOST ?= su-35
+DEPLOY_DIR ?= ~/nat
+
 # Dashboard ports
 DASHBOARD_PORT ?= 8050
 AGENT_DASHBOARD_PORT ?= 8060

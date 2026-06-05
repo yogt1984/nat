@@ -9,6 +9,7 @@
         agent_watchdog_install agent_watchdog_remove \
         discovery_start discovery_once discovery_status discovery_stop \
         cascade_start cascade_once cascade_status cascade_stop cascade_report \
+        deploy deploy_status deploy_rollback \
         monitor proxy proxy_stop
 
 all: run
@@ -314,6 +315,40 @@ cascade_stop:
 
 cascade_report:
 	@$(PYTHON) scripts/agent/cascade_daemon.py report
+
+# --- Remote deploy (su-35) ---
+
+.PHONY: deploy deploy_status deploy_rollback
+
+deploy: release
+	@echo "╔══════════════════════════════════════════════════════════════════╗"
+	@echo "║          DEPLOYING INGESTOR TO $(DEPLOY_HOST)                    ║"
+	@echo "╚══════════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "1/4  Backing up current binary on $(DEPLOY_HOST)..."
+	ssh $(DEPLOY_HOST) 'cp $(DEPLOY_DIR)/rust/target/release/ing $(DEPLOY_DIR)/rust/target/release/ing.bak 2>/dev/null || true'
+	@echo "2/4  Syncing binary + config..."
+	rsync -az rust/target/release/ing $(DEPLOY_HOST):$(DEPLOY_DIR)/rust/target/release/ing
+	rsync -az config/ $(DEPLOY_HOST):$(DEPLOY_DIR)/config/
+	@echo "3/4  Restarting ingestor..."
+	ssh $(DEPLOY_HOST) 'cd $(DEPLOY_DIR) && ./nat stop && sleep 3 && ./nat start'
+	@echo "4/4  Health check (waiting 10s)..."
+	@sleep 10
+	ssh $(DEPLOY_HOST) 'cd $(DEPLOY_DIR) && ./nat status'
+	@echo ""
+	@echo "Deploy complete."
+
+deploy_status:
+	@echo "Remote ingestor status on $(DEPLOY_HOST):"
+	ssh $(DEPLOY_HOST) 'cd $(DEPLOY_DIR) && ./nat status'
+
+deploy_rollback:
+	@echo "Rolling back ingestor on $(DEPLOY_HOST)..."
+	ssh $(DEPLOY_HOST) 'test -f $(DEPLOY_DIR)/rust/target/release/ing.bak || (echo "No backup found" && exit 1)'
+	ssh $(DEPLOY_HOST) 'cd $(DEPLOY_DIR) && ./nat stop && cp rust/target/release/ing.bak rust/target/release/ing && sleep 2 && ./nat start'
+	@sleep 10
+	ssh $(DEPLOY_HOST) 'cd $(DEPLOY_DIR) && ./nat status'
+	@echo "Rollback complete."
 
 # --- Reverse proxy ---
 
