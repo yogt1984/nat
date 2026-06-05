@@ -172,7 +172,7 @@ Release profile: LTO, single codegen unit, panic=abort, stripped.
 - `config/discovery.toml` — Discovery orchestrator (sweep intervals, gates)
 - `config/llm.toml` — LLM client (model, endpoint, API key reference)
 
-Environment overrides: `RUST_LOG`, `REDIS_URL`, `ING_DASHBOARD_ENABLED`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+Environment overrides: `RUST_LOG`, `REDIS_URL`, `ING_DASHBOARD_ENABLED`, `ING_PROMETHEUS_ADDR`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
 
 ## Hypothesis Testing
 
@@ -184,4 +184,6 @@ The ingestor runs on a second machine (su-35). `nat start` kills stale processes
 
 ## Docker
 
-`docker-compose.yml` runs: redis (6379), ingestor, api (3000), alerts. Build with `nat docker build`, run with `nat docker up`.
+`docker-compose.yml` runs: redis (6379), ingestor (8080), api (3000), alerts, prometheus (9090), grafana (3002). Build with `nat docker build`, run with `nat docker up`.
+
+Grafana auto-provisions a "NAT Overview" dashboard (anonymous access, no login). Prometheus scrapes the ingestor's metrics endpoint every 5s with 90-day retention.

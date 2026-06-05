@@ -1,0 +1,41 @@
+# Build artifacts
+rust/target/
+*.o
+*.d
+
+# Data
+data/
+*.parquet
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Git
+.git/
+
+# IDE
+.vscode/
+.idea/
+
+# Docs
+docs/
+*.pdf
+*.tex
+*.aux
+*.log
+
+# Node / Web
+web/
+exploration/
+reports/
+analysis/
+logs/
+
+# Misc
+*.swp
+*.swo
+.DS_Store
+.claude/
