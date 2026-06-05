@@ -4,6 +4,7 @@ Algorithm execution engine — batch and parquet modes.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,8 @@ import numpy as np
 import pandas as pd
 
 from .base import MicrostructureAlgorithm
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -55,6 +58,16 @@ class AlgorithmRunner:
                     f"not found after aggregation. Available: {list(bars.columns[:20])}..."
                 )
 
+            # NaN availability guard
+            for col in algo.required_columns():
+                if col in bars.columns:
+                    nan_rate = bars[col].isna().mean()
+                    if nan_rate > 0.95:
+                        logger.warning(
+                            "%s: required column '%s' is %.0f%% NaN",
+                            algo.name(), col, nan_rate * 100,
+                        )
+
             t0 = time.time()
             features_df = algo.run_batch(bars)
             elapsed = time.time() - t0
@@ -78,6 +91,15 @@ class AlgorithmRunner:
                 f"Algorithm '{algo.name()}' requires columns {missing} "
                 f"not found in data. Available: {list(df.columns[:20])}..."
             )
+
+        # NaN availability guard
+        for col in algo.required_columns():
+            nan_rate = df[col].isna().mean()
+            if nan_rate > 0.95:
+                logger.warning(
+                    "%s: required column '%s' is %.0f%% NaN",
+                    algo.name(), col, nan_rate * 100,
+                )
 
         t0 = time.time()
         features_df = algo.run_batch(df)
