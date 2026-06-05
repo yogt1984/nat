@@ -23,6 +23,15 @@ pub struct HyperliquidClient {
     pong_received: bool,
 }
 
+/// Calculate reconnect delay with exponential backoff capped at max.
+/// Delay = min(base_delay * 2^attempts, max_delay), capped at attempt 10.
+pub fn reconnect_delay_ms(attempts: u32, config: &WebSocketConfig) -> u64 {
+    std::cmp::min(
+        config.reconnect_delay_ms * (1u64 << attempts.min(10)),
+        config.max_reconnect_delay_ms,
+    )
+}
+
 impl HyperliquidClient {
     /// Create a new client (does not connect yet)
     pub fn new(config: &WebSocketConfig, symbol: &str) -> Self {
@@ -166,11 +175,7 @@ impl HyperliquidClient {
         self.stream = None;
         self.reconnect_attempts += 1;
 
-        // Calculate delay with exponential backoff
-        let delay_ms = std::cmp::min(
-            self.config.reconnect_delay_ms * (1 << self.reconnect_attempts.min(10)),
-            self.config.max_reconnect_delay_ms,
-        );
+        let delay_ms = reconnect_delay_ms(self.reconnect_attempts, &self.config);
 
         warn!(
             symbol = %self.symbol,
@@ -454,5 +459,52 @@ mod tests {
         assert_eq!(client.config.max_reconnect_delay_ms, 60000);
         assert_eq!(client.config.ping_interval_ms, 15000);
         assert_eq!(client.symbol, "SOL");
+    }
+
+    // --- reconnect_delay_ms ---
+
+    #[test]
+    fn test_reconnect_delay_exponential_backoff() {
+        let config = WebSocketConfig {
+            reconnect_delay_ms: 1000,
+            max_reconnect_delay_ms: 60000,
+            ..test_config()
+        };
+        // attempt 1: 1000 * 2^1 = 2000
+        assert_eq!(reconnect_delay_ms(1, &config), 2000);
+        // attempt 2: 1000 * 2^2 = 4000
+        assert_eq!(reconnect_delay_ms(2, &config), 4000);
+        // attempt 3: 1000 * 2^3 = 8000
+        assert_eq!(reconnect_delay_ms(3, &config), 8000);
+    }
+
+    #[test]
+    fn test_reconnect_delay_capped_at_max() {
+        let config = WebSocketConfig {
+            reconnect_delay_ms: 1000,
+            max_reconnect_delay_ms: 30000,
+            ..test_config()
+        };
+        // attempt 6: 1000 * 2^6 = 64000 → capped at 30000
+        assert_eq!(reconnect_delay_ms(6, &config), 30000);
+        // attempt 10: 1000 * 2^10 = 1024000 → capped at 30000
+        assert_eq!(reconnect_delay_ms(10, &config), 30000);
+    }
+
+    #[test]
+    fn test_reconnect_delay_iteration_cap_prevents_overflow() {
+        let config = WebSocketConfig {
+            reconnect_delay_ms: 1000,
+            max_reconnect_delay_ms: 2_000_000,
+            ..test_config()
+        };
+        // attempt 10: 1000 * 2^10 = 1024000
+        let delay_10 = reconnect_delay_ms(10, &config);
+        // attempt 11+: capped at min(10) so same shift
+        let delay_11 = reconnect_delay_ms(11, &config);
+        let delay_20 = reconnect_delay_ms(20, &config);
+        assert_eq!(delay_10, delay_11);
+        assert_eq!(delay_10, delay_20);
+        assert_eq!(delay_10, 1024000);
     }
 }
