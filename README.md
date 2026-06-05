@@ -309,6 +309,15 @@ Developer guide: `docs/research/new/ml_specs/ML_DEVELOPER_GUIDE.md`
 automatically calls `aggregate_bars()` before `run_batch()` and forward-fills
 results to tick-level. No per-algorithm aggregation code needed.
 
+**Operations:**
+```bash
+python scripts/ml_health_check.py                    # nightly health check
+python scripts/ml_rollback.py disable <algo>          # remove from trading
+python scripts/ml_rollback.py enable <algo>           # re-enable algorithm
+python scripts/ml_rollback.py rollback-model <algo>   # revert to previous model
+python scripts/ml_rollback.py list-models <algo>      # list model versions
+```
+
 ### Top Performer Algorithms — `nat oos30`
 
 These 5 algorithms are the validated winners from a 17-algorithm walk-forward paper trade sweep (Experiment Report 2). They are tested together via `nat oos30` on 30-day out-of-sample data. Walk-forward conditions: 5min bars, 100min horizon (20 bars), 3-day rolling training window, P20/P80 z-score entry, 1.61 bps round-trip fees.
