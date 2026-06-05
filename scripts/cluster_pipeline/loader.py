@@ -29,6 +29,28 @@ from .config import FEATURE_VECTORS, COMPOSITE_VECTORS, META_COLUMNS, get_vector
 
 
 # ---------------------------------------------------------------------------
+# Schema version
+# ---------------------------------------------------------------------------
+
+# Current expected schema version — must match SCHEMA_VERSION in
+# rust/ing/src/output/schema.rs.
+CURRENT_SCHEMA_VERSION = 1
+
+
+def read_schema_version(path: Union[str, Path]) -> Optional[int]:
+    """Read schema_version from a Parquet file's metadata.
+
+    Returns None for legacy files that pre-date schema versioning.
+    """
+    try:
+        meta = pq.read_schema(str(path))
+        ver = meta.metadata.get(b"schema_version")
+        return int(ver) if ver is not None else None
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Schema inspection
 # ---------------------------------------------------------------------------
 
@@ -117,6 +139,9 @@ def scan_schema(
     except Exception:
         pass
 
+    # Schema version (from first readable file)
+    schema_version = read_schema_version(files[0]) if files else None
+
     return {
         "file_count": len(files),
         "total_rows": total_rows,
@@ -126,6 +151,7 @@ def scan_schema(
         "meta_columns": meta_found,
         "symbols": symbols,
         "files": [str(f) for f in files],
+        "schema_version": schema_version,
     }
 
 

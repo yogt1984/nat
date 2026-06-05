@@ -1,9 +1,14 @@
 //! Arrow schema definition for feature output
 
 use arrow::datatypes::{DataType, Field, Schema};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::features::Features;
+
+/// Schema version — increment when features are added or removed.
+/// Python loader uses this to handle forward/backward compatibility.
+pub const SCHEMA_VERSION: u32 = 1;
 
 /// Create the Arrow schema for feature output
 pub fn create_schema() -> Arc<Schema> {
@@ -18,7 +23,7 @@ pub fn create_schema_with_alg_features(alg_names: &[&str]) -> Arc<Schema> {
         Field::new("sequence_id", DataType::UInt64, false),
     ];
 
-    // Base + optional features (217 fixed columns)
+    // Base + optional features (236 fixed columns)
     for name in Features::names_all() {
         fields.push(Field::new(name, DataType::Float64, false));
     }
@@ -28,7 +33,11 @@ pub fn create_schema_with_alg_features(alg_names: &[&str]) -> Arc<Schema> {
         fields.push(Field::new(*name, DataType::Float64, false));
     }
 
-    Arc::new(Schema::new(fields))
+    let mut metadata = HashMap::new();
+    metadata.insert("schema_version".to_string(), SCHEMA_VERSION.to_string());
+    metadata.insert("feature_count".to_string(), Features::count_all().to_string());
+
+    Arc::new(Schema::new_with_metadata(fields, metadata))
 }
 
 /// Get column names
@@ -228,6 +237,38 @@ mod tests {
             v1.len() + 3,
             schema.fields().len(),
             "Vector + metadata must match schema"
+        );
+    }
+
+    #[test]
+    fn test_schema_has_version_metadata() {
+        let schema = create_schema();
+        let meta = schema.metadata();
+        assert_eq!(
+            meta.get("schema_version").map(|s| s.as_str()),
+            Some(SCHEMA_VERSION.to_string().as_str()),
+        );
+    }
+
+    #[test]
+    fn test_schema_has_feature_count_metadata() {
+        let schema = create_schema();
+        let meta = schema.metadata();
+        assert_eq!(
+            meta.get("feature_count").map(|s| s.as_str()),
+            Some(Features::count_all().to_string().as_str()),
+        );
+    }
+
+    #[test]
+    fn test_schema_with_alg_features_has_version() {
+        let schema = create_schema_with_alg_features(&["alg_test_a", "alg_test_b"]);
+        let meta = schema.metadata();
+        assert!(meta.contains_key("schema_version"));
+        // Should have base columns + 2 alg columns
+        assert_eq!(
+            schema.fields().len(),
+            3 + Features::count_all() + 2,
         );
     }
 }
