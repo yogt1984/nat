@@ -61,20 +61,20 @@ class OIDivergence(MicrostructureAlgorithm):
             return {f.name: np.nan for f in self.alg_features()}
 
         self._price_buffer.append(mid)
-        if len(self._price_buffer) > self._price_window:
+        if len(self._price_buffer) > self._price_window + 1:
             self._price_buffer.pop(0)
 
         self._oi_buffer.append(oi)
-        if len(self._oi_buffer) > self._oi_window:
+        if len(self._oi_buffer) > self._oi_window + 1:
             self._oi_buffer.pop(0)
 
-        if len(self._price_buffer) < 50 or len(self._oi_buffer) < 50:
+        if len(self._price_buffer) < self._price_window + 1 or len(self._oi_buffer) < self._oi_window + 1:
             return {f.name: np.nan for f in self.alg_features()}
 
-        # Price trend: log return over window
+        # Price trend: log return over full window (matches batch shift behavior)
         price_trend = np.log(self._price_buffer[-1] / self._price_buffer[0])
 
-        # OI trend: relative change over window
+        # OI trend: relative change over full window
         oi_trend = (self._oi_buffer[-1] - self._oi_buffer[0]) / (self._oi_buffer[0] + 1e-12)
 
         # Z-score normalize both trends for dimensionless comparison
@@ -85,8 +85,17 @@ class OIDivergence(MicrostructureAlgorithm):
         if len(self._oi_trend_buffer) > self._oi_window:
             self._oi_trend_buffer.pop(0)
 
-        pt_std = np.std(self._price_trend_buffer) or 1e-12
-        ot_std = np.std(self._oi_trend_buffer) or 1e-12
+        # Need enough trend samples for stable z-score (matches batch min_periods=50)
+        if len(self._price_trend_buffer) < 50 or len(self._oi_trend_buffer) < 50:
+            oi_momentum = oi_change / (oi + 1e-12)
+            return {
+                "alg_oi_price_divergence": np.nan,
+                "alg_oi_confirmation": np.nan,
+                "alg_oi_momentum": oi_momentum,
+            }
+
+        pt_std = np.std(self._price_trend_buffer, ddof=1) or 1e-12
+        ot_std = np.std(self._oi_trend_buffer, ddof=1) or 1e-12
         z_price = price_trend / pt_std
         z_oi = oi_trend / ot_std
 
