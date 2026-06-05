@@ -1192,10 +1192,30 @@ make docker_logs                       # tail logs
 | Service | Port | Description |
 |---------|------|-------------|
 | **redis** | 6379 | Pub/sub, caching (256MB max, LRU) |
-| **ingestor** | — | Market data collection (depends on redis) |
+| **ingestor** | 8080 | Market data collection + real-time dashboard |
 | **api** | 3000 | REST/WebSocket endpoints |
 | **alerts** | — | Telegram alert service |
 | **web** | 3001 | Next.js frontend (depends on api) |
+| **prometheus** | 9090 | Metrics collection (90-day retention) |
+| **grafana** | 3002 | Pre-configured dashboards (anonymous access) |
+
+### Observability
+
+The Docker stack includes Prometheus + Grafana for production monitoring.
+
+**Metrics exposed by the ingestor:**
+- `ing_features_emitted_total` — counter, per symbol
+- `ing_errors_total` — counter, per symbol + error type
+- `ing_feature_latency_seconds` — histogram, feature compute time
+- `ing_update_latency_seconds` — histogram, WebSocket update processing time
+
+**Access:**
+- Grafana: http://localhost:3002 (no login required, "NAT Overview" dashboard auto-provisioned)
+- Prometheus: http://localhost:9090
+
+**Environment variables:**
+- `ING_PROMETHEUS_ADDR` — bind address for metrics endpoint (e.g. `0.0.0.0:9090`)
+- `ING_DASHBOARD_ENABLED` — enable real-time dashboard (`true`/`1`)
 
 ---
 

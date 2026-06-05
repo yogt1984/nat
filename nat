@@ -2618,21 +2618,32 @@ def cmd_discovery_stop(args):
 # ── Docker commands ──────────────────────────────────────────────────────────
 
 def cmd_docker_build(args):
-    _exec("docker-compose build")
+    services = " ".join(getattr(args, 'services', None) or [])
+    verbose = "--progress=plain" if getattr(args, 'verbose', False) else ""
+    _exec(f"docker compose build {verbose} {services}".strip())
 
 
 def cmd_docker_up(args):
-    _exec("docker-compose up -d")
-    print("\n  API: http://localhost:3000")
-    print("  Redis: localhost:6379\n")
+    services = " ".join(getattr(args, 'services', None) or [])
+    _exec(f"docker compose up -d {services}".strip())
+    print("\n  Ingestor:   http://localhost:8080")
+    print("  API:        http://localhost:3000")
+    print("  Grafana:    http://localhost:3002")
+    print("  Prometheus: http://localhost:9090")
+    print("  Redis:      localhost:6379\n")
 
 
 def cmd_docker_down(args):
-    _exec("docker-compose down")
+    _exec("docker compose down")
 
 
 def cmd_docker_logs(args):
-    _exec("docker-compose logs -f")
+    services = " ".join(getattr(args, 'services', None) or [])
+    _exec(f"docker compose logs -f {services}".strip())
+
+
+def cmd_docker_ps(args):
+    _exec("docker compose ps")
 
 
 # ── Deploy commands ──────────────────────────────────────────────────────────
@@ -4282,10 +4293,18 @@ def build_parser():
     dk_p = sub.add_parser('docker', help='Docker operations')
     dk_p.set_defaults(func=lambda a: dk_p.print_help())
     dksub = dk_p.add_subparsers(dest='subcmd')
-    dksub.add_parser('build', help='Build images').set_defaults(func=cmd_docker_build)
-    dksub.add_parser('up', help='Start services').set_defaults(func=cmd_docker_up)
+    dk_build = dksub.add_parser('build', help='Build images (nat docker build [--verbose] [services...])')
+    dk_build.add_argument('--verbose', '-v', action='store_true', help='Show full build output')
+    dk_build.add_argument('services', nargs='*', default=None, help='Services to build (default: all)')
+    dk_build.set_defaults(func=cmd_docker_build)
+    dk_up = dksub.add_parser('up', help='Start services (nat docker up [services...])')
+    dk_up.add_argument('services', nargs='*', default=None, help='Services to start (default: all)')
+    dk_up.set_defaults(func=cmd_docker_up)
     dksub.add_parser('down', help='Stop services').set_defaults(func=cmd_docker_down)
-    dksub.add_parser('logs', help='View logs').set_defaults(func=cmd_docker_logs)
+    dksub.add_parser('ps', help='Show running services').set_defaults(func=cmd_docker_ps)
+    dk_logs = dksub.add_parser('logs', help='View logs (nat docker logs [services...])')
+    dk_logs.add_argument('services', nargs='*', default=None, help='Services to tail (default: all)')
+    dk_logs.set_defaults(func=cmd_docker_logs)
 
     # ── 15m experiment ──
     sm_p = sub.add_parser('15m', help='15-minute experiment (ingest → analyze → report)')
