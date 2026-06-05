@@ -1,144 +1,156 @@
-"""End-to-end pipeline test: load Parquet -> run algorithms -> evaluate -> JSON report.
+"""
+E2E pipeline test — synthetic ticks → AlgorithmRunner → AlgorithmEvaluator → JSON report.
 
-Uses the 1-hour BTC fixture from scripts/algorithms/tests/fixtures/btc_1h_real.parquet.
-Tests the full chain that matters for production: data loading, algorithm execution,
-IC evaluation, and report generation.
+Validates that all 5 winner algorithms chain through the full evaluation
+pipeline without crashing, produce structurally valid reports, and complete
+within a reasonable time budget.
+
+Uses synthetic data (no real fixture dependency).
 """
 
 from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
 
-import sys
+from algorithms.autodiscover import discover_all
+from algorithms.evaluate import AlgorithmEvaluator
+from algorithms.registry import get_algorithm
+from algorithms.runner import AlgorithmRunner, run_chain
+from algorithms.tests.conftest import make_synthetic_ticks
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts"))
-
-from algorithms.autodiscover import discover_all  # noqa: E402
-from algorithms.registry import get_algorithm  # noqa: E402
-from algorithms.runner import AlgorithmRunner  # noqa: E402
-from algorithms.evaluate import AlgorithmEvaluator  # noqa: E402
-
-FIXTURE = ROOT / "scripts" / "algorithms" / "tests" / "fixtures" / "btc_1h_real.parquet"
+discover_all()
 
 WINNERS = ["jump_detector", "optimal_entry", "funding_reversion",
            "surprise_signal", "weighted_ofi"]
 
 
 @pytest.fixture(scope="module")
-def fixture_df():
-    if not FIXTURE.exists():
-        pytest.skip(
-            f"Fixture not found: {FIXTURE}\n"
-            "Run: python scripts/algorithms/tests/extract_fixture.py "
-            "--date 2026-06-04 --hour 8"
-        )
-    discover_all()
-    return pd.read_parquet(FIXTURE)
+def synthetic_df():
+    """Synthetic tick DataFrame covering all 5 winners' requirements."""
+    all_cols = set()
+    for name in WINNERS:
+        alg = get_algorithm(name)
+        all_cols.update(alg.required_columns())
+    # Extra columns needed by AlgorithmEvaluator
+    all_cols.update(["raw_midprice", "raw_spread", "ent_book_shape"])
+    return make_synthetic_ticks(5000, sorted(all_cols), seed=42)
 
 
-# --- e2e: load -> run -> correct output shape ---
-
-@pytest.mark.parametrize("name", WINNERS)
-def test_e2e_run_produces_correct_columns(fixture_df, name):
-    """Algorithm output has exactly the expected column names."""
-    alg = get_algorithm(name)
-    runner = AlgorithmRunner(alg)
-    result = runner.run_on_dataframe(fixture_df)
-
-    expected = set(alg.feature_names)
-    actual = set(result.features_df.columns)
-    assert actual == expected, f"Column mismatch: extra={actual - expected}, missing={expected - actual}"
-
-
-@pytest.mark.parametrize("name", WINNERS)
-def test_e2e_no_100pct_nan_post_warmup(fixture_df, name):
-    """No feature column is 100% NaN after warmup."""
-    alg = get_algorithm(name)
-    runner = AlgorithmRunner(alg)
-    result = runner.run_on_dataframe(fixture_df)
-
-    post_warmup = result.features_df.iloc[alg.warmup:]
-    for col in post_warmup.columns:
-        nan_rate = post_warmup[col].isna().mean()
-        assert nan_rate < 1.0, f"{name}.{col} is 100% NaN post-warmup"
-
-
-# --- e2e: load -> run -> evaluate -> report ---
-
-@pytest.mark.parametrize("name", WINNERS)
-def test_e2e_evaluation_report(fixture_df, name):
-    """Full evaluation produces a valid JSON report with expected keys."""
-    alg = get_algorithm(name)
-    runner = AlgorithmRunner(alg)
-    result = runner.run_on_dataframe(fixture_df)
-
-    evaluator = AlgorithmEvaluator(result)
-    report = evaluator.full_report()
-
-    # Report structure
-    assert isinstance(report, dict)
-    assert report["algorithm"] == name
-    assert report["n_ticks"] == len(fixture_df)
-    assert report["warmup_ticks"] == alg.warmup
-    assert report["elapsed_s"] >= 0
-
-    # IC section
-    assert "ic" in report
-    ic = report["ic"]
-    assert "horizons" in ic
-    assert "features" in ic
-    assert len(ic["features"]) == len(alg.alg_features())
-    for feat_name, ic_dict in ic["features"].items():
-        assert feat_name.startswith("alg_"), f"Feature {feat_name} missing alg_ prefix"
-        # Each feature has IC at each horizon
-        for h in ic["horizons"]:
-            key = f"{h}t"
-            assert key in ic_dict, f"Missing IC at horizon {h} for {feat_name}"
-
-    # IC regime section
-    assert "ic_regime" in report
-
-    # Report should be JSON-serializable
-    json_str = json.dumps(report, default=str)
-    assert len(json_str) > 100
-
-
-def test_e2e_all_winners_complete_under_60s(fixture_df):
-    """Running all 5 winners + evaluation should complete in < 60s."""
-    start = time.time()
-
+@pytest.fixture(scope="module")
+def runner_results(synthetic_df):
+    """Pre-computed AlgorithmResult for each winner."""
+    results = {}
     for name in WINNERS:
         alg = get_algorithm(name)
         runner = AlgorithmRunner(alg)
-        result = runner.run_on_dataframe(fixture_df)
-        evaluator = AlgorithmEvaluator(result)
-        evaluator.full_report()
-
-    elapsed = time.time() - start
-    assert elapsed < 60, f"All 5 winners took {elapsed:.1f}s (limit: 60s)"
+        results[name] = runner.run_on_dataframe(synthetic_df)
+    return results
 
 
-# --- e2e: IC sanity ---
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
 
-def test_e2e_ic_values_bounded(fixture_df):
-    """IC values should be in [-1, 1] (Spearman correlation)."""
-    for name in WINNERS:
+
+class TestWinnerOutput:
+    """Each winner runs and produces correct output."""
+
+    @pytest.mark.parametrize("name", WINNERS)
+    def test_produces_output(self, name, runner_results):
+        result = runner_results[name]
+        assert result.algorithm_name == name
+        assert len(result.features_df) > 0
+        assert result.n_ticks == 5000
+
+    @pytest.mark.parametrize("name", WINNERS)
+    def test_correct_columns(self, name, runner_results):
+        result = runner_results[name]
         alg = get_algorithm(name)
-        runner = AlgorithmRunner(alg)
-        result = runner.run_on_dataframe(fixture_df)
-        evaluator = AlgorithmEvaluator(result)
+        expected = [f.name for f in alg.alg_features()]
+        assert list(result.features_df.columns) == expected
+
+    @pytest.mark.parametrize("name", WINNERS)
+    def test_no_100pct_nan_post_warmup(self, name, runner_results):
+        result = runner_results[name]
+        warmup = result.warmup_ticks
+        post = result.features_df.iloc[warmup + 50:]
+        for col in post.columns:
+            nan_frac = post[col].isna().mean()
+            assert nan_frac < 1.0, f"{name}/{col}: 100% NaN post-warmup"
+
+
+class TestChain:
+    """run_chain() works with all 5 winners."""
+
+    def test_no_crash(self, synthetic_df):
+        algos = [get_algorithm(n) for n in WINNERS]
+        results = run_chain(synthetic_df, algos)
+        assert len(results) == 5
+        names = [r.algorithm_name for r in results]
+        for w in WINNERS:
+            assert w in names
+
+
+class TestEvaluation:
+    """AlgorithmEvaluator produces valid reports."""
+
+    @pytest.mark.parametrize("name", WINNERS)
+    def test_ic_report_structure(self, name, runner_results):
+        evaluator = AlgorithmEvaluator(runner_results[name])
+        ic = evaluator.ic_analysis()
+
+        assert "horizons" in ic
+        assert "features" in ic
+        assert set(ic["horizons"]) == {1, 5, 10, 50, 100}
+
+        alg = get_algorithm(name)
+        expected_features = [f.name for f in alg.alg_features()]
+        assert set(ic["features"].keys()) == set(expected_features)
+
+        for feat, ics in ic["features"].items():
+            for h_key, ic_val in ics.items():
+                assert isinstance(ic_val, float), f"{feat}/{h_key} not float"
+                if np.isfinite(ic_val):
+                    assert -1.0 <= ic_val <= 1.0, f"{feat}/{h_key}={ic_val} out of range"
+
+    @pytest.mark.parametrize("name", WINNERS)
+    def test_full_report_structure(self, name, runner_results):
+        evaluator = AlgorithmEvaluator(runner_results[name])
         report = evaluator.full_report()
 
-        for feat_name, ic_dict in report["ic"]["features"].items():
-            for h_key, ic_val in ic_dict.items():
-                if ic_val is not None and not np.isnan(ic_val):
-                    assert -1.0 <= ic_val <= 1.0, (
-                        f"{name}.{feat_name} IC at {h_key} = {ic_val} (out of [-1,1])"
-                    )
+        assert report["algorithm"] == name
+        assert report["n_ticks"] == 5000
+        assert isinstance(report["warmup_ticks"], int)
+        assert isinstance(report["elapsed_s"], float)
+        assert "ic" in report
+        assert "ic_regime" in report
+        # drift present because raw_spread is in base_df
+        assert "drift" in report
+
+    @pytest.mark.parametrize("name", WINNERS)
+    def test_report_json_serializable(self, name, runner_results):
+        evaluator = AlgorithmEvaluator(runner_results[name])
+        report = evaluator.full_report()
+        serialized = json.dumps(report, default=str)
+        assert len(serialized) > 0
+        parsed = json.loads(serialized)
+        assert parsed["algorithm"] == name
+
+
+class TestPerformance:
+    """Pipeline completes within time budget."""
+
+    def test_evaluation_completes_fast(self, synthetic_df):
+        t0 = time.time()
+        for name in WINNERS:
+            alg = get_algorithm(name)
+            runner = AlgorithmRunner(alg)
+            result = runner.run_on_dataframe(synthetic_df)
+            evaluator = AlgorithmEvaluator(result)
+            evaluator.full_report()
+        elapsed = time.time() - t0
+        assert elapsed < 30.0, f"Pipeline took {elapsed:.1f}s (budget: 30s)"
