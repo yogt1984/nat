@@ -297,6 +297,11 @@ See `docs/research/new/ml_specs/` for per-algorithm specifications.
 | 2 | `meta_labeling` | De Prado triple-barrier precision filter | Done (awaiting training) |
 | 3 | `regime_conditioned_lgbm` | Per-regime LightGBM ensemble | Done (awaiting training) |
 | 3 | `knn_retrieval` | Mahalanobis nearest-neighbor | Done |
+| 4 | `hmm_emissions` | HMM with Gaussian emissions | Deferred* |
+| 4 | `stacking_ensemble` | Ridge/LightGBM stacking | Deferred* |
+| 4 | `online_learner` | Online SGD adaptation wrapper | Deferred* |
+
+*Deferred algorithms are not scheduled. See `docs/research/new/ml_specs/DEFERRED_OVERVIEW.md` for trigger conditions.
 
 Developer guide: `docs/research/new/ml_specs/ML_DEVELOPER_GUIDE.md`
 
