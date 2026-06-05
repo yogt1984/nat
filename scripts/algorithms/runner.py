@@ -33,25 +33,62 @@ class AlgorithmRunner:
         self.algorithm = algorithm
 
     def run_on_dataframe(self, df: pd.DataFrame) -> AlgorithmResult:
-        """Run algorithm over a pre-loaded DataFrame."""
-        # Validate required columns
-        missing = [c for c in self.algorithm.required_columns() if c not in df.columns]
+        """Run algorithm over a pre-loaded DataFrame.
+
+        For bar-level algorithms (bar_level=True), tick data is aggregated
+        to bars before calling run_batch(). Results are forward-filled back
+        to tick-level index for downstream compatibility.
+        """
+        algo = self.algorithm
+
+        # Bar-level algorithms operate on aggregated bars, not raw ticks
+        if algo.bar_level and "timestamp_ns" in df.columns:
+            from cluster_pipeline.preprocess import aggregate_bars
+
+            bars = aggregate_bars(df, timeframe=algo.bar_timeframe)
+
+            # Validate required columns against bar-aggregated names
+            missing = [c for c in algo.required_columns() if c not in bars.columns]
+            if missing:
+                raise ValueError(
+                    f"Algorithm '{algo.name()}' requires bar columns {missing} "
+                    f"not found after aggregation. Available: {list(bars.columns[:20])}..."
+                )
+
+            t0 = time.time()
+            features_df = algo.run_batch(bars)
+            elapsed = time.time() - t0
+
+            # Forward-fill bar results to tick-level index
+            features_df = features_df.reindex(df.index, method="ffill")
+
+            return AlgorithmResult(
+                algorithm_name=algo.name(),
+                features_df=features_df,
+                base_df=df,
+                n_ticks=len(df),
+                warmup_ticks=algo.warmup,
+                elapsed_s=round(elapsed, 2),
+            )
+
+        # Tick-level algorithms (default path)
+        missing = [c for c in algo.required_columns() if c not in df.columns]
         if missing:
             raise ValueError(
-                f"Algorithm '{self.algorithm.name()}' requires columns {missing} "
+                f"Algorithm '{algo.name()}' requires columns {missing} "
                 f"not found in data. Available: {list(df.columns[:20])}..."
             )
 
         t0 = time.time()
-        features_df = self.algorithm.run_batch(df)
+        features_df = algo.run_batch(df)
         elapsed = time.time() - t0
 
         return AlgorithmResult(
-            algorithm_name=self.algorithm.name(),
+            algorithm_name=algo.name(),
             features_df=features_df,
             base_df=df,
             n_ticks=len(df),
-            warmup_ticks=self.algorithm.warmup,
+            warmup_ticks=algo.warmup,
             elapsed_s=round(elapsed, 2),
         )
 
