@@ -53,6 +53,58 @@ jobs:
       - name: Test
         run: npm test
 
+  rust-bench:
+    name: Rust benchmarks (perf regression gate)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Restore benchmark baseline
+        uses: actions/cache@v4
+        with:
+          path: rust/target/criterion
+          key: criterion-baseline-${{ runner.os }}-${{ hashFiles('rust/**/Cargo.lock') }}
+          restore-keys: criterion-baseline-${{ runner.os }}-
+      - name: Run benchmarks
+        run: cargo bench --package ing -- --output-format=bencher 2>&1 | tee bench_output.txt
+      - name: Check for regression (>10%)
+        run: |
+          # Parse bencher output and check against max thresholds (ns)
+          # Thresholds set at ~2x measured values to catch real regressions
+          declare -A MAX_NS=(
+            ["feature_compute/baseline_empty"]=50000          # 50µs max
+            ["feature_compute/normal_10lvl_30trades"]=500000  # 500µs max
+            ["feature_compute/stress_10lvl_300trades"]=800000 # 800µs max (must stay under emission budget)
+            ["features_to_vec"]=5000                          # 5µs max
+          )
+          FAILED=0
+          while IFS= read -r line; do
+            if [[ "$line" =~ ^test[[:space:]]+(.*)[[:space:]]+\.\.\.[[:space:]]+bench:[[:space:]]+([0-9,]+)[[:space:]]ns/iter ]]; then
+              name="${BASH_REMATCH[1]}"
+              # Remove commas from number
+              ns="${BASH_REMATCH[2]//,/}"
+              if [[ -n "${MAX_NS[$name]+x}" ]]; then
+                max="${MAX_NS[$name]}"
+                if (( ns > max )); then
+                  echo "REGRESSION: $name = ${ns}ns > max ${max}ns"
+                  FAILED=1
+                else
+                  echo "OK: $name = ${ns}ns (max ${max}ns)"
+                fi
+              fi
+            fi
+          done < bench_output.txt
+          if (( FAILED )); then
+            echo "::error::Benchmark regression detected"
+            exit 1
+          fi
+
   python:
     name: Python tests
     runs-on: ubuntu-latest
