@@ -30,6 +30,7 @@ class EntropyMomentum(MicrostructureAlgorithm):
         self._exit_pct = exit_pct
         self._ema_alpha = ema_alpha
         self._entropy_buffer: list[float] = []
+        self._gate_buffer: list[float] = []
         self._ema_entropy: float = np.nan
         self._in_low_entropy: bool = False
 
@@ -94,9 +95,11 @@ class EntropyMomentum(MicrostructureAlgorithm):
             ent_norm = 0.5
         interaction = (1 - ent_norm) * momentum
 
-        # Predictability score: fraction of recent window in low-entropy regime
-        arr = np.array(self._entropy_buffer)
-        predictability = float(np.mean(arr < exit_thresh))
+        # Predictability score: rolling fraction of time in low-entropy regime
+        self._gate_buffer.append(1.0 if low_entropy else 0.0)
+        if len(self._gate_buffer) > self._momentum_window:
+            self._gate_buffer.pop(0)
+        predictability = float(np.mean(self._gate_buffer))
 
         return {
             "alg_entropy_gated_momentum": gated_momentum,
@@ -106,6 +109,7 @@ class EntropyMomentum(MicrostructureAlgorithm):
 
     def reset(self) -> None:
         self._entropy_buffer.clear()
+        self._gate_buffer.clear()
         self._ema_entropy = np.nan
         self._in_low_entropy = False
 

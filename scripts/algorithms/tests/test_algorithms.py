@@ -164,19 +164,20 @@ class TestStepBatchConsistency:
     """step() loop should approximately match run_batch()."""
 
     def test_step_vs_batch(self, algorithm_name):
-        # Skip algorithms with known step/batch divergence due to EMA initialization,
-        # rolling window boundary effects, or meta-algorithm non-determinism
+        # Skip algorithms with known step/batch divergence due to sequential
+        # state resets (regime_gated combines multiple sub-algorithms)
         skip_list = {"regime_gated"}
         if algorithm_name in skip_list:
-            pytest.skip("Known step/batch divergence due to implementation strategy")
-
-        # Columns where ratio of two divergent quantities amplifies differences
-        ratio_skip_cols = {
-            "alg_predictability_score",  # rolling mean of binary, boundary-sensitive
-        }
+            pytest.skip("Known step/batch divergence due to sequential state resets")
 
         alg = get_algorithm(algorithm_name)
-        n = 200
+
+        # Scale data length to warmup: need at least warmup+100 comparison points
+        n = max(alg.warmup * 2 + 100, 500)
+        # Cap at reasonable size for step-loop performance
+        if n > 8000:
+            pytest.skip(f"Warmup ({alg.warmup}) too large for step-loop test")
+
         df = make_synthetic_ticks(n, alg.required_columns())
 
         # run_batch
@@ -197,9 +198,6 @@ class TestStepBatchConsistency:
             pytest.skip("Warmup exceeds test data length")
 
         for col in batch_result.columns:
-            if col in ratio_skip_cols:
-                continue
-
             batch_vals = batch_result[col].values[warmup:]
             step_vals = step_df[col].values[warmup:]
 
