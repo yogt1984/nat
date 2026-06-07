@@ -63,7 +63,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      - "3010:3000"
     environment:
       - REDIS_URL=redis://redis:6379
       - NAT_API_HOST=0.0.0.0
