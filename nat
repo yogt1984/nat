@@ -2627,7 +2627,7 @@ def cmd_docker_up(args):
     services = " ".join(getattr(args, 'services', None) or [])
     _exec(f"docker compose up -d {services}".strip())
     print("\n  Ingestor:   http://localhost:8080")
-    print("  API:        http://localhost:3000")
+    print("  API:        http://localhost:3010")
     print("  Grafana:    http://localhost:3002")
     print("  Prometheus: http://localhost:9090")
     print("  Redis:      localhost:6379\n")
