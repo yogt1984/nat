@@ -3051,7 +3051,13 @@ def cmd_help(args=None):
               serving|eamm|scan|viz]
 
   {BOLD}Docker{W}
-    nat docker [build|up|down|logs]
+    nat docker build [-v] [svc...]  Build images (--verbose for full output)
+    nat docker up [svc...]          Start services
+    nat docker down                 Stop all services
+    nat docker ps                   Show running services
+    nat docker logs [svc...]        Tail service logs
+    nat docker stack [--no-build]   Build + start + verify full stack
+    nat docker smoke                Quick health check of running stack
 
   {BOLD}15-Minute Experiment{W}
     nat 15m [--duration SEC]   Ingest -> validate -> profile -> cluster -> report
