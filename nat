@@ -2743,6 +2743,7 @@ def cmd_docker_smoke(args):
         "Grafana":    "http://localhost:3002/api/health",
     }
     ok = 0
+    total = len(endpoints) + 2  # +2 for postgres and caddy
     for name, url in endpoints.items():
         try:
             r = subprocess.run(["curl", "-sf", "-o", "/dev/null", "-w", "%{http_code}", url],
@@ -2754,9 +2755,31 @@ def cmd_docker_smoke(args):
                 _p("x", R, f"{name:12s} HTTP {r.stdout.strip()}")
         except Exception:
             _p("x", R, f"{name:12s} unreachable")
+    # PostgreSQL check
+    try:
+        r = subprocess.run(["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "nat"],
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            _p("*", G, f"{'PostgreSQL':12s} OK")
+            ok += 1
+        else:
+            _p("x", R, f"{'PostgreSQL':12s} not ready")
+    except Exception:
+        _p("x", R, f"{'PostgreSQL':12s} unreachable")
+    # Caddy check
+    try:
+        r = subprocess.run(["curl", "-sf", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:80"],
+                           capture_output=True, text=True, timeout=5)
+        if r.stdout.strip() in ("200", "301", "308"):
+            _p("*", G, f"{'Caddy':12s} OK")
+            ok += 1
+        else:
+            _p("x", R, f"{'Caddy':12s} HTTP {r.stdout.strip()}")
+    except Exception:
+        _p("x", R, f"{'Caddy':12s} unreachable")
     print()
-    _p("*" if ok == len(endpoints) else "!", G if ok == len(endpoints) else Y,
-       f"{ok}/{len(endpoints)} services healthy")
+    _p("*" if ok == total else "!", G if ok == total else Y,
+       f"{ok}/{total} services healthy")
 
 
 # ── Deploy commands ──────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 # 1.4 Testing & Verification
 
-## Status: IN_PROGRESS
+## Status: DONE
 
 ## Goal
 

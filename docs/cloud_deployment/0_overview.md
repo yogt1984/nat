@@ -28,8 +28,8 @@ Tier 1 (Observe) ──► Tier 2 (Swarm) ──► Tier 3 (Evolve)
 |------|-------------|--------|
 | [1_1](1_1_docker_stack.md) | Docker Compose stack + Dockerfiles | DONE |
 | [1_2](1_2_prometheus_grafana.md) | Prometheus metrics + Grafana dashboards | DONE |
-| [1_3](1_3_production_hardening.md) | Caddy HTTPS, PostgreSQL, auth, backup | NOT_STARTED |
-| [1_4](1_4_testing_verification.md) | Build test, endpoint smoke tests | IN_PROGRESS |
+| [1_3](1_3_production_hardening.md) | Caddy HTTPS, PostgreSQL, auth, backup | DONE |
+| [1_4](1_4_testing_verification.md) | Build test, endpoint smoke tests | DONE |
 
 ### Tier 2: Config Swarm
 
