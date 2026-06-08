@@ -44,8 +44,9 @@ def test_run_batch_with_injected_model(bars):
     """Inject a trained LogReg, run_batch() returns varied signals in [-1,1]."""
     algo = MomentumContinuation()
 
-    # Train a model on the bars themselves
-    X = bars[list(algo.FEATURE_COLS)].values
+    # Train a model on the bars themselves (fill optional cols with 0.0)
+    bars_feat = bars.reindex(columns=algo.FEATURE_COLS, fill_value=0.0)
+    X = bars_feat.values
     fwd = bars["raw_midprice_mean"].shift(-20) / bars["raw_midprice_mean"] - 1
     y = (fwd > 0).astype(float).values
     valid = np.isfinite(X).all(axis=1) & np.isfinite(y)

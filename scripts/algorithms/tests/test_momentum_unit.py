@@ -17,8 +17,9 @@ def algo():
 def algo_with_model():
     """Create algorithm with an injected minimal LogisticRegression."""
     algo = MomentumContinuation()
+    n_features = len(algo.FEATURE_COLS)  # 7 base + 1 optional = 8
     rng = np.random.default_rng(42)
-    X = rng.standard_normal((100, 7))
+    X = rng.standard_normal((100, n_features))
     y = (X[:, 0] > 0).astype(float)  # Simple rule based on first feature
     scaler = StandardScaler()
     X_s = scaler.fit_transform(X)
@@ -30,7 +31,7 @@ def algo_with_model():
 
 
 def _make_tick(ent: float = 0.5, **overrides) -> dict:
-    """Create a tick dict with all 7 required features."""
+    """Create a tick dict with all required + optional features."""
     tick = {
         "ent_tick_1m_mean": ent,
         "ent_permutation_returns_16_mean": 0.5,
@@ -39,6 +40,7 @@ def _make_tick(ent: float = 0.5, **overrides) -> dict:
         "whale_net_flow_4h_sum": 100.0,
         "regime_accumulation_score_mean": 0.6,
         "vol_returns_5m_last": 0.001,
+        "alg_conv_best_score_max": 0.0,  # optional, defaults to 0.0
     }
     tick.update(overrides)
     return tick
@@ -68,8 +70,9 @@ def test_dead_zone_zeroes_signal():
     algo = MomentumContinuation(p_long=0.6, p_short=0.4)
 
     # Train a dummy model then zero out coefficients -> always predicts 0.5
+    n_features = len(algo.FEATURE_COLS)
     rng = np.random.default_rng(42)
-    X = rng.standard_normal((50, 7))
+    X = rng.standard_normal((50, n_features))
     y = rng.integers(0, 2, 50).astype(float)
     model = LogisticRegression(C=1.0, max_iter=200)
     model.fit(X, y)

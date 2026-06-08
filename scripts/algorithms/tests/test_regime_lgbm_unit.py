@@ -93,12 +93,12 @@ def test_missing_regime_label():
     assert np.isfinite(r["alg_rlgbm_predicted_return"])
 
 
-def test_no_models_returns_nan(rlgbm):
-    """No models loaded: all outputs NaN."""
+def test_no_models_returns_neutral(rlgbm):
+    """No models loaded: neutral output (0.0 signal/return), regime computed."""
     r = rlgbm.step(_make_tick())
-    assert np.isnan(r["alg_rlgbm_signal"])
-    assert np.isnan(r["alg_rlgbm_predicted_return"])
-    assert np.isnan(r["alg_rlgbm_regime_used"])
+    assert r["alg_rlgbm_signal"] == 0.0
+    assert r["alg_rlgbm_predicted_return"] == 0.0
+    assert np.isfinite(r["alg_rlgbm_regime_used"])
 
 
 def test_signal_range():

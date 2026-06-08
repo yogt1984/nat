@@ -107,12 +107,12 @@ def test_signal_range():
             assert -1.0 <= sig <= 1.0, f"Signal out of range: {sig}"
 
 
-def test_no_model_returns_nan_for_signal(mrd):
-    """No model: signal=NaN, probability=NaN, but zscore and gate computed."""
+def test_no_model_returns_neutral_for_signal(mrd):
+    """No model: signal=0.0, probability=0.5 (neutral), zscore and gate computed."""
     r = mrd.step(_make_tick(ent_tick_1m_mean=0.80))
 
-    assert np.isnan(r["alg_mr_signal"])
-    assert np.isnan(r["alg_mr_probability"])
+    assert r["alg_mr_signal"] == 0.0
+    assert r["alg_mr_probability"] == 0.5
     assert np.isfinite(r["alg_mr_zscore"])
     assert r["alg_mr_entropy_gate"] == 1.0
 

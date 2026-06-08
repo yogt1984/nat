@@ -122,11 +122,11 @@ class MeanReversionDetector(MicrostructureAlgorithm):
         # Entropy gate INVERTED: active when entropy HIGH (ranging)
         gate = 1.0 if entropy > self._entropy_threshold else 0.0
 
-        # No model -> NaN for signal/prob, but zscore and gate computed
+        # No model -> neutral defaults for signal/prob, zscore and gate computed
         if self._model is None:
             return {
-                "alg_mr_signal": np.nan,
-                "alg_mr_probability": np.nan,
+                "alg_mr_signal": 0.0,
+                "alg_mr_probability": 0.5,
                 "alg_mr_zscore": zscore,
                 "alg_mr_entropy_gate": gate,
             }
@@ -193,9 +193,10 @@ class MeanReversionDetector(MicrostructureAlgorithm):
         ent = df["ent_tick_1m_mean"].values
         gates = np.where(valid, np.where(ent > self._entropy_threshold, 1.0, 0.0), np.nan)
 
-        # No model -> NaN for signal/prob
+        # No model -> neutral defaults for signal/prob
         if self._model is None or not np.any(valid):
-            pass  # signals and probs stay NaN
+            signals = np.where(valid, 0.0, np.nan)
+            probs = np.where(valid, 0.5, np.nan)
         else:
             # Model inference on valid rows
             X_valid = X[valid]
