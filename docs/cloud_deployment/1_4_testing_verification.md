@@ -42,87 +42,53 @@ ports:
   - "3010:3000"  # avoid conflict
 ```
 
-### Step 3: Endpoint Smoke Tests
+### Step 3: Automated Smoke Test
 
-Run each curl and verify expected response:
+All endpoint checks are automated via `nat docker smoke`:
 
 ```bash
-# 1. Ingestor dashboard
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8080
-# Expected: 200
-
-# 2. API health
-curl -s http://localhost:3000/health
-# Expected: JSON with status ok
-
-# 3. Prometheus targets
-curl -s http://localhost:9090/api/v1/targets | python3 -m json.tool
-# Expected: activeTargets with health="up" for nat-ingestor
-
-# 4. Grafana health
-curl -s http://localhost:3002/api/health
-# Expected: {"database":"ok"}
-
-# 5. Grafana dashboard exists
-curl -s http://localhost:3002/api/dashboards/uid/nat-overview \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['dashboard']['title'])"
-# Expected: "NAT Overview"
+nat docker smoke
 ```
+
+Checks 6 services:
+- **Ingestor** — HTTP 200 on :8080
+- **API** — HTTP 200 on :3010/health
+- **Prometheus** — HTTP 200 on :9090/api/v1/targets
+- **Grafana** — HTTP 200 on :3002/api/health
+- **PostgreSQL** — `pg_isready -U nat`
+- **Caddy** — HTTP 200/301 on :80
 
 ### Step 4: Metrics Flow Verification
 
-Wait 1-2 minutes after startup, then:
+The `nat docker stack` command verifies metrics automatically:
 
 ```bash
-# Check Prometheus has scraped metrics
-curl -s 'http://localhost:9090/api/v1/query?query=ing_features_emitted_total' \
-  | python3 -m json.tool
-# Expected: result array with data points
-
-# Check latency histograms exist
-curl -s 'http://localhost:9090/api/v1/query?query=ing_feature_latency_seconds_bucket' \
-  | python3 -m json.tool
-# Expected: non-empty result
+nat docker stack --no-build
+# Output includes: "Metrics  Prometheus scraping 3 series"
 ```
 
-### Step 5: Visual Check
+Manual check if needed:
+```bash
+curl -s 'http://localhost:9090/api/v1/query?query=ing_features_emitted_total' \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['data']['result']), 'series')"
+# Expected: 3 series (BTC, ETH, SOL)
+```
 
-Open in browser:
-- http://localhost:3002 → Grafana → "NAT Overview" dashboard
-- Verify panels show live data (non-empty graphs)
-- Check emission rate panel shows per-symbol lines
-- Check latency panel shows p50/p95/p99 curves
-
-### Step 6: Teardown
+### Step 5: Teardown
 
 ```bash
 docker compose down
 docker compose down -v  # also remove volumes (optional)
 ```
 
-## Automated Smoke Script (future)
+## Resolved Issues
 
-```bash
-#!/bin/bash
-# scripts/test_docker_smoke.sh
-set -e
-docker compose up -d
-sleep 30  # wait for startup + first scrape
-for url in "localhost:8080" "localhost:3000/health" \
-           "localhost:9090/api/v1/targets" "localhost:3002/api/health"; do
-  status=$(curl -s -o /dev/null -w "%{http_code}" "http://$url")
-  [ "$status" = "200" ] || { echo "FAIL: $url ($status)"; exit 1; }
-done
-echo "ALL PASS"
-docker compose down
-```
-
-## Current Blockers
-
-- Docker build in progress (first Rust compile, ~10 min)
-- Port 3000 conflict with open-webui on su-35
+- **Rust 1.75 → 1.89:** Cargo.lock v4 requires Rust >= 1.78. Fixed in all Dockerfiles.
+- **Build context 1.5GB → 53MB:** Added `.dockerignore` excluding `rust/target/`, `data/`, `web/`, `exploration/`.
+- **Port 3000 conflict:** API remapped to 3010 (open-webui uses 3000 on su-35).
 
 ## Files Modified
 
-- `README.md` — Docker observability section added (uncommitted)
-- `CLAUDE.md` — Docker + env vars updated (uncommitted)
+- `README.md` — Docker observability section added
+- `CLAUDE.md` — Docker services + env vars updated
+- `nat` — `docker stack`, `docker smoke` commands added
