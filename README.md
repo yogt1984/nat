@@ -12,8 +12,9 @@
      ╔══════════════════════════════════════════════════════════════╗            
      ║  Autonomous Alpha Discovery for Crypto Perpetual Futures    ║            
      ║  ─────────────────────────────────────────────────────────── ║            
-     ║  209 features · 100ms resolution · 33 algorithms            ║            
+     ║  236 features · 100ms resolution · 25 algorithms             ║            
      ║  4 research agents · 5-gate replication · FDR control       ║            
+     ║  Config swarm · Optuna evolution · ML pipeline (7 algos)    ║            
      ║  From order book to deployment — zero human intervention    ║            
      ╚══════════════════════════════════════════════════════════════╝            
                                                                                 
@@ -25,7 +26,7 @@
               └─────────────── feedback loop ───────────────┘                   
 ```
 
-NAT is a fully autonomous quantitative research platform that discovers tradeable alpha signals from [Hyperliquid](https://hyperliquid.xyz) perpetual futures microstructure. A Rust ingestor computes 209 order book features at 100ms tick resolution; four autonomous Python agents generate hypotheses, test them through a 5-gate replication protocol with FDR control, and register validated signals — without human intervention.
+NAT is a fully autonomous quantitative research platform that discovers tradeable alpha signals from [Hyperliquid](https://hyperliquid.xyz) perpetual futures microstructure. A Rust ingestor computes 236 order book features at 100ms tick resolution; four autonomous Python agents generate hypotheses, test them through a 5-gate replication protocol with FDR control, and register validated signals — without human intervention. A three-tier cloud deployment architecture automates parameter optimization via config swarm evaluation and Optuna-driven evolutionary search (CMA-ES/NSGA-II) with walk-forward guard rails.
 
 ---
 
@@ -34,8 +35,8 @@ NAT is a fully autonomous quantitative research platform that discovers tradeabl
 - [Quick Start](#quick-start)
 - [Architecture](#architecture)
 - [Data Ingestion Layer (Rust)](#data-ingestion-layer-rust)
-- [Feature Vector (209 Dimensions)](#feature-vector-209-dimensions)
-- [Microstructure Algorithm Library (29 Algorithms)](#microstructure-algorithm-library-29-algorithms)
+- [Feature Vector (236 Dimensions)](#feature-vector-236-dimensions)
+- [Microstructure Algorithm Library (25 Algorithms)](#microstructure-algorithm-library-25-algorithms)
 - [Autonomous Research Agents](#autonomous-research-agents)
 - [Alpha Pipeline](#alpha-pipeline)
 - [Information-Theoretic Engine](#information-theoretic-engine)
@@ -45,7 +46,8 @@ NAT is a fully autonomous quantitative research platform that discovers tradeabl
 - [Web Dashboard & API](#web-dashboard--api)
 - [Polymarket Integration](#polymarket-integration)
 - [Entropy-Adaptive Market Making (EAMM)](#entropy-adaptive-market-making-eamm)
-- [The `nat` CLI (163+ Commands)](#the-nat-cli-163-commands)
+- [Config Swarm & Evolutionary Optimization](#config-swarm--evolutionary-optimization)
+- [The `nat` CLI (251 Commands)](#the-nat-cli-251-commands)
 - [Configuration](#configuration)
 - [Testing](#testing)
 - [Docker](#docker)
@@ -98,7 +100,7 @@ make run                # foreground ingestor (dev mode)
 make run_and_serve      # ingestor + dashboard on :8080
 make test               # Rust unit tests
 make test_agent         # 350 agent tests (unit + integration)
-pytest scripts/tests/   # Python test suite (68 test files)
+pytest scripts/tests/   # Python test suite (70+ test files)
 make validate           # live API validation (4 binaries)
 ```
 
@@ -156,23 +158,24 @@ make validate           # live API validation (4 binaries)
 | Layer | Technology |
 |-------|-----------|
 | Data ingestion | **Rust** (tokio, Arrow, Parquet, Axum) |
-| Feature computation | **Rust** (209 features, 15 categories, 100ms emission) |
+| Feature computation | **Rust** (236 features, 15 categories, 100ms emission) |
 | Research agents | **Python** (autonomous daemons, SQLite state, FDR control) |
 | ML & backtesting | **Python** (LightGBM, scikit-learn, pandas, numpy) |
+| Optimization | **Python** (Optuna CMA-ES/TPE/NSGA-II, walk-forward OOS) |
 | API server | **Rust** (Axum REST/WebSocket, port 3000) |
 | Web dashboard | **Next.js** (TypeScript, Tailwind, React) |
 | Agent dashboard | **Python** (stdlib HTTP server, port 8060) |
 | Messaging | **Redis** (Pub/Sub + Streams, feature distribution, alerts) |
-| State persistence | **SQLite** (hypothesis queue, agent state) + **JSON** (research output) |
+| State persistence | **SQLite** (hypothesis queue, agent state) + **PostgreSQL** (Optuna studies) + **JSON** |
 | Alerting | **Telegram** (bot API for alerts) |
 | Process management | **tmux** (sessions with watchdog auto-restart via cron) |
-| Containerization | **Docker** (docker-compose: redis, ingestor, api, alerts, web) |
+| Containerization | **Docker** (docker-compose: redis, ingestor, api, postgres, optuna, grafana, caddy) |
 
 ---
 
 ## Data Ingestion Layer (Rust)
 
-The Rust ingestor (`rust/ing/`) subscribes to Hyperliquid L2 WebSocket and computes 209 features at 100ms resolution for BTC, ETH, and SOL.
+The Rust ingestor (`rust/ing/`) subscribes to Hyperliquid L2 WebSocket and computes 236 features at 100ms resolution for BTC, ETH, and SOL.
 
 ```
 Hyperliquid WebSocket ──▶ OrderBook + TradeBuffer + MarketContext
@@ -199,7 +202,7 @@ nat run show BTC 10             # real-time feature display
 
 ---
 
-## Feature Vector (209 Dimensions)
+## Feature Vector (236 Dimensions)
 
 | # | Category | Count | Prefix | Key Features | Reference |
 |---|----------|-------|--------|-------------|-----------|
@@ -219,14 +222,14 @@ nat run show BTC 10             # real-time feature display
 | 14 | **Regime** | 20 | `regime_` | absorption, divergence, churn, range position | Optional |
 | 15 | **GMM** | 8 | `prob_` | 5-state posteriors, confidence, regime entropy | Optional |
 
-138 base features always computed. 71 optional features NaN-padded when absent. Full manifest with formulas: [`FEATURES.md`](FEATURES.md).
+138 base features always computed. 98 optional features NaN-padded when absent. Full manifest with formulas: [`FEATURES.md`](FEATURES.md).
 
 ### Feature Engineering Contract
 
 ```
-Features::to_vec()    → always returns exactly 209 elements
+Features::to_vec()    → always returns exactly 236 elements
 Features::names_all() → matching column names (Parquet schema source)
-Features::count_all() → 209
+Features::count_all() → 236
 ```
 
 When adding a new feature category:
@@ -237,9 +240,9 @@ When adding a new feature category:
 
 ---
 
-## Microstructure Algorithm Library (29 Algorithms)
+## Microstructure Algorithm Library (25 Algorithms)
 
-NAT includes 29 configurable microstructure algorithms that compute derived signals from the 209-dimensional base feature vector. Each algorithm implements the `MicrostructureAlgorithm` interface.
+NAT includes 25 configurable microstructure algorithms that compute derived signals from the 236-dimensional base feature vector. Each algorithm implements the `MicrostructureAlgorithm` interface.
 
 ```bash
 nat algorithm list                              # all algorithms and features
@@ -970,9 +973,64 @@ nat eamm backtest                      # backtesting
 
 ---
 
-## The `nat` CLI (163+ Commands)
+## Config Swarm & Evolutionary Optimization
 
-`nat` is a unified research terminal (~4,400 lines) that replaces the Makefile for production use. All commands follow the pattern `nat <command> [subcommand] [flags]`.
+NAT includes a three-tier cloud deployment architecture for automated parameter optimization:
+
+### Tier 1: Continuous Cloud + Observability
+
+Docker stack with Prometheus metrics (5s scrape, 90d retention), Grafana dashboards, Caddy HTTPS reverse proxy, PostgreSQL state persistence. All services health-checked.
+
+### Tier 2: Config Swarm
+
+Shared ingestor writes Parquet once; N evaluators read and score configs in parallel across a ~35-dimensional parameter space.
+
+```bash
+nat swarm run --instances 8          # parallel config evaluation
+nat swarm status                     # running evaluations
+nat swarm results                    # ranked fitness table
+nat swarm best                       # top config
+nat swarm generate                   # sample new config
+```
+
+| Component | File | Function |
+|-----------|------|----------|
+| `parquet_reader.py` | Data loading | Time-windowed reads from latest date |
+| `config_generator.py` | Sampling | Random, grid, or Optuna trial generation |
+| `evaluator.py` | Scoring | 5 algorithms → ensemble → fitness (Sharpe, IC, DD) |
+| `orchestrator.py` | Orchestration | ProcessPoolExecutor, ranking, export |
+
+Config: `config/swarm_ranges.toml` (15 algo + 5 ensemble + 8 trading + 7 feature selection params).
+
+### Tier 3: Evolutionary Optimization (Optuna)
+
+Optuna-based optimizer with CMA-ES (continuous 35D), TPE (mixed), and NSGA-II (multi-objective) samplers. Walk-forward train/test split with overfit detection guard rails.
+
+```bash
+nat evolve start --trials 5000 --sampler cma    # launch optimization
+nat evolve start --sampler nsga2                # multi-objective Pareto
+nat evolve status                                # trial count, best Sharpe
+nat evolve best --top 5                          # top configs
+nat evolve pareto                                # Pareto front (NSGA-II)
+nat evolve export                                # export best config to TOML
+```
+
+**Guard Rails:**
+- Walk-forward OOS evaluation (train/test never overlap)
+- IS/OOS overfit detection (ratio > 3.0 triggers penalty)
+- Deflated Sharpe ratio (Bailey & Lopez de Prado, 2014)
+- Hard constraints: signal count > 50/day, turnover < 100/day, OOS Sharpe > 0
+- MedianPruner for early stopping of unpromising trials
+
+**Multi-Objective (NSGA-II):** Produces a Pareto front optimizing Sharpe (maximize), drawdown (minimize), and IC (maximize) simultaneously. User selects operating point based on risk appetite.
+
+**Distributed:** SQLite for single-machine, PostgreSQL for multi-machine studies. Optuna dashboard at http://localhost:8070.
+
+---
+
+## The `nat` CLI (251 Commands)
+
+`nat` is a unified research terminal (~5,000 lines) that replaces the Makefile for production use. All commands follow the pattern `nat <command> [subcommand] [flags]`.
 
 ### Command Reference
 
@@ -1006,9 +1064,17 @@ nat macro [--symbol SYM]                 # macro regime analysis
 nat kalman analysis [--symbol SYM]       # Kalman filter analysis
 ```
 
+#### Swarm & Evolve
+```bash
+nat swarm run [--instances N]            # parallel config evaluation
+nat swarm {status,results,best,generate} # swarm management
+nat evolve start [--trials N --sampler cma|tpe|nsga2]
+nat evolve {status,best,pareto,export}   # optimization management
+```
+
 #### Algorithms
 ```bash
-nat algorithm list                       # list all 27 algorithms
+nat algorithm list                       # list all 25 algorithms
 nat algorithm evaluate {--all|--algorithm NAME}
 nat algorithm config                     # TOML config
 nat backtest algorithm --algorithm NAME --symbol SYM
@@ -1102,6 +1168,8 @@ nat help                                 # usage help
 | `config/pipeline.toml` | Pipeline orchestration: ingestion duration, analysis thresholds |
 | `config/discovery.toml` | Discovery orchestrator: sweep config, training, backtesting |
 | `config/algorithms.toml` | Algorithm parameters: per-algorithm constructor kwargs |
+| `config/swarm_ranges.toml` | Swarm parameter ranges (~35D: algo, ensemble, trading, feature selection) |
+| `config/costs.toml` | Fee parameters: taker/maker bps, slippage (single source of truth) |
 | `config/it_engine.toml` | IT engine: buffer size, KSG k, horizons, cost thresholds |
 | `config/kalman.toml` | Kalman filter parameters |
 | `config/hypothesis_testing.toml` | Hypothesis test parameters (H1-H5) |
@@ -1129,11 +1197,16 @@ make test_verbose                       # with --nocapture
 cd rust && cargo test -- test_name      # single test
 
 # Python
-pytest scripts/tests/                   # full suite (68 test files)
+pytest scripts/tests/                   # full suite (70+ test files)
+pytest scripts/algorithms/tests/ -v     # 600+ algorithm tests (unit + integration + smoke)
 make test_agent                         # 350 agent tests (unit + integration + logging + research output)
 make test_pipeline                      # pipeline state machine
 make test_dashboard                     # dashboard endpoints
 make test_eamm                          # EAMM module
+
+# Swarm & Evolve
+pytest scripts/tests/test_tier3_optuna.py -v    # 38 Optuna optimizer tests
+pytest scripts/tests/test_nat_cli.py::TestEvolve # 9 evolve CLI tests
 
 # Validation
 make validate                           # live API validation (4 binaries against Hyperliquid)
@@ -1198,6 +1271,9 @@ make docker_logs                       # tail logs
 | **web** | 3001 | Next.js frontend (depends on api) |
 | **prometheus** | 9090 | Metrics collection (90-day retention) |
 | **grafana** | 3002 | Pre-configured dashboards (anonymous access) |
+| **postgres** | 5432 | State persistence + Optuna study storage |
+| **optuna-dashboard** | 8070 | Live optimization history, Pareto fronts |
+| **caddy** | 80/443 | HTTPS reverse proxy with auto-TLS |
 
 ### Observability
 
@@ -1212,6 +1288,7 @@ The Docker stack includes Prometheus + Grafana for production monitoring.
 **Access:**
 - Grafana: http://localhost:3002 (no login required, "NAT Overview" dashboard auto-provisioned)
 - Prometheus: http://localhost:9090
+- Optuna Dashboard: http://localhost:8070 (optimization history, parameter importance, Pareto fronts)
 
 **Environment variables:**
 - `ING_PROMETHEUS_ADDR` — bind address for metrics endpoint (e.g. `0.0.0.0:9090`)
@@ -1239,7 +1316,7 @@ The Rust ingestor runs on a separate machine (`su-35`) for low-latency data coll
 
 ```
 nat/
-├── nat                            # Unified CLI (4,400 lines, 163+ commands)
+├── nat                            # Unified CLI (~5,000 lines, 251 commands)
 ├── Makefile                       # Build/dev targets (compat, prefer nat CLI)
 ├── FEATURES.md                    # 209-feature manifest with formulas
 ├── CLAUDE.md                      # Architecture guide
@@ -1294,18 +1371,23 @@ nat/
 │   │   ├── paper_trader_surprise.py # Surprise signal paper trader
 │   │   └── deployer.py            # Live deployment executor
 │   │
-│   ├── algorithms/                # 27 microstructure algorithms
-│   │   ├── base.py                # MicrostructureAlgorithm ABC
+│   ├── algorithms/                # 25 microstructure algorithms
+│   │   ├── base.py                # MicrostructureAlgorithm ABC (bar_level support)
 │   │   ├── registry.py            # @register decorator, auto-discovery
-│   │   ├── runner.py              # AlgorithmRunner (parquet + dataframe)
+│   │   ├── runner.py              # AlgorithmRunner (tick + bar aggregation)
 │   │   ├── evaluate.py            # IC/drift evaluation harness
 │   │   ├── jump_detector.py       # Lee-Mykland jump test
 │   │   ├── funding_reversion.py   # Funding rate mean-reversion
 │   │   ├── optimal_entry.py       # SPRT on Kalman innovation
 │   │   ├── surprise_signal.py     # Entropy regime transition
-│   │   ├── hawkes_intensity.py    # Self-exciting process
-│   │   ├── convolver.py           # Kernel convolution discovery
-│   │   └── ...                    # 17 more algorithms
+│   │   ├── change_point_detector.py  # CUSUM + Bayesian OCD
+│   │   ├── momentum_continuation.py  # LogReg momentum (ML, bar_level)
+│   │   ├── mean_reversion_detector.py # LightGBM reversion (ML, bar_level)
+│   │   ├── meta_labeling.py       # De Prado meta-label filter (ML, bar_level)
+│   │   ├── regime_state_machine.py # 6-state classifier (bar_level)
+│   │   ├── regime_conditioned_lgbm.py # Per-regime LightGBM (ML, bar_level)
+│   │   ├── knn_retrieval.py       # Mahalanobis KNN (bar_level)
+│   │   └── ...                    # 9 more algorithms
 │   │
 │   ├── analysis/                  # Signal analysis (11 modules)
 │   ├── backtest/                  # Backtesting engine (8 modules)
@@ -1317,10 +1399,19 @@ nat/
 │   ├── experiment/                # Experiment monitoring (6 modules)
 │   ├── it_engine/                 # Information theory engine (6 modules)
 │   ├── polymarket/                # Prediction market integration (6 modules)
+│   ├── swarm/                     # Config swarm & optimization
+│   │   ├── parquet_reader.py      # Time-windowed data loading
+│   │   ├── config_generator.py    # 35D parameter space sampling
+│   │   ├── evaluator.py           # Fitness scoring (Sharpe, IC, DD)
+│   │   ├── orchestrator.py        # Parallel evaluation, ranking
+│   │   └── optuna_optimizer.py    # Optuna CMA-ES/TPE/NSGA-II optimizer
+│   │
 │   ├── utils/                     # Shared utilities
+│   │   ├── model_io.py            # ML model persistence (sklearn, LightGBM)
+│   │   └── online.py              # WelfordNormalizer, DerivativeBuffer
 │   ├── viz/                       # Visualization modules
 │   ├── workflows/                 # Validation workflows
-│   └── tests/                     # 68 test files
+│   └── tests/                     # 70+ test files
 │
 ├── web/                           # Next.js dashboard
 │   └── src/
@@ -1328,7 +1419,7 @@ nat/
 │       ├── components/            # UI (hypothesis table, IC chart, gate funnel, agent cards)
 │       └── lib/                   # API client + WebSocket
 │
-├── config/                        # TOML configuration (10 files)
+├── config/                        # TOML configuration (12 files)
 ├── data/                          # Output (parquet, state, research)
 ├── reports/                       # Generated reports & analysis
 ├── docs/                          # Architecture, research papers, specs
