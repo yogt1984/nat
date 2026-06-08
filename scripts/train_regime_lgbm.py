@@ -37,9 +37,9 @@ HORIZON_BARS = 20  # 20 * 5min = 100min forward return
 MIN_SAMPLES_REGIME = 500
 
 
-def load_bars(data_dir: str, symbol: str) -> pd.DataFrame:
+def load_bars(data_dir: str, symbol: str, start_date: str | None = None) -> pd.DataFrame:
     """Load parquet data and aggregate to 5-min bars."""
-    df = load_parquet(data_dir, symbols=[symbol], max_memory_mb=4000)
+    df = load_parquet(data_dir, symbols=[symbol], start_date=start_date, max_memory_mb=4000)
     print(f"Loaded {len(df):,} ticks for {symbol}")
     if len(df) < 1000:
         print(f"ERROR: Only {len(df)} ticks, need at least 1000")
@@ -163,12 +163,14 @@ def main():
     parser.add_argument("--embargo", type=int, default=100)
     parser.add_argument("--min-samples", type=int, default=MIN_SAMPLES_REGIME)
     parser.add_argument("--output-dir", default="models/regime_conditioned_lgbm")
+    parser.add_argument("--start-date", default=None,
+                        help="Earliest date to load (YYYY-MM-DD), limits memory")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     print(f"=== Training Regime-Conditioned LightGBM: {args.symbol} ===")
 
-    bars = load_bars(args.data_dir, args.symbol)
+    bars = load_bars(args.data_dir, args.symbol, start_date=args.start_date)
     bars = add_regime_labels(bars)
     fwd_returns = build_labels(bars)
 
@@ -189,8 +191,9 @@ def main():
         regime_ids = [r for r, g in REGIME_TO_GROUP.items() if g == group_name]
         mask = valid & bars["regime"].isin(regime_ids).values
 
-        # Check all feature columns exist
-        available = [c for c in feat_cols if c in bars.columns]
+        # Check all feature columns exist (exclude >50% NaN)
+        available = [c for c in feat_cols
+                     if c in bars.columns and bars[c].isna().mean() <= 0.5]
         if not available:
             print(f"\n  [{group_name}] No features available, skipping")
             continue
@@ -228,7 +231,8 @@ def main():
             save_lightgbm_model(model, meta, output_dir, model_filename=f"model_{group_name}.txt")
 
     # Train global fallback
-    available_global = [c for c in GLOBAL_FEATURES if c in bars.columns]
+    available_global = [c for c in GLOBAL_FEATURES
+                        if c in bars.columns and bars[c].isna().mean() <= 0.5]
     if available_global:
         bars_valid = bars[valid]
         X_global = bars_valid[available_global].values
