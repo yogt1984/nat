@@ -163,6 +163,8 @@ def main():
     parser.add_argument("--embargo", type=int, default=100, help="Embargo bars")
     parser.add_argument("--output-dir", default="models/meta_labeling",
                         help="Output directory for trained model")
+    parser.add_argument("--start-date", default=None,
+                        help="Earliest date to load (YYYY-MM-DD), limits memory")
     parser.add_argument("--dry-run", action="store_true", help="Evaluate only, don't save")
     args = parser.parse_args()
 
@@ -170,15 +172,16 @@ def main():
 
     # Build training data
     bars, labels, meta_features = build_meta_training_data(
-        args.data_dir, args.symbol
+        args.data_dir, args.symbol, start_date=args.start_date
     )
 
     if len(labels) < 500:
         print(f"ERROR: Only {len(labels)} valid samples, need at least 500")
         sys.exit(1)
 
-    # Use available meta features
-    available = [c for c in FEATURE_COLS if c in bars.columns]
+    # Use available meta features (exclude columns with >50% NaN)
+    available = [c for c in FEATURE_COLS
+                 if c in bars.columns and bars[c].isna().mean() <= 0.5]
     if not available:
         print("ERROR: No meta features available in bars")
         sys.exit(1)

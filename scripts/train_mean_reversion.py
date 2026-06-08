@@ -45,15 +45,16 @@ ZSCORE_COLS = ["raw_midprice_mean", "mf_ema_15m_last"]
 HORIZON_BARS = 20  # 20 * 5min = 100min forward return
 
 
-def load_bars(data_dir: str, symbol: str) -> pd.DataFrame:
+def load_bars(data_dir: str, symbol: str, start_date: str | None = None) -> pd.DataFrame:
     """Load parquet data and aggregate to 5-min bars."""
     raw_cols = [
         "timestamp_ns", "symbol", "raw_midprice", "raw_spread",
         "vol_returns_5m", "ent_tick_1m", "trend_hurst_300",
-        "imbalance_qty_l1", "toxic_vpin_50", "mf_ema_15m",
+        "imbalance_qty_l1", "toxic_vpin_50",
     ]
 
-    df = load_parquet(data_dir, symbols=[symbol], columns=raw_cols, max_memory_mb=4000)
+    df = load_parquet(data_dir, symbols=[symbol], columns=raw_cols,
+                      start_date=start_date, max_memory_mb=4000)
     print(f"Loaded {len(df):,} ticks for {symbol}")
 
     if len(df) < 1000:
@@ -62,6 +63,13 @@ def load_bars(data_dir: str, symbol: str) -> pd.DataFrame:
 
     bars = aggregate_bars(df, timeframe="5min")
     print(f"Aggregated to {len(bars):,} bars")
+
+    # Compute EMA locally if mf_ema_15m_last not available
+    if "mf_ema_15m_last" not in bars.columns or bars["mf_ema_15m_last"].isna().all():
+        span = 3  # 3 bars × 5min = 15min
+        bars["mf_ema_15m_last"] = bars["raw_midprice_mean"].ewm(span=span).mean()
+        print("Computed mf_ema_15m_last locally (ewm span=3)")
+
     return bars
 
 
@@ -281,6 +289,8 @@ def main():
     parser.add_argument("--embargo", type=int, default=100, help="Embargo bars between train/test")
     parser.add_argument("--output-dir", default="models/mean_reversion_detector",
                         help="Output directory for trained model")
+    parser.add_argument("--start-date", default=None,
+                        help="Earliest date to load (YYYY-MM-DD), limits memory")
     parser.add_argument("--dry-run", action="store_true", help="Evaluate only, don't save")
     args = parser.parse_args()
 
@@ -290,7 +300,7 @@ def main():
           f"n_splits={args.n_splits}, embargo={args.embargo}")
 
     # Load and build dataset
-    bars = load_bars(args.data_dir, args.symbol)
+    bars = load_bars(args.data_dir, args.symbol, start_date=args.start_date)
 
     # Check z-score columns exist
     for col in ZSCORE_COLS:

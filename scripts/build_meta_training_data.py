@@ -32,7 +32,7 @@ from algorithms.registry import get_algorithm
 # Base algorithms whose signals trigger meta-labeling
 BASE_ALGOS = [
     "jump_detector",
-    "3f_liquidity",
+    "weighted_ofi",
     "optimal_entry",
     "funding_reversion",
     "surprise_signal",
@@ -41,7 +41,7 @@ BASE_ALGOS = [
 # Primary signal column for each base algorithm
 BASE_SIGNAL_COLS = {
     "jump_detector": "alg_jd_signal",
-    "3f_liquidity": "alg_3f_signal",
+    "weighted_ofi": "alg_weighted_ofi",
     "optimal_entry": "alg_oe_signal",
     "funding_reversion": "alg_fr_signal",
     "surprise_signal": "alg_ss_signal",
@@ -121,6 +121,7 @@ def build_meta_training_data(
     stop_loss_bps: float = 10.0,
     max_holding_bars: int = 100,
     signal_threshold: float = 0.01,
+    start_date: str | None = None,
 ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
     """Build meta-labeling training data.
 
@@ -134,7 +135,7 @@ def build_meta_training_data(
         base_algos = BASE_ALGOS
 
     # Load raw ticks
-    df = load_parquet(data_dir, symbols=[symbol], max_memory_mb=4000)
+    df = load_parquet(data_dir, symbols=[symbol], start_date=start_date, max_memory_mb=4000)
     print(f"Loaded {len(df):,} ticks for {symbol}")
 
     if len(df) < 1000:
@@ -186,11 +187,15 @@ def build_meta_training_data(
         prices, profit_target_bps, stop_loss_bps, max_holding_bars
     )
 
-    # Build meta-feature matrix
-    available_meta = [c for c in META_FEATURE_COLS if c in bars.columns]
-    missing_meta = [c for c in META_FEATURE_COLS if c not in bars.columns]
-    if missing_meta:
-        print(f"WARNING: Missing meta features: {missing_meta}")
+    # Build meta-feature matrix (exclude columns missing or >50% NaN)
+    available_meta = []
+    for c in META_FEATURE_COLS:
+        if c not in bars.columns:
+            print(f"WARNING: Missing meta feature: {c}")
+        elif bars[c].isna().mean() > 0.5:
+            print(f"WARNING: Dropping meta feature {c} (NaN rate {bars[c].isna().mean():.1%})")
+        else:
+            available_meta.append(c)
 
     meta_features = bars[available_meta].values if available_meta else np.zeros((len(bars), 0))
 

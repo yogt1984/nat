@@ -46,7 +46,7 @@ FEATURE_COLS = [
 HORIZON_BARS = 20  # 20 * 5min = 100min forward return
 
 
-def load_bars(data_dir: str, symbol: str) -> pd.DataFrame:
+def load_bars(data_dir: str, symbol: str, start_date: str | None = None) -> pd.DataFrame:
     """Load parquet data and aggregate to 5-min bars."""
     base_cols = ["timestamp_ns", "symbol", "raw_midprice", "raw_spread"]
     # Feature columns needed (raw names before aggregation)
@@ -58,7 +58,8 @@ def load_bars(data_dir: str, symbol: str) -> pd.DataFrame:
     ]
     load_cols = list(set(base_cols + raw_cols))
 
-    df = load_parquet(data_dir, symbols=[symbol], columns=load_cols, max_memory_mb=4000)
+    df = load_parquet(data_dir, symbols=[symbol], columns=load_cols,
+                      start_date=start_date, max_memory_mb=4000)
     print(f"Loaded {len(df):,} ticks for {symbol}")
 
     if len(df) < 1000:
@@ -230,6 +231,8 @@ def main():
     parser.add_argument("--embargo", type=int, default=100, help="Embargo bars between train/test")
     parser.add_argument("--output-dir", default="models/momentum_continuation",
                         help="Output directory for trained model")
+    parser.add_argument("--start-date", default=None,
+                        help="Earliest date to load (YYYY-MM-DD), limits memory")
     parser.add_argument("--dry-run", action="store_true", help="Evaluate only, don't save")
     args = parser.parse_args()
 
@@ -238,7 +241,7 @@ def main():
     print(f"C={args.C}, n_splits={args.n_splits}, embargo={args.embargo}")
 
     # Load and build dataset
-    bars = load_bars(args.data_dir, args.symbol)
+    bars = load_bars(args.data_dir, args.symbol, start_date=args.start_date)
     X, y, bars_valid = build_dataset(bars)
 
     if len(y) < 500:
