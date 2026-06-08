@@ -1,6 +1,6 @@
 # 3.1 Optuna Setup
 
-## Status: NOT_STARTED
+## Status: DONE
 
 ## Goal
 

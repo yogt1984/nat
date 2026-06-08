@@ -1,6 +1,6 @@
 # 2.2 Config Generator
 
-## Status: NOT_STARTED
+## Status: DONE
 
 ## Goal
 

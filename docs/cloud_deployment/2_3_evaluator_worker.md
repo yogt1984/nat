@@ -1,6 +1,6 @@
 # 2.3 Evaluator Worker
 
-## Status: NOT_STARTED
+## Status: DONE
 
 ## Goal
 

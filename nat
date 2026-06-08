@@ -2782,6 +2782,100 @@ def cmd_docker_smoke(args):
        f"{ok}/{total} services healthy")
 
 
+# ── Swarm commands ──────────────────────────────────────────────────────────
+
+def cmd_swarm_run(args):
+    """Generate configs and evaluate in parallel."""
+    _py(f"scripts/swarm/orchestrator.py run "
+        f"--instances {args.instances} --hours {args.hours} "
+        f"--symbol {args.symbol}"
+        + (f" --seed {args.seed}" if args.seed is not None else "")
+        + (f" --workers {args.workers}" if args.workers is not None else "")
+        + (" --json" if args.json else ""))
+
+
+def cmd_swarm_status(args):
+    """Show swarm run status."""
+    _py("scripts/swarm/orchestrator.py status")
+
+
+def cmd_swarm_results(args):
+    """Show top configs ranked by Sharpe."""
+    _py(f"scripts/swarm/orchestrator.py results --top {args.top}"
+        + (" --json" if args.json else ""))
+
+
+def cmd_swarm_best(args):
+    """Export best config as TOML."""
+    _py(f"scripts/swarm/orchestrator.py best --export {args.export}")
+
+
+def cmd_swarm_generate(args):
+    """Generate configs only (no evaluation)."""
+    _py(f"scripts/swarm/config_generator.py "
+        f"--count {args.count} --output {args.output}"
+        + (f" --seed {args.seed}" if args.seed is not None else ""))
+
+
+# ── Evolve commands (Tier 3 — Optuna optimization) ──────────────────────────
+
+
+def cmd_evolve_start(args):
+    """Start evolutionary optimization."""
+    cmd = (f"scripts/swarm/optuna_optimizer.py optimize "
+           f"--study {args.study} --sampler {args.sampler} "
+           f"--trials {args.trials} --jobs {args.jobs} "
+           f"--symbol {args.symbol} --hours {args.hours} "
+           f"--train-frac {args.train_frac}")
+    if args.seed is not None:
+        cmd += f" --seed {args.seed}"
+    if args.storage:
+        cmd += f" --storage {args.storage}"
+    if args.timeout is not None:
+        cmd += f" --timeout {args.timeout}"
+    if args.no_guard_rails:
+        cmd += " --no-guard-rails"
+    _py(cmd)
+
+
+def cmd_evolve_status(args):
+    """Show Optuna study status."""
+    cmd = f"scripts/swarm/optuna_optimizer.py status --study {args.study}"
+    if args.storage:
+        cmd += f" --storage {args.storage}"
+    _py(cmd)
+
+
+def cmd_evolve_best(args):
+    """Show best configs from optimization."""
+    cmd = (f"scripts/swarm/optuna_optimizer.py best "
+           f"--study {args.study} --top {args.top}")
+    if args.storage:
+        cmd += f" --storage {args.storage}"
+    if args.json:
+        cmd += " --json"
+    _py(cmd)
+
+
+def cmd_evolve_pareto(args):
+    """Show Pareto front (NSGA-II multi-objective studies)."""
+    cmd = f"scripts/swarm/optuna_optimizer.py pareto --study {args.study}"
+    if args.storage:
+        cmd += f" --storage {args.storage}"
+    if args.json:
+        cmd += " --json"
+    _py(cmd)
+
+
+def cmd_evolve_export(args):
+    """Export best config as usable TOML file."""
+    cmd = (f"scripts/swarm/optuna_optimizer.py export "
+           f"--study {args.study} --output {args.output}")
+    if args.storage:
+        cmd += f" --storage {args.storage}"
+    _py(cmd)
+
+
 # ── Deploy commands ──────────────────────────────────────────────────────────
 
 def cmd_deploy(args):
@@ -3081,6 +3175,20 @@ def cmd_help(args=None):
     nat docker logs [svc...]        Tail service logs
     nat docker stack [--no-build]   Build + start + verify full stack
     nat docker smoke                Quick health check of running stack
+
+  {BOLD}Swarm (Parameter Sweep){W}
+    nat swarm run [--instances N]   Generate N configs, evaluate in parallel
+    nat swarm status                Show swarm run status (trials, best Sharpe)
+    nat swarm results [--top N]     Show top configs ranked by Sharpe
+    nat swarm best [--export PATH]  Export best config as TOML
+    nat swarm generate [--count N]  Generate configs only (no evaluation)
+
+  {BOLD}Evolve (Optuna Optimization){W}
+    nat evolve start [--trials N]  Start evolutionary optimization (CMA-ES/TPE/NSGA-II)
+    nat evolve status              Show study status (trials, best Sharpe, overfit)
+    nat evolve best [--top N]      Show top configs from optimization
+    nat evolve pareto              Pareto front (NSGA-II multi-objective)
+    nat evolve export [--output P] Export best config as usable TOML
 
   {BOLD}15-Minute Experiment{W}
     nat 15m [--duration SEC]   Ingest -> validate -> profile -> cluster -> report
@@ -4454,6 +4562,72 @@ def build_parser():
     dk_stack.add_argument('services', nargs='*', default=None, help='Services (default: all)')
     dk_stack.set_defaults(func=cmd_docker_stack)
     dksub.add_parser('smoke', help='Quick health check of running stack').set_defaults(func=cmd_docker_smoke)
+
+    # ── swarm ──
+    sw_p = sub.add_parser('swarm', help='Parameter sweep optimization')
+    sw_p.set_defaults(func=lambda a: sw_p.print_help())
+    swsub = sw_p.add_subparsers(dest='subcmd')
+    sw_run = swsub.add_parser('run', help='Generate configs and evaluate in parallel')
+    sw_run.add_argument('--instances', '-n', type=int, default=16, help='Number of configs (default: 16)')
+    sw_run.add_argument('--hours', type=int, default=24, help='Hours of data per eval (default: 24)')
+    sw_run.add_argument('--symbol', type=str, default='BTC', help='Symbol (default: BTC)')
+    sw_run.add_argument('--seed', type=int, default=None, help='Random seed')
+    sw_run.add_argument('--workers', type=int, default=None, help='Max parallel workers')
+    sw_run.add_argument('--json', action='store_true', help='JSON output')
+    sw_run.set_defaults(func=cmd_swarm_run)
+    sw_st = swsub.add_parser('status', help='Show swarm run status')
+    sw_st.set_defaults(func=cmd_swarm_status)
+    sw_res = swsub.add_parser('results', help='Show top configs ranked by Sharpe')
+    sw_res.add_argument('--top', type=int, default=10, help='Number of results (default: 10)')
+    sw_res.add_argument('--json', action='store_true', help='JSON output')
+    sw_res.set_defaults(func=cmd_swarm_results)
+    sw_best = swsub.add_parser('best', help='Export best config as TOML')
+    sw_best.add_argument('--export', type=str, default='config/best_algorithms.toml', help='Output path')
+    sw_best.set_defaults(func=cmd_swarm_best)
+    sw_gen = swsub.add_parser('generate', help='Generate configs only (no evaluation)')
+    sw_gen.add_argument('--count', '-n', type=int, default=16, help='Number of configs')
+    sw_gen.add_argument('--output', type=str, default='data/swarm/configs', help='Output directory')
+    sw_gen.add_argument('--seed', type=int, default=None, help='Random seed')
+    sw_gen.set_defaults(func=cmd_swarm_generate)
+
+    # ── evolve (Optuna) ──
+    ev_p = sub.add_parser('evolve', help='Evolutionary config optimization (Optuna)')
+    ev_p.set_defaults(func=lambda a: ev_p.print_help())
+    evsub = ev_p.add_subparsers(dest='subcmd')
+    ev_start = evsub.add_parser('start', help='Start evolutionary optimization')
+    ev_start.add_argument('--study', type=str, default='nat_evolve', help='Study name (default: nat_evolve)')
+    ev_start.add_argument('--sampler', choices=['cma', 'tpe', 'nsga2'], default='cma',
+                          help='Sampler: cma (continuous), tpe (mixed), nsga2 (multi-objective)')
+    ev_start.add_argument('--trials', '-n', type=int, default=500, help='Number of trials (default: 500)')
+    ev_start.add_argument('--jobs', type=int, default=1, help='Parallel trial threads (default: 1)')
+    ev_start.add_argument('--timeout', type=int, default=None, help='Timeout in seconds')
+    ev_start.add_argument('--seed', type=int, default=42, help='Random seed (default: 42)')
+    ev_start.add_argument('--symbol', type=str, default='BTC', help='Symbol (default: BTC)')
+    ev_start.add_argument('--hours', type=int, default=720, help='Eval window hours (default: 720 = 30d)')
+    ev_start.add_argument('--train-frac', type=float, default=0.667, help='Train fraction (default: 0.667)')
+    ev_start.add_argument('--storage', type=str, default='', help='Optuna storage URL (default: SQLite)')
+    ev_start.add_argument('--no-guard-rails', action='store_true', help='Disable overfit detection')
+    ev_start.set_defaults(func=cmd_evolve_start)
+    ev_st = evsub.add_parser('status', help='Show study status')
+    ev_st.add_argument('--study', type=str, default='nat_evolve', help='Study name')
+    ev_st.add_argument('--storage', type=str, default='', help='Optuna storage URL')
+    ev_st.set_defaults(func=cmd_evolve_status)
+    ev_best = evsub.add_parser('best', help='Show best configs')
+    ev_best.add_argument('--study', type=str, default='nat_evolve', help='Study name')
+    ev_best.add_argument('--storage', type=str, default='', help='Optuna storage URL')
+    ev_best.add_argument('--top', type=int, default=5, help='Number of configs (default: 5)')
+    ev_best.add_argument('--json', action='store_true', help='JSON output')
+    ev_best.set_defaults(func=cmd_evolve_best)
+    ev_pareto = evsub.add_parser('pareto', help='Pareto front (NSGA-II)')
+    ev_pareto.add_argument('--study', type=str, default='nat_evolve', help='Study name')
+    ev_pareto.add_argument('--storage', type=str, default='', help='Optuna storage URL')
+    ev_pareto.add_argument('--json', action='store_true', help='JSON output')
+    ev_pareto.set_defaults(func=cmd_evolve_pareto)
+    ev_export = evsub.add_parser('export', help='Export best config as TOML')
+    ev_export.add_argument('--study', type=str, default='nat_evolve', help='Study name')
+    ev_export.add_argument('--storage', type=str, default='', help='Optuna storage URL')
+    ev_export.add_argument('--output', type=str, default='config/evolved_algorithms.toml', help='Output path')
+    ev_export.set_defaults(func=cmd_evolve_export)
 
     # ── 15m experiment ──
     sm_p = sub.add_parser('15m', help='15-minute experiment (ingest → analyze → report)')

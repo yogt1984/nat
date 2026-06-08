@@ -1,0 +1,65 @@
+# Swarm Parameter Ranges
+#
+# Defines the search space for swarm optimization.
+# Each parameter has: min, max, type (float|int|categorical|bool).
+# Base values come from config/algorithms.toml.
+#
+# Total dimensions: ~35 (15 algorithm + 5 ensemble + 8 trading + 7 feature selection)
+
+# ── Algorithm Thresholds (15 params) ────────────────────────────
+
+[jump_detector]
+window       = { min = 50,  max = 500, type = "int" }
+significance = { min = 2.0, max = 5.0, type = "float" }
+reversion_horizon = { min = 20, max = 200, type = "int" }
+
+[optimal_entry]
+sprt_drift     = { min = 0.0005, max = 0.005, type = "float", log = true }
+alpha_error    = { min = 0.01,   max = 0.10,  type = "float" }
+beta_error     = { min = 0.10,   max = 0.30,  type = "float" }
+sigma_process  = { min = 0.001,  max = 0.1,   type = "float", log = true }
+
+[funding_reversion]
+zscore_entry   = { min = 1.5, max = 4.0, type = "float" }
+momentum_span  = { min = 50,  max = 500, type = "int" }
+premium_weight = { min = 0.1, max = 0.5, type = "float" }
+
+[surprise_signal]
+roc_window            = { min = 20,  max = 200, type = "int" }
+transition_threshold  = { min = 1.5, max = 4.0, type = "float" }
+
+[weighted_ofi]
+decay_lambda = { min = 0.1, max = 1.0, type = "float" }
+ema_span     = { min = 20,  max = 200, type = "int" }
+
+# ── Ensemble Parameters (5 params) ─────────────────────────────
+
+[ensemble]
+method        = { choices = ["equal_weight", "ic_weight", "regime_switch"], type = "categorical" }
+ic_lookback   = { min = 500,  max = 10000, type = "int" }
+regime_column = { choices = ["ent_book_shape", "vol_regime"], type = "categorical" }
+top_n         = { min = 3,    max = 10,    type = "int" }
+min_ic        = { min = 0.0,  max = 0.05,  type = "float" }
+
+# ── Trading Parameters (8 params) ──────────────────────────────
+
+[trading]
+entry_percentile  = { min = 0.70, max = 0.95, type = "float" }
+exit_percentile   = { min = 0.30, max = 0.60, type = "float" }
+bar_seconds       = { min = 60,   max = 600,  type = "int" }
+max_position_usd  = { min = 1000, max = 50000, type = "float" }
+stop_loss_pct     = { min = 0.005, max = 0.03, type = "float" }
+take_profit_pct   = { min = 0.005, max = 0.05, type = "float" }
+cooldown_bars     = { min = 1,    max = 10,   type = "int" }
+max_daily_trades  = { min = 10,   max = 200,  type = "int" }
+
+# ── Feature Selection (7 binary params) ────────────────────────
+
+[feature_selection]
+whale_flow          = { default = true,  type = "bool" }
+liquidation_risk    = { default = true,  type = "bool" }
+concentration       = { default = true,  type = "bool" }
+regime              = { default = true,  type = "bool" }
+gmm_classification  = { default = false, type = "bool" }
+cross_symbol        = { default = false, type = "bool" }
+heatmap             = { default = false, type = "bool" }

@@ -35,18 +35,18 @@ Tier 1 (Observe) ──► Tier 2 (Swarm) ──► Tier 3 (Evolve)
 
 | Task | Description | Status |
 |------|-------------|--------|
-| [2_1](2_1_shared_ingestor.md) | Shared ingestor → Parquet → N evaluators | NOT_STARTED |
-| [2_2](2_2_config_generator.md) | 35D parameter space, TOML templating | NOT_STARTED |
-| [2_3](2_3_evaluator_worker.md) | Lightweight evaluator, fitness dict | NOT_STARTED |
-| [2_4](2_4_swarm_orchestrator.md) | Orchestration, ranking, CLI, heatmap | NOT_STARTED |
+| [2_1](2_1_shared_ingestor.md) | Shared ingestor → Parquet → N evaluators | DONE |
+| [2_2](2_2_config_generator.md) | 35D parameter space, TOML templating | DONE |
+| [2_3](2_3_evaluator_worker.md) | Lightweight evaluator, fitness dict | DONE |
+| [2_4](2_4_swarm_orchestrator.md) | Orchestration, ranking, CLI, heatmap | DONE |
 
 ### Tier 3: Evolutionary Optimization
 
 | Task | Description | Status |
 |------|-------------|--------|
-| [3_1](3_1_optuna_setup.md) | Optuna + CMA-ES/TPE, distributed backend | NOT_STARTED |
-| [3_2](3_2_fitness_function.md) | Multi-objective fitness (Sharpe, DD, IC) | NOT_STARTED |
-| [3_3](3_3_guard_rails.md) | Walk-forward OOS, overfit detection | NOT_STARTED |
+| [3_1](3_1_optuna_setup.md) | Optuna + CMA-ES/TPE, distributed backend | DONE |
+| [3_2](3_2_fitness_function.md) | Multi-objective fitness (Sharpe, DD, IC) | DONE |
+| [3_3](3_3_guard_rails.md) | Walk-forward OOS, overfit detection | DONE |
 
 ## Estimated Effort
 

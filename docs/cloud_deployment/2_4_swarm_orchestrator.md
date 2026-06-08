@@ -1,6 +1,6 @@
 # 2.4 Swarm Orchestrator
 
-## Status: NOT_STARTED
+## Status: DONE
 
 ## Goal
 

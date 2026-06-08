@@ -509,6 +509,166 @@ class TestDocker:
         args = parser.parse_args(['docker', 'logs'])
         assert args.func == nat.cmd_docker_logs
 
+    def test_docker_ps(self, parser):
+        args = parser.parse_args(['docker', 'ps'])
+        assert args.func == nat.cmd_docker_ps
+
+    def test_docker_stack(self, parser):
+        args = parser.parse_args(['docker', 'stack'])
+        assert args.func == nat.cmd_docker_stack
+
+    def test_docker_stack_no_build(self, parser):
+        args = parser.parse_args(['docker', 'stack', '--no-build'])
+        assert args.func == nat.cmd_docker_stack
+        assert args.no_build is True
+
+    def test_docker_smoke(self, parser):
+        args = parser.parse_args(['docker', 'smoke'])
+        assert args.func == nat.cmd_docker_smoke
+
+
+# ── Swarm commands ──────────────────────────────────────────────────────────
+
+class TestSwarm:
+    def test_swarm_run_defaults(self, parser):
+        args = parser.parse_args(['swarm', 'run'])
+        assert args.func == nat.cmd_swarm_run
+        assert args.instances == 16
+        assert args.hours == 24
+        assert args.symbol == 'BTC'
+        assert args.seed is None
+        assert args.workers is None
+        assert args.json is False
+
+    def test_swarm_run_custom(self, parser):
+        args = parser.parse_args(['swarm', 'run', '--instances', '8',
+                                   '--hours', '4', '--symbol', 'ETH',
+                                   '--seed', '42', '--workers', '4'])
+        assert args.func == nat.cmd_swarm_run
+        assert args.instances == 8
+        assert args.hours == 4
+        assert args.symbol == 'ETH'
+        assert args.seed == 42
+        assert args.workers == 4
+
+    def test_swarm_run_short_flag(self, parser):
+        args = parser.parse_args(['swarm', 'run', '-n', '4'])
+        assert args.instances == 4
+
+    def test_swarm_status(self, parser):
+        args = parser.parse_args(['swarm', 'status'])
+        assert args.func == nat.cmd_swarm_status
+
+    def test_swarm_results_defaults(self, parser):
+        args = parser.parse_args(['swarm', 'results'])
+        assert args.func == nat.cmd_swarm_results
+        assert args.top == 10
+        assert args.json is False
+
+    def test_swarm_results_custom(self, parser):
+        args = parser.parse_args(['swarm', 'results', '--top', '5', '--json'])
+        assert args.func == nat.cmd_swarm_results
+        assert args.top == 5
+        assert args.json is True
+
+    def test_swarm_best_defaults(self, parser):
+        args = parser.parse_args(['swarm', 'best'])
+        assert args.func == nat.cmd_swarm_best
+        assert args.export == 'config/best_algorithms.toml'
+
+    def test_swarm_best_custom(self, parser):
+        args = parser.parse_args(['swarm', 'best', '--export', '/tmp/out.toml'])
+        assert args.func == nat.cmd_swarm_best
+        assert args.export == '/tmp/out.toml'
+
+    def test_swarm_generate_defaults(self, parser):
+        args = parser.parse_args(['swarm', 'generate'])
+        assert args.func == nat.cmd_swarm_generate
+        assert args.count == 16
+        assert args.output == 'data/swarm/configs'
+        assert args.seed is None
+
+    def test_swarm_generate_custom(self, parser):
+        args = parser.parse_args(['swarm', 'generate', '-n', '32',
+                                   '--seed', '123', '--output', '/tmp/configs'])
+        assert args.func == nat.cmd_swarm_generate
+        assert args.count == 32
+        assert args.seed == 123
+        assert args.output == '/tmp/configs'
+
+
+class TestEvolve:
+    def test_evolve_start_defaults(self, parser):
+        args = parser.parse_args(['evolve', 'start'])
+        assert args.func == nat.cmd_evolve_start
+        assert args.study == 'nat_evolve'
+        assert args.sampler == 'cma'
+        assert args.trials == 500
+        assert args.jobs == 1
+        assert args.symbol == 'BTC'
+        assert args.hours == 720
+        assert abs(args.train_frac - 0.667) < 0.01
+        assert args.seed == 42
+        assert args.timeout is None
+        assert args.no_guard_rails is False
+
+    def test_evolve_start_custom(self, parser):
+        args = parser.parse_args(['evolve', 'start', '--study', 'test',
+                                   '--sampler', 'nsga2', '--trials', '100',
+                                   '--jobs', '4', '--symbol', 'ETH',
+                                   '--hours', '168', '--seed', '7',
+                                   '--timeout', '3600', '--no-guard-rails'])
+        assert args.func == nat.cmd_evolve_start
+        assert args.study == 'test'
+        assert args.sampler == 'nsga2'
+        assert args.trials == 100
+        assert args.jobs == 4
+        assert args.symbol == 'ETH'
+        assert args.hours == 168
+        assert args.seed == 7
+        assert args.timeout == 3600
+        assert args.no_guard_rails is True
+
+    def test_evolve_start_short_flag(self, parser):
+        args = parser.parse_args(['evolve', 'start', '-n', '50'])
+        assert args.trials == 50
+
+    def test_evolve_status(self, parser):
+        args = parser.parse_args(['evolve', 'status'])
+        assert args.func == nat.cmd_evolve_status
+        assert args.study == 'nat_evolve'
+
+    def test_evolve_best_defaults(self, parser):
+        args = parser.parse_args(['evolve', 'best'])
+        assert args.func == nat.cmd_evolve_best
+        assert args.top == 5
+        assert args.json is False
+
+    def test_evolve_best_custom(self, parser):
+        args = parser.parse_args(['evolve', 'best', '--top', '10',
+                                   '--json', '--study', 'my_study'])
+        assert args.func == nat.cmd_evolve_best
+        assert args.top == 10
+        assert args.json is True
+        assert args.study == 'my_study'
+
+    def test_evolve_pareto(self, parser):
+        args = parser.parse_args(['evolve', 'pareto'])
+        assert args.func == nat.cmd_evolve_pareto
+        assert args.study == 'nat_evolve'
+
+    def test_evolve_export_defaults(self, parser):
+        args = parser.parse_args(['evolve', 'export'])
+        assert args.func == nat.cmd_evolve_export
+        assert args.output == 'config/evolved_algorithms.toml'
+
+    def test_evolve_export_custom(self, parser):
+        args = parser.parse_args(['evolve', 'export', '--output', '/tmp/best.toml',
+                                   '--study', 'prod_study'])
+        assert args.func == nat.cmd_evolve_export
+        assert args.output == '/tmp/best.toml'
+        assert args.study == 'prod_study'
+
 
 # ── CLI smoke tests (subprocess) ─────────────────────────────────────────────
 
@@ -531,7 +691,7 @@ class TestCLISmoke:
     def test_all_subcommand_help(self):
         for cmd in ['build', 'run', 'data', 'test', 'backtest', 'model',
                     'cluster', 'experiment', 'pipeline', 'signal', 'eamm',
-                    'api', 'exp', 'docker']:
+                    'api', 'exp', 'docker', 'swarm', 'evolve']:
             r = subprocess.run([sys.executable, str(ROOT / 'nat'), cmd, '--help'],
                               capture_output=True, text=True, timeout=10)
             assert r.returncode == 0, f'{cmd} --help failed: {r.stderr}'

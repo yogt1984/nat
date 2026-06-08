@@ -1,6 +1,6 @@
 # 2.1 Shared Ingestor Architecture
 
-## Status: NOT_STARTED
+## Status: DONE
 
 ## Goal
 

@@ -1,6 +1,6 @@
 # 3.2 Multi-Objective Fitness Function
 
-## Status: NOT_STARTED
+## Status: DONE
 
 ## Goal
 
