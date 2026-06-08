@@ -1,0 +1,29 @@
+{
+	# Global options
+	email {$ACME_EMAIL:admin@example.com}
+}
+
+# Grafana — dashboards and monitoring
+{$DOMAIN:localhost}:443 {
+	reverse_proxy grafana:3000
+}
+
+# API — REST/WebSocket endpoints
+api.{$DOMAIN:localhost}:443 {
+	reverse_proxy api:3000
+}
+
+# Dashboard — real-time market state
+dashboard.{$DOMAIN:localhost}:443 {
+	reverse_proxy ingestor:8080
+}
+
+# Prometheus — metrics (optional, restrict in production)
+prometheus.{$DOMAIN:localhost}:443 {
+	reverse_proxy prometheus:9090
+}
+
+# Local dev: plain HTTP on port 80
+:80 {
+	redir https://{host}{uri} permanent
+}

@@ -134,9 +134,47 @@ services:
       - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=nat
-      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-nat}
+      - GF_AUTH_ANONYMOUS_ENABLED=${GRAFANA_ANON:-true}
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    restart: unless-stopped
+
+  # PostgreSQL for state persistence
+  postgres:
+    image: postgres:16-alpine
+    container_name: nat-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=nat
+      - POSTGRES_USER=nat
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-nat_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nat"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+
+  # Caddy reverse proxy (HTTPS)
+  caddy:
+    image: caddy:2-alpine
+    container_name: nat-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+    depends_on:
+      - grafana
+      - api
     restart: unless-stopped
 
 volumes:
@@ -145,6 +183,12 @@ volumes:
   prometheus_data:
     driver: local
   grafana_data:
+    driver: local
+  postgres_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
     driver: local
 
 networks:

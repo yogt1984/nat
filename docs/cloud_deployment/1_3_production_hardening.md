@@ -1,6 +1,6 @@
 # 1.3 Production Hardening
 
-## Status: NOT_STARTED
+## Status: DONE
 
 ## Goal
 
