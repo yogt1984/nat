@@ -48,6 +48,14 @@ compression = "zstd"
 # File rotation interval: 1h, 1d
 rotate_interval = "1h"
 
+[trade_output]
+# Raw trade persistence (individual trades to Parquet)
+# Enables event-driven fill simulation downstream
+enabled = true
+data_dir = "../data/trades"
+buffer_size = 50000
+compression = "zstd"
+
 [algorithms]
 # Microstructure algorithms (dummy impls, real logic in Python)
 # enabled = ["regime_gated", "kalman_imbalance"]

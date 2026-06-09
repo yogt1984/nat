@@ -20,6 +20,8 @@ pub struct Config {
     pub redis: RedisTomlConfig,
     #[serde(default)]
     pub algorithms: AlgorithmsConfig,
+    #[serde(default)]
+    pub trade_output: TradeOutputConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -113,6 +115,32 @@ impl Default for RedisTomlConfig {
 pub struct AlgorithmsConfig {
     #[serde(default)]
     pub enabled: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TradeOutputConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub data_dir: Option<String>,
+    #[serde(default = "default_trade_buffer_size")]
+    pub buffer_size: usize,
+    #[serde(default = "default_compression")]
+    pub compression: String,
+}
+
+impl Default for TradeOutputConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            data_dir: None,
+            buffer_size: default_trade_buffer_size(),
+            compression: default_compression(),
+        }
+    }
+}
+
+fn default_trade_buffer_size() -> usize {
+    50_000
 }
 
 /// Read symbols list from an external TOML file (config/symbols.toml).
@@ -275,6 +303,7 @@ impl Default for Config {
             dashboard: DashboardConfig::default(),
             redis: RedisTomlConfig::default(),
             algorithms: AlgorithmsConfig::default(),
+            trade_output: TradeOutputConfig::default(),
         }
     }
 }
