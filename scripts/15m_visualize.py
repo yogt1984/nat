@@ -928,6 +928,20 @@ def main():
         ref_path = DEFAULT_OUTPUT / "latest" / "data_ref.json"
         if ref_path.exists():
             ref = json.loads(ref_path.read_text())
+            # Warn if experiment is stale (> 1 hour old)
+            if "created" in ref:
+                created = datetime.fromisoformat(ref["created"])
+                age = datetime.now(timezone.utc) - created
+                age_hours = age.total_seconds() / 3600
+                if age_hours > 1:
+                    days = int(age.days)
+                    hours = int((age.total_seconds() % 86400) / 3600)
+                    age_str = f"{days}d {hours}h" if days else f"{hours}h"
+                    log.warning(
+                        "Experiment is %s old (created %s). "
+                        "Run 'nat 15m' to collect fresh data.",
+                        age_str, created.strftime("%Y-%m-%d %H:%M"),
+                    )
             # Prefer 15m__ data file from experiment dir (check ref or glob)
             if "data_file" in ref and Path(ref["data_file"]).exists():
                 data_file = Path(ref["data_file"])

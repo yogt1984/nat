@@ -861,6 +861,18 @@ def run_smoke_test(
     # Phase 1: Collect
     try:
         df, used_dir = phase_collect(cfg, data_dir, live, duration_s)
+    except FileNotFoundError as e:
+        log.error("Phase 1 (Collect) failed — no data found: %s", e)
+        log.error(
+            "The ingestor may have failed to produce data. "
+            "Check 'nat status' and ingestor logs. "
+            "Note: 'nat 15m viz' will show the PREVIOUS experiment until a new one succeeds."
+        )
+        report.data_dir = str(data_dir or "live")
+        report.overall_passed = False
+        report.critical_passed = False
+        phase_report(report, output_dir)
+        return 2
     except Exception as e:
         log.error("Phase 1 (Collect) failed: %s", e)
         report.data_dir = str(data_dir or "live")
