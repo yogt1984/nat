@@ -1,0 +1,524 @@
+================================================================================
+  CONVOLVER IMPLEMENTATION DETAILS
+  Concrete Steps Grounded in NAT Architecture
+================================================================================
+
+Status:       IMPLEMENTATION PLAN (no code changes yet)
+Created:      2026-06-03
+Depends on:   docs/research/new/convolver_data_analysis.txt (data requirements)
+              docs/convolver_report.md (BTC discovery, 2026-05-24)
+              docs/convolver_method.tex (mathematical specification)
+Relates to:   scripts/algorithms/convolver.py (online algorithm, 306 LOC)
+              scripts/algorithms/convolver_kernels.py (kernel math, 456 LOC)
+              scripts/analysis/convolver_discovery.py (offline pipeline, ~480 LOC)
+              scripts/alpha/paper_trader_generic.py (backtesting, bar_agg config)
+
+================================================================================
+  1. CURRENT STATE SUMMARY
+================================================================================
+
+What exists:
+  - Convolver algorithm: @register'd, smoke tests pass, in DAILY_ALGOS
+  - 6 SVD-discovered kernels from BTC (2026-05-24, 12,059 candles)
+  - Kernel files: models/convolver_kernels.{npz,json}
+  - Discovery pipeline: CLI-callable, produces .npz/.json + JSON report
+  - 8 output features: alg_conv_{breakout_bull,...,best_score,best_pattern}
+
+What does NOT work:
+  - 0 trades on gauntlet 2026-06-01 (bar_agg configuration bug)
+  - 0/6 kernels pass walk-forward OOS (insufficient data for regime coverage)
+  - ETH and SOL discovery never run (BTC only)
+
+================================================================================
+  2. STEP 0: FIX THE BAR_AGG BUG (10 minutes)
+================================================================================
+
+2.1  Problem
+-----------------------------------------------------------------------
+
+  File: scripts/alpha/paper_trader_generic.py, lines 145-149
+  Current:
+    "convolver": {
+        "primary": "alg_conv_best_score",
+        "polarity": "high_long",
+        "bar_agg": "mean",
+    }
+
+  The convolver's alg_conv_best_score:
+    - Range: [0, 1]
+    - Updates once per 60s candle, held constant across 600 ticks
+    - Is 0.0 for ~95% of candles (no pattern match)
+    - Spikes to 0.3-0.8 when a pattern matches
+
+  Paper trader with BAR_SECONDS=300 (5-min bars) averages 5 candle
+  scores per bar. If one candle scores 0.8 and four score 0.0:
+    mean = (0.8 + 0 + 0 + 0 + 0) / 5 = 0.16
+
+  The z-score of 0.16 against a near-zero distribution may not reach
+  the P80 entry threshold. The signal is DILUTED.
+
+2.2  Fix
+-----------------------------------------------------------------------
+
+  Change bar_agg from "mean" to "max":
+
+    "convolver": {
+        "primary": "alg_conv_best_score",
+        "polarity": "high_long",
+        "bar_agg": "max",
+    }
+
+  This captures the peak pattern match within each 5-min bar.
+  Max preserves the signal magnitude; mean destroys it.
+
+2.3  Verification
+-----------------------------------------------------------------------
+
+  1. Apply the one-line change
+  2. Run single-day backtest:
+       nat daily --date 2026-06-01
+
+  3. Check output for convolver trade count:
+       grep -i convolver in the daily output
+       Expected: trades > 0 (was 0 with bar_agg="mean")
+
+  4. Compare signal distributions:
+       # Quick sanity check in Python
+       python3 -c "
+       import pandas as pd, numpy as np
+       from algorithms.registry import get_algorithm
+       from algorithms.runner import AlgorithmRunner
+       from cluster_pipeline.loader import load_parquet
+
+       algo = get_algorithm('convolver')
+       runner = AlgorithmRunner(algo)
+       df = load_parquet('data/features', symbols=['BTC'], columns=algo.required_columns())
+       result = runner.run_on_dataframe(df)
+       scores = result.features_df['alg_conv_best_score'].dropna()
+       print(f'Score stats: mean={scores.mean():.4f} max={scores.max():.4f} '
+             f'nonzero={( scores > 0.01).sum()}/{len(scores)}')
+       # Group by 5-min bar and compare mean vs max
+       bar_id = np.arange(len(scores)) // (300 * 10)  # 300s * 10 ticks/s
+       bars = scores.groupby(bar_id)
+       print(f'Bar mean avg: {bars.mean().mean():.4f}  max avg: {bars.max().mean():.4f}')
+       "
+
+================================================================================
+  3. STEP 1: RE-RUN BTC DISCOVERY (1 hour compute)
+================================================================================
+
+3.1  Current kernel staleness
+-----------------------------------------------------------------------
+
+  Existing kernels: discovered 2026-05-24, on 12,059 candles (~8.4 days)
+  Current data:     ~30 days accumulated (estimated ~43,200 candles at 60s)
+  Improvement:      ~3.6x more data → more stable SVD, more trap events
+
+3.2  Command
+-----------------------------------------------------------------------
+
+  cd /home/onat/nat
+  python scripts/analysis/convolver_discovery.py \
+      --data-dir data/features \
+      --symbol BTC \
+      --candle-freq 60s \
+      --window 20 \
+      --save
+
+  The --save flag writes to models/convolver_kernels.{npz,json}, overwriting
+  the May-24 library. Back up the old kernels first:
+
+  cp models/convolver_kernels.npz models/convolver_kernels_20260524.npz
+  cp models/convolver_kernels.json models/convolver_kernels_20260524.json
+
+3.3  Expected outcomes
+-----------------------------------------------------------------------
+
+  With ~43K candles (~30 days):
+    - Trap events:     ~550 total (vs 308 in May-24)
+    - Turtle events:   ~1,050 total (vs 527)
+    - Breakout events: ~1,850 total (vs 940)
+    - SVD per-channel: ~140 trap events/channel (vs ~34, NOW above 100 threshold)
+    - OOS trap events: ~220 at 60/40 split (marginal for IC estimation)
+
+  The 100-event SVD threshold will be MET for all event types.
+  Walk-forward OOS may still fail (35 days ≈ 1-2 regimes).
+
+3.4  Verification
+-----------------------------------------------------------------------
+
+  After discovery:
+    1. Check new kernel count:
+         python3 -c "import json; d=json.load(open('models/convolver_kernels.json')); \
+         print(f'Kernels: {d[\"n_kernels\"]}, discovered: {d[\"discovery_date\"]}')"
+
+    2. Compare IC values to May-24:
+         # ICs should be more conservative (larger sample → less noise)
+         # If ICs INCREASE, shapes are real; if they decrease, May-24 was overfit
+
+    3. Check walk-forward decay ratios:
+         # Look for any kernel with decay ratio >= 0.50 (ROBUST)
+         # 0/6 in May-24 → hoping for 1+ with larger sample
+
+    4. Re-run gauntlet:
+         nat daily --date 2026-06-02
+         # Confirm trades > 0 with new kernels + bar_agg="max"
+
+================================================================================
+  4. STEP 2: CROSS-SYMBOL DISCOVERY (2 hours compute)
+================================================================================
+
+4.1  Rationale
+-----------------------------------------------------------------------
+
+  If turtle_bull kernel shape is UNIVERSAL across symbols, pooling events
+  across BTC + ETH + SOL triples the effective sample size:
+    - ~43K candles per symbol → ~129K candles pooled
+    - ~1,650 trap events pooled → ~410 per channel (4x the SVD threshold)
+    - OOS trap events: ~660 at 60/40 split (robust for IC estimation)
+
+  The rolling stability results (turtle_bull rho=0.920, trap_bull rho=0.941)
+  suggest shapes are temporally stable within BTC. Cross-symbol stability
+  is the test that justifies pooling.
+
+4.2  Commands
+-----------------------------------------------------------------------
+
+  # Independent per-symbol discovery (run in parallel if compute allows)
+  python scripts/analysis/convolver_discovery.py \
+      --data-dir data/features --symbol ETH --save-dir models/convolver_ETH
+
+  python scripts/analysis/convolver_discovery.py \
+      --data-dir data/features --symbol SOL --save-dir models/convolver_SOL
+
+  Note: the --save-dir flag may not exist. Check discovery CLI args:
+    python scripts/analysis/convolver_discovery.py --help
+
+  If --save-dir is not supported, the pipeline writes to a fixed path.
+  In that case, rename outputs after each run:
+
+    python scripts/analysis/convolver_discovery.py --data-dir data/features --symbol ETH --save
+    mv models/convolver_kernels.npz models/convolver_kernels_ETH.npz
+    mv models/convolver_kernels.json models/convolver_kernels_ETH.json
+
+    python scripts/analysis/convolver_discovery.py --data-dir data/features --symbol SOL --save
+    mv models/convolver_kernels.npz models/convolver_kernels_SOL.npz
+    mv models/convolver_kernels.json models/convolver_kernels_SOL.json
+
+4.3  Cross-symbol universality test
+-----------------------------------------------------------------------
+
+  After per-symbol discovery, compare kernel shapes:
+
+    python3 -c "
+    import numpy as np
+
+    # Load kernels per symbol
+    btc = np.load('models/convolver_kernels.npz')
+    eth = np.load('models/convolver_kernels_ETH.npz')
+    sol = np.load('models/convolver_kernels_SOL.npz')
+
+    # Compare first kernel of each (same event_type, channel, component)
+    # Cosine similarity between BTC and ETH turtle_bull body k=0
+    for key in btc.files:
+        if key in eth.files:
+            cos_sim = np.dot(btc[key], eth[key]) / (
+                np.linalg.norm(btc[key]) * np.linalg.norm(eth[key]))
+            print(f'{key}: BTC-ETH cos_sim = {cos_sim:.3f}')
+    "
+
+  Threshold: cos_sim > 0.80 across symbols → shapes are universal → pooling justified.
+  If cos_sim < 0.50 → shapes are symbol-specific → separate per-symbol libraries needed.
+
+4.4  Pooled discovery (if universality confirmed)
+-----------------------------------------------------------------------
+
+  NOT yet supported by the discovery CLI (it takes a single --symbol).
+  Implementation requires either:
+
+    a) Modify convolver_discovery.py to accept --symbol BTC,ETH,SOL and
+       concatenate candle arrays from all symbols before SVD.
+
+    b) Write a thin wrapper script that loads parquet for all 3 symbols,
+       concatenates event windows, and calls the SVD/IC/FDR functions
+       from convolver_kernels.py directly.
+
+  Option (b) is ~50 LOC and avoids modifying the discovery pipeline.
+
+================================================================================
+  5. STEP 3: INTEGRATE CONVOLVER INTO ML PIPELINE
+================================================================================
+
+5.1  Why this matters more than standalone trading
+-----------------------------------------------------------------------
+
+  The convolver's 8 features are DECORRELATED from all 236 microstructure
+  features because they operate on OHLCV candle shapes, not tick-level
+  order book state. Expected Spearman |rho| < 0.2 with existing winners.
+
+  This makes them high-value INPUT FEATURES to ML algorithms. The convolver
+  does NOT need to pass gauntlet independently if its features improve the
+  ML algorithms that consume them.
+
+5.2  Where convolver features plug in
+-----------------------------------------------------------------------
+
+  Target ML algorithms from docs/research/new/ml_implementation_plan.txt:
+
+    #1 Momentum Continuation (Wave 1):
+      - Add alg_conv_best_score to required_columns
+      - Hypothesis: high convolver score + momentum signal = higher conviction
+      - The convolver detects breakout/continuation patterns that complement
+        momentum indicators (RSI, EMA slope)
+
+    #5 Regime-Conditioned Entry (Wave 1):
+      - Add alg_conv_turtle_bull, alg_conv_trap_bull as features
+      - Hypothesis: turtle soup patterns predict regime transitions
+      - The convolver provides shape-based regime context distinct from
+        statistical regime detection (switching_ou)
+
+    #7 Regime-Conditioned LightGBM (Wave 2, conditional):
+      - Add all 6 alg_conv_{event_type} scores as features
+      - LightGBM can learn non-linear interactions between convolver scores
+        and other features (e.g., high trap_bull + high VPIN = reversal)
+
+5.3  Implementation
+-----------------------------------------------------------------------
+
+  For each target ML algorithm:
+
+    1. Add convolver features to required_columns():
+         def required_columns(self) -> list[str]:
+             return [
+                 # ... existing columns ...
+                 "alg_conv_best_score",
+                 "alg_conv_turtle_bull",
+                 "alg_conv_trap_bull",
+             ]
+
+    2. The paper trader already runs all algorithms including convolver.
+       Convolver outputs are available as columns in the features DataFrame.
+
+    3. NO changes to convolver.py needed.
+
+    4. The ML algorithm's run_batch() receives the full tick DataFrame,
+       which already contains alg_conv_* columns from convolver's prior
+       execution in the same pipeline run.
+
+  DEPENDENCY: This requires runner.py to support multi-algorithm chaining
+  (run convolver FIRST, append outputs, THEN run ML algorithms). The
+  current runner.py runs algorithms independently. This is a Wave 0
+  prerequisite from the ML implementation plan.
+
+5.4  Runner modification for feature chaining
+-----------------------------------------------------------------------
+
+  Current flow in runner.py:
+    df → algo.run_batch(df) → AlgorithmResult
+
+  Required flow for ML algorithms that consume other algorithms' outputs:
+    df → convolver.run_batch(df) → df_with_conv = pd.concat([df, conv_features])
+       → ml_algo.run_batch(df_with_conv) → AlgorithmResult
+
+  Implementation in runner.py (add method):
+
+    def run_chain(self, df: pd.DataFrame, algorithms: list[MicrostructureAlgorithm]):
+        """Run algorithms in dependency order, chaining outputs."""
+        current_df = df.copy()
+        results = []
+        for algo in algorithms:
+            result = AlgorithmRunner(algo).run_on_dataframe(current_df)
+            current_df = pd.concat([current_df, result.features_df], axis=1)
+            results.append(result)
+        return results
+
+  This is NOT convolver-specific — it enables any ML algorithm that consumes
+  other algorithms' features. The dependency order must be specified explicitly
+  or inferred from required_columns() graph.
+
+================================================================================
+  6. STEP 4: QUARTERLY RE-DISCOVERY SCHEDULE
+================================================================================
+
+6.1  Schedule
+-----------------------------------------------------------------------
+
+  Every 90 days (~130K new candles per symbol at 60s):
+
+    1. Back up current kernels
+    2. Run full discovery pipeline per symbol
+    3. Compare new kernels to old (cosine similarity)
+    4. If cos_sim > 0.85: shapes stable, use new kernels (updated ICs)
+    5. If cos_sim < 0.85: shapes shifted, investigate regime change
+    6. Track metrics over time:
+         - Number of FDR survivors
+         - Mean IC of survivors
+         - Walk-forward decay ratios
+         - Rolling stability (rho)
+
+  This creates a DATA-VOLUME LEARNING CURVE: as data grows, we see exactly
+  when discovery becomes robust (decay ratio > 0.50 on OOS).
+
+6.2  Automation via research agent
+-----------------------------------------------------------------------
+
+  The NAT cloud research agent (docs/agent_specifications/agent_specs_1.md)
+  can run quarterly discovery as a scheduled task:
+
+    # Add to daemon.py scheduled cycles
+    schedule.every(90).days.do(
+        lambda: asyncio.run(run_cycle(
+            "Run convolver discovery for BTC, ETH, SOL. "
+            "Compare new kernels to existing ones. "
+            "Report IC changes, new FDR survivors, decay ratios."
+        ))
+    )
+
+  Until the agent is deployed, run manually:
+    nat algorithm evaluate --algorithm convolver --symbol BTC
+
+================================================================================
+  7. ARCHITECTURAL CONSIDERATIONS
+================================================================================
+
+7.1  Data flow through NAT
+-----------------------------------------------------------------------
+
+  Live path (ingestor):
+    Hyperliquid WS → MarketState → FeatureComputer (236 features)
+      → parquet writer (100ms ticks)
+
+  The convolver runs in Python (not Rust). It is NOT part of the ingestor's
+  feature computation pipeline. It runs OFFLINE:
+
+  Offline path (paper trader):
+    parquet → load_features() → pd.DataFrame (100ms ticks)
+      → convolver.run_batch(df) → 8 alg_conv_* columns appended
+      → aggregate_to_bars(bar_agg) → z-score → P80/P20 → trades
+
+  Live path (when deployed):
+    parquet → load_features() → latest ticks
+      → convolver.step(tick) → cached scores (update per candle)
+      → feed to paper_trader_live or direct execution
+
+7.2  The tick-to-bar mismatch
+-----------------------------------------------------------------------
+
+  The convolver operates on 60s micro-candles (600 ticks). It produces
+  tick-level output by broadcasting each candle's scores to all 600 ticks.
+
+  The paper trader aggregates to 5-min bars (3,000 ticks = 5 candles).
+  With bar_agg="max", the 5-min bar captures the peak score across
+  5 consecutive candle evaluations.
+
+  This is correct behavior: the bar represents "did a strong pattern
+  appear in this 5-minute window?"
+
+7.3  Convolver warm-up and alignment
+-----------------------------------------------------------------------
+
+  Warmup = (W + atr_period) * candle_ticks = (20 + 14) * 600 = 20,400 ticks
+  At 100ms: 20,400 * 0.1s = 34 minutes
+
+  The first 34 minutes of each day's data produce NaN outputs. The paper
+  trader's walk-forward training window (TRAIN_WINDOW=3 days) means
+  34 minutes of NaN per day is negligible (~2.4% of daily data lost).
+
+7.4  Kernel file deployment
+-----------------------------------------------------------------------
+
+  Current: models/convolver_kernels.{npz,json} checked into repo
+  The convolver constructor loads from kernel_path parameter:
+    Convolver(kernel_path="models/convolver_kernels")
+
+  Config override in config/algorithms.toml [convolver]:
+    kernel_path = "models/convolver_kernels"
+
+  For per-symbol kernels (if universality fails):
+    kernel_path_btc = "models/convolver_kernels_BTC"
+    kernel_path_eth = "models/convolver_kernels_ETH"
+    kernel_path_sol = "models/convolver_kernels_SOL"
+
+  This requires modifying the Convolver constructor to accept per-symbol
+  paths and select based on the current symbol. Currently there is no
+  symbol context passed to algorithms — runner.py filters by symbol before
+  calling run_batch() but does not pass the symbol name.
+
+  Workaround: run separate Convolver instances per symbol with different
+  kernel_path values. The registry would need to support parameterized
+  instantiation or the paper_trader_generic.py would need custom handling.
+
+  Simplest approach: keep one universal kernel library. If cross-symbol
+  universality holds (cos_sim > 0.80), this is justified.
+
+================================================================================
+  8. DEPENDENCY GRAPH
+================================================================================
+
+  Step 0: Fix bar_agg                    [0 dependencies, 10 min]
+    |
+    v
+  Step 1: Re-run BTC discovery           [0 dependencies, 1 hr compute]
+    |
+    v
+  Step 2: Cross-symbol discovery         [depends on Step 1 for comparison]
+    |                                    [2 hr compute]
+    v
+  Step 3: ML feature integration         [depends on ML plan Wave 0]
+    |                                    [needs runner.py chain support]
+    v
+  Step 4: Quarterly schedule             [depends on Step 2 results]
+
+  Steps 0 and 1 can run IN PARALLEL (independent).
+  Step 2 depends on Step 1 for kernel comparison.
+  Step 3 depends on ML implementation plan Wave 0 (runner.py bar_level fix).
+  Step 4 is ongoing after Steps 1-2 establish the baseline.
+
+================================================================================
+  9. RISK REGISTER
+================================================================================
+
+  Risk                              Mitigation
+  -----------------------------------------------------------------------
+  Cross-symbol discovery finds
+  symbol-specific shapes            Per-symbol kernel libraries + config
+  (cos_sim < 0.50)                  (adds config complexity, not a blocker)
+
+  New BTC kernels worse than        Keep backup of May-24 kernels
+  May-24 (lower IC, fewer           Compare before overwriting
+  survivors)                        Possible cause: regime shift in data
+
+  bar_agg="max" still produces      Signal may genuinely be too weak
+  0 trades                          Check z-score distribution of max-agg'd
+                                    convolver scores vs other algorithms
+
+  ML algorithms don't benefit       Convolver features are decorrelated
+  from convolver features           but decorrelation != predictive power
+                                    Drop from ML pipeline if feature
+                                    importance < 0.01 in LightGBM
+
+  Runner chaining introduces        Profile run_batch() per algorithm
+  latency (convolver must run       Convolver: O(n_candles * W * n_kernels)
+  before ML algorithms)             ~0.5s per day of data — negligible
+
+================================================================================
+  10. VERIFICATION CHECKLIST
+================================================================================
+
+  [ ] Step 0: bar_agg changed to "max" in paper_trader_generic.py
+  [ ] Step 0: nat daily produces convolver trades > 0
+  [ ] Step 1: May-24 kernels backed up
+  [ ] Step 1: BTC discovery re-run with ~30 days of data
+  [ ] Step 1: New kernel count and ICs recorded
+  [ ] Step 1: Walk-forward decay ratios checked
+  [ ] Step 2: ETH discovery run
+  [ ] Step 2: SOL discovery run
+  [ ] Step 2: Cross-symbol cosine similarity computed
+  [ ] Step 2: Universality verdict reached (pool vs per-symbol)
+  [ ] Step 3: Convolver features added to ML algorithm required_columns
+  [ ] Step 3: Runner chain method implemented (ML plan Wave 0)
+  [ ] Step 4: First quarterly re-discovery scheduled
+
+================================================================================
+  END OF IMPLEMENTATION DETAILS
+================================================================================

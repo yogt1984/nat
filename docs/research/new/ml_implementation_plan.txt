@@ -1,0 +1,1560 @@
+================================================================================
+  ML ALGORITHM IMPLEMENTATION PLAN
+  Codebase-Grounded Execution Guide for ML Algorithms
+================================================================================
+
+Date:         2026-06-03
+Revised:      2026-06-03 (applied kill criteria, data sufficiency gates,
+              runner.py fix, wave pruning)
+Status:       PLAN (no code written yet)
+Source:       docs/research/new/ml_algorithms.txt (5,754-line spec)
+Scope:        COMMITTED: 4 algorithms (#5, #1, #4, #2) ~2,600 LOC
+              CONDITIONAL: 3 algorithms (#3, #6, #7) ~950 LOC, gated on Wave 1-2 results
+              DEFERRED: 3 algorithms (#8, #9, #10) — not scheduled, pending evidence
+Prereqs:      All 5 current winners deployed (jump_detector, 3f_liquidity,
+              optimal_entry, funding_reversion, surprise_signal)
+
+================================================================================
+  DESIGN PHILOSOPHY
+================================================================================
+
+  This plan is structured as a GATED PIPELINE, not a waterfall. Each wave
+  has explicit kill criteria. If ML doesn't add alpha on this dataset with
+  this amount of data, we stop early rather than building all 10 algorithms
+  on hope.
+
+  The 5 deployed winners are handcrafted statistical algorithms that required
+  NO training data. ML algorithms require training data, and we have 30 days.
+  This is the fundamental constraint that shapes every decision below.
+
+================================================================================
+  TABLE OF CONTENTS
+================================================================================
+
+  0.  Critical Gotchas & Constraints
+  1.  Data Sufficiency Analysis
+  2.  Infrastructure Prerequisites (Wave 0)
+  3.  Wave 1: Change-Point (#5) + Momentum (#1) — proof of concept
+  4.  Wave 1 Decision Gate
+  5.  Wave 2: Regime (#4) + Mean-Reversion (#2) + Meta-Labeling (#3)
+  6.  Wave 2 Decision Gate
+  7.  Wave 3 (CONDITIONAL): Regime-Conditioned LightGBM (#7) + KNN (#6)
+  8.  Wave 4 (DEFERRED): HMM Emissions (#8), Stacking (#9), Online (#10)
+  9.  Per-Algorithm Implementation Checklist
+  10. Verification Matrix
+  11. Integration Order & File Manifest
+  12. Risk Register
+  13. Rollback Procedure
+  14. Timeline Estimate
+
+================================================================================
+================================================================================
+
+  0. CRITICAL GOTCHAS & CONSTRAINTS
+
+================================================================================
+
+These are non-obvious facts about the existing codebase that WILL cause bugs
+if ignored. Every implementer must read this section first.
+
+  0.1  @register calls cls() with NO arguments
+  -----------------------------------------------------------------------
+  File: scripts/algorithms/registry.py, lines 6-10
+
+  The @register decorator instantiates the class to extract its name:
+
+    def register(cls):
+        instance = cls()         # <--- NO ARGUMENTS
+        _REGISTRY[instance.name()] = cls
+        return cls
+
+  Consequence: every __init__ MUST have defaults for ALL parameters.
+  This includes model_path, thresholds, everything. If your constructor
+  requires an argument, registration will crash and the algorithm silently
+  disappears from list_algorithms().
+
+  Pattern:
+    def __init__(self, model_path="models/momentum_continuation",
+                 entropy_ceiling=0.85, use_lgbm=False):
+
+  NOT:
+    def __init__(self, model_path):  # CRASH at import time
+
+  0.2  walk_forward_validation() takes POLARS, not pandas
+  -----------------------------------------------------------------------
+  File: scripts/backtest/walk_forward.py
+
+  The function signature is:
+    walk_forward_validation(df: pl.DataFrame, strategy, cost_model, ...)
+
+  All training scripts that use it must convert pandas -> polars first:
+    import polars as pl
+    df_pl = pl.from_pandas(df_pd)
+
+  Or load directly with polars. The returned WalkForwardResult contains
+  in_sample_sharpe, out_of_sample_sharpe, oos_is_ratio, is_valid.
+
+  0.3  Config is NOT auto-injected into constructors
+  -----------------------------------------------------------------------
+  File: config/algorithms.toml
+
+  Adding a [momentum_continuation] section does NOT automatically pass
+  values to the MomentumContinuation constructor. The algorithm must
+  explicitly load its config:
+
+    import toml
+    cfg = toml.load("config/algorithms.toml").get("momentum_continuation", {})
+    self._threshold = cfg.get("entropy_ceiling", 0.85)
+
+  Or accept kwargs and let get_algorithm("name", **overrides) pass them.
+  The convention is: constructor defaults are the production values,
+  config/algorithms.toml overrides are optional.
+
+  0.4  Bar vs tick naming — required_columns() must use suffixes
+  -----------------------------------------------------------------------
+  ML algorithms operate on 5-min bars, not raw 100ms ticks. The
+  aggregate_bars() function in scripts/cluster_pipeline/preprocess.py
+  renames columns:
+
+    Raw tick column:     ent_tick_1m
+    After aggregation:   ent_tick_1m_mean, ent_tick_1m_std, ent_tick_1m_slope
+
+  required_columns() must return bar-aggregated names:
+    ["ent_tick_1m_mean", "trend_hurst_300_mean", "vol_returns_5m_last"]
+
+  NOT raw tick names:
+    ["ent_tick_1m", "trend_hurst_300", "vol_returns_5m"]
+
+  The suffixes are determined by column prefix — see preprocess.py:
+    - Price columns: open/high/low/close/mean
+    - Entropy columns: mean/std/slope
+    - Flow columns: sum
+    - Others: mean/std/last
+
+  0.5  Bar-level algorithms handled by runner.py (Wave 0 fix)
+  -----------------------------------------------------------------------
+  ML algorithms operate on bars, not ticks. Rather than having each ML
+  algorithm copy-paste detection logic in run_batch(), we fix this in
+  runner.py during Wave 0.
+
+  Add a class attribute to MicrostructureAlgorithm ABC:
+
+    class MicrostructureAlgorithm(ABC):
+        bar_level: bool = False          # NEW: override to True for ML algos
+        bar_timeframe: str = "5min"      # NEW: aggregation period
+
+  Then in AlgorithmRunner.run_on_dataframe():
+
+    if algo.bar_level and "timestamp_ns" in df.columns:
+        from scripts.cluster_pipeline.preprocess import aggregate_bars
+        df = aggregate_bars(df, timeframe=algo.bar_timeframe)
+
+  This is ~20 lines in runner.py + 2 lines in base.py. It replaces
+  the alternative of copy-pasting detection logic into every ML
+  algorithm's run_batch(), which would be ~10 duplicated blocks.
+
+  Each ML algorithm simply declares:
+    bar_level = True
+
+  And the runner handles aggregation transparently.
+
+  0.6  AlgorithmFeature is frozen and minimal
+  -----------------------------------------------------------------------
+  File: scripts/algorithms/base.py
+
+    @dataclass(frozen=True)
+    class AlgorithmFeature:
+        name: str
+        warmup: int = 0
+        description: str = ""
+
+  Features must start with "alg_" prefix. For bar-level algorithms,
+  warmup is in number of BARS (not ticks), because run_batch() operates
+  on the bar-level DataFrame after the runner aggregates.
+
+  0.7  autodiscover.py finds algorithms silently
+  -----------------------------------------------------------------------
+  File: scripts/algorithms/autodiscover.py
+
+  Any .py file in scripts/algorithms/ is auto-imported. If import fails
+  (missing dependency, syntax error), it's silently swallowed. After
+  implementing a new algorithm, always verify:
+
+    python -c "from scripts.algorithms.autodiscover import discover_algorithms; \
+               discover_algorithms(); \
+               from scripts.algorithms.registry import list_algorithms; \
+               print(list_algorithms())"
+
+  If your algorithm isn't in the list, check import errors manually.
+
+  0.8  model_io.py paths and conventions
+  -----------------------------------------------------------------------
+  File: scripts/utils/model_io.py
+
+  - save_sklearn_model(model, scaler, metadata, output_dir) -> joblib, compress=3
+  - save_lightgbm_model(model, metadata, output_dir) -> native .txt
+  - get_latest_model(model_dir, model_type=None) -> most recent by timestamp
+  - ModelMetadata sidecar JSON: model_type, model_name, feature_names,
+    hyperparameters, performance_metrics, training_date, snapshot_name
+
+  The algorithm loads at __init__ time:
+    path = model_io.get_latest_model("models/momentum_continuation")
+    if path is not None:
+        self._model, self._scaler, self._meta = model_io.load_sklearn_model(path)
+
+  If no model exists, step() returns all NaN. This is the expected behavior
+  for a freshly registered algorithm that hasn't been trained yet.
+
+  0.9  make_synthetic_ticks() column generation
+  -----------------------------------------------------------------------
+  File: scripts/algorithms/tests/conftest.py
+
+  The test fixture generates columns by prefix:
+    midprice -> geometric Brownian motion
+    ent_     -> uniform [0, 1]
+    tox_     -> beta distribution
+    whale_   -> normal * 1000
+    regime_  -> uniform [0, 1]
+    trend_   -> random walk
+    vol_     -> abs(normal) * 0.01
+    ctx_     -> normal * 0.5
+
+  ML algorithms need bar-aggregated fixtures. New fixtures needed (see
+  Infrastructure Prerequisites below).
+
+
+================================================================================
+================================================================================
+
+  1. DATA SUFFICIENCY ANALYSIS
+
+================================================================================
+
+Before writing any ML code, we must honestly assess whether we have
+enough data to train ML models that generalize.
+
+  1.1  What we have
+  -----------------------------------------------------------------------
+
+  Data span:      30 days (2026-04-19 to 2026-06-03)
+  Tick interval:  100ms
+  Total ticks:    ~29M (3 symbols x ~9.7M each)
+  Symbols:        BTC, ETH, SOL
+
+  At 5-min bar aggregation: ~8,640 bars per symbol (30 days x 288 bars/day).
+  At 15-min aggregation:    ~2,880 bars per symbol.
+
+  1.2  What training requires
+  -----------------------------------------------------------------------
+
+  Walk-forward with 4 folds, 75/25 split, embargo=100 bars:
+    Total bars per symbol:    ~8,640 (5min)
+    Per fold (75% train):     ~6,480 training bars
+    Per fold (25% test):      ~2,160 test bars
+    Effective test (embargo):  ~2,060 test bars (~7.1 days of 5-min bars)
+
+  This is MARGINAL but workable for:
+    - Logistic regression (7 features, ~15 parameters): SAFE.
+      Rule of thumb: 10 samples per parameter = 150 minimum. We have 6,480.
+    - LightGBM (31 leaves, 200 trees): RISKY.
+      31 leaves x 200 trees = 6,200 leaf nodes. With 6,480 training bars
+      and early stopping, this will regularize aggressively but may still
+      overfit on noise. num_leaves=15 is safer for this data volume.
+
+  1.3  Minimum data thresholds (hard requirements)
+  -----------------------------------------------------------------------
+
+  Before training ANY ML model, verify:
+
+    Threshold 1 — Bar count:
+      bars_per_symbol >= 4000 (5-min bars)
+      If not: DO NOT TRAIN. Accumulate more data first.
+
+    Threshold 2 — Label balance:
+      For binary labels: 40% <= positive_rate <= 60%
+      If outside: labels are degenerate (market was trending one way).
+      Model will predict majority class. Discard and relabel or wait.
+
+    Threshold 3 — Feature coverage:
+      For each required feature: NaN rate < 5% across all bars.
+      If higher: that feature is unreliable. Drop from feature set.
+
+    Threshold 4 — Walk-forward test fold minimum:
+      Each test fold must have >= 500 bars (~1.7 days).
+      If not: reduce n_splits from 4 to 3, or use expanding window.
+
+  Verification script (run in Wave 0):
+
+    python -c "
+    import polars as pl, glob, numpy as np
+    files = sorted(glob.glob('data/features/2026-*/*BTC*.parquet'))
+    df = pl.concat([pl.read_parquet(f) for f in files])
+    n_ticks = len(df)
+    n_bars = n_ticks // 3000  # 5min bars = 3000 ticks at 100ms
+    print(f'Ticks: {n_ticks:,}, Estimated 5min bars: {n_bars:,}')
+    print(f'Bars >= 4000: {\"PASS\" if n_bars >= 4000 else \"FAIL\"} ({n_bars})')
+    # Check feature NaN rates
+    needed = ['ent_tick_1m', 'trend_hurst_300', 'toxic_vpin_50',
+              'whale_net_flow_4h', 'vol_returns_5m', 'imbalance_qty_l1',
+              'midprice', 'regime_accumulation_score']
+    for col in needed:
+        if col in df.columns:
+            nan_rate = df[col].null_count() / len(df)
+            status = 'PASS' if nan_rate < 0.05 else 'FAIL'
+            print(f'  {col}: NaN rate {nan_rate:.3f} [{status}]')
+        else:
+            print(f'  {col}: MISSING [FAIL]')
+    "
+
+  1.4  Implications for algorithm choice
+  -----------------------------------------------------------------------
+
+  Given ~8,640 bars per symbol:
+    - Logistic regression: OK. Low parameter count, high bias, low variance.
+    - LightGBM with num_leaves=15, n_estimators=100: OK with early stopping.
+    - LightGBM with num_leaves=31, n_estimators=200: RISKY. Reduce complexity.
+    - HMM with 3-5 states: OK. EM converges in ~2000 observations.
+    - KNN with buffer_size=5000: Will only use ~60% of data per symbol.
+    - Stacking over 4+ base models: NOT ENOUGH DATA. Out-of-fold predictions
+      on 8,640 bars with 4+ meta-features will overfit.
+    - Online SGD: Marginal. 8,640 bars with 20-bar label delay gives
+      ~8,620 gradient updates. Enough for logistic, not for complex models.
+
+  This analysis is WHY algorithms #8 (HMM), #9 (Stacking), and #10 (Online)
+  are deferred. They need either more data or proof that simpler models work.
+
+
+================================================================================
+================================================================================
+
+  2. INFRASTRUCTURE PREREQUISITES (Wave 0)
+
+================================================================================
+
+Before implementing any ML algorithm, these shared pieces must exist.
+Estimate: 1 day (includes runner.py fix and data sufficiency verification).
+
+  2.1  Fix runner.py for bar-level algorithms
+  -----------------------------------------------------------------------
+
+  This is the MOST IMPORTANT Wave 0 task. Without it, every ML algorithm
+  copy-pastes the same bar detection hack.
+
+  File to modify: scripts/algorithms/base.py
+
+    Add two class attributes to MicrostructureAlgorithm:
+
+      class MicrostructureAlgorithm(ABC):
+          bar_level: bool = False
+          bar_timeframe: str = "5min"
+          # ... existing ABC methods unchanged ...
+
+  File to modify: scripts/algorithms/runner.py
+
+    In run_on_dataframe(), before calling algo.run_batch():
+
+      if algo.bar_level and "timestamp_ns" in df.columns:
+          from scripts.cluster_pipeline.preprocess import aggregate_bars
+          bars = aggregate_bars(df, timeframe=algo.bar_timeframe)
+          result = algo.run_batch(bars)
+          # Forward-fill bar results to tick-level index
+          result = result.reindex(df.index, method='ffill')
+      else:
+          result = algo.run_batch(df)
+
+  LOC: ~20 lines in runner.py + 2 lines in base.py.
+
+  Verification:
+    1. Existing algorithms unaffected (bar_level=False, no behavior change)
+    2. pytest scripts/tests/test_algorithm_smoke.py (full suite, regression)
+    3. New ML algorithm with bar_level=True receives bars, not ticks
+
+  2.2  Extract WelfordNormalizer to shared utility
+  -----------------------------------------------------------------------
+
+  Current location: scripts/algorithms/cascade_probability.py, lines 32-52
+  Target location:  scripts/utils/online.py (new file)
+
+  Action:
+    1. Create scripts/utils/online.py with WelfordNormalizer class
+    2. Update cascade_probability.py to import from the new location:
+         from scripts.utils.online import WelfordNormalizer
+    3. Verify: pytest scripts/tests/test_algorithm_smoke.py -k cascade
+
+  LOC: ~30 (new file) + 1 (import change)
+
+  2.3  Add ML test fixtures to conftest.py
+  -----------------------------------------------------------------------
+
+  File to modify: scripts/algorithms/tests/conftest.py
+
+  New fixtures needed:
+
+    @pytest.fixture
+    def make_bar_df(n_bars=400, timeframe="5min", seed=42):
+        """Generate synthetic bar-aggregated DataFrame with _mean/_std/_last
+        suffixes. Mimics output of aggregate_bars()."""
+
+    @pytest.fixture
+    def make_forward_returns(bars_df, horizon=20):
+        """Compute forward returns from midprice_mean column.
+        fwd_return[t] = midprice_mean[t + horizon] / midprice_mean[t] - 1
+        Last `horizon` rows are NaN."""
+
+    @pytest.fixture
+    def make_labeled_df(bars_df, fwd_returns):
+        """Merge bars with binary labels: 1 if fwd_return > 0, else 0.
+        For training pipeline tests."""
+
+    @pytest.fixture
+    def make_regime_labels(n_bars=400, n_regimes=3, seed=42):
+        """Synthetic regime sequence from a Markov chain.
+        Transition matrix with 95% self-loop probability."""
+
+  LOC: ~80 new lines in conftest.py
+
+  2.4  Create model directories (only for committed algorithms)
+  -----------------------------------------------------------------------
+
+    models/momentum_continuation/      (Wave 1)
+
+  Conditional directories created when their wave is approved:
+    models/mean_reversion_detector/    (Wave 2)
+    models/meta_labeling/              (Wave 2)
+    models/regime_state_machine/       (Wave 2, if HMM path chosen)
+    models/regime_conditioned_lgbm/    (Wave 3)
+
+  Do NOT create all 7 directories upfront. Create on demand.
+
+  2.5  Run data sufficiency checks
+  -----------------------------------------------------------------------
+
+  Execute the verification script from Section 1.3. All 4 thresholds
+  must pass before proceeding to Wave 1.
+
+  If any threshold fails: STOP. Accumulate more data. The ingestor
+  runs continuously — wait until bar_count >= 4000 per symbol.
+
+
+================================================================================
+================================================================================
+
+  3. WAVE 1: Change-Point (#5) + Momentum (#1) — Proof of Concept
+
+================================================================================
+
+Wave 1 is deliberately minimal: one model-free algorithm (#5) and one
+trained ML algorithm (#1). The purpose is to answer TWO questions:
+
+  Q1: Does the bar-level integration pattern work end-to-end?
+      (#5 validates the pipeline without training complexity)
+
+  Q2: Can a trained ML model produce positive OOS alpha on this dataset?
+      (#1 is the simplest supervised learning test case)
+
+If BOTH fail, we save weeks by stopping here.
+
+Estimate: 5 days (realistic, includes training pipeline debugging).
+
+------------------------------------------------------------------------
+  3.1  Algorithm #5 — Online Anomaly / Change-Point Detector
+------------------------------------------------------------------------
+
+  WHY FIRST: Simplest algorithm (~200 LOC). No ML model to train. No
+  model persistence. Pure online statistics (CUSUM + Bayesian run-length).
+  Validates the bar-level integration pattern before investing in
+  training pipelines.
+
+  FILES TO CREATE:
+    scripts/algorithms/change_point_detector.py     ~200 LOC
+
+  FILES TO MODIFY:
+    config/algorithms.toml                          add [change_point_detector]
+    scripts/alpha/paper_trader_generic.py            add ALGO_CONFIG entry
+    scripts/alpha/paper_trader_daily.py             add to DAILY_ALGOS
+
+  NO TRAINING SCRIPT. NO MODEL DIRECTORY. This is purely online.
+
+  IMPLEMENTATION STEPS:
+
+    Step 1 — Algorithm class:
+
+      @register
+      class ChangePointDetector(MicrostructureAlgorithm):
+          bar_level = True                         # NEW: handled by runner.py
+
+          def __init__(self,
+                       cusum_threshold=5.0,
+                       cusum_drift=0.05,
+                       hazard_rate=1/200,
+                       max_run_length=500):
+              # CUSUM state
+              self._cusum_pos = 0.0
+              self._cusum_neg = 0.0
+              # Bayesian run-length state
+              self._run_length_probs = np.array([1.0])
+              self._hazard = hazard_rate
+              self._max_rl = max_run_length
+              # Predictive sufficient statistics (Normal-Inverse-Gamma prior)
+              self._mu0 = 0.0
+              self._kappa0 = 1.0
+              self._alpha0 = 1.0
+              self._beta0 = 1.0
+              # Per-run-length sufficient stats
+              self._mu_n = np.array([self._mu0])
+              self._kappa_n = np.array([self._kappa0])
+              self._alpha_n = np.array([self._alpha0])
+              self._beta_n = np.array([self._beta0])
+
+          def name(self) -> str:
+              return "change_point_detector"
+
+          def alg_features(self) -> list[AlgorithmFeature]:
+              return [
+                  AlgorithmFeature("alg_cpd_cusum_signal", warmup=100,
+                      description="CUSUM composite: max(S+, S-), sign = direction"),
+                  AlgorithmFeature("alg_cpd_run_length", warmup=100,
+                      description="Expected run length (bars since last change-point)"),
+                  AlgorithmFeature("alg_cpd_change_prob", warmup=100,
+                      description="P(change-point at current bar) from Bayesian OCD"),
+                  AlgorithmFeature("alg_cpd_regime_age", warmup=0,
+                      description="Bars since last CUSUM alert"),
+              ]
+
+          def required_columns(self) -> list[str]:
+              return [
+                  "imbalance_qty_l1_mean",
+                  "vol_returns_5m_last",
+                  "ent_tick_1m_mean",
+              ]
+
+          def step(self, tick: dict[str, float]) -> dict[str, float]:
+              # 1. Extract observation (imbalance change or composite)
+              # 2. CUSUM update: S+ = max(0, S+ + x - drift)
+              #                  S- = max(0, S- - x - drift)
+              # 3. Bayesian run-length update (Adams-MacKay):
+              #    growth_probs = run_length_probs * (1 - hazard) * predictive_prob
+              #    changepoint_prob = sum(run_length_probs * hazard * predictive_prob)
+              #    new_joint = concat(changepoint_prob, growth_probs)
+              #    run_length_probs = new_joint / sum(new_joint)
+              # 4. Expected run length = sum(r * P(r))
+              # 5. CUSUM signal = max(S+, S-) * sign(S+ - S-)
+              ...
+
+          def reset(self) -> None:
+              self._cusum_pos = 0.0
+              self._cusum_neg = 0.0
+              self._run_length_probs = np.array([1.0])
+              ...
+
+    Step 2 — Config:
+
+      [change_point_detector]
+      cusum_threshold = 5.0
+      cusum_drift = 0.05
+      hazard_rate = 0.005       # 1/200
+      max_run_length = 500
+
+    Step 3 — Paper trader entry:
+
+      "change_point_detector": {
+          "primary": "alg_cpd_cusum_signal",
+          "polarity": "high_long",
+          "bar_agg": "last",
+      }
+
+  VERIFICATION:
+    Phase 1: pytest scripts/tests/test_algorithm_smoke.py -k change_point
+    Phase 2: nat algorithm evaluate --algorithm change_point_detector --symbol BTC
+    Phase 3: nat daily (single-day OOS, confirm appears in output)
+
+  KEY GOTCHAS:
+    - Bayesian run-length grows unbounded; cap at max_run_length and
+      renormalize. Without this, memory grows linearly with time.
+    - CUSUM drift must be calibrated to observation scale. Default 0.05
+      assumes standardized input. If using raw imbalance_qty_l1, need
+      to normalize first (divide by rolling std).
+
+
+------------------------------------------------------------------------
+  3.2  Algorithm #1 — Momentum Continuation Classifier
+------------------------------------------------------------------------
+
+  WHY IN WAVE 1: The simplest supervised ML test case. Logistic regression
+  with 7 features — low parameter count, interpretable, fast to train.
+  If this can't produce positive OOS alpha, more complex ML won't either.
+
+  FILES TO CREATE:
+    scripts/algorithms/momentum_continuation.py     ~250 LOC
+    scripts/train_momentum.py                       ~200 LOC
+    models/momentum_continuation/                   directory
+
+  FILES TO MODIFY:
+    config/algorithms.toml                          add [momentum_continuation]
+    scripts/alpha/paper_trader_generic.py            add ALGO_CONFIG entry
+    scripts/alpha/paper_trader_daily.py             add to DAILY_ALGOS
+
+  IMPLEMENTATION STEPS:
+
+    Step 1 — Training script (scripts/train_momentum.py):
+
+      def train_momentum_model(data_dir, symbol, timeframe="5min",
+                                horizon_bars=20, use_lgbm=False):
+          # 1. Load parquet, aggregate to bars
+          # 2. Compute forward returns: fwd_ret[t] = midprice[t+20] / midprice[t] - 1
+          # 3. Binary label: 1 if fwd_ret > 0, else 0
+          # 4. CHECK LABEL BALANCE: assert 0.4 <= positive_rate <= 0.6
+          # 5. Feature matrix: 7 bar-aggregated features
+          #    [ent_tick_1m_mean, ent_permutation_returns_16_mean,
+          #     trend_hurst_300_mean, toxic_vpin_50_mean,
+          #     whale_net_flow_4h_sum, regime_accumulation_score_mean,
+          #     vol_returns_5m_last]
+          # 6. CHECK FEATURE NANS: assert nan_rate < 0.05 for each feature
+          # 7. StandardScaler on features
+          # 8. LogisticRegression(C=1.0, penalty='l2', max_iter=1000)
+          # 9. Walk-forward validation (polars DataFrame!):
+          #    df_pl = pl.from_pandas(df_pd)
+          #    result = walk_forward_validation(df_pl, strategy, cost_model,
+          #                                     n_splits=4, embargo_bars=100)
+          #10. PRINT OOS METRICS: OOS Sharpe, OOS/IS ratio, per-fold results
+          #11. Save: model_io.save_sklearn_model()
+
+      CLI:
+        python scripts/train_momentum.py --symbol BTC --data-dir data/features
+
+      LightGBM upgrade path (only if logistic OOS > 0.5 Sharpe):
+        python scripts/train_momentum.py --symbol BTC --use-lgbm
+        NOTE: use num_leaves=15 (not 31) given data volume. See Section 1.4.
+
+    Step 2 — Algorithm class:
+
+      @register
+      class MomentumContinuation(MicrostructureAlgorithm):
+          bar_level = True                         # NEW: handled by runner.py
+
+          def __init__(self, model_path="models/momentum_continuation",
+                       entropy_ceiling=0.85, p_long=0.6, p_short=0.4,
+                       use_lgbm=False):
+              self._model = None
+              self._scaler = None
+              self._use_lgbm = use_lgbm
+              self._p_long = p_long
+              self._p_short = p_short
+              self._entropy_ceiling = entropy_ceiling
+              try:
+                  path = model_io.get_latest_model(model_path)
+                  if path:
+                      if use_lgbm:
+                          self._model, self._meta = model_io.load_lightgbm_model(path)
+                      else:
+                          self._model, self._scaler, self._meta = \
+                              model_io.load_sklearn_model(path)
+              except (FileNotFoundError, TypeError):
+                  pass
+
+          def name(self): return "momentum_continuation"
+
+          def alg_features(self):
+              return [
+                  AlgorithmFeature("alg_mc_signal", warmup=50,
+                      description="Momentum continuation signal [-1, +1]"),
+                  AlgorithmFeature("alg_mc_confidence", warmup=50,
+                      description="Raw P(continuation) [0, 1]"),
+                  AlgorithmFeature("alg_mc_entropy_gate", warmup=0,
+                      description="1 if entropy below ceiling, 0 if gated off"),
+              ]
+
+          def required_columns(self):
+              return [
+                  "ent_tick_1m_mean",
+                  "ent_permutation_returns_16_mean",
+                  "trend_hurst_300_mean",
+                  "toxic_vpin_50_mean",
+                  "whale_net_flow_4h_sum",
+                  "regime_accumulation_score_mean",
+                  "vol_returns_5m_last",
+              ]
+
+          def step(self, tick):
+              feats = {f.name: np.nan for f in self.alg_features()}
+              if self._model is None:
+                  return feats
+
+              # Extract features, check NaN
+              x = np.array([tick.get(c, np.nan) for c in self.required_columns()])
+              if np.any(np.isnan(x)):
+                  return feats
+
+              # Entropy gate
+              entropy = tick.get("ent_tick_1m_mean", 1.0)
+              gate = 1.0 if entropy < self._entropy_ceiling else 0.0
+              feats["alg_mc_entropy_gate"] = gate
+
+              # Model inference
+              if self._scaler:
+                  x = self._scaler.transform(x.reshape(1, -1))
+              else:
+                  x = x.reshape(1, -1)
+              prob = self._model.predict_proba(x)[0, 1] if not self._use_lgbm \
+                  else self._model.predict(x)[0]
+
+              feats["alg_mc_confidence"] = prob
+
+              # Signal: [-1, +1] with dead zone
+              if prob > self._p_long:
+                  feats["alg_mc_signal"] = (prob - 0.5) * 2.0 * gate
+              elif prob < self._p_short:
+                  feats["alg_mc_signal"] = -(0.5 - prob) * 2.0 * gate
+              else:
+                  feats["alg_mc_signal"] = 0.0
+
+              return feats
+
+    Step 3 — Config:
+      [momentum_continuation]
+      model_path = "models/momentum_continuation"
+      entropy_ceiling = 0.85
+      p_long = 0.6
+      p_short = 0.4
+      use_lgbm = false
+
+    Step 4 — Paper trader:
+      "momentum_continuation": {
+          "primary": "alg_mc_signal",
+          "polarity": "high_long",
+          "bar_agg": "last",
+      }
+
+  VERIFICATION:
+    Phase 1: pytest scripts/tests/test_algorithm_smoke.py -k momentum_continuation
+    Phase 2: python scripts/train_momentum.py --symbol BTC --data-dir data/features
+             CHECK: OOS Sharpe printed by training script
+    Phase 3: nat algorithm evaluate --algorithm momentum_continuation --symbol BTC
+    Phase 4: nat daily (single-day OOS)
+
+  KEY GOTCHAS:
+    - Feature names are alg_mc_* (not alg_momentum_*).
+    - The entropy gate multiplies the signal by 0.0 in high-entropy
+      regimes, but the probability is still output (for monitoring).
+    - LightGBM upgrade only attempted if logistic passes OOS validation.
+
+
+================================================================================
+================================================================================
+
+  4. WAVE 1 DECISION GATE
+
+================================================================================
+
+After Wave 1 completes, evaluate before proceeding. This is a hard gate.
+
+  4.1  Metrics to collect
+  -----------------------------------------------------------------------
+
+  For #5 (Change-Point):
+    - Does it produce non-trivial signal variance? (std > 0.01)
+    - Does alg_cpd_change_prob correlate with vol_returns_5m changes?
+    - nat daily: positive or negative total PnL?
+
+  For #1 (Momentum):
+    - Walk-forward OOS Sharpe (from training script output)
+    - Walk-forward OOS/IS ratio
+    - nat daily: PnL across 3 symbols
+    - Spearman correlation with existing winners
+
+  4.2  Decision matrix
+  -----------------------------------------------------------------------
+
+  CASE A — #1 OOS Sharpe > 0.5 AND 2/3 symbols positive on nat daily:
+    PROCEED TO WAVE 2 (full).
+    ML adds alpha. Invest in more algorithms.
+
+  CASE B — #1 OOS Sharpe > 0.5 BUT only 1/3 symbols positive:
+    PROCEED TO WAVE 2 (cautious).
+    Train only per-symbol models in Wave 2. Skip #3 (meta-labeling)
+    which needs cross-algorithm correlation.
+
+  CASE C — #1 OOS Sharpe between 0.0 and 0.5:
+    INVESTIGATE before proceeding.
+    Run feature importance (SHAP for LightGBM, coefficient magnitude for
+    logistic). If no feature has importance > 0.1, the features themselves
+    lack predictive power — more complex models won't help.
+    If 1-2 features dominate, try a simpler signal (rolling z-score of
+    that feature, no ML) and compare.
+    Only proceed to Wave 2 if investigation reveals actionable insight.
+
+  CASE D — #1 OOS Sharpe < 0.0:
+    STOP. ML does not add alpha on this dataset/horizon.
+    Possible next steps:
+      a) Try different horizon (60-min bars instead of 5-min)
+      b) Try different label (next-bar return instead of 20-bar)
+      c) Wait for more data (60+ days instead of 30)
+      d) Focus on #5 (change-point) as a meta-signal for existing winners
+    Do NOT proceed to Wave 2.
+
+  4.3  What about #5 (Change-Point)?
+  -----------------------------------------------------------------------
+
+  #5 is model-free, so its performance is independent of the ML gate.
+  Even if #1 fails (Case D), #5 may be useful as a regime gate for
+  existing winners. Evaluate it on its own merits:
+    - If alg_cpd_change_prob is correlated with subsequent volatility
+      (Spearman > 0.15), keep it as a gating signal.
+    - If not, retire it.
+
+
+================================================================================
+================================================================================
+
+  5. WAVE 2: Regime (#4) + Mean-Reversion (#2) + Meta-Labeling (#3)
+
+================================================================================
+
+GATED: only starts after Wave 1 Decision Gate passes (Case A or B).
+Estimate: 7 days (realistic, includes training + multi-day gauntlet).
+
+------------------------------------------------------------------------
+  5.1  Algorithm #4 — Regime State Machine
+------------------------------------------------------------------------
+
+  FILES TO CREATE:
+    scripts/algorithms/regime_state_machine.py      ~400 LOC
+
+  FILES TO MODIFY:
+    config/algorithms.toml                          add [regime_state_machine]
+    scripts/alpha/paper_trader_generic.py            add ALGO_CONFIG entry
+    scripts/alpha/paper_trader_daily.py             add to DAILY_ALGOS
+
+  EXISTING INFRASTRUCTURE REUSED:
+    - scripts/train_regime_gmm.py — 5-feature GMM (already trained)
+    - scripts/cluster_pipeline/transitions.py — fit_hmm() for transition learning
+    - Rust ingestor already computes GMM labels in real-time
+
+  IMPLEMENTATION NOTES:
+
+    START WITH MANUAL THRESHOLDS ONLY. Do not build the HMM path in Wave 2.
+    The manual threshold path is ~250 LOC, no training needed, fully
+    interpretable. If the regime labels are useful for gating, THEN consider
+    HMM in a future wave.
+
+    6 states via manual thresholds:
+      0: ACCUMULATION     (low vol, positive whale flow, low entropy)
+      1: MARKUP           (high Hurst, low entropy, positive trend)
+      2: DISTRIBUTION     (low vol, negative whale flow, low entropy)
+      3: MARKDOWN         (high Hurst, low entropy, negative trend)
+      4: HIGH_VOLATILITY  (elevated vol, moderate entropy)
+      5: VOLATILE_NOISE   (extreme vol, high entropy)
+
+    The algorithm's primary value is as a GATE for other algorithms,
+    not as a standalone trading signal. It provides regime context that
+    #7 (Regime-Conditioned LightGBM) consumes in Wave 3.
+
+    required_columns: vol_returns_5m_last, trend_hurst_300_mean,
+    ent_tick_1m_mean, whale_net_flow_4h_sum, toxic_vpin_50_mean.
+
+  VERIFICATION:
+    Phase 1: pytest -k regime_state_machine (smoke tests)
+    Phase 2: nat algorithm evaluate --algorithm regime_state_machine --symbol BTC
+    Phase 3: State distribution: no state <5% or >60% occupancy
+    Phase 4: Regime transitions correlate with vol_returns_5m changes
+
+  KEY GOTCHAS:
+    - State 5 is "VOLATILE_NOISE" (not "PANIC").
+    - bar_level = True — use the runner.py infrastructure.
+    - No training script needed for manual threshold path.
+    - Create models/regime_state_machine/ only if HMM path is added later.
+
+
+------------------------------------------------------------------------
+  5.2  Algorithm #2 — Mean-Reversion / False-Breakout Detector
+------------------------------------------------------------------------
+
+  FILES TO CREATE:
+    scripts/algorithms/mean_reversion_detector.py   ~300 LOC
+    scripts/train_mean_reversion.py                 ~200 LOC
+    models/mean_reversion_detector/                 directory
+
+  FILES TO MODIFY:
+    config/algorithms.toml                          add [mean_reversion_detector]
+    scripts/alpha/paper_trader_generic.py            add ALGO_CONFIG entry
+    scripts/alpha/paper_trader_daily.py             add to DAILY_ALGOS
+
+  IMPLEMENTATION NOTES:
+
+    LightGBM classifier predicting: "will current price extreme revert?"
+    Uses num_leaves=15 (not 31) given data volume — see Section 1.4.
+
+    Key feature set (bar-aggregated):
+      vol_returns_5m_last, ent_tick_1m_mean, trend_hurst_300_mean,
+      imbalance_qty_l1_mean, toxic_vpin_50_mean, spread_microprice_offset_mean
+
+    Training label: binary — did price revert within 20 bars?
+    Walk-forward: 4 folds, 75/25 split, embargo=100 bars.
+
+    FEATURE SELECTION STEP (new, not in original plan):
+      After training, compute SHAP feature importance. If any feature has
+      importance < 0.02, drop it and retrain. This prevents fitting to noise
+      features.
+
+  VERIFICATION:
+    Phase 1: pytest -k mean_reversion_detector (smoke tests)
+    Phase 2: python scripts/train_mean_reversion.py --symbol BTC
+    Phase 3: nat algorithm evaluate --algorithm mean_reversion_detector --symbol BTC
+    Phase 4: Verify signal is negatively correlated with momentum_continuation
+             (Spearman rho < -0.2 expected). If not, these are redundant.
+
+  KEY GOTCHAS:
+    - bar_level = True.
+    - If Spearman correlation with #1 (Momentum) is > 0.3, these are NOT
+      complementary — consider dropping whichever has lower OOS Sharpe.
+
+
+------------------------------------------------------------------------
+  5.3  Algorithm #3 — Meta-Labeling System
+------------------------------------------------------------------------
+
+  MOVED FROM WAVE 1 because of the preprocessing pipeline complexity.
+
+  Meta-labeling requires running all 5 existing winners on historical data,
+  aggregating their outputs to bars, and THEN training. This multi-step
+  preprocessing is non-trivial and should not be attempted until the
+  bar-level integration pattern is proven in Wave 1.
+
+  SKIP IF WAVE 1 GATE WAS CASE B (only 1/3 symbols positive). Meta-labeling
+  needs cross-algorithm correlation structure, which requires multiple
+  working signals.
+
+  FILES TO CREATE:
+    scripts/algorithms/meta_labeling.py             ~350 LOC
+    scripts/train_meta_labeling.py                  ~250 LOC
+    models/meta_labeling/                           directory
+
+  FILES TO MODIFY:
+    config/algorithms.toml                          add [meta_labeling]
+    scripts/alpha/paper_trader_generic.py            add ALGO_CONFIG entry
+    scripts/alpha/paper_trader_daily.py             add to DAILY_ALGOS
+
+  IMPLEMENTATION STEPS:
+
+    Step 1 — Preprocessing pipeline (the hard part):
+
+      The training script must:
+      a) Load raw parquet ticks for each date/symbol
+      b) Run AlgorithmRunner on each set to compute winner signals:
+           runner = AlgorithmRunner(get_algorithm("jump_detector"))
+           result = runner.run_on_dataframe(ticks_df)
+         Repeat for: jump_detector, 3f_liquidity, optimal_entry,
+                     funding_reversion, surprise_signal
+      c) Aggregate ALL columns (tick features + algorithm outputs) to 5-min bars
+      d) The bar DataFrame now has columns like:
+           alg_jump_signal_mean, alg_3f_composite_signal_mean, etc.
+      e) Filter bars where at least one base signal exceeds threshold
+      f) Compute triple-barrier labels (de Prado method)
+      g) Train logistic regression on meta-feature matrix
+
+      This pipeline is ~150 LOC just for preprocessing. Factor it into
+      a reusable function: build_meta_training_data(data_dir, symbols).
+
+    Step 2 — Algorithm class:
+
+      @register
+      class MetaLabeling(MicrostructureAlgorithm):
+          bar_level = True
+
+          def __init__(self, model_path="models/meta_labeling",
+                       min_base_signals=1):
+              self._model, self._scaler, self._meta = None, None, None
+              try:
+                  path = model_io.get_latest_model(model_path)
+                  if path:
+                      self._model, self._scaler, self._meta = \
+                          model_io.load_sklearn_model(path)
+              except (FileNotFoundError, TypeError):
+                  pass
+
+          def name(self): return "meta_labeling"
+
+          def alg_features(self):
+              return [
+                  AlgorithmFeature("alg_meta_probability", warmup=50,
+                      description="P(base signal is profitable)"),
+                  AlgorithmFeature("alg_meta_side", warmup=50,
+                      description="Recommended side: +1 long, -1 short, 0 no trade"),
+                  AlgorithmFeature("alg_meta_size", warmup=50,
+                      description="Position size scaler [0, 1] from meta confidence"),
+              ]
+
+          def required_columns(self):
+              return [
+                  "alg_jump_signal_mean",
+                  "alg_3f_composite_signal_mean",
+                  "alg_optimal_entry_signal_mean",
+                  "alg_funding_signal_mean",
+                  "alg_surprise_signal_mean",
+                  "vol_returns_5m_last",
+                  "ent_tick_1m_mean",
+              ]
+
+  VERIFICATION:
+    Phase 1: pytest -k meta_labeling (smoke tests)
+    Phase 2: python scripts/train_meta_labeling.py --symbol BTC
+    Phase 3: nat algorithm evaluate --algorithm meta_labeling --symbol BTC
+    Phase 4: Check that meta_labeling signals are positively correlated
+             with base signal profitability (IC > 0.05)
+
+  KEY GOTCHAS:
+    - Feature name is "alg_meta_probability" (not alg_meta_confidence).
+    - required_columns includes alg_*_mean suffixes — these are bar-aggregated
+      algorithm outputs, which only exist if the base algorithms have already
+      run. The runner.py bar-level fix handles this for the algorithm itself,
+      but the TRAINING script must generate these columns from scratch.
+    - Don't include a base algorithm's primary signal as a meta-feature
+      for itself (circular).
+
+
+================================================================================
+================================================================================
+
+  6. WAVE 2 DECISION GATE
+
+================================================================================
+
+After Wave 2 completes, evaluate before proceeding to Wave 3.
+
+  6.1  Metrics to collect
+  -----------------------------------------------------------------------
+
+  For each Wave 2 algorithm (#4, #2, #3):
+    - Walk-forward OOS Sharpe (where applicable)
+    - nat gauntlet run: multi-day PnL across 3 symbols
+    - Spearman correlation with ALL existing signals (winners + Wave 1)
+
+  Aggregate metrics:
+    - How many of the 4 committed ML algorithms (#5, #1, #2, #3 or #4)
+      have positive OOS performance?
+    - Are any ML algorithms correlated with each other (rho > 0.5)?
+
+  6.2  Decision matrix
+  -----------------------------------------------------------------------
+
+  CASE A — 3+ algorithms with OOS Sharpe > 0.5, uncorrelated:
+    PROCEED TO WAVE 3 (full).
+    #7 (Regime-Conditioned LightGBM) has enough regime infrastructure (#4)
+    and enough data to train per-regime models.
+
+  CASE B — 2 algorithms working, some correlation:
+    PROCEED TO WAVE 3 (partial).
+    Build #7 only — it leverages #4's regime labels to improve on #1 or #2.
+    Skip #6 (KNN) — not enough uncorrelated signals to justify another approach.
+
+  CASE C — Only 1 algorithm working:
+    STOP. Deploy the one that works. The portfolio doesn't benefit from
+    more ML complexity.
+
+  CASE D — 0 algorithms with positive OOS:
+    STOP. ML does not add alpha. Focus on handcrafted signals.
+    Consider: different horizons, different features, more data.
+
+
+================================================================================
+================================================================================
+
+  7. WAVE 3 (CONDITIONAL): Regime-Conditioned LightGBM (#7) + KNN (#6)
+
+================================================================================
+
+GATED: only starts after Wave 2 Decision Gate passes (Case A or B).
+
+------------------------------------------------------------------------
+  7.1  Algorithm #7 — Regime-Conditioned LightGBM
+------------------------------------------------------------------------
+
+  Only build this if #4 (Regime State Machine) produces meaningful regime
+  labels (state distribution passes the <5%, >60% occupancy check).
+
+  FILES TO CREATE:
+    scripts/algorithms/regime_conditioned_lgbm.py   ~350 LOC
+    scripts/train_regime_lgbm.py                    ~250 LOC
+    models/regime_conditioned_lgbm/                 directory
+
+  FILES TO MODIFY:
+    config/algorithms.toml                          add [regime_conditioned_lgbm]
+    scripts/alpha/paper_trader_generic.py            add ALGO_CONFIG entry
+    scripts/alpha/paper_trader_daily.py             add to DAILY_ALGOS
+
+  IMPLEMENTATION NOTES:
+
+    Trains SEPARATE LightGBM models per regime (from #4 labels).
+    N regime models + 1 global fallback model.
+
+    CRITICAL: per-regime data volume check.
+      With ~8,640 bars and 6 regimes, the average regime has ~1,440 bars.
+      Rarer regimes (HIGH_VOLATILITY, VOLATILE_NOISE) may have <500 bars.
+      min_samples_regime = 500 bars. Regimes below this threshold use the
+      global fallback model.
+
+    Use num_leaves=15 for per-regime models (less data per model).
+
+    Per-regime feature sets:
+      Trending (1, 3):  trend_hurst_300_mean, whale_net_flow_4h_sum,
+                        regime_accumulation_score_mean
+      Mean-reverting (0, 2): ent_tick_1m_mean, vol_returns_5m_last,
+                             imbalance_qty_l1_mean
+      Volatile (4, 5):  vol_returns_5m_last, toxic_vpin_50_mean, ent_tick_1m_mean
+
+  VERIFICATION:
+    Phase 1: pytest -k regime_conditioned_lgbm
+    Phase 2: python scripts/train_regime_lgbm.py --symbol BTC
+    Phase 3: Verify per-regime dispatch works (different predictions per regime)
+    Phase 4: Verify OOS Sharpe > max(#1 Sharpe, #2 Sharpe) — otherwise
+             regime conditioning isn't adding value over a global model
+
+  KEY GOTCHAS:
+    - bar_level = True.
+    - required_columns must include "alg_rsm_state_last" (regime label from #4).
+    - If #4 is not deployed, fall back to existing GMM labels (if available
+      in bars) or return NaN.
+
+
+------------------------------------------------------------------------
+  7.2  Algorithm #6 — Nearest-Neighbor State Retrieval (KNN)
+------------------------------------------------------------------------
+
+  Only build if Wave 2 Decision Gate was Case A (3+ algorithms working).
+
+  FILES TO CREATE:
+    scripts/algorithms/knn_retrieval.py             ~250 LOC
+
+  FILES TO MODIFY:
+    config/algorithms.toml                          add [knn_retrieval]
+    scripts/alpha/paper_trader_generic.py            add ALGO_CONFIG entry
+    scripts/alpha/paper_trader_daily.py             add to DAILY_ALGOS
+
+  NO TRAINING SCRIPT. NO MODEL DIRECTORY. Lazy buffer-based.
+
+  IMPLEMENTATION NOTES:
+
+    Whiten features (Cholesky of Ledoit-Wolf covariance) + KD-tree.
+    Re-fit whitening transform every 100 bars.
+
+    Key parameters:
+      K = 20, buffer_size = 5000, time_decay_halflife = 500 bars,
+      refit_interval = 100, min_buffer = 100
+
+    bar_level = True.
+
+  VERIFICATION:
+    Phase 1: pytest -k knn_retrieval
+    Phase 2: nat algorithm evaluate --algorithm knn_retrieval --symbol BTC
+    Phase 3: Known-neighbor test on synthetic data
+    Phase 4: Spearman correlation with #1 and #2 — must be < 0.4
+
+
+================================================================================
+================================================================================
+
+  8. WAVE 4 (DEFERRED): HMM Emissions (#8), Stacking (#9), Online (#10)
+
+================================================================================
+
+These three algorithms are NOT SCHEDULED. They are documented here for
+completeness but will only be considered if:
+
+  a) Waves 1-3 produce 4+ working, uncorrelated ML algorithms
+  b) Data grows to 60+ days (>17,000 5-min bars per symbol)
+  c) A specific research question emerges that only these can answer
+
+------------------------------------------------------------------------
+  8.1  Why each is deferred
+------------------------------------------------------------------------
+
+  #8 HMM with Emissions:
+    Overlaps significantly with #4 (Regime State Machine). Both answer
+    "what regime is the market in?" — #4 uses manual thresholds (simple,
+    interpretable), #8 uses learned emission parameters (complex, fragile).
+    With only one regime algorithm needed, #4 is the right choice for now.
+    Build #8 only if #4's manual thresholds are proven insufficient AND
+    you need continuous return predictions per regime (not just state labels).
+
+  #9 Stacking:
+    Requires 3+ uncorrelated base ML models with positive OOS performance.
+    With ~8,640 bars, the out-of-fold prediction protocol (5 folds x
+    training each base model 5 times) produces meta-features that are
+    themselves noisy. Stacking on noisy inputs overfits.
+    Build #9 only if: (a) 4+ base models are deployed, (b) each has
+    OOS Sharpe > 0.5, (c) data volume exceeds 15,000 bars per symbol.
+
+  #10 Online Learning:
+    Online SGD adaptation makes sense when markets drift faster than your
+    retrain schedule. With 30 days of data, we don't yet know what the
+    drift rate IS. Build #10 only if: (a) a batch model is deployed and
+    profitable, (b) performance degrades measurably over 2+ weeks without
+    retraining, (c) the degradation is confirmed as concept drift (not
+    just market randomness).
+
+------------------------------------------------------------------------
+  8.2  What to do instead
+------------------------------------------------------------------------
+
+  If Waves 1-3 produce 2-3 working algorithms, the higher-ROI activities
+  are:
+
+    1. Accumulate more data (ingestor runs 24/7, data grows daily)
+    2. Retrain existing ML models weekly on expanding window
+    3. Tune hyperparameters (num_leaves, C, embargo) using gauntlet
+    4. Run SHAP feature importance to identify which features carry alpha
+    5. Experiment with different horizons (15min, 60min bars)
+
+  These activities improve the algorithms you HAVE rather than building
+  new ones with diminishing returns.
+
+------------------------------------------------------------------------
+  8.3  Trigger conditions for re-evaluation
+------------------------------------------------------------------------
+
+  Re-evaluate deferral when ANY of:
+    - Data exceeds 60 days (check: ls data/features/ | wc -l > 60)
+    - 4+ ML algorithms are deployed with positive gauntlet results
+    - A deployed ML model shows >30% Sharpe degradation over 2 weeks
+      (signals concept drift, justifying #10)
+    - A regime-based algorithm (#4 or #7) shows significant per-regime
+      performance variance (justifying richer regime models like #8)
+
+
+================================================================================
+================================================================================
+
+  9. PER-ALGORITHM IMPLEMENTATION CHECKLIST
+
+================================================================================
+
+Universal checklist for EVERY algorithm. Do not skip any step.
+
+  [ ] 1. Create scripts/algorithms/<name>.py
+  [ ] 2. Set bar_level = True in class body
+  [ ] 3. Implement MicrostructureAlgorithm ABC (name, alg_features,
+          required_columns, step, reset)
+  [ ] 4. Add @register decorator
+  [ ] 5. Verify: python -c "from scripts.algorithms.autodiscover import
+          discover_algorithms; discover_algorithms(); from scripts.algorithms.
+          registry import list_algorithms; print('<name>' in list_algorithms())"
+  [ ] 6. Run: pytest scripts/tests/test_algorithm_smoke.py -k <name>
+          (must pass all 6 TestSmokeAll tests)
+  [ ] 7. Add [<name>] section to config/algorithms.toml
+  [ ] 8. Add ALGO_CONFIG entry to scripts/alpha/paper_trader_generic.py
+  [ ] 9. Add to DAILY_ALGOS in scripts/alpha/paper_trader_daily.py
+
+  For ML algorithms with training (skip for #5, #6):
+  [ ]10. Create training script: scripts/train_<name>.py
+  [ ]11. Run data sufficiency checks in training script (Section 1.3)
+  [ ]12. Run SHAP/coefficient feature importance after training
+  [ ]13. Train model: python scripts/train_<name>.py --symbol BTC
+  [ ]14. Verify walk-forward OOS Sharpe > 0.5
+  [ ]15. Verify model saved: ls models/<name>/
+
+  For all algorithms:
+  [ ]16. Run: nat algorithm evaluate --algorithm <name> --symbol BTC
+  [ ]17. Run: nat daily (verify algorithm appears in output)
+  [ ]18. Run: nat gauntlet run (multi-day OOS)
+  [ ]19. Compute Spearman correlation with ALL deployed signals (target: |rho| < 0.5)
+  [ ]20. Record results in data/research/ for decision gate evaluation
+
+
+================================================================================
+================================================================================
+
+  10. VERIFICATION MATRIX
+
+================================================================================
+
+Each algorithm goes through 6 verification phases. Only advance to the
+next phase after the current one passes.
+
+  Phase                Test Command                      Pass Criteria
+  -----------------------------------------------------------------------
+  1. Smoke test        pytest -k <name>                  All 6 TestSmokeAll pass
+                                                         Output shape correct
+                                                         Column names match
+                                                         Warmup rows are NaN
+                                                         Post-warmup rows finite
+                                                         No infinities
+                                                         name() matches
+
+  2. Training          python scripts/train_<name>.py    Model file created
+     (ML only)         --symbol BTC                      Walk-forward is_valid=True
+                                                         OOS Sharpe > 0.5
+                                                         No convergence warnings
+                                                         Label balance 40-60%
+                                                         Feature NaN rate < 5%
+
+  3. Feature audit     SHAP or coef importance           No feature < 0.02 importance
+     (ML only)                                           Drop and retrain if so
+
+  4. Single-day OOS    nat daily                         Algorithm appears in output
+                                                         Non-NaN signal values
+                                                         Trade count > 0
+
+  5. Multi-day OOS     nat gauntlet run                  Net positive across 3 symbols
+                                                         bps/trade > 1.0
+                                                         2/3+ symbols positive
+
+  6. Complementarity   Spearman correlation              |rho| < 0.5 with each winner
+                                                         |rho| < 0.4 with other ML algos
+                                                         Adds diversification to portfolio
+
+  Agent submission (5-gate protocol — after all 6 phases pass):
+    Gate 1: IC > 0.10, dIC > 0.05
+    Gate 2: Net Sharpe > 0.5 after costs
+    Gate 3: Temporal replication (positive on 3+ separate days)
+    Gate 4: Symbol replication (positive on 2/3 symbols)
+    Gate 5: Correlation < 0.6 with all promoted signals
+
+
+================================================================================
+================================================================================
+
+  11. INTEGRATION ORDER & FILE MANIFEST
+
+================================================================================
+
+  11.1  Committed files (Waves 0-2)
+  -----------------------------------------------------------------------
+
+  Wave 0 — Infrastructure (1 day):
+    MODIFY  scripts/algorithms/base.py                 +2 lines (bar_level, bar_timeframe)
+    MODIFY  scripts/algorithms/runner.py               +20 lines (bar aggregation dispatch)
+    CREATE  scripts/utils/online.py                    ~30 LOC (WelfordNormalizer)
+    MODIFY  scripts/algorithms/cascade_probability.py  ~1 line (import change)
+    MODIFY  scripts/algorithms/tests/conftest.py       ~80 LOC (bar fixtures)
+    CREATE  models/momentum_continuation/.gitkeep
+
+  Wave 1 — Proof of concept (5 days):
+    CREATE  scripts/algorithms/change_point_detector.py     ~200 LOC
+    CREATE  scripts/algorithms/momentum_continuation.py     ~250 LOC
+    CREATE  scripts/train_momentum.py                       ~200 LOC
+
+  Wave 2 — Expansion, gated on Wave 1 (7 days):
+    CREATE  scripts/algorithms/regime_state_machine.py      ~400 LOC
+    CREATE  scripts/algorithms/mean_reversion_detector.py   ~300 LOC
+    CREATE  scripts/train_mean_reversion.py                 ~200 LOC
+    CREATE  scripts/algorithms/meta_labeling.py             ~350 LOC
+    CREATE  scripts/train_meta_labeling.py                  ~250 LOC
+    CREATE  models/mean_reversion_detector/.gitkeep
+    CREATE  models/meta_labeling/.gitkeep
+
+  11.2  Conditional files (Wave 3, gated on Wave 2)
+  -----------------------------------------------------------------------
+
+    CREATE  scripts/algorithms/regime_conditioned_lgbm.py   ~350 LOC
+    CREATE  scripts/train_regime_lgbm.py                    ~250 LOC
+    CREATE  scripts/algorithms/knn_retrieval.py             ~250 LOC
+    CREATE  models/regime_conditioned_lgbm/.gitkeep
+
+  11.3  Files to modify (all committed waves)
+  -----------------------------------------------------------------------
+
+    config/algorithms.toml                  +5-7 sections (~50-60 lines)
+    scripts/alpha/paper_trader_generic.py   +5-7 ALGO_CONFIG entries (~20 lines)
+    scripts/alpha/paper_trader_daily.py     +5-7 names to DAILY_ALGOS (~7 lines)
+    scripts/algorithms/base.py              +2 lines (bar_level attributes)
+    scripts/algorithms/runner.py            +20 lines (bar aggregation)
+    scripts/algorithms/cascade_probability.py  1 import line change
+    scripts/algorithms/tests/conftest.py    ~80 lines (bar fixtures)
+
+  11.4  Git workflow per wave
+  -----------------------------------------------------------------------
+
+    For each wave:
+      1. git checkout -b feat/ml-wave-N
+      2. Implement all algorithms in the wave
+      3. pytest scripts/tests/test_algorithm_smoke.py (all must pass)
+      4. Train models (if applicable)
+      5. nat daily for each algorithm
+      6. RECORD DECISION GATE METRICS
+      7. git commit -m "feat: add ML wave N algorithms (<names>)"
+      8. git checkout master && git merge --no-ff feat/ml-wave-N
+      9. git push origin master
+
+    Branch naming: feat/ml-wave-0, feat/ml-wave-1, feat/ml-wave-2, etc.
+
+
+================================================================================
+================================================================================
+
+  12. RISK REGISTER
+
+================================================================================
+
+  Risk                         Severity   Mitigation
+  -----------------------------------------------------------------------
+  INSUFFICIENT DATA            HIGH       30 days = ~8,640 5-min bars per symbol.
+  Not enough bars for                     Marginal for LightGBM, OK for logistic.
+  ML to generalize.                       Hard gate: bars >= 4000 before training.
+  OOS appears positive                    Use num_leaves=15 (not 31).
+  but is noise.                           Deflated Sharpe for multiple testing.
+                                          Decision gates after each wave — stop
+                                          early if evidence doesn't support ML.
+
+  OVERFITTING                  HIGH       Walk-forward with embargo_bars=100.
+  ML models fit noise,                    Deflated Sharpe ratio correction.
+  not signal. OOS                         4-fold CV minimum. Kill any algorithm
+  degradation > 50%.                      with OOS/IS ratio < 0.5.
+
+  DATA LEAKAGE                 HIGH       Forward returns use bars at t+horizon,
+  Labels contaminate                      not t+horizon-1. Embargo between
+  features, inflating                     train/test. Out-of-fold stacking.
+  in-sample metrics.                      Automated lookahead test in training.
+
+  SUNK COST FALLACY            HIGH       Decision gates are HARD GATES. If Wave 1
+  Continuing to build                     produces OOS Sharpe < 0, stop. Do not
+  algorithms after evidence               add "one more algorithm" hoping it works.
+  shows ML doesn't work.                  Each wave must justify the next.
+
+  MODEL STALENESS              MEDIUM     Weekly retrain via training scripts.
+  Market regime shifts,                   Integration with research agent daemon
+  model parameters                        (cloud_agent nightly_cycle) for automated
+  become stale.                           retraining — not built in this plan, but
+                                          the training scripts are CLI-callable,
+                                          ready for cron or agent SDK integration.
+                                          Monitor IC decay: if IC < 0.05 for 5 days,
+                                          trigger retrain.
+
+  COMPLEXITY CREEP             MEDIUM     Start with simplest version (logistic
+  Over-engineered models                  over LightGBM, manual thresholds over
+  are harder to debug                     HMM, Ridge over LightGBM meta-learner).
+  and maintain.                           Only upgrade if OOS improvement > 20%.
+                                          Defer #8, #9, #10 until evidence demands.
+
+  CORRELATION CLUSTERING       MEDIUM     Correlation dedup gate (rho < 0.5 with
+  ML algorithms are                       existing winners, rho < 0.4 with other ML).
+  correlated with each                    If 2 ML algorithms cluster (rho > 0.5),
+  other (same features).                  keep only the better OOS performer.
+
+  REGIME MISMATCH              MEDIUM     Regime State Machine (#4) as gate.
+  Algorithm trained in                    Walk-forward INCLUDES regime transitions.
+  one regime, deployed                    Monitor per-regime performance separately.
+  in another.
+
+  DEPENDENCY CASCADES          LOW        Each algorithm must degrade gracefully
+  Regime labels missing,                  (return NaN) if inputs are missing.
+  base models fail.                       test_no_models_returns_nan in tests.
+
+  BAR/TICK CONFUSION           LOW        runner.py bar_level fix (Wave 0) handles
+  Wrong column names                      aggregation transparently. bar_level=True
+  cause silent NaN.                       in class body. No per-algorithm hacks.
+
+  TRAINING COST                LOW        LightGBM trains in seconds on 8,640 bars.
+  Training too slow.                      Logistic regression in milliseconds.
+                                          Walk-forward: 4x training time.
+
+
+================================================================================
+================================================================================
+
+  13. ROLLBACK PROCEDURE
+
+================================================================================
+
+If a deployed ML algorithm causes losses or degrades portfolio performance:
+
+  13.1  Immediate removal (< 5 minutes)
+  -----------------------------------------------------------------------
+
+    1. Remove algorithm name from DAILY_ALGOS in paper_trader_daily.py
+    2. Remove ALGO_CONFIG entry from paper_trader_generic.py
+    3. The algorithm file remains (no deletion) but is no longer traded
+
+  This is the fastest path. The algorithm still passes smoke tests and
+  can be re-enabled later.
+
+  13.2  Full removal (if algorithm is interfering with others)
+  -----------------------------------------------------------------------
+
+    1. Steps from 13.1
+    2. Remove [<name>] section from config/algorithms.toml
+    3. Optionally: delete scripts/algorithms/<name>.py
+    4. Optionally: delete models/<name>/ directory
+
+  13.3  Model rollback (bad retrain, not bad algorithm)
+  -----------------------------------------------------------------------
+
+  If the algorithm was profitable but a retrain produced a worse model:
+
+    1. ls models/<name>/ — list all model versions by timestamp
+    2. Delete or rename the bad model file
+    3. get_latest_model() will now return the previous version
+    4. Restart any running processes that cached the model
+
+  model_io.get_latest_model() selects by timestamp, so removing the
+  newest file is sufficient to roll back one version.
+
+  13.4  Decision to rollback
+  -----------------------------------------------------------------------
+
+  Trigger rollback if ANY of:
+    - Algorithm loses > 50 bps cumulative in gauntlet
+    - Algorithm has 5+ consecutive losing days
+    - Algorithm's Spearman correlation with an existing winner rises
+      above 0.6 (it's no longer adding diversification)
+    - Walk-forward revalidation produces OOS Sharpe < 0.0
+
+
+================================================================================
+================================================================================
+
+  14. TIMELINE ESTIMATE
+
+================================================================================
+
+  Realistic estimates. Includes training debugging, data issues, and
+  overnight gauntlet runs. One developer.
+
+  Wave 0 — Infrastructure:                            1 day
+    runner.py bar_level fix
+    WelfordNormalizer extraction
+    Test fixtures
+    Data sufficiency verification
+    Model directories
+
+  Wave 1 — #5 + #1 (proof of concept):               5 days
+    Day 1:  Implement #5 (change-point), smoke test
+    Day 2:  Implement #1 (momentum), smoke test
+    Day 3:  Write and debug training script for #1
+            Discover off-by-one in forward returns, fix
+            Discover label imbalance, adjust
+    Day 4:  Walk-forward validation, analyze per-fold results
+            nat daily for both algorithms
+    Day 5:  Gauntlet run, collect metrics, evaluate decision gate
+
+  DECISION GATE — 1 day to analyze and decide
+
+  Wave 2 — #4 + #2 + #3 (if gate passes):            7 days
+    Day 1:  Implement #4 (regime state machine, manual thresholds)
+    Day 2:  Implement #2 (mean-reversion detector)
+    Day 3:  Write and debug training script for #2
+    Day 4:  Walk-forward for #2, SHAP feature importance
+    Day 5:  Build meta-labeling preprocessing pipeline (#3)
+    Day 6:  Train and validate #3
+    Day 7:  Gauntlet for all three, correlation check, decision gate
+
+  DECISION GATE — 1 day
+
+  Wave 3 — #7 + #6 (if gate passes):                 5 days
+    Day 1:  Implement #7 (regime-conditioned LightGBM)
+    Day 2:  Per-regime training, fallback verification
+    Day 3:  Implement #6 (KNN)
+    Day 4:  Buffer tuning, Mahalanobis vs Euclidean comparison
+    Day 5:  Gauntlet for both, final correlation matrix
+
+  Total committed:        7 days (Wave 0 + Wave 1 + gate)
+  Total if Wave 2 runs:  15 days
+  Total if Wave 3 runs:  21 days
+
+  First useful signal:    Day 6 (end of Wave 1)
+  Full ML portfolio:      Day 21 (if all gates pass)
+  Most likely outcome:    2-3 algorithms deployed by Day 15,
+                          with clear evidence for or against expanding
+
+================================================================================
+  END OF IMPLEMENTATION PLAN
+================================================================================

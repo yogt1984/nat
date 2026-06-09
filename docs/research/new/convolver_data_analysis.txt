@@ -1,0 +1,363 @@
+================================================================================
+  CONVOLVER DATA REQUIREMENTS ANALYSIS
+  Why Pattern Discovery Needs Years, Not Months
+================================================================================
+
+Status:       ANALYSIS (no code changes)
+Created:      2026-06-03
+Source:       docs/convolver_report.md (BTC discovery, 2026-05-24)
+              docs/convolver_method.tex (mathematical specification)
+              scripts/analysis/convolver_discovery.py (discovery pipeline)
+Relates to:   scripts/algorithms/convolver.py (online algorithm, Tier 2)
+
+================================================================================
+  1. SUMMARY
+================================================================================
+
+The convolver discovery report recommends "50K+ candles" for robust OOS
+validation. At 60s candles, this is ~35 days — achievable in weeks.
+
+This analysis argues that 50K candles solves the SAMPLE SIZE problem but
+not the REGIME COVERAGE problem. For regime-robust, multi-timeframe
+pattern discovery, the true requirement is 6-24 months for 60s patterns
+and years for longer timescales.
+
+The convolver's methodology is sound (SVD + IC gate + BH-FDR is
+rigorous). The constraint is data volume, not code quality.
+
+================================================================================
+  2. CURRENT STATE
+================================================================================
+
+BTC discovery (2026-05-24):
+  Data:           12,059 candles (60s), ~8.4 days of continuous data
+  Events found:   1,775 total across 6 types
+  FDR survivors:  6 kernels out of 158 candidates
+  OOS robust:     0 out of 6 (walk-forward decay ratio < 0.50 for all)
+  Temporal stability: turtle_bull rho=0.920, trap_bull rho=0.941 (STABLE)
+
+Gauntlet 2026-06-01:
+  Trades: 0 (no pattern match above threshold)
+  Diagnosis: likely bar_agg configuration mismatch (see Section 7)
+
+================================================================================
+  3. EVENT RATES AND SAMPLE SIZE ARITHMETIC
+================================================================================
+
+Observed event rates (BTC, 12,059 candles):
+
+  Event Type       Count    Per 1000 Candles    Per Day (60s)
+  ---------------------------------------------------------------
+  breakout_bull      418        34.7               ~50
+  breakout_bear      522        43.3               ~62
+  turtle_bull        286        23.7               ~34
+  turtle_bear        241        20.0               ~29
+  trap_bull          136        11.3               ~16
+  trap_bear          172        14.3               ~21
+  ---------------------------------------------------------------
+  Total            1,775       147.2              ~212
+
+The BOTTLENECK is trap events: 11-14 per 1000 candles.
+
+SVD stability requirement: >= 100 events per (event_type, channel) pair.
+With 4 channels and 6 event types, need 100 events per pair.
+Trap_bull has 136 total events across 4 channels = ~34 per channel.
+This is BELOW the 100-event threshold for reliable SVD.
+
+Walk-forward OOS requirement: >= 200 events for reliable IC estimation.
+With 60/40 split, need ~500 total events of each type.
+Trap events: need 500/12.8 * 1000 = ~39,000 candles minimum.
+
+The 50K recommendation accounts for this: 50K candles yields ~600 trap
+events total, ~240 in OOS. Marginal but workable for IC estimation.
+
+================================================================================
+  4. WHY 50K IS NECESSARY BUT NOT SUFFICIENT
+================================================================================
+
+4.1  Regime coverage gap
+-----------------------------------------------------------------------
+
+50K candles at 60s = ~35 days. This captures 1-2 market regimes.
+
+Crypto market regimes and approximate durations:
+  - Low-volatility accumulation:    2-8 weeks
+  - Trending (markup/markdown):     1-4 weeks
+  - High-volatility distribution:   1-3 weeks
+  - Liquidation cascade / crisis:   1-5 days
+  - Sideways chop:                  2-6 weeks
+
+A full cycle through all regime types: 3-12 months.
+To observe each regime twice (training + validation): 6-24 months.
+
+The convolver discovers shapes within a specific regime context. A
+turtle soup kernel discovered during low-volatility accumulation may
+describe a reversal pattern that simply DOES NOT OCCUR during a
+liquidation cascade (because there are no false breakouts — all
+breakouts are real during cascades).
+
+To prove a kernel is regime-robust:
+  - Train on data containing regime A
+  - Validate on data containing regimes B and C
+  - Confirm the kernel still scores above IC threshold
+
+This requires the OOS period to span a regime transition. With 35 days
+of data and a 60/40 split, the OOS window is ~14 days — likely a
+single regime. The walk-forward test is WITHIN-REGIME, not ACROSS-REGIME.
+
+Minimum for across-regime validation: 6 months (enough to span 2-3
+regime transitions in the OOS window).
+
+4.2  Multi-timeframe scaling
+-----------------------------------------------------------------------
+
+Current discovery: 60s candles, W=20 (20-minute patterns).
+
+Larger patterns require longer candles. Event rates scale linearly with
+candle count, so longer candles produce proportionally fewer events:
+
+  Candle    Candles   Trap Rate     200 OOS Traps    Calendar
+  Size      Per Day   (per day)     Requires Total   Time
+  ---------------------------------------------------------------
+  60s       1,440     ~17           ~30 days          ~5 weeks
+  5min        288     ~3.5          ~150 days         ~5 months
+  15min        96     ~1.2          ~440 days         ~1.5 years
+  1hr          24     ~0.3          ~1,750 days       ~5 years
+  4hr           6     ~0.07         ~7,500 days       ~20 years
+
+Derivation: 200 OOS traps at 60/40 split needs 500 total traps.
+At rate r traps/day: 500/r = days needed.
+
+CONCLUSION:
+  60s patterns: feasible at month scale (current approach)
+  5min patterns: feasible at 6-month scale
+  15min patterns: requires 1.5+ years
+  Hourly patterns: essentially infeasible (5+ years)
+  4hr+ patterns: impossible with any realistic data collection
+
+The convolver should NOT attempt multi-timeframe discovery beyond 5min
+candles without years of accumulated data.
+
+4.3  Event rate non-stationarity
+-----------------------------------------------------------------------
+
+Event detection parameters are FIXED (N=20, vol_mult=1.5, K=3, alpha=1.0).
+But the underlying rates vary with market conditions:
+
+  Breakout rate: scales with volatility and trend strength
+    High-vol trending market: ~60 breakouts/1000 candles
+    Low-vol sideways market:  ~15 breakouts/1000 candles
+
+  Trap rate: P(breakout) x P(reversal within K candles | breakout)
+    Volatile market: more breakouts AND more traps
+    Calm market: fewer of both
+
+  Turtle rate: depends on mean-reversion frequency
+    Choppy market: high turtle rate
+    Persistent trend: low turtle rate
+
+A 35-day window in a volatile period might see 25 traps/1000 candles.
+The same window in a calm period: 4 traps/1000 candles.
+
+Discovery on a volatile window produces kernels tuned to volatile-market
+patterns. These kernels may score near zero on calm-market data — not
+because the methodology failed, but because the patterns genuinely
+do not occur in that regime.
+
+4.4  Pattern stationarity decay
+-----------------------------------------------------------------------
+
+Crypto market microstructure evolves over months/years:
+  - Market maker algorithms change (new strategies, latency improvements)
+  - Fee structures change (Hyperliquid taker/maker rates, funding model)
+  - Participant composition shifts (retail vs institutional vs algorithmic)
+  - Liquidation mechanics change (partial vs full, insurance fund rules)
+  - Regulation changes (MiCA, CFTC actions)
+
+A turtle soup pattern from 2024 may not exist in 2026 because the market
+makers that CREATED the pattern have been replaced.
+
+This creates a fundamental tension:
+
+  MORE DATA  →  better statistics  →  more confident discovery
+  OLDER DATA →  stale patterns     →  less relevant discovery
+
+No clean resolution exists. A sliding window (e.g., most recent 6 months)
+limits maximum data volume. An expanding window includes stale patterns.
+
+Practical compromise: exponential decay weighting on events, with
+half-life of 3-6 months. Recent events weighted 2-4x more than old events
+in SVD and IC computation. This is NOT currently implemented in the
+discovery pipeline.
+
+4.5  Cross-symbol validation
+-----------------------------------------------------------------------
+
+Current discovery: BTC only. ETH and SOL untested.
+
+Cross-symbol validation requires either:
+  a) Independent per-symbol discovery (3x data requirement)
+  b) Pooled discovery (assume universality, test on held-out symbols)
+
+Option (b) is more data-efficient: pool events across 3 symbols to
+~3x effective sample size. If turtle_bull kernel shape is universal
+(high cosine similarity across symbols), this is justified.
+
+The rolling stability for turtle_bull (rho=0.920) and trap_bull
+(rho=0.941) is promising — these shapes are temporally stable within
+BTC. Cross-symbol stability is the next test.
+
+================================================================================
+  5. HONEST ASSESSMENT
+================================================================================
+
+  Claim                              Verdict
+  ---------------------------------------------------------------
+  "50K candles is enough"            PARTIALLY TRUE
+                                     Solves sample size at 60s.
+                                     Does NOT solve regime coverage.
+
+  "Years of data needed"             TRUE for multi-timeframe
+                                     15min+ patterns need 1.5+ years.
+                                     Regime-robust 60s needs 6-12 months.
+
+  "60s patterns work at month scale" PLAUSIBLE but UNPROVEN
+                                     0/6 robust OOS so far.
+                                     High temporal stability suggests
+                                     methodology is sound; sample is thin.
+
+  "Hourly patterns are infeasible"   TRUE
+                                     ~5 years of data needed.
+                                     Market stationarity breaks first.
+
+  "The convolver is broken"          FALSE
+                                     Methodology is sound (SVD + FDR).
+                                     Shapes are real (high stereotypy).
+                                     Problem is data volume, not code.
+
+================================================================================
+  6. IMPLICATIONS FOR NAT
+================================================================================
+
+6.1  The convolver's viable niche
+-----------------------------------------------------------------------
+
+Short-timescale patterns on high-frequency data ONLY:
+  - 60s candles, W=20 (20-minute microstructure patterns)
+  - This matches NAT's core advantage: 100ms tick data, 239 features
+  - The convolver is complementary to tick-level signals because it
+    operates on candle-level shape, not tick-level microstructure
+
+Longer timescales are NOT viable with the convolver approach.
+For hour/day-scale patterns, use the ML algorithms (momentum, regime,
+mean-reversion) which are designed for bar-level operation.
+
+6.2  Convolver as ML feature source
+-----------------------------------------------------------------------
+
+The 8 alg_conv_* features are DECORRELATED from all microstructure
+features (imbalance, entropy, VPIN, etc.) because they operate on a
+completely different data representation (OHLCV candle shapes vs
+tick-level order book snapshots).
+
+Expected Spearman correlation with existing winners: |rho| < 0.2.
+
+This makes convolver outputs high-value as INPUT FEATURES to the ML
+algorithms in the implementation plan:
+  - #1 Momentum Continuation: add alg_conv_best_score as a feature
+  - #3 Meta-Labeling: add alg_conv_turtle_bull as a meta-feature
+  - #7 Regime-Conditioned LightGBM: convolver may work differently per regime
+
+The convolver does NOT need to pass gauntlet independently if its
+features improve the ML algorithms that consume them.
+
+================================================================================
+  7. THE 0-TRADE GAUNTLET BUG
+================================================================================
+
+The June 1 gauntlet produced 0 trades for convolver. This is likely a
+CONFIGURATION issue, not a signal quality issue.
+
+paper_trader_generic.py ALGO_CONFIG:
+  "convolver": {
+      "primary": "alg_conv_best_score",
+      "polarity": "high_long",
+      "bar_agg": "mean",
+  }
+
+The paper trader aggregates tick-level algorithm outputs to 5-min bars
+using bar_agg="mean". But the convolver's alg_conv_best_score updates
+once per 60s candle and is held constant between candles. Averaging
+over 5 minutes of repeated values produces the same value — this is
+fine for the value, BUT the z-score computation used for entry/exit
+thresholds may interact badly:
+
+  - alg_conv_best_score range: [0, 1]
+  - If the score is 0.0 for most candles and spikes to 0.8 briefly,
+    the 5-min mean might be 0.13 — below any reasonable z-score threshold
+  - The signal is DILUTED by bar averaging
+
+Potential fix: change bar_agg from "mean" to "max" for convolver.
+The maximum score within a 5-min bar captures the peak pattern match,
+which is what you want to trade on.
+
+Verification: compare alg_conv_best_score_mean vs alg_conv_best_score_max
+on a sample day of data.
+
+================================================================================
+  8. ACTIONABLE NEXT STEPS
+================================================================================
+
+Priority-ordered by effort/impact ratio:
+
+  1. FIX THE BAR_AGG BUG (10 minutes)
+     Change convolver bar_agg from "mean" to "max" in paper_trader_generic.py.
+     Re-run nat daily to see if trades appear.
+
+  2. RE-RUN BTC DISCOVERY (1 hour compute)
+     30 days of data now vs 24 in the May report.
+     ~17K candles vs 12K. Marginal improvement, but cheap to run.
+     Command: python scripts/analysis/convolver_discovery.py --symbol BTC
+
+  3. RUN ETH AND SOL DISCOVERY (2 hours compute)
+     Test cross-symbol universality of turtle/trap kernels.
+     If shapes are universal, pooling triples effective sample: ~51K candles.
+
+  4. QUARTERLY RE-DISCOVERY SCHEDULE
+     Every 90 days (~130K new candles per symbol at 60s), re-run full
+     discovery pipeline. Track how IC, kernel stability, and OOS decay
+     ratio evolve with data volume. This creates a data-volume learning
+     curve that tells us exactly when discovery becomes robust.
+
+  5. INTEGRATE CONVOLVER FEATURES INTO ML PLAN
+     Add alg_conv_* to the feature set for Wave 1 momentum classifier.
+     No changes to convolver code needed — just add to required_columns
+     in the ML algorithm and to the training feature matrix.
+
+  6. DO NOT ATTEMPT MULTI-TIMEFRAME DISCOVERY
+     5min candle discovery feasible in ~5 months.
+     15min+ requires 1.5+ years.
+     The effort is not justified until 60s discovery is proven.
+
+================================================================================
+  9. REFERENCES
+================================================================================
+
+  Eckart, C. & Young, G. (1936) — "The approximation of one matrix by
+    another of lower rank", Psychometrika 1(3), 211-218.
+
+  Benjamini, Y. & Hochberg, Y. (1995) — "Controlling the false discovery
+    rate", Journal of the Royal Statistical Society B, 57(1), 289-300.
+
+  Adams, R.P. & MacKay, D.J.C. (2007) — "Bayesian online changepoint
+    detection", arXiv:0710.3742.
+
+  Turin, G.L. (1960) — "An introduction to matched filters", IRE
+    Transactions on Information Theory, 6(3), 311-329.
+
+  Hamilton, J.D. (1989) — "A new approach to the economic analysis of
+    nonstationary time series", Econometrica 57(2), 357-384.
+
+================================================================================
+  END OF ANALYSIS
+================================================================================
