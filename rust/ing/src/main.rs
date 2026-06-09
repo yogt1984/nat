@@ -16,7 +16,7 @@ use ing::dashboard::state::FeaturesSummary;
 use ing::dashboard::{run_dashboard_server, BroadcastLayer, DashboardState};
 use ing::features::CrossSymbolState;
 use ing::metrics::Metrics;
-use ing::output::ParquetWriter;
+use ing::output::{ParquetWriter, TradeParquetWriter, TradeRecord};
 use ing::redis_publisher::{RedisConfig, RedisPublisher};
 use ing::state::MarketState;
 use ing::ws::{HyperliquidClient, WsMessage};
@@ -136,6 +136,20 @@ async fn main() -> Result<()> {
         ParquetWriter::new_with_alg_features(&config.output, config.data_dir(), alg_feature_names)?;
     let writer_handle = tokio::spawn(run_writer(writer, feature_rx));
 
+    // Initialize trade writer (optional — writes raw trades to separate Parquet files)
+    let (trade_tx, trade_rx) = mpsc::channel::<TradeRecord>(100_000);
+    let trade_writer_handle = if config.trade_output.enabled {
+        let default_trade_dir = "../data/trades".to_string();
+        let trade_writer =
+            TradeParquetWriter::new(&config.trade_output, &default_trade_dir)?;
+        info!("Trade Parquet writer enabled");
+        Some(tokio::spawn(run_trade_writer(trade_writer, trade_rx)))
+    } else {
+        info!("Trade Parquet writer disabled");
+        drop(trade_rx); // drop receiver so senders don't block
+        None
+    };
+
     // Initialize market state for each symbol
     let mut handles = Vec::new();
     let cross_symbol_state = CrossSymbolState::new();
@@ -145,6 +159,7 @@ async fn main() -> Result<()> {
         let config = config.clone();
         let metrics = Arc::clone(&metrics);
         let feature_tx = feature_tx.clone();
+        let trade_tx = trade_tx.clone();
         let dashboard_state = Arc::clone(&dashboard_state);
         let redis_publisher = redis_publisher.clone();
         let alert_config = alert_config.clone();
@@ -157,6 +172,7 @@ async fn main() -> Result<()> {
                 config,
                 metrics,
                 feature_tx,
+                trade_tx,
                 dashboard_state,
                 redis_publisher,
                 alert_config,
@@ -169,9 +185,10 @@ async fn main() -> Result<()> {
         handles.push(handle);
     }
 
-    // Drop the original sender so writer knows when to stop
+    // Drop the original senders so writers know when to stop
     // (once all symbol tasks also drop their clones)
     drop(feature_tx);
+    drop(trade_tx);
 
     // Block until SIGINT/SIGTERM — this is where the process lives
     // during normal operation. Symbol tasks emit features in the
@@ -200,6 +217,16 @@ async fn main() -> Result<()> {
         Err(_) => error!("Writer flush timed out — data may be lost"),
     }
 
+    // Flush trade writer if enabled
+    if let Some(handle) = trade_writer_handle {
+        match tokio::time::timeout(tokio::time::Duration::from_secs(3), handle).await {
+            Ok(Ok(Ok(()))) => info!("Trade writer flushed successfully"),
+            Ok(Ok(Err(e))) => error!(?e, "Trade writer error during shutdown"),
+            Ok(Err(e)) => error!(?e, "Trade writer task panicked"),
+            Err(_) => error!("Trade writer flush timed out — data may be lost"),
+        }
+    }
+
     info!("ING shutdown complete");
     Ok(())
 }
@@ -210,6 +237,7 @@ async fn run_symbol_ingestor(
     config: Config,
     metrics: Arc<Metrics>,
     feature_tx: mpsc::Sender<FeatureVector>,
+    trade_tx: mpsc::Sender<TradeRecord>,
     dashboard_state: Arc<DashboardState>,
     redis_publisher: Option<Arc<Mutex<RedisPublisher>>>,
     alert_config: AlertConfig,
@@ -286,7 +314,24 @@ async fn run_symbol_ingestor(
                         // Track per-channel liveness independently
                         match &ws_msg {
                             WsMessage::Book(_) => channel_health.on_book(),
-                            WsMessage::Trades(_) => channel_health.on_trade(),
+                            WsMessage::Trades(trades) => {
+                                channel_health.on_trade();
+                                // Send raw trades to trade writer (if enabled)
+                                if config.trade_output.enabled {
+                                    for t in trades {
+                                        let rec = TradeRecord {
+                                            timestamp_ns: (t.time as i64) * 1_000_000, // ms → ns
+                                            symbol: symbol.clone(),
+                                            tid: t.tid,
+                                            price: t.price(),
+                                            size: t.size(),
+                                            is_buy: t.is_buy(),
+                                        };
+                                        // Non-blocking: if channel is full, drop the trade
+                                        let _ = trade_tx.try_send(rec);
+                                    }
+                                }
+                            }
                             _ => {}
                         }
 
@@ -575,5 +620,21 @@ async fn run_writer(
 
     writer.flush()?;
     info!("Parquet writer shutdown complete");
+    Ok(())
+}
+
+/// Run the trade Parquet writer task
+async fn run_trade_writer(
+    mut writer: TradeParquetWriter,
+    mut trade_rx: mpsc::Receiver<TradeRecord>,
+) -> Result<()> {
+    info!("Trade Parquet writer started");
+
+    while let Some(trade) = trade_rx.recv().await {
+        writer.write(&trade)?;
+    }
+
+    writer.flush()?;
+    info!("Trade Parquet writer shutdown complete");
     Ok(())
 }
