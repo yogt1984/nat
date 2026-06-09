@@ -44,6 +44,12 @@ pub struct RegimeFeatures {
     pub absorption_zscore: f64,
 
     // === Volume-Price Divergence ===
+    /// Volume-price divergence (1 minute)
+    pub divergence_1m: f64,
+    /// Volume-price divergence (5 minutes)
+    pub divergence_5m: f64,
+    /// Volume-price divergence (15 minutes)
+    pub divergence_15m: f64,
     /// Volume-price divergence (1 hour)
     pub divergence_1h: f64,
     /// Volume-price divergence (4 hour)
@@ -85,7 +91,7 @@ pub struct RegimeFeatures {
 impl RegimeFeatures {
     /// Number of regime features
     pub fn count() -> usize {
-        20
+        23
     }
 
     /// Feature names for serialization
@@ -95,6 +101,9 @@ impl RegimeFeatures {
             "regime_absorption_4h",
             "regime_absorption_24h",
             "regime_absorption_zscore",
+            "regime_divergence_1m",
+            "regime_divergence_5m",
+            "regime_divergence_15m",
             "regime_divergence_1h",
             "regime_divergence_4h",
             "regime_divergence_24h",
@@ -121,6 +130,9 @@ impl RegimeFeatures {
             self.absorption_4h,
             self.absorption_24h,
             self.absorption_zscore,
+            self.divergence_1m,
+            self.divergence_5m,
+            self.divergence_15m,
             self.divergence_1h,
             self.divergence_4h,
             self.divergence_24h,
@@ -152,8 +164,8 @@ mod tests {
 
     #[test]
     fn test_regime_features_count() {
-        assert_eq!(RegimeFeatures::count(), 20);
-        assert_eq!(RegimeFeatures::names().len(), 20);
-        assert_eq!(RegimeFeatures::default().to_vec().len(), 20);
+        assert_eq!(RegimeFeatures::count(), 23);
+        assert_eq!(RegimeFeatures::names().len(), 23);
+        assert_eq!(RegimeFeatures::default().to_vec().len(), 23);
     }
 }
