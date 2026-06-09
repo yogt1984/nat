@@ -114,7 +114,10 @@ impl RegimeBuffer {
             .absorption
             .compute_zscore(windows.get(2).copied().unwrap_or(1440));
 
-        // Divergence at multiple windows
+        // Divergence at multiple windows (short + long)
+        let divergence_1m = self.divergence.compute(1);
+        let divergence_5m = self.divergence.compute(5);
+        let divergence_15m = self.divergence.compute(15);
         let divergence_1h = self
             .divergence
             .compute(windows.first().copied().unwrap_or(60));
@@ -170,6 +173,9 @@ impl RegimeBuffer {
             absorption_4h,
             absorption_24h,
             absorption_zscore,
+            divergence_1m,
+            divergence_5m,
+            divergence_15m,
             divergence_1h,
             divergence_4h,
             divergence_24h,
