@@ -37,13 +37,18 @@ HORIZON_BARS = 20  # 20 * 5min = 100min forward return
 MIN_SAMPLES_REGIME = 500
 
 
-def load_bars(data_dir: str, symbol: str, start_date: str | None = None) -> pd.DataFrame:
-    """Load parquet data and aggregate to 5-min bars."""
+def load_bars(data_dir: str, symbol: str, start_date: str | None = None,
+              enrich_convolver: bool = False) -> pd.DataFrame:
+    """Load parquet data, optionally enrich with convolver, aggregate to 5-min bars."""
     df = load_parquet(data_dir, symbols=[symbol], start_date=start_date, max_memory_mb=4000)
     print(f"Loaded {len(df):,} ticks for {symbol}")
     if len(df) < 1000:
         print(f"ERROR: Only {len(df)} ticks, need at least 1000")
         sys.exit(1)
+    if enrich_convolver:
+        from algorithms.runner import enrich_with_convolver
+        df = enrich_with_convolver(df, symbol=symbol)
+        print(f"Enriched with convolver features")
     bars = aggregate_bars(df, timeframe="5min")
     print(f"Aggregated to {len(bars):,} bars")
     return bars
@@ -165,12 +170,15 @@ def main():
     parser.add_argument("--output-dir", default="models/regime_conditioned_lgbm")
     parser.add_argument("--start-date", default=None,
                         help="Earliest date to load (YYYY-MM-DD), limits memory")
+    parser.add_argument("--enrich-convolver", action="store_true",
+                        help="Run convolver on ticks before bar aggregation")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     print(f"=== Training Regime-Conditioned LightGBM: {args.symbol} ===")
 
-    bars = load_bars(args.data_dir, args.symbol, start_date=args.start_date)
+    bars = load_bars(args.data_dir, args.symbol, start_date=args.start_date,
+                     enrich_convolver=args.enrich_convolver)
     bars = add_regime_labels(bars)
     fwd_returns = build_labels(bars)
 
