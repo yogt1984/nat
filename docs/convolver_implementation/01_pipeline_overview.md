@@ -8,27 +8,26 @@ implementing any stage.
 
 ## Data Ingestion
 
-Historical OHLCV data is fetched via CCXT from Hyperliquid directly:
+Historical OHLCV data is fetched from Hyperliquid's native `candleSnapshot`
+REST API. No external dependencies (no CCXT) — uses stdlib `urllib` only.
 
-```python
-import ccxt
-hl = ccxt.hyperliquid()
-candles = hl.fetch_ohlcv("BTC/USDC:USDC", timeframe="1m", limit=1000, params={"since": since_ms})
-# Returns: [[timestamp, O, H, L, C, V], ...]
+```bash
+nat fetch candles --symbol BTC --interval 1m --days 90
+# Output: data/candles/BTC_1m.parquet
 ```
 
-Why CCXT: unified API, handles pagination and rate limits, Hyperliquid supported
-natively, returns OHLCV arrays directly. Same venue as production (not Binance
-proxies) so market microstructure matches.
+File: `scripts/data/fetch_candles.py`
+API: `POST https://api.hyperliquid.xyz/info` with `candleSnapshot` payload.
+Pagination: 5000 candles/request (~3.5 days at 1m), auto-paginates to cover
+full range. Incremental: only fetches candles newer than last stored timestamp.
 
-Pagination: loop `fetch_ohlcv()` with `since` parameter to backfill months of
-60s candles. Minimum data: 50K candles (~35 days) for sample size, 6+ months
-for regime coverage (see `docs/research/new/convolver_data_analysis.txt`).
+Minimum data: 50K candles (~35 days) for sample size, 6+ months for regime
+coverage (see `docs/research/new/convolver_data_analysis.txt`).
 
 ## Pipeline Stages
 
 ```
-[0] CCXT fetch_ohlcv             Hyperliquid historical 1m candles via REST
+[0] fetch_candles.py             Hyperliquid candleSnapshot API -> parquet
     |
 [1] OHLCV decomposition          4 channels: body, upper_wick, lower_wick, volume
 [2] Event detection              6 boolean masks (breakout/turtle/trap x bull/bear)
