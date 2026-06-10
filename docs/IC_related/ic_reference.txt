@@ -1,0 +1,356 @@
+================================================================================
+ INFORMATION COEFFICIENT (IC) REFERENCE
+ Mathematical Foundations for Signal Quality Assessment
+ NAT Quantitative Research Platform — June 2026
+================================================================================
+
+TABLE OF CONTENTS
+  1. Introduction
+  2. Core Definitions
+  3. Derived Metrics
+  4. Computation Variants
+  5. Statistical Quality Control
+  6. IC Decay Monitoring
+  7. Regime-Conditioned Feature Weights
+  8. Threshold Reference
+  9. Algorithm Development Guide
+
+================================================================================
+1. INTRODUCTION
+================================================================================
+
+The Information Coefficient (IC) is the canonical metric for measuring a
+signal's predictive power over future asset returns. In NAT, IC governs
+every stage: discovery, hypothesis gating, walk-forward validation, regime
+conditioning, and live decay monitoring.
+
+Source files:
+  - scripts/exploration/spannung_regime_screener.py — core IC computation
+  - scripts/alpha/screener.py — rolling/expanding IC, FDR correction
+  - scripts/agent/gates.py — gate protocol (G1, G2)
+  - scripts/agent/base.py — decay monitoring
+  - scripts/alpha/regime_filter.py — conditional IC
+  - config/agent.toml — threshold configuration
+
+================================================================================
+2. CORE DEFINITIONS
+================================================================================
+
+2.1 Forward Log Return
+----------------------
+
+Given price series {p_t} and horizon h (ticks or bars):
+
+    r(t → t+h) = ln( p(t+h) / max(p(t), ε) )
+
+where ε = 1e-15 prevents division by zero. Final h entries = NaN.
+
+Horizon mapping (tick level, 100ms emission):
+    h = 10  →  1 second
+    h = 50  →  5 seconds
+
+2.2 Spearman Rank IC
+---------------------
+
+The IC of signal S at horizon h:
+
+    IC = ρ_s(S_t, r(t → t+h))
+       = 1 - 6·Σ(d_i²) / [n·(n²-1)]
+
+where d_i = rank(S_i) - rank(r_i), n = number of valid paired observations.
+
+Why Spearman (not Pearson):
+  (i)   robust to outliers in microstructure data
+  (ii)  captures monotonic (not just linear) relationships
+  (iii) invariant to monotone signal transformations
+
+Exception: Kalman filter tuning uses Pearson for filter parameter optimization.
+
+2.3 Rolling Non-Overlapping IC
+-------------------------------
+
+Partition N observations into K = floor(N/W) windows of size W.
+
+For window k:
+    IC_k = ρ_s( S[kW:(k+1)W], r[kW:(k+1)W] )
+
+Window validity requires ALL of:
+  1. Finite paired observations ≥ n_min (default: 100)
+  2. Signal range ptp(S) > 1e-15 (not constant)
+  3. Return range ptp(r) > 1e-15 (not constant)
+  4. Spearman does not return NaN
+
+Defaults: W = 3000 ticks, n_min = 100
+
+================================================================================
+3. DERIVED METRICS
+================================================================================
+
+Given K valid IC windows {IC_1, ..., IC_K}:
+
+3.1 IC Mean and Std
+--------------------
+    IC_mean = (1/K) · Σ IC_k
+    IC_std  = sqrt( (1/K) · Σ (IC_k - IC_mean)² )
+
+3.2 Information Ratio (IC IR)
+------------------------------
+    IR = IC_mean / IC_std
+
+IR > 1 means mean IC exceeds its variability — strong persistent predictability.
+
+3.3 Annualized IC IR
+---------------------
+    IR_ann = IR × sqrt( B_year / B_step )
+
+where B_step = N_bars / K (avg bars per window).
+
+    Timeframe   B_year      Computation
+    15 min      35,040      96 × 365
+    1 h          8,760      24 × 365
+    4 h          2,190       6 × 365
+
+3.4 Statistical Significance
+------------------------------
+
+t-Statistic (window-based, H0: IC_mean = 0):
+    t = IC_mean / (IC_std / sqrt(K))
+    p = 2 · Pr(|T| > |t|),   T ~ Student's t(K-1)
+
+Z-Test p-value (observation-based, single IC):
+    p = erfc( |IC| · sqrt(n) / sqrt(2) )
+
+3.5 IC Hit Rate
+----------------
+    HitRate = (1/K) · Σ 1[ sign(IC_k) = sign(IC_mean) ]
+
+Above 70% indicates consistently-signed prediction.
+
+3.6 IC Autocorrelation
+-----------------------
+    ρ_1 = Σ (IC_k - IC_mean)(IC_{k+1} - IC_mean) / Σ (IC_k - IC_mean)²
+
+Low |ρ_1| < 0.3 → noisy IC; high → persistent regimes of predictability.
+
+3.7 Signal Turnover
+---------------------
+    Turnover = mean(|ΔS_t|) / σ(S)
+
+High turnover → frequent rebalancing → higher transaction costs.
+
+3.8 Breakeven Fee (bps)
+-------------------------
+    Breakeven_bps = |IC_mean| × σ(r) / Turnover × 10,000
+
+Hyperliquid fees: taker ~3.5 bps, maker ~0.2 bps.
+Signal is cost-viable if Breakeven > relevant fee tier.
+When Turnover ≈ 0, breakeven = ∞ (never trades).
+
+================================================================================
+4. COMPUTATION VARIANTS
+================================================================================
+
+4.1 Rolling IC (Non-Overlapping)
+---------------------------------
+Standard method (Section 2.3). Windows non-overlapping for independence.
+Params: window size W, min observations n_min.
+
+4.2 Expanding IC (Causal)
+--------------------------
+Avoids lookahead bias. Anchored at t=0:
+
+    IC_j^exp = ρ_s( S[0:t_j], r[0:t_j] )
+    t_j = n_min + j · Δt
+    Δt = max(floor(N/20), 1)
+    n_min = 50
+
+Simulates what a researcher observes in real time.
+
+4.3 Conditional IC (Regime-Gated)
+----------------------------------
+For binary regime mask M_t ∈ {0,1}:
+
+    IC_cond = ρ_s( S_t · M_t, r(t→t+h) · M_t )
+
+computed only on observations where M_t = 1. Adaptive window:
+
+    W_cond = min(W, max(floor(n_valid/4), n_min))
+
+Fallback: single global Spearman if < 2 valid windows.
+Min regime observations: 500.
+
+4.4 Bandpass-Filtered IC
+--------------------------
+Signal filtered before IC computation:
+
+    S_tilde = BPF(S_t; f_lo, f_hi)
+
+Default band: f_lo = 0.005 Hz, f_hi = 0.1 Hz.
+At 10 Hz sampling (100ms ticks): extracts periods between 10s and 200s.
+Often exceeds raw IC by removing HF noise.
+
+4.5 Tick-Level vs Bar-Resampled
+---------------------------------
+    Path            Forward Return                  Horizon
+    Tick-level      r = (p(t+h)-p(t))/p(t)         h = max(1, floor(h_s/0.1)) ticks
+    Bar-resampled   r = (p(t+h)-p(t))/p(t)         h = max(1, floor(h_s/T_bar)) bars
+
+================================================================================
+5. STATISTICAL QUALITY CONTROL
+================================================================================
+
+5.1 Benjamini-Hochberg FDR Correction
+---------------------------------------
+When testing m hypotheses simultaneously:
+
+  1. Sort raw p-values: p_(1) ≤ p_(2) ≤ ... ≤ p_(m)
+  2. Adjust: p_adj(i) = p_(i) × m / i
+  3. Enforce monotonicity (step-down):
+       p_adj(i) ← min(p_adj(i), p_adj(i+1)),   i = m-1, ..., 1
+  4. Clip to [0, 1]
+  5. Reject H_i where p_adj(i) < q
+
+Default FDR threshold: q = 0.05.
+
+Applied at end of each research cycle across all hypotheses that passed
+individual gates. Controls expected fraction of false discoveries.
+
+5.2 Five-Gate Hypothesis Protocol
+-----------------------------------
+
+Gate 1 — IC Gate:
+    PASS ⟺ |IC| ≥ IC_min
+    p-value via erfc(|IC|·sqrt(n)/sqrt(2)) for reporting only.
+
+Gate 2 — ΔIC Gate:
+    ΔIC = IC_gated - IC_baseline
+    PASS ⟺ ΔIC ≥ ΔIC_min
+    Skipped when no regime gate specified.
+
+Gate 3 — Cost Gate:
+    PASS ⟺ avg return per trade ≥ 0.1 bps
+
+Gate 4 — Coverage Gate:
+    PASS ⟺ regime observation fraction ≥ 0.10
+
+Gate 5 — Regime Improvement:
+    PASS ⟺ ∃ regime r s.t. |IC_r| / |IC_global| > 1.5
+
+After all gates: BH-FDR at q = 0.05.
+
+5.3 Adaptive IC Threshold
+---------------------------
+As registry matures:
+
+    IC_min^adapt = max( IC_floor, 0.8 × median({IC_exp^(i)} for i in registry) )
+
+Prevents accumulating marginal signals once strong ones exist.
+
+================================================================================
+6. IC DECAY MONITORING
+================================================================================
+
+Live signals monitored for IC degradation:
+
+  1. Compute rolling IC on latest 2 days of data.
+  2. Compare against expected IC at registration:
+       IC_threshold = IC_expected × δ       (δ = 0.5)
+  3. Track consecutive days below threshold:
+       D_t = D_{t-1} + 1   if IC_rolling < IC_threshold
+       D_t = 0              otherwise (recovery)
+  4. Retire when D_t ≥ D_max  (default: 14 days)
+
+Rolling IC computation:
+  - Tick path: h = max(1, floor(h_s/0.1)) ticks
+  - Bar path: aggregate to bars first, then Spearman IC
+  - Min valid data points: 500
+  - IC history: rolling buffer of 30 daily entries
+
+================================================================================
+7. REGIME-CONDITIONED FEATURE WEIGHTS
+================================================================================
+
+When a regime improves IC, per-regime feature weights:
+
+    w_f^(r) = |IC_f^(r)| / Σ|IC_f'^(r)|     if |IC_f^(r)| / |IC_f^(global)| > 1.5
+    w_f^(r) = |IC_f^(global)| / Σ|IC_f'^(global)|     otherwise
+
+Exploits regime-specific predictability, falls back to global when
+conditioning doesn't help.
+
+================================================================================
+8. THRESHOLD REFERENCE
+================================================================================
+
+8.1 IC Computation Parameters
+-------------------------------
+    Parameter           Context                         Value
+    IC_WINDOW           Rolling window (ticks)          3,000
+    IC_MIN_OBS          Min valid obs per window         100
+    MIN_REGIME_OBS      Min obs per regime condition     500
+    ULTRALOW_BAND       Bandpass filter (Hz)            (0.005, 0.1)
+    FWD_HORIZONS        Forward return horizons         1s=10t, 5s=50t
+    Expanding min_obs   First expanding IC point         50
+    Expanding step      Step size                       max(floor(N/20), 1)
+    Rolling min_obs     Alpha screener (bars)            30
+
+8.2 Agent Gate Thresholds
+--------------------------
+    Parameter           Micro       MF (5 min)      Macro (1 h)
+    IC_min              0.10        0.08            0.07
+    ΔIC_min             0.05        0.03            0.02
+    Min coverage        0.10         —               —
+    WF sign consistency 0.80         —               —
+
+Rationale: Lower thresholds at longer horizons compensate for fewer
+observations per day (~24 bars/day at 1h vs ~36,000 ticks/hour at tick).
+
+8.3 Decay and FDR Parameters
+------------------------------
+    Parameter                   Description                         Value
+    δ (decay ratio)             Retire if IC < δ × expected         0.5
+    D_max                       Consecutive days before retirement  14
+    q (FDR)                     Benjamini-Hochberg threshold        0.05
+    OOS min dates               Min out-of-sample periods           2
+    Min symbols                 Cross-asset replication             2
+
+================================================================================
+9. ALGORITHM DEVELOPMENT GUIDE
+================================================================================
+
+9.1 Computing IC for a New Signal
+-----------------------------------
+  1. Compute forward returns at target horizon (Section 2.1).
+  2. Rolling IC: non-overlapping windows, Spearman per window (Section 2.3).
+  3. Aggregate: IC_mean, IC_std, IR, t-stat, p-value (Section 3).
+  4. Cost check: turnover and breakeven (Section 3.7-3.8).
+     Reject if breakeven < 3.5 bps (taker) or < 0.2 bps (maker).
+  5. FDR: if testing multiple signals, BH correction at q = 0.05.
+
+9.2 Gate Checklist
+-------------------
+  [ ] G1: |IC| ≥ IC_min for target agent tier
+  [ ] G2: ΔIC ≥ ΔIC_min (if regime-gated)
+  [ ] G3: Avg return per trade ≥ 0.1 bps after costs
+  [ ] G4: Regime coverage ≥ 10% of observations
+  [ ] G5: At least one regime with IC ratio > 1.5× global
+  [ ] FDR: Survives BH correction across hypothesis batch
+  [ ] Cross-symbol: IC replicates on ≥ 2 symbols
+  [ ] Walk-forward: ≥ 80% sign consistency across OOS periods
+
+9.3 Interpreting IC Values
+---------------------------
+    |IC|            Interpretation
+    < 0.02          Noise — no signal
+    0.02 - 0.05     Weak — may survive in ensemble only
+    0.05 - 0.10     Moderate — viable with low costs
+    0.10 - 0.20     Strong — standalone signal candidate
+    > 0.20          Exceptional — verify not overfit
+
+WARNING: IC > 0.20 at tick level should be treated with suspicion.
+Common causes: lookahead bias, stale feature lagging price, insufficient
+data. Always verify with expanding IC and cross-symbol replication.
+
+================================================================================
+END OF DOCUMENT
+================================================================================
