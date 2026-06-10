@@ -29,7 +29,12 @@ WORKDIR /app
 COPY --from=builder /app/target/release/ing /app/ing
 
 # Create directories for data and config
-RUN mkdir -p /app/data /app/config
+# WORKDIR must be /app/rust so that relative paths in ing.toml
+# (e.g. "../data/features") resolve to /app/data/features,
+# matching the Docker volume mount at /app/data.
+RUN mkdir -p /app/rust /app/data /app/config
+
+WORKDIR /app/rust
 
 # Default command
 CMD ["/app/ing", "/app/config/ing.toml"]
