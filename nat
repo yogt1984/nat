@@ -921,6 +921,24 @@ def cmd_model_train_gmm(args):
     _py(cmd)
 
 
+def cmd_model_train_hier(args):
+    symbol = _sym(args)
+    horizon = getattr(args, 'horizon', 60)
+    dry_run = getattr(args, 'dry_run', False)
+    start = getattr(args, 'start_date', None)
+    l1_thresh = getattr(args, 'l1_threshold', 0.5)
+    _banner(f"Training Hierarchical Signal Combiner: {symbol}")
+    os.makedirs("models/hierarchical_combiner", exist_ok=True)
+    cmd = (f"scripts/train_hierarchical.py --symbol {symbol} "
+           f"--data-dir {_data(args)} --horizon {horizon} "
+           f"--l1-threshold {l1_thresh}")
+    if dry_run:
+        cmd += " --dry-run"
+    if start:
+        cmd += f" --start-date {start}"
+    _py(cmd)
+
+
 def cmd_model_list(args):
     model_dir = getattr(args, 'model_dir', './models')
     _py(f"scripts/list_models.py --model-dir {model_dir}")
@@ -3098,6 +3116,7 @@ def cmd_help(args=None):
     ElasticNet (L1+L2 regularization) and LightGBM (gradient boosted trees).
     nat model train            Train baseline (--snapshot, --type elasticnet|lightgbm)
     nat model train-gmm       Train GMM regime classifier (--auto BIC selection)
+    nat model train-hier      Train hierarchical signal combiner (--symbol, --horizon, --dry-run)
     nat model list             List saved models
     nat model score            Score data + evaluate (--model, --save)
     nat model serve            REST API for model serving (--port, --best)
@@ -4003,6 +4022,14 @@ def build_parser():
     mg.add_argument('--auto', action='store_true', help='Auto BIC selection')
     mg.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     mg.set_defaults(func=cmd_model_train_gmm)
+    mh = msub.add_parser('train-hier', help='Train hierarchical signal combiner')
+    mh.add_argument('--symbol', default='BTC', help='Symbol (default: BTC)')
+    mh.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+    mh.add_argument('--horizon', type=int, default=60, help='Forward return horizon in bars (default: 60 = 5h)')
+    mh.add_argument('--l1-threshold', type=float, default=0.5, help='L1 z-score gate threshold')
+    mh.add_argument('--start-date', default=None, help='Earliest date (YYYY-MM-DD)')
+    mh.add_argument('--dry-run', action='store_true', help='Evaluate only, no save')
+    mh.set_defaults(func=cmd_model_train_hier)
     ml = msub.add_parser('list', help='List models')
     ml.add_argument('--model-dir', default='./models', help='Model directory')
     ml.set_defaults(func=cmd_model_list)
