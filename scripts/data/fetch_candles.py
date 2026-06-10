@@ -123,16 +123,23 @@ def fetch_candles(
     else:
         start_ms = end_ms - days * 86_400_000
 
-    # Incremental: if file exists, start from last timestamp
+    # Incremental: if file exists and covers the requested start, resume from end
     existing_df = None
     if out_path.exists():
         existing_df = pd.read_parquet(out_path)
         if len(existing_df) > 0:
+            first_ts = existing_df["timestamp"].min()
             last_ts = existing_df["timestamp"].max()
+            first_ms = int(first_ts.timestamp() * 1000)
             last_ms = int(last_ts.timestamp() * 1000)
-            if last_ms > start_ms:
+            if first_ms <= start_ms and last_ms > start_ms:
+                # Existing data covers requested start; only fetch new candles
                 start_ms = last_ms + interval_ms
                 log.info("Incremental update from %s", last_ts)
+            else:
+                # Existing data doesn't go back far enough; refetch full range
+                log.info("Existing data starts at %s, need %s — refetching",
+                         first_ts, datetime.fromtimestamp(start_ms/1000, tz=timezone.utc))
 
     if start_ms >= end_ms:
         log.info("Already up to date for %s %s", symbol, interval)
