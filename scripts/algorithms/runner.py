@@ -69,6 +69,49 @@ def run_chain(
     return results
 
 
+def enrich_with_convolver(
+    df: pd.DataFrame,
+    symbol: str = "BTC",
+    kernel_dir: str = "models",
+) -> pd.DataFrame:
+    """Run convolver on tick data and append its outputs to the DataFrame.
+
+    Use before bar aggregation in training scripts so that convolver features
+    (e.g. alg_conv_best_score) appear in aggregated bars as alg_conv_best_score_max.
+
+    Args:
+        df: Tick-level DataFrame with raw_midprice and flow_volume_1s.
+        symbol: Symbol name — loads models/convolver_kernels_{symbol}.
+        kernel_dir: Directory containing kernel .npz/.json files.
+
+    Returns:
+        DataFrame with convolver output columns appended.
+    """
+    from .convolver import Convolver
+
+    kernel_path = f"{kernel_dir}/convolver_kernels_{symbol}"
+    try:
+        conv = Convolver(kernel_path=kernel_path)
+    except FileNotFoundError:
+        # Try default (no symbol suffix)
+        try:
+            conv = Convolver(kernel_path=f"{kernel_dir}/convolver_kernels")
+        except FileNotFoundError:
+            logger.warning("No convolver kernel library found, skipping enrichment")
+            return df
+
+    logger.info("Enriching with convolver features (kernel=%s)", kernel_path)
+    features_df = conv.run_batch(df)
+
+    enriched = df.copy()
+    for col in features_df.columns:
+        enriched[col] = features_df[col].values
+    logger.info("Added %d convolver columns, %.1f%% non-NaN",
+                len(features_df.columns),
+                features_df.notna().all(axis=1).mean() * 100)
+    return enriched
+
+
 class AlgorithmRunner:
     """Run a MicrostructureAlgorithm over data."""
 

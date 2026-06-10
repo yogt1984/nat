@@ -33,7 +33,7 @@ from utils.model_io import ModelMetadata, save_sklearn_model
 from cluster_pipeline.preprocess import aggregate_bars
 from cluster_pipeline.loader import load_parquet
 
-FEATURE_COLS = [
+_BASE_FEATURE_COLS = [
     "ent_tick_1m_mean",
     "ent_permutation_returns_16_mean",
     "trend_hurst_300_mean",
@@ -43,11 +43,18 @@ FEATURE_COLS = [
     "vol_returns_5m_last",
 ]
 
+_OPTIONAL_FEATURE_COLS = [
+    "alg_conv_best_score_max",
+]
+
+FEATURE_COLS = _BASE_FEATURE_COLS + _OPTIONAL_FEATURE_COLS
+
 HORIZON_BARS = 20  # 20 * 5min = 100min forward return
 
 
-def load_bars(data_dir: str, symbol: str, start_date: str | None = None) -> pd.DataFrame:
-    """Load parquet data and aggregate to 5-min bars."""
+def load_bars(data_dir: str, symbol: str, start_date: str | None = None,
+              enrich_convolver: bool = False) -> pd.DataFrame:
+    """Load parquet data, optionally enrich with convolver, aggregate to 5-min bars."""
     base_cols = ["timestamp_ns", "symbol", "raw_midprice", "raw_spread"]
     # Feature columns needed (raw names before aggregation)
     raw_cols = [
@@ -57,6 +64,9 @@ def load_bars(data_dir: str, symbol: str, start_date: str | None = None) -> pd.D
         "vol_returns_5m",
     ]
     load_cols = list(set(base_cols + raw_cols))
+    # Convolver needs flow_volume_1s
+    if enrich_convolver:
+        load_cols = list(set(load_cols + ["flow_volume_1s"]))
 
     df = load_parquet(data_dir, symbols=[symbol], columns=load_cols,
                       start_date=start_date, max_memory_mb=4000)
@@ -66,15 +76,22 @@ def load_bars(data_dir: str, symbol: str, start_date: str | None = None) -> pd.D
         print(f"ERROR: Only {len(df)} ticks, need at least 1000")
         sys.exit(1)
 
+    if enrich_convolver:
+        from algorithms.runner import enrich_with_convolver
+        df = enrich_with_convolver(df, symbol=symbol)
+        print(f"Enriched with convolver features")
+
     bars = aggregate_bars(df, timeframe="5min")
     print(f"Aggregated to {len(bars):,} bars")
     return bars
 
 
-def build_dataset(bars: pd.DataFrame, horizon: int = HORIZON_BARS) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
+def build_dataset(bars: pd.DataFrame, horizon: int = HORIZON_BARS) -> tuple[np.ndarray, np.ndarray, pd.DataFrame, list[str]]:
     """Build feature matrix X and binary label y from bars.
 
-    Returns (X, y, bars_valid) where rows with NaN features or labels are dropped.
+    Returns (X, y, bars_valid, feature_cols) where rows with NaN features
+    or labels are dropped. feature_cols is the actual list of columns used
+    (base + available optional).
     """
     # Forward returns
     mid = bars["raw_midprice_mean"].values
@@ -86,22 +103,35 @@ def build_dataset(bars: pd.DataFrame, horizon: int = HORIZON_BARS) -> tuple[np.n
     bars["label"] = (fwd > 0).astype(float)
     bars.loc[np.isnan(fwd), "label"] = np.nan
 
-    # Check required columns
-    missing = [c for c in FEATURE_COLS if c not in bars.columns]
-    if missing:
-        print(f"ERROR: Missing feature columns: {missing}")
+    # Check required base columns; optional columns default to 0.0
+    opt = set(_OPTIONAL_FEATURE_COLS)
+    missing_base = [c for c in _BASE_FEATURE_COLS if c not in bars.columns]
+    if missing_base:
+        print(f"ERROR: Missing base feature columns: {missing_base}")
         print(f"Available: {sorted(bars.columns.tolist())}")
         sys.exit(1)
 
+    # Use available feature columns (base + optional present in data)
+    use_cols = list(_BASE_FEATURE_COLS)
+    for c in _OPTIONAL_FEATURE_COLS:
+        if c in bars.columns and bars[c].notna().mean() > 0.05:
+            use_cols.append(c)
+            print(f"  Including optional feature: {c}")
+        else:
+            print(f"  Skipping optional feature: {c} (not in data)")
+
     # Drop rows with NaN in features or label
     valid_mask = bars["label"].notna()
-    for col in FEATURE_COLS:
+    for col in use_cols:
         valid_mask &= bars[col].notna()
 
     bars_valid = bars[valid_mask].copy()
-    X = bars_valid[FEATURE_COLS].values
+    X = bars_valid[use_cols].values
     y = bars_valid["label"].values
 
+    if len(bars) == 0:
+        print("ERROR: No bars after aggregation")
+        sys.exit(1)
     print(f"Valid samples: {len(y):,} / {len(bars):,} ({100*len(y)/len(bars):.1f}%)")
     print(f"Label balance: {y.mean():.3f} (positive rate)")
 
@@ -109,16 +139,16 @@ def build_dataset(bars: pd.DataFrame, horizon: int = HORIZON_BARS) -> tuple[np.n
         print(f"WARNING: Label balance {y.mean():.3f} outside [0.35, 0.65]")
 
     # Feature NaN report
-    for col in FEATURE_COLS:
+    for col in use_cols:
         nan_rate = bars[col].isna().mean()
         if nan_rate > 0.05:
             print(f"WARNING: {col} NaN rate = {nan_rate:.1%}")
 
-    return X, y, bars_valid
+    return X, y, bars_valid, use_cols
 
 
-def walk_forward_train(X: np.ndarray, y: np.ndarray, n_splits: int = 4,
-                        embargo: int = 100, C: float = 1.0) -> dict:
+def walk_forward_train(X: np.ndarray, y: np.ndarray, feature_names: list[str],
+                        n_splits: int = 4, embargo: int = 100, C: float = 1.0) -> dict:
     """Expanding-window walk-forward validation.
 
     Returns dict with OOS metrics and the final trained model.
@@ -207,7 +237,7 @@ def walk_forward_train(X: np.ndarray, y: np.ndarray, n_splits: int = 4,
 
     # Feature importance (coefficients)
     print("\nFeature coefficients (final model):")
-    for name, coef in zip(FEATURE_COLS, final_model.coef_[0]):
+    for name, coef in zip(feature_names, final_model.coef_[0]):
         print(f"  {name:40s} {coef:+.6f}")
     print(f"  {'intercept':40s} {final_model.intercept_[0]:+.6f}")
 
@@ -233,6 +263,8 @@ def main():
                         help="Output directory for trained model")
     parser.add_argument("--start-date", default=None,
                         help="Earliest date to load (YYYY-MM-DD), limits memory")
+    parser.add_argument("--enrich-convolver", action="store_true",
+                        help="Run convolver on ticks before bar aggregation")
     parser.add_argument("--dry-run", action="store_true", help="Evaluate only, don't save")
     args = parser.parse_args()
 
@@ -241,15 +273,17 @@ def main():
     print(f"C={args.C}, n_splits={args.n_splits}, embargo={args.embargo}")
 
     # Load and build dataset
-    bars = load_bars(args.data_dir, args.symbol, start_date=args.start_date)
-    X, y, bars_valid = build_dataset(bars)
+    bars = load_bars(args.data_dir, args.symbol, start_date=args.start_date,
+                     enrich_convolver=args.enrich_convolver)
+    X, y, bars_valid, feature_cols = build_dataset(bars)
 
     if len(y) < 500:
         print(f"ERROR: Only {len(y)} valid samples, need at least 500")
         sys.exit(1)
 
     # Walk-forward validation
-    result = walk_forward_train(X, y, n_splits=args.n_splits,
+    result = walk_forward_train(X, y, feature_names=feature_cols,
+                                 n_splits=args.n_splits,
                                  embargo=args.embargo, C=args.C)
 
     # Decision gate
@@ -267,7 +301,7 @@ def main():
         metadata = ModelMetadata(
             model_type="logistic_regression",
             model_name="momentum_continuation",
-            feature_names=FEATURE_COLS,
+            feature_names=feature_cols,
             hyperparameters={"C": args.C, "penalty": "l2", "max_iter": 1000},
             performance_metrics={
                 "avg_auc_oos": result["avg_auc_oos"],
