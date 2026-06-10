@@ -565,35 +565,51 @@ def _run_single_symbol(
     """
     # --- Load data ---
     print(f"\n{'='*60}")
-    print(f"Loading data from {args.data_dir} for {symbol}...")
-    try:
-        from cluster_pipeline.loader import load_parquet
-        df = load_parquet(
-            args.data_dir,
-            symbols=[symbol],
-            columns=["raw_midprice", "flow_volume_1s", "symbol", "timestamp_ns"],
-            max_memory_mb=args.max_memory_mb,
-        )
-    except ImportError:
+
+    ohlcv_file = getattr(args, "ohlcv_file", None)
+    if ohlcv_file is not None:
+        # Direct OHLCV parquet (from fetch_candles.py)
         import pandas as pd
-        import pyarrow.parquet as pq
-        data_path = Path(args.data_dir)
-        files = sorted(data_path.glob("**/*.parquet"))
-        dfs = []
-        for f in files:
-            t = pq.read_table(f, columns=["raw_midprice", "flow_volume_1s", "symbol"])
-            d = t.to_pandas()
-            d = d[d["symbol"] == symbol]
-            if len(d) > 0:
-                dfs.append(d)
-        df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+        print(f"Loading pre-fetched OHLCV from {ohlcv_file}...")
+        ohlcv = pd.read_parquet(ohlcv_file)
+        O = ohlcv["open"].values.astype(np.float64)
+        H = ohlcv["high"].values.astype(np.float64)
+        L = ohlcv["low"].values.astype(np.float64)
+        C = ohlcv["close"].values.astype(np.float64)
+        V = ohlcv["volume"].values.astype(np.float64)
+        n_candles = len(O)
+        print(f"Loaded {n_candles:,} candles directly from OHLCV parquet")
+    else:
+        # Tick parquet (from Rust ingestor)
+        print(f"Loading data from {args.data_dir} for {symbol}...")
+        try:
+            from cluster_pipeline.loader import load_parquet
+            df = load_parquet(
+                args.data_dir,
+                symbols=[symbol],
+                columns=["raw_midprice", "flow_volume_1s", "symbol", "timestamp_ns"],
+                max_memory_mb=args.max_memory_mb,
+            )
+        except ImportError:
+            import pandas as pd
+            import pyarrow.parquet as pq
+            data_path = Path(args.data_dir)
+            files = sorted(data_path.glob("**/*.parquet"))
+            dfs = []
+            for f in files:
+                t = pq.read_table(f, columns=["raw_midprice", "flow_volume_1s", "symbol"])
+                d = t.to_pandas()
+                d = d[d["symbol"] == symbol]
+                if len(d) > 0:
+                    dfs.append(d)
+            df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
-    print(f"Loaded {len(df):,} ticks")
+        print(f"Loaded {len(df):,} ticks")
 
-    # --- Aggregate to candles ---
-    O, H, L, C, V = aggregate_ticks_to_candles(df, args.candle_ticks, symbol)
-    n_candles = len(O)
-    print(f"Aggregated to {n_candles:,} candles ({args.candle_ticks} ticks each)")
+        # --- Aggregate to candles ---
+        O, H, L, C, V = aggregate_ticks_to_candles(df, args.candle_ticks, symbol)
+        n_candles = len(O)
+        print(f"Aggregated to {n_candles:,} candles ({args.candle_ticks} ticks each)")
 
     if n_candles < args.window + args.atr_period + args.min_events:
         print(f"ERROR: Not enough candles for {symbol}. Need at least "
@@ -746,7 +762,7 @@ def _run_single_symbol(
         "title": "Convolver Discovery: Event-Aligned SVD",
         "generated": datetime.now(timezone.utc).isoformat(),
         "symbol": symbol,
-        "n_ticks": len(df),
+        "n_ticks": len(df) if ohlcv_file is None else n_candles,
         "n_candles": n_candles,
         "candle_ticks": args.candle_ticks,
         "params": params,
@@ -844,6 +860,8 @@ def main():
     )
     parser.add_argument("--data-dir", default="data/features",
                         help="Path to tick parquet directory")
+    parser.add_argument("--ohlcv-file", default=None,
+                        help="Pre-fetched OHLCV parquet (bypasses tick aggregation)")
     parser.add_argument("--symbol", default=None,
                         help="Single symbol to analyze (backward compat)")
     parser.add_argument("--symbols", default=None,
