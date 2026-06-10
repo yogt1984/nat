@@ -927,13 +927,17 @@ def cmd_model_train_hier(args):
     dry_run = getattr(args, 'dry_run', False)
     start = getattr(args, 'start_date', None)
     l1_thresh = getattr(args, 'l1_threshold', 0.5)
+    ablation = getattr(args, 'ablation', False)
+    val_mode = getattr(args, 'validation_mode', 'walk_forward')
     _banner(f"Training Hierarchical Signal Combiner: {symbol}")
     os.makedirs("models/hierarchical_combiner", exist_ok=True)
     cmd = (f"scripts/train_hierarchical.py --symbol {symbol} "
            f"--data-dir {_data(args)} --horizon {horizon} "
-           f"--l1-threshold {l1_thresh}")
+           f"--l1-threshold {l1_thresh} --validation-mode {val_mode}")
     if dry_run:
         cmd += " --dry-run"
+    if ablation:
+        cmd += " --ablation"
     if start:
         cmd += f" --start-date {start}"
     _py(cmd)
@@ -4029,6 +4033,9 @@ def build_parser():
     mh.add_argument('--l1-threshold', type=float, default=0.5, help='L1 z-score gate threshold')
     mh.add_argument('--start-date', default=None, help='Earliest date (YYYY-MM-DD)')
     mh.add_argument('--dry-run', action='store_true', help='Evaluate only, no save')
+    mh.add_argument('--ablation', action='store_true', help='Run layer ablation analysis (auto with --dry-run)')
+    mh.add_argument('--validation-mode', choices=['walk_forward', 'purged_kfold'], default='walk_forward',
+                    help='Validation method (default: walk_forward)')
     mh.set_defaults(func=cmd_model_train_hier)
     ml = msub.add_parser('list', help='List models')
     ml.add_argument('--model-dir', default='./models', help='Model directory')

@@ -138,9 +138,11 @@ class HierarchicalCombiner(MicrostructureAlgorithm):
         self,
         weights_path: str = "models/hierarchical_combiner/weights.json",
         l1_threshold: float = 0.5,
+        l1_target_percentile: float = 70.0,
         zscore_window: int = 200,
     ):
-        self._l1_threshold = l1_threshold
+        self._l1_threshold = l1_threshold  # fixed fallback
+        self._l1_target_percentile = l1_target_percentile
         self._zscore_window = zscore_window
 
         # Load trained weights or use defaults
@@ -156,6 +158,9 @@ class HierarchicalCombiner(MicrostructureAlgorithm):
             self._l2_weights.update(trained.get("l2_weights", {}))
             self._l3_weights.update(trained.get("l3_weights", {}))
             self._l1_threshold = trained.get("l1_threshold", self._l1_threshold)
+            self._l1_target_percentile = trained.get(
+                "l1_target_percentile", self._l1_target_percentile
+            )
             logger.info("Loaded trained weights from %s", wp)
 
     def name(self) -> str:
@@ -191,10 +196,17 @@ class HierarchicalCombiner(MicrostructureAlgorithm):
         # --- Layer 1: Slow directional bias ---
         l1_z = _ic_weighted_composite(df, L1_FEATURES, self._l1_weights, window=w)
 
+        # Adaptive threshold: rolling percentile of |z| with fixed fallback
+        l1_abs = l1_z.abs()
+        rolling_thresh = l1_abs.rolling(w, min_periods=50).quantile(
+            self._l1_target_percentile / 100.0
+        )
+        rolling_thresh = rolling_thresh.fillna(self._l1_threshold)
+
         # Discretize: strong positive → +1, strong negative → -1, else 0
         l1_direction = pd.Series(0.0, index=df.index)
-        l1_direction[l1_z > self._l1_threshold] = 1.0
-        l1_direction[l1_z < -self._l1_threshold] = -1.0
+        l1_direction[l1_z > rolling_thresh] = 1.0
+        l1_direction[l1_z < -rolling_thresh] = -1.0
 
         # --- Layer 2: Fast entry timing ---
         l2_raw = _ic_weighted_composite(df, L2_FEATURES, self._l2_weights, window=w)

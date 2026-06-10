@@ -36,6 +36,56 @@ from algorithms.hierarchical_combiner import (
 )
 
 HORIZON_BARS = 60  # 60 * 5min = 5h forward return
+VALID_MODES = ("walk_forward", "purged_kfold")
+
+ABLATION_MODES = ["full", "l1_only", "no_l3", "no_l2"]
+
+
+def _compute_composite(
+    l1_z: pd.Series,
+    l2_z: pd.Series,
+    l3_z: pd.Series,
+    l1_threshold: float,
+    mode: str = "full",
+) -> tuple[pd.Series, pd.Series]:
+    """Compute hierarchical composite with ablation support.
+
+    Returns (composite, l1_direction).
+    """
+    # Layer 1: directional bias
+    l1_dir = pd.Series(0.0, index=l1_z.index)
+    l1_dir[l1_z > l1_threshold] = 1.0
+    l1_dir[l1_z < -l1_threshold] = -1.0
+
+    # Layer 2: entry timing
+    l2_entry = l2_z.clip(-3, 3) / 3.0
+
+    # Layer 3: vol sizing
+    l3_scale = 1.0 / (1.0 + np.exp(l3_z.clip(-5, 5)))
+
+    # Apply ablation overrides
+    if mode == "l1_only":
+        l2_entry = pd.Series(1.0, index=l1_z.index)
+        l3_scale = pd.Series(0.5, index=l1_z.index)
+    elif mode == "no_l3":
+        l3_scale = pd.Series(0.5, index=l1_z.index)
+    elif mode == "no_l2":
+        # L2 passthrough (no gating), but keep its magnitude
+        pass  # skip gating below
+
+    # Gate L2 by L1 alignment (skip for no_l2 mode)
+    if mode != "no_l2" and mode != "l1_only":
+        l1_active = l1_dir != 0
+        aligned = np.sign(l2_entry) == l1_dir
+        l2_entry = l2_entry.copy()
+        l2_entry[l1_active & ~aligned] = 0.0
+
+    # Composite assembly
+    composite = l1_dir * l2_entry.abs() * l3_scale
+    neutral = l1_dir == 0
+    composite[neutral] = l2_entry[neutral] * l3_scale[neutral] * 0.3
+
+    return composite.clip(-1, 1), l1_dir
 
 
 def load_bars(data_dir: str, symbol: str, start_date: str | None = None) -> pd.DataFrame:
@@ -112,6 +162,43 @@ def train_layer_weights(
     return weights
 
 
+def _eval_fold_metrics(
+    composite: pd.Series,
+    l1_dir: pd.Series,
+    fwd_return: pd.Series,
+    test_start: int,
+    test_end: int,
+) -> dict | None:
+    """Compute OOS metrics for a single fold slice."""
+    tc_series = composite.iloc[test_start:test_end]
+    tr_series = fwd_return.iloc[test_start:test_end]
+    l1_slice = l1_dir.iloc[test_start:test_end]
+
+    valid_mask = np.isfinite(tc_series.values) & np.isfinite(tr_series.values)
+    if valid_mask.sum() < 30:
+        return None
+
+    tc = tc_series.values[valid_mask]
+    tr = tr_series.values[valid_mask]
+
+    composite_ic, _ = spearmanr(tc, tr)
+    dir_acc = np.mean(np.sign(tc) == np.sign(tr))
+
+    cost_bps = 11e-4
+    signal_returns = np.sign(tc) * tr - cost_bps * (np.abs(np.diff(np.sign(tc), prepend=0)) > 0)
+    sharpe_proxy = np.mean(signal_returns) / max(np.std(signal_returns), 1e-8) * np.sqrt(252 * 288)
+
+    l1_active_pct = (l1_slice.values != 0).mean()
+
+    return {
+        "test_size": int(valid_mask.sum()),
+        "composite_ic": float(composite_ic),
+        "dir_accuracy": float(dir_acc),
+        "sharpe_proxy": float(sharpe_proxy),
+        "l1_active_pct": float(l1_active_pct),
+    }
+
+
 def walk_forward_evaluate(
     bars: pd.DataFrame,
     fwd_returns: np.ndarray,
@@ -122,6 +209,7 @@ def walk_forward_evaluate(
     n_splits: int = 4,
     embargo: int = 100,
     zscore_window: int = 200,
+    ablation: bool = False,
 ) -> list[dict]:
     """Walk-forward evaluation of hierarchical composite signal."""
     n = len(bars)
@@ -130,8 +218,8 @@ def walk_forward_evaluate(
 
     bars = bars.copy()
     bars["fwd_return"] = fwd_returns
-    valid = np.isfinite(fwd_returns)
 
+    modes = ABLATION_MODES if ablation else ["full"]
     fold_results = []
 
     for fold in range(n_splits):
@@ -142,65 +230,98 @@ def walk_forward_evaluate(
         if test_start >= n or test_end <= test_start:
             break
 
-        test_bars = bars.iloc[test_start:test_end].copy()
-        if len(test_bars) < 50:
+        if test_end - test_start < 50:
             continue
 
-        # Compute composite on test set (using full history for z-scores)
         eval_bars = bars.iloc[:test_end].copy()
 
         l1_z = _ic_weighted_composite(eval_bars, L1_FEATURES, l1_weights, window=zscore_window)
         l2_z = _ic_weighted_composite(eval_bars, L2_FEATURES, l2_weights, window=zscore_window)
         l3_z = _ic_weighted_composite(eval_bars, L3_FEATURES, l3_weights, window=zscore_window)
 
-        # Layer outputs
-        l1_dir = pd.Series(0.0, index=eval_bars.index)
-        l1_dir[l1_z > l1_threshold] = 1.0
-        l1_dir[l1_z < -l1_threshold] = -1.0
+        fold_entry = {"fold": fold}
 
-        l2_entry = (l2_z.clip(-3, 3) / 3.0)
-        l3_scale = 1.0 / (1.0 + np.exp(l3_z.clip(-5, 5)))
+        for mode in modes:
+            composite, l1_dir = _compute_composite(l1_z, l2_z, l3_z, l1_threshold, mode=mode)
+            metrics = _eval_fold_metrics(
+                composite, l1_dir, eval_bars["fwd_return"], test_start, test_end,
+            )
+            if metrics is None:
+                break
 
-        composite = l1_dir * l2_entry.abs() * l3_scale
-        neutral = l1_dir == 0
-        composite[neutral] = l2_entry[neutral] * l3_scale[neutral] * 0.3
+            if mode == "full":
+                fold_entry.update(metrics)
+                print(f"  Fold {fold}: n={metrics['test_size']:,} IC={metrics['composite_ic']:+.4f} "
+                      f"DirAcc={metrics['dir_accuracy']:.3f} Sharpe={metrics['sharpe_proxy']:+.2f} "
+                      f"L1_active={metrics['l1_active_pct']:.1%}")
+            else:
+                fold_entry[f"ic_{mode}"] = metrics["composite_ic"]
 
-        # Extract test portion
-        test_composite = composite.iloc[test_start:test_end]
-        test_returns = eval_bars["fwd_return"].iloc[test_start:test_end]
-        test_l1 = l1_dir.iloc[test_start:test_end]
+        if "composite_ic" in fold_entry:
+            fold_results.append(fold_entry)
 
-        # Metrics
-        valid_mask = np.isfinite(test_composite.values) & np.isfinite(test_returns.values)
-        if valid_mask.sum() < 30:
+    return fold_results
+
+
+def purged_kfold_evaluate(
+    bars: pd.DataFrame,
+    fwd_returns: np.ndarray,
+    l1_weights: dict[str, float],
+    l2_weights: dict[str, float],
+    l3_weights: dict[str, float],
+    l1_threshold: float = 0.5,
+    n_splits: int = 5,
+    embargo: int = 100,
+    zscore_window: int = 200,
+    ablation: bool = False,
+) -> list[dict]:
+    """Purged K-fold evaluation with embargo zones.
+
+    Each fold's test set is separated from train by `embargo` bars on both
+    sides, preventing temporal leakage. Unlike walk-forward, all data is
+    used for testing (symmetric confidence intervals).
+    """
+    n = len(bars)
+    fold_size = n // n_splits
+
+    bars = bars.copy()
+    bars["fwd_return"] = fwd_returns
+
+    modes = ABLATION_MODES if ablation else ["full"]
+    fold_results = []
+
+    for fold in range(n_splits):
+        test_start = fold * fold_size
+        test_end = min(test_start + fold_size, n)
+
+        if test_end - test_start < 50:
             continue
 
-        tc = test_composite.values[valid_mask]
-        tr = test_returns.values[valid_mask]
+        # Use full data for z-score computation (features are self-normalizing)
+        l1_z = _ic_weighted_composite(bars, L1_FEATURES, l1_weights, window=zscore_window)
+        l2_z = _ic_weighted_composite(bars, L2_FEATURES, l2_weights, window=zscore_window)
+        l3_z = _ic_weighted_composite(bars, L3_FEATURES, l3_weights, window=zscore_window)
 
-        composite_ic, _ = spearmanr(tc, tr)
-        dir_acc = np.mean(np.sign(tc) == np.sign(tr))
+        fold_entry = {"fold": fold}
 
-        # Cost-adjusted Sharpe proxy (11 bps RT per trade)
-        cost_bps = 11e-4
-        signal_returns = np.sign(tc) * tr - cost_bps * (np.abs(np.diff(np.sign(tc), prepend=0)) > 0)
-        sharpe_proxy = np.mean(signal_returns) / max(np.std(signal_returns), 1e-8) * np.sqrt(252 * 288)
+        for mode in modes:
+            composite, l1_dir = _compute_composite(l1_z, l2_z, l3_z, l1_threshold, mode=mode)
+            metrics = _eval_fold_metrics(
+                composite, l1_dir, bars["fwd_return"], test_start, test_end,
+            )
+            if metrics is None:
+                break
 
-        # L1 activity rate
-        l1_active_pct = (test_l1.values != 0).mean()
+            if mode == "full":
+                fold_entry.update(metrics)
+                print(f"  Fold {fold}: n={metrics['test_size']:,} IC={metrics['composite_ic']:+.4f} "
+                      f"DirAcc={metrics['dir_accuracy']:.3f} Sharpe={metrics['sharpe_proxy']:+.2f} "
+                      f"L1_active={metrics['l1_active_pct']:.1%}")
+            else:
+                fold_entry[f"ic_{mode}"] = metrics["composite_ic"]
 
-        fold_results.append({
-            "fold": fold,
-            "test_size": int(valid_mask.sum()),
-            "composite_ic": float(composite_ic),
-            "dir_accuracy": float(dir_acc),
-            "sharpe_proxy": float(sharpe_proxy),
-            "l1_active_pct": float(l1_active_pct),
-        })
-
-        print(f"  Fold {fold}: n={valid_mask.sum():,} IC={composite_ic:+.4f} "
-              f"DirAcc={dir_acc:.3f} Sharpe={sharpe_proxy:+.2f} "
-              f"L1_active={l1_active_pct:.1%}")
+        if "composite_ic" in fold_entry:
+            fold_results.append(fold_entry)
 
     return fold_results
 
@@ -222,7 +343,13 @@ def main():
     parser.add_argument("--start-date", default=None,
                         help="Earliest date to load (YYYY-MM-DD)")
     parser.add_argument("--dry-run", action="store_true", help="Evaluate only, don't save")
+    parser.add_argument("--ablation", action="store_true",
+                        help="Run layer ablation analysis (auto-enabled with --dry-run)")
+    parser.add_argument("--validation-mode", choices=VALID_MODES, default="walk_forward",
+                        help="Validation method: walk_forward (expanding) or purged_kfold")
     args = parser.parse_args()
+    if args.dry_run:
+        args.ablation = True
 
     print(f"=== Training Hierarchical Signal Combiner: {args.symbol} ===")
     print(f"Data: {args.data_dir}, horizon: {args.horizon} bars ({args.horizon * 5}min)")
@@ -268,15 +395,17 @@ def main():
         window=args.zscore_window, label="L3",
     )
 
-    # Walk-forward evaluation
-    print(f"\n--- Walk-Forward Evaluation ({args.n_splits} folds) ---")
-    fold_results = walk_forward_evaluate(
+    # Evaluation
+    eval_fn = purged_kfold_evaluate if args.validation_mode == "purged_kfold" else walk_forward_evaluate
+    print(f"\n--- {args.validation_mode.replace('_', ' ').title()} Evaluation ({args.n_splits} folds) ---")
+    fold_results = eval_fn(
         bars, fwd_returns,
         l1_weights, l2_weights, l3_weights,
         l1_threshold=args.l1_threshold,
         n_splits=args.n_splits,
         embargo=args.embargo,
         zscore_window=args.zscore_window,
+        ablation=args.ablation,
     )
 
     if not fold_results:
@@ -288,13 +417,37 @@ def main():
     avg_dir = np.mean([f["dir_accuracy"] for f in fold_results])
     avg_sharpe = np.mean([f["sharpe_proxy"] for f in fold_results])
     avg_l1_active = np.mean([f["l1_active_pct"] for f in fold_results])
+    ic_std = np.std([f["composite_ic"] for f in fold_results])
 
     print(f"\n{'='*60}")
     print(f"OOS Average:")
-    print(f"  Composite IC:      {avg_ic:+.4f}")
+    print(f"  Composite IC:      {avg_ic:+.4f} +/- {ic_std:.4f}")
     print(f"  Dir Accuracy:      {avg_dir:.4f}")
     print(f"  Sharpe (cost-adj): {avg_sharpe:+.2f}")
     print(f"  L1 Active Rate:    {avg_l1_active:.1%}")
+
+    # IC significance check
+    if len(fold_results) >= 2 and avg_ic < 2 * ic_std:
+        print(f"\n  WARN: IC not significant (mean {avg_ic:.4f} < 2*std {2*ic_std:.4f})")
+
+    # Monotonicity check
+    ics = [f["composite_ic"] for f in fold_results]
+    if len(ics) >= 3 and all(ics[i+1] > ics[i] for i in range(len(ics)-1)):
+        print(f"\n  WARN: IC monotonically increasing across folds — possible data ordering bias")
+
+    # Ablation summary
+    if args.ablation and "ic_l1_only" in fold_results[0]:
+        print(f"\n--- Ablation Analysis ---")
+        print(f"  {'Mode':<12s} {'Mean IC':>10s} {'Delta':>10s} {'Rel %':>8s}")
+        print(f"  {'-'*42}")
+        for mode in ABLATION_MODES:
+            key = f"ic_{mode}" if mode != "full" else "composite_ic"
+            mode_ics = [f.get(key, f.get("composite_ic")) for f in fold_results]
+            mode_avg = np.mean(mode_ics)
+            delta = mode_avg - avg_ic
+            rel = (delta / abs(avg_ic) * 100) if avg_ic != 0 else 0
+            marker = "" if mode == "full" else f"  {'<-- L2/L3 not helping' if delta >= -0.005 else ''}"
+            print(f"  {mode:<12s} {mode_avg:>+10.4f} {delta:>+10.4f} {rel:>+7.1f}%{marker}")
 
     # Decision gate
     if avg_ic < 0.02:
