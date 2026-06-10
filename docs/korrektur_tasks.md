@@ -86,7 +86,7 @@ Max gap 13.4s observed, with 10-12 gaps >1s per symbol per hour. Median cadence 
 ## K5. 6-Day Data Gap (Jun 4 — Jun 10)
 
 **Severity:** Moderate
-**Status:** Resolved (ingestor restarted)
+**Status:** Fixed (2026-06-10) — healthcheck + Prometheus alert rules added
 
 Ingestor process was alive but stopped writing data for ~6 days. Root cause unknown — zombie process with no error logs.
 

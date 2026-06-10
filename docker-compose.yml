@@ -51,6 +51,12 @@ services:
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9090/metrics | grep -q ing_features_emitted_total"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   # REST API + WebSocket server
