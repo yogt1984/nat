@@ -147,6 +147,11 @@ ALGO_CONFIG = {
         "polarity": "high_long",  # high score → strong pattern match
         "bar_agg": "max",
     },
+    "hierarchical_combiner": {
+        "primary": "alg_hier_composite",
+        "polarity": "high_long",
+        "bar_agg": "last",
+    },
     "change_point_detector": {
         "primary": "alg_cpd_cusum_signal",
         "polarity": "high_long",
