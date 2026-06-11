@@ -33,7 +33,7 @@ price_buffer_size = 1000
 # GMM regime classifier model path (optional)
 # When set, features will include regime classification (Accumulation/Distribution/etc)
 # Train with: make train_gmm
-# gmm_model_path = "models/regime_gmm.json"
+gmm_model_path = "models/regime_gmm.json"
 
 [output]
 # Output format (only parquet supported)

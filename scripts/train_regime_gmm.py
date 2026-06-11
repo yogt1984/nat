@@ -17,7 +17,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 
 import numpy as np
 
@@ -36,45 +36,39 @@ except ImportError:
     sys.exit(1)
 
 
-# Feature columns for 5D regime space
+# Feature columns for regime space.
+# Must match the Rust inference side (ing/src/state/mod.rs emit_features).
+# Whale flow is excluded: all-NaN in current data (feature not yet computed).
+# This makes the GMM a 4D model until whale flow is wired.
 FEATURE_COLUMNS = [
-    "ill_kyle_lambda_300",      # Kyle's Lambda (liquidity)
-    "tox_vpin_50",              # VPIN (informed trading)
-    "regime_absorption_zscore_300",  # Absorption ratio z-score
-    "trend_hurst_300",          # Hurst exponent (persistence)
-    "whale_net_flow_4h_norm",   # Whale net flow (institutional)
+    "illiq_kyle_100",              # Kyle's Lambda (liquidity)
+    "toxic_vpin_50",               # VPIN (informed trading)
+    "regime_absorption_zscore",    # Absorption ratio z-score
+    "trend_hurst_300",             # Hurst exponent (persistence)
 ]
 
-# Alternative column names if the above aren't found
-FEATURE_ALTERNATIVES = {
-    "regime_absorption_zscore_300": ["abs_zscore_300", "absorption_zscore"],
-    "whale_net_flow_4h_norm": ["whale_flow_4h", "whale_net_flow"],
-}
-
-
-def find_feature_column(df: pl.DataFrame, primary: str, alternatives: List[str]) -> Optional[str]:
-    """Find the actual column name in the dataframe."""
-    if primary in df.columns:
-        return primary
-    for alt in alternatives:
-        if alt in df.columns:
-            print(f"  Using alternative column '{alt}' for '{primary}'")
-            return alt
-    return None
+# Rust inference dimension order — must match exactly.
+# See rust/ing/src/state/mod.rs ~line 205: gmm_input array.
+RUST_INFERENCE_ORDER = [
+    "illiq_kyle_100",              # features.illiquidity.kyle_lambda_100
+    "toxic_vpin_50",               # features.toxicity.vpin_50
+    "regime_absorption_zscore",    # regime_features.absorption_zscore
+    "trend_hurst_300",             # features.trend.hurst_300
+]
 
 
 def load_features(data_dir: Path, sample_frac: float = 1.0) -> Tuple[np.ndarray, pl.DataFrame]:
     """
-    Load all Parquet files and extract 5D feature space.
+    Load all Parquet files and extract feature space for GMM training.
 
     Args:
-        data_dir: Directory containing Parquet files
+        data_dir: Directory containing Parquet files (searched recursively)
         sample_frac: Fraction of data to sample (for faster iteration)
 
     Returns:
         (X, df) where X is the feature matrix and df is the full dataframe
     """
-    files = list(data_dir.glob("*.parquet"))
+    files = list(data_dir.rglob("*.parquet"))
     if not files:
         raise FileNotFoundError(f"No Parquet files found in {data_dir}")
 
@@ -82,7 +76,7 @@ def load_features(data_dir: Path, sample_frac: float = 1.0) -> Tuple[np.ndarray,
 
     # Load and concatenate
     dfs = []
-    for f in files:
+    for f in sorted(files):
         try:
             df = pl.read_parquet(f)
             dfs.append(df)
@@ -92,7 +86,7 @@ def load_features(data_dir: Path, sample_frac: float = 1.0) -> Tuple[np.ndarray,
     if not dfs:
         raise ValueError("No data loaded from Parquet files")
 
-    df = pl.concat(dfs)
+    df = pl.concat(dfs, how="diagonal_relaxed")
     print(f"Loaded {len(df)} total rows")
 
     # Sample if requested
@@ -100,28 +94,38 @@ def load_features(data_dir: Path, sample_frac: float = 1.0) -> Tuple[np.ndarray,
         df = df.sample(fraction=sample_frac, seed=42)
         print(f"Sampled to {len(df)} rows")
 
-    # Find actual column names
-    actual_columns = []
-    for col in FEATURE_COLUMNS:
-        alts = FEATURE_ALTERNATIVES.get(col, [])
-        actual = find_feature_column(df, col, alts)
-        if actual is None:
-            print(f"Warning: Feature '{col}' not found in data")
-            actual_columns.append(None)
-        else:
-            actual_columns.append(actual)
-
-    # Filter to rows with all features present
-    missing = [c for c in actual_columns if c is None]
+    # Verify all required columns exist in schema
+    missing = [col for col in FEATURE_COLUMNS if col not in df.columns]
     if missing:
-        print(f"\nMissing {len(missing)} features. Available columns:")
-        for col in sorted(df.columns):
-            print(f"  - {col}")
-        raise ValueError(f"Missing required features")
+        raise ValueError(
+            f"Missing required columns: {missing}. "
+            f"Available: {sorted(df.columns)}"
+        )
 
-    # Select and drop nulls
-    df_features = df.select(actual_columns).drop_nulls()
-    print(f"After dropping nulls: {len(df_features)} rows")
+    # Check for all-NaN columns (e.g. whale features not yet computed)
+    for col in FEATURE_COLUMNS:
+        nan_rate = df[col].is_null().mean() + df[col].is_nan().mean()
+        if nan_rate > 0.95:
+            raise ValueError(
+                f"Column '{col}' is {nan_rate:.0%} NaN — cannot train on missing data. "
+                f"Ensure the ingestor is computing this feature."
+            )
+        elif nan_rate > 0.1:
+            print(f"Warning: '{col}' has {nan_rate:.1%} NaN (will drop those rows)")
+
+    # Select feature columns and drop rows with any null/NaN
+    df_features = df.select(FEATURE_COLUMNS)
+    # Replace NaN with null for uniform drop_nulls handling
+    df_features = df_features.with_columns(
+        [pl.col(c).fill_nan(None) for c in FEATURE_COLUMNS]
+    ).drop_nulls()
+
+    print(f"After dropping nulls: {len(df_features)} rows ({len(df) - len(df_features)} dropped)")
+
+    if len(df_features) < 100:
+        raise ValueError(
+            f"Only {len(df_features)} valid rows after dropping NaN — need at least 100"
+        )
 
     X = df_features.to_numpy()
     return X, df
@@ -266,22 +270,20 @@ def analyze_clusters(
 
 def suggest_labels(cluster_stats: Dict[int, Dict]) -> Dict[int, str]:
     """
-    Suggest semantic labels based on cluster characteristics.
+    Suggest semantic labels based on 4D cluster characteristics.
 
-    Based on expected regime signatures:
-    - Accumulation: low λ, low VPIN, high absorption, positive whale
-    - Markup: high λ, low VPIN, high Hurst, positive whale
-    - Distribution: low λ, high VPIN, high absorption, negative whale
-    - Markdown: high λ, high VPIN, high Hurst, negative whale
+    Based on expected regime signatures (without whale flow):
+    - Accumulation: low λ, low VPIN, high absorption
+    - Markup: high λ, low VPIN, high Hurst
+    - Distribution: low λ, high VPIN, high absorption
+    - Markdown: high λ, high VPIN, high Hurst
     - Ranging: moderate all, low Hurst
     """
     suggestions = {}
 
     for c, stats in cluster_stats.items():
-        means = stats["feature_means"]
         scaled = stats["scaled_center"]
 
-        # Score each regime
         scores = {
             "accumulation": 0.0,
             "markup": 0.0,
@@ -290,27 +292,26 @@ def suggest_labels(cluster_stats: Dict[int, Dict]) -> Dict[int, str]:
             "ranging": 0.0,
         }
 
-        # Use scaled centers for comparison
-        kyle = scaled[0]  # λ
-        vpin = scaled[1]  # VPIN
-        absorption = scaled[2]  # Absorption
-        hurst = scaled[3]  # Hurst
-        whale = scaled[4]  # Whale flow
+        # 4D: [kyle_lambda, vpin, absorption_zscore, hurst]
+        kyle = scaled[0]
+        vpin = scaled[1]
+        absorption = scaled[2]
+        hurst = scaled[3]
 
-        # Accumulation: low λ, low VPIN, high absorption, positive whale
-        scores["accumulation"] = -kyle - vpin + absorption + whale
+        # Accumulation: low λ, low VPIN, high absorption
+        scores["accumulation"] = -kyle - vpin + absorption
 
-        # Markup: high λ, low VPIN, high Hurst, positive whale
-        scores["markup"] = kyle - vpin + hurst + whale * 0.5
+        # Markup: high λ, low VPIN, high Hurst
+        scores["markup"] = kyle - vpin + hurst
 
-        # Distribution: low λ, high VPIN, high absorption, negative whale
-        scores["distribution"] = -kyle + vpin + absorption - whale
+        # Distribution: low λ, high VPIN, high absorption
+        scores["distribution"] = -kyle + vpin + absorption
 
-        # Markdown: high λ, high VPIN, high Hurst, negative whale
-        scores["markdown"] = kyle + vpin + hurst - whale * 0.5
+        # Markdown: high λ, high VPIN, high Hurst
+        scores["markdown"] = kyle + vpin + hurst
 
         # Ranging: low Hurst, neutral everything else
-        scores["ranging"] = -abs(kyle) - abs(vpin) - hurst - abs(whale)
+        scores["ranging"] = -abs(kyle) - abs(vpin) - hurst
 
         best_label = max(scores, key=scores.get)
         suggestions[c] = best_label

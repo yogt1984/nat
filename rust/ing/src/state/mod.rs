@@ -200,18 +200,13 @@ impl MarketState {
 
             // Run GMM classification if classifier is available
             if let Some(ref classifier) = self.regime_classifier {
-                // Extract 5D features for GMM input:
-                // [kyle_lambda, vpin, absorption_zscore, hurst, whale_net_flow]
-                let gmm_input = [
-                    features.illiquidity.kyle_lambda_100, // Kyle's Lambda (closest to 300)
-                    features.toxicity.vpin_50,            // VPIN
-                    regime_features.absorption_zscore,    // Absorption z-score
-                    features.trend.hurst_300,             // Hurst exponent
-                    features
-                        .whale_flow
-                        .as_ref()
-                        .map(|wf| wf.whale_net_flow_1h)
-                        .unwrap_or(0.0), // Whale net flow (0 if not available)
+                // Feature vector must match train_regime_gmm.py FEATURE_COLUMNS order.
+                // Currently 4D (whale flow excluded — all-NaN until feature is wired).
+                let gmm_input = vec![
+                    features.illiquidity.kyle_lambda_100, // illiq_kyle_100
+                    features.toxicity.vpin_50,            // toxic_vpin_50
+                    regime_features.absorption_zscore,    // regime_absorption_zscore
+                    features.trend.hurst_300,             // trend_hurst_300
                 ];
 
                 let (regime, probs) = classifier.classify(&gmm_input);
@@ -405,8 +400,8 @@ mod tests {
             ],
         );
 
-        // Classify some features
-        let features = [0.0, 0.0, 0.0, 0.5, 0.0];
+        // Classify some features (4D: kyle_lambda, vpin, absorption, hurst)
+        let features = [0.0, 0.0, 0.0, 0.5];
         let (regime, probs) = classifier.classify(&features);
 
         // Probabilities should sum to 1

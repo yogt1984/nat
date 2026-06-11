@@ -53,9 +53,9 @@ pub struct GmmParams {
 
 impl Default for GmmParams {
     fn default() -> Self {
-        // Default 5-component GMM with identity covariances
+        // Default 5-component GMM with identity covariances (4D feature space)
         let n = 5;
-        let d = 5;
+        let d = 4;
         Self {
             n_components: n,
             means: vec![vec![0.0; d]; n],
@@ -151,14 +151,19 @@ impl RegimeClassifier {
         }
     }
 
+    /// Return the expected feature dimensionality for this model
+    pub fn n_features(&self) -> usize {
+        self.params.scaler_mean.len()
+    }
+
     /// Classify a single observation
     ///
     /// # Arguments
-    /// * `features` - 5D feature vector [kyle_lambda, vpin, absorption_zscore, hurst, whale_flow]
+    /// * `features` - Feature vector (length must match model dimensionality)
     ///
     /// # Returns
     /// (Regime, probabilities for each cluster)
-    pub fn classify(&self, features: &[f64; 5]) -> (Regime, Vec<f64>) {
+    pub fn classify(&self, features: &[f64]) -> (Regime, Vec<f64>) {
         // Standardize features using saved scaler parameters
         let scaled: Vec<f64> = features
             .iter()
@@ -205,12 +210,12 @@ impl RegimeClassifier {
     }
 
     /// Batch classification for multiple observations
-    pub fn classify_batch(&self, features_batch: &[[f64; 5]]) -> Vec<(Regime, Vec<f64>)> {
+    pub fn classify_batch(&self, features_batch: &[Vec<f64>]) -> Vec<(Regime, Vec<f64>)> {
         features_batch.iter().map(|f| self.classify(f)).collect()
     }
 
     /// Get raw cluster assignment (without semantic label mapping)
-    pub fn predict_cluster(&self, features: &[f64; 5]) -> (usize, f64) {
+    pub fn predict_cluster(&self, features: &[f64]) -> (usize, f64) {
         let (_, probs) = self.classify(features);
         let (cluster, &prob) = probs
             .iter()
@@ -405,26 +410,27 @@ mod tests {
     use super::*;
 
     fn mock_params() -> GmmParams {
-        // Create distinguishable cluster centers
+        // Create distinguishable 4D cluster centers:
+        // [kyle_lambda, vpin, absorption_zscore, hurst]
         GmmParams {
             n_components: 5,
             means: vec![
-                vec![-1.0, -1.0, 1.0, 0.5, 1.0], // Accumulation: low λ, low VPIN, high abs, pos whale
-                vec![1.0, -1.0, 0.0, 1.0, 0.5],  // Markup: high λ, low VPIN, high Hurst
-                vec![-1.0, 1.0, 1.0, 0.5, -1.0], // Distribution: low λ, high VPIN, high abs, neg whale
-                vec![1.0, 1.0, 0.0, 1.0, -0.5], // Markdown: high λ, high VPIN, high Hurst, neg whale
-                vec![0.0, -1.0, 0.0, -1.0, 0.0], // Ranging: neutral, low Hurst
+                vec![-1.0, -1.0, 1.0, 0.5],  // Accumulation: low λ, low VPIN, high abs
+                vec![1.0, -1.0, 0.0, 1.0],   // Markup: high λ, low VPIN, high Hurst
+                vec![-1.0, 1.0, 1.0, 0.5],   // Distribution: low λ, high VPIN, high abs
+                vec![1.0, 1.0, 0.0, 1.0],    // Markdown: high λ, high VPIN, high Hurst
+                vec![0.0, -1.0, 0.0, -1.0],  // Ranging: neutral, low Hurst
             ],
             covariances: (0..5)
                 .map(|_| {
-                    (0..5)
-                        .map(|i| (0..5).map(|j| if i == j { 0.5 } else { 0.0 }).collect())
+                    (0..4)
+                        .map(|i| (0..4).map(|j| if i == j { 0.5 } else { 0.0 }).collect())
                         .collect()
                 })
                 .collect(),
             weights: vec![0.2, 0.2, 0.2, 0.2, 0.2],
-            scaler_mean: vec![0.0; 5],
-            scaler_std: vec![1.0; 5],
+            scaler_mean: vec![0.0; 4],
+            scaler_std: vec![1.0; 4],
         }
     }
 
@@ -443,7 +449,7 @@ mod tests {
         );
 
         // Features matching accumulation center
-        let features = [-1.0, -1.0, 1.0, 0.5, 1.0];
+        let features = [-1.0, -1.0, 1.0, 0.5];
         let (regime, probs) = classifier.classify(&features);
 
         assert_eq!(regime, Regime::Accumulation);
@@ -469,7 +475,7 @@ mod tests {
         );
 
         // Features matching markup center
-        let features = [1.0, -1.0, 0.0, 1.0, 0.5];
+        let features = [1.0, -1.0, 0.0, 1.0];
         let (regime, probs) = classifier.classify(&features);
 
         assert_eq!(regime, Regime::Markup);
@@ -486,14 +492,14 @@ mod tests {
         let classifier = RegimeClassifier::new(params, vec![Regime::Unknown; 5]);
 
         // Random features
-        let test_cases = [
-            [0.5, 0.5, 0.5, 0.5, 0.5],
-            [-2.0, 2.0, -1.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 0.0, 0.0],
-            [3.0, 3.0, 3.0, 3.0, 3.0],
+        let test_cases: &[&[f64]] = &[
+            &[0.5, 0.5, 0.5, 0.5],
+            &[-2.0, 2.0, -1.0, 1.0],
+            &[0.0, 0.0, 0.0, 0.0],
+            &[3.0, 3.0, 3.0, 3.0],
         ];
 
-        for features in &test_cases {
+        for features in test_cases {
             let (_, probs) = classifier.classify(features);
             let sum: f64 = probs.iter().sum();
             assert!(
@@ -510,7 +516,7 @@ mod tests {
         let params = mock_params();
         let classifier = RegimeClassifier::new(params, vec![Regime::Unknown; 5]);
 
-        let features = [-5.0, 5.0, -3.0, 3.0, 0.0]; // Extreme values
+        let features = [-5.0, 5.0, -3.0, 3.0]; // Extreme values
         let (_, probs) = classifier.classify(&features);
 
         for (i, &p) in probs.iter().enumerate() {
@@ -638,10 +644,10 @@ mod tests {
             ],
         );
 
-        let batch = [
-            [-1.0, -1.0, 1.0, 0.5, 1.0],
-            [1.0, -1.0, 0.0, 1.0, 0.5],
-            [0.0, 0.0, 0.0, 0.0, 0.0],
+        let batch = vec![
+            vec![-1.0, -1.0, 1.0, 0.5],
+            vec![1.0, -1.0, 0.0, 1.0],
+            vec![0.0, 0.0, 0.0, 0.0],
         ];
 
         let results = classifier.classify_batch(&batch);
@@ -673,26 +679,27 @@ mod skeptical_tests {
 
     /// Create mock GMM parameters for testing
     fn mock_params() -> GmmParams {
-        // Create distinguishable cluster centers
+        // Create distinguishable 4D cluster centers:
+        // [kyle_lambda, vpin, absorption_zscore, hurst]
         GmmParams {
             n_components: 5,
             means: vec![
-                vec![-1.0, -1.0, 1.0, 0.5, 1.0], // Accumulation: low λ, low VPIN, high abs, pos whale
-                vec![1.0, -1.0, 0.0, 1.0, 0.5],  // Markup: high λ, low VPIN, high Hurst
-                vec![-1.0, 1.0, 1.0, 0.5, -1.0], // Distribution: low λ, high VPIN, high abs, neg whale
-                vec![1.0, 1.0, 0.0, 1.0, -0.5], // Markdown: high λ, high VPIN, high Hurst, neg whale
-                vec![0.0, -1.0, 0.0, -1.0, 0.0], // Ranging: neutral, low Hurst
+                vec![-1.0, -1.0, 1.0, 0.5],  // Accumulation: low λ, low VPIN, high abs
+                vec![1.0, -1.0, 0.0, 1.0],   // Markup: high λ, low VPIN, high Hurst
+                vec![-1.0, 1.0, 1.0, 0.5],   // Distribution: low λ, high VPIN, high abs
+                vec![1.0, 1.0, 0.0, 1.0],    // Markdown: high λ, high VPIN, high Hurst
+                vec![0.0, -1.0, 0.0, -1.0],  // Ranging: neutral, low Hurst
             ],
             covariances: (0..5)
                 .map(|_| {
-                    (0..5)
-                        .map(|i| (0..5).map(|j| if i == j { 0.5 } else { 0.0 }).collect())
+                    (0..4)
+                        .map(|i| (0..4).map(|j| if i == j { 0.5 } else { 0.0 }).collect())
                         .collect()
                 })
                 .collect(),
             weights: vec![0.2, 0.2, 0.2, 0.2, 0.2],
-            scaler_mean: vec![0.0; 5],
-            scaler_std: vec![1.0; 5],
+            scaler_mean: vec![0.0; 4],
+            scaler_std: vec![1.0; 4],
         }
     }
 
@@ -711,16 +718,16 @@ mod skeptical_tests {
             ],
         );
 
-        // Strong accumulation signal
-        let acc_features = [-2.0, -2.0, 2.0, 0.5, 2.0];
+        // Strong accumulation signal: low λ, low VPIN, high abs, low Hurst
+        let acc_features = [-2.0, -2.0, 2.0, 0.5];
         let (acc_regime, acc_probs) = classifier.classify(&acc_features);
 
-        // Strong markup signal
-        let mk_features = [2.0, -2.0, 0.0, 2.0, 1.0];
+        // Strong markup signal: high λ, low VPIN, low abs, high Hurst
+        let mk_features = [2.0, -2.0, 0.0, 2.0];
         let (mk_regime, mk_probs) = classifier.classify(&mk_features);
 
-        // Strong distribution signal
-        let dist_features = [-2.0, 2.0, 2.0, 0.5, -2.0];
+        // Strong distribution signal: low λ, high VPIN, high abs, low Hurst
+        let dist_features = [-2.0, 2.0, 2.0, 0.5];
         let (dist_regime, dist_probs) = classifier.classify(&dist_features);
 
         // They should classify to different regimes
@@ -752,14 +759,14 @@ mod skeptical_tests {
         let classifier = RegimeClassifier::new(params, vec![Regime::Unknown; 5]);
 
         // Clear accumulation signal
-        let clear_features = [-2.0, -2.0, 2.0, 0.5, 2.0];
+        let clear_features = [-2.0, -2.0, 2.0, 0.5];
         let clear_result = RegimeFeatures::from_classification(
             classifier.classify(&clear_features).0,
             &classifier.classify(&clear_features).1,
         );
 
         // Ambiguous signal (near origin)
-        let ambig_features = [0.0, 0.0, 0.0, 0.0, 0.0];
+        let ambig_features = [0.0, 0.0, 0.0, 0.0];
         let ambig_result = RegimeFeatures::from_classification(
             classifier.classify(&ambig_features).0,
             &classifier.classify(&ambig_features).1,
@@ -782,9 +789,9 @@ mod skeptical_tests {
         );
     }
 
-    /// Test 3: Opposing whale flow should differentiate accumulation from distribution
+    /// Test 3: VPIN should differentiate low-toxicity (accumulation) from high-toxicity (distribution)
     #[test]
-    fn test_whale_flow_differentiates_acc_dist() {
+    fn test_vpin_differentiates_acc_dist() {
         let params = mock_params();
         let classifier = RegimeClassifier::new(
             params,
@@ -797,23 +804,26 @@ mod skeptical_tests {
             ],
         );
 
-        // Same features except whale flow
-        let pos_whale = [-1.0, 0.0, 1.0, 0.5, 2.0]; // Strong positive whale
-        let neg_whale = [-1.0, 0.0, 1.0, 0.5, -2.0]; // Strong negative whale
+        // Same features except VPIN
+        let low_vpin = [-1.0, -2.0, 1.0, 0.5];  // Low VPIN → accumulation
+        let high_vpin = [-1.0, 2.0, 1.0, 0.5];   // High VPIN → distribution
 
-        let (pos_regime, pos_probs) = classifier.classify(&pos_whale);
-        let (neg_regime, neg_probs) = classifier.classify(&neg_whale);
+        let (_, low_probs) = classifier.classify(&low_vpin);
+        let (_, high_probs) = classifier.classify(&high_vpin);
 
-        // Positive whale should favor accumulation/markup
-        let pos_bullish = pos_probs[0] + pos_probs[1];
-        // Negative whale should favor distribution/markdown
-        let neg_bearish = neg_probs[2] + neg_probs[3];
-
+        // Low VPIN should favor accumulation
         assert!(
-            pos_bullish > neg_bearish - 0.3,
-            "Positive whale flow should favor bullish regimes: pos_bull={}, neg_bear={}",
-            pos_bullish,
-            neg_bearish
+            low_probs[0] > high_probs[0],
+            "Low VPIN should favor accumulation: low={:.3}, high={:.3}",
+            low_probs[0],
+            high_probs[0]
+        );
+        // High VPIN should favor distribution
+        assert!(
+            high_probs[2] > low_probs[2],
+            "High VPIN should favor distribution: high={:.3}, low={:.3}",
+            high_probs[2],
+            low_probs[2]
         );
     }
 
@@ -833,12 +843,12 @@ mod skeptical_tests {
         );
 
         // High Hurst (trending)
-        let high_hurst = [0.5, -0.5, 0.0, 2.0, 0.3];
+        let high_hurst = [0.5, -0.5, 0.0, 2.0];
         let (_, high_probs) = classifier.classify(&high_hurst);
 
         // Low Hurst (ranging)
-        let low_hurst = [0.0, -1.0, 0.0, -2.0, 0.0];
-        let (low_regime, low_probs) = classifier.classify(&low_hurst);
+        let low_hurst = [0.0, -1.0, 0.0, -2.0];
+        let (_, low_probs) = classifier.classify(&low_hurst);
 
         // High Hurst should favor trending regimes (markup/markdown)
         let high_trending = high_probs[1] + high_probs[3];
@@ -857,7 +867,7 @@ mod skeptical_tests {
         let params = mock_params();
         let classifier = RegimeClassifier::new(params, vec![Regime::Unknown; 5]);
 
-        let features = [0.5, -0.5, 0.3, 0.7, 0.2];
+        let features = [0.5, -0.5, 0.3, 0.7];
 
         let (regime1, probs1) = classifier.classify(&features);
         let (regime2, probs2) = classifier.classify(&features);
@@ -878,14 +888,14 @@ mod skeptical_tests {
         let params = mock_params();
         let classifier = RegimeClassifier::new(params, vec![Regime::Unknown; 5]);
 
-        let extreme_cases = [
-            [100.0, 100.0, 100.0, 100.0, 100.0],
-            [-100.0, -100.0, -100.0, -100.0, -100.0],
-            [0.0, 0.0, 0.0, 0.0, 0.0],
-            [1e10, -1e10, 1e-10, -1e-10, 0.0],
+        let extreme_cases: &[&[f64]] = &[
+            &[100.0, 100.0, 100.0, 100.0],
+            &[-100.0, -100.0, -100.0, -100.0],
+            &[0.0, 0.0, 0.0, 0.0],
+            &[1e10, -1e10, 1e-10, -1e-10],
         ];
 
-        for features in &extreme_cases {
+        for features in extreme_cases {
             let (_, probs) = classifier.classify(features);
 
             // Check probabilities are valid
@@ -911,7 +921,7 @@ mod skeptical_tests {
     fn test_default_untrained_behavior() {
         let classifier = RegimeClassifier::default_untrained();
 
-        let features = [0.5, 0.5, 0.5, 0.5, 0.5];
+        let features = [0.5, 0.5, 0.5, 0.5];
         let (_, probs) = classifier.classify(&features);
 
         // With default identity covariances and centered means,
