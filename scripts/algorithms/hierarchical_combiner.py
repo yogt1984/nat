@@ -44,6 +44,9 @@ from .registry import register
 
 logger = logging.getLogger(__name__)
 
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_DEFAULT_WEIGHTS_PATH = str(_PROJECT_ROOT / "models" / "hierarchical_combiner" / "weights.json")
+
 # --- Feature groups per layer ---
 
 L1_FEATURES = [
@@ -136,7 +139,8 @@ class HierarchicalCombiner(MicrostructureAlgorithm):
 
     def __init__(
         self,
-        weights_path: str = "models/hierarchical_combiner/weights.json",
+        weights_path: str = _DEFAULT_WEIGHTS_PATH,
+        symbol: str | None = None,
         l1_threshold: float = 0.5,
         l1_target_percentile: float = 70.0,
         zscore_window: int = 200,
@@ -150,7 +154,13 @@ class HierarchicalCombiner(MicrostructureAlgorithm):
         self._l2_weights = dict(DEFAULT_L2_WEIGHTS)
         self._l3_weights = dict(DEFAULT_L3_WEIGHTS)
 
+        # Per-symbol file takes priority over generic
         wp = Path(weights_path)
+        if symbol:
+            per_symbol = wp.parent / f"weights_{symbol}.json"
+            if per_symbol.exists():
+                wp = per_symbol
+
         if wp.exists():
             with open(wp) as f:
                 trained = json.load(f)
