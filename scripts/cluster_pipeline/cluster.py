@@ -843,12 +843,12 @@ def predictive_quality(
         r = returns_v[labels_v == c]
         mean_r = float(np.mean(r))
         std_r = float(np.std(r))
-        sharpe = mean_r / std_r if std_r > 1e-10 else 0.0
+        sharpe_per_bar = mean_r / std_r if std_r > 1e-10 else 0.0
         per_cluster[int(c)] = {
             "count": len(r),
             "mean_return": mean_r,
             "std_return": std_r,
-            "sharpe": sharpe,
+            "sharpe_per_bar": sharpe_per_bar,
             "min_return": float(np.min(r)),
             "max_return": float(np.max(r)),
         }

@@ -27,6 +27,7 @@ from sklearn.metrics import accuracy_score, classification_report
 # Add scripts to path for cluster_pipeline imports
 
 from cluster_pipeline.loader import load_parquet
+from utils.metrics import annualized_sharpe
 
 
 def load_all_data(
@@ -150,7 +151,7 @@ def test_1_insample(X_train, y_train, X_test, y_test, feature_names):
     return model, test1_result
 
 
-def test_2_walkforward(df: pl.DataFrame, feature_cols: list, n_splits: int = 5):
+def test_2_walkforward(df: pl.DataFrame, feature_cols: list, n_splits: int = 5, horizon: int = 300):
     """
     Test 2: Walk-forward validation.
     Train on past, predict future. No lookahead.
@@ -201,7 +202,9 @@ def test_2_walkforward(df: pl.DataFrame, feature_cols: list, n_splits: int = 5):
         # simple PnL: go long if predict up, short if predict down
         positions = np.where(preds == 1, 1.0, -1.0)
         pnl = positions * ret_te
-        sharpe = np.mean(pnl) / (np.std(pnl) + 1e-10) * np.sqrt(len(pnl))
+        # Non-overlapping return periods per year (crypto 365d, 100ms ticks)
+        periods_per_year = 365 * 24 * 3600 * 10 / horizon
+        sharpe = annualized_sharpe(pnl, periods_per_year=periods_per_year)
 
         results.append({
             "split": i + 1,
@@ -431,7 +434,7 @@ def reg_test_1_insample(X_train, y_train, X_test, y_test, feature_names):
     return model, result
 
 
-def reg_test_2_walkforward(df: pl.DataFrame, feature_cols: list, n_splits: int = 5):
+def reg_test_2_walkforward(df: pl.DataFrame, feature_cols: list, n_splits: int = 5, horizon: int = 300):
     """
     Regression Test 2: Walk-forward R² and IC.
     Train on past, predict future returns (continuous).
@@ -483,7 +486,9 @@ def reg_test_2_walkforward(df: pl.DataFrame, feature_cols: list, n_splits: int =
         # PnL: position proportional to predicted return
         positions = y_pred  # continuous sizing
         pnl = positions * y_te
-        sharpe = np.mean(pnl) / (np.std(pnl) + 1e-10) * np.sqrt(len(pnl))
+        # Non-overlapping return periods per year (crypto 365d, 100ms ticks)
+        periods_per_year = 365 * 24 * 3600 * 10 / horizon
+        sharpe = annualized_sharpe(pnl, periods_per_year=periods_per_year)
 
         results.append({
             "split": i + 1,
@@ -696,7 +701,7 @@ def main():
         y_train, y_test = y[:split], y[split:]
 
         model, test1_result = test_1_insample(X_train, y_train, X_test, y_test, feature_cols)
-        wf_results = test_2_walkforward(df, feature_cols)
+        wf_results = test_2_walkforward(df, feature_cols, horizon=args.horizon)
         test3_result = test_3_confidence_filtered(df, feature_cols, args.spread_bps, args.horizon)
 
         if args.json_report:
@@ -735,7 +740,7 @@ def main():
         y_train, y_test = y[:split], y[split:]
 
         model, test1_result = reg_test_1_insample(X_train, y_train, X_test, y_test, feature_cols)
-        wf_results = reg_test_2_walkforward(df, feature_cols)
+        wf_results = reg_test_2_walkforward(df, feature_cols, horizon=args.horizon)
         test3_result = reg_test_3_quantile_pnl(df, feature_cols, args.spread_bps, args.horizon)
 
         if args.json_report:
