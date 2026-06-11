@@ -470,6 +470,31 @@ def main():
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        perf = {
+            "avg_composite_ic": float(avg_ic),
+            "avg_dir_accuracy": float(avg_dir),
+            "avg_sharpe_proxy": float(avg_sharpe),
+            "avg_l1_active_pct": float(avg_l1_active),
+            "n_folds": len(fold_results),
+            "fold_results": fold_results,
+        }
+
+        # Persist ablation summary if available
+        if args.ablation and fold_results and "ic_l1_only" in fold_results[0]:
+            ablation = {}
+            for mode in ABLATION_MODES:
+                key = f"ic_{mode}" if mode != "full" else "composite_ic"
+                mode_ics = [f.get(key, f.get("composite_ic")) for f in fold_results]
+                ablation[mode] = {
+                    "mean_ic": float(np.mean(mode_ics)),
+                    "std_ic": float(np.std(mode_ics)),
+                    "per_fold": [float(x) for x in mode_ics],
+                }
+            ablation["l1_alone_vs_full_delta"] = float(
+                ablation["l1_only"]["mean_ic"] - ablation["full"]["mean_ic"]
+            )
+            perf["ablation"] = ablation
+
         weights_data = {
             "l1_weights": l1_weights,
             "l2_weights": l2_weights,
@@ -479,14 +504,7 @@ def main():
             "symbol": args.symbol,
             "horizon_bars": args.horizon,
             "zscore_window": args.zscore_window,
-            "performance": {
-                "avg_composite_ic": float(avg_ic),
-                "avg_dir_accuracy": float(avg_dir),
-                "avg_sharpe_proxy": float(avg_sharpe),
-                "avg_l1_active_pct": float(avg_l1_active),
-                "n_folds": len(fold_results),
-                "fold_results": fold_results,
-            },
+            "performance": perf,
         }
 
         # Save per-symbol file (primary) + generic fallback
