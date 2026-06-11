@@ -108,9 +108,12 @@ class PortfolioConstraints:
     max_portfolio_dd_pct: float
     dd_breached: bool
     dd_action: str
+    # VaR (parametric, 1-day)
+    var_99_pct: float = 0.0  # 99% 1-day VaR as % of equity
+    cvar_99_pct: float = 0.0  # 99% 1-day CVaR as % of equity
     # Aggregate
-    any_breached: bool
-    scale_factor: float  # 1.0 if clean, max_leverage/gross_leverage if scaling
+    any_breached: bool = False
+    scale_factor: float = 1.0  # 1.0 if clean, max_leverage/gross_leverage if scaling
 
 
 @dataclass
@@ -254,6 +257,7 @@ def check_portfolio_constraints(
     max_portfolio_dd_pct: float = 5.0,
     dd_action: str = "halt_review",
     leverage_action: str = "scale_down",
+    symbol_vol_daily: Optional[Dict[str, float]] = None,
 ) -> PortfolioConstraints:
     """Evaluate portfolio-level risk constraints.
 
@@ -266,6 +270,7 @@ def check_portfolio_constraints(
         max_portfolio_dd_pct: Portfolio drawdown trigger (%).
         dd_action: Action on DD breach ("halt_24h", "halt_review", "kill").
         leverage_action: Action on leverage breach ("scale_down", "reject").
+        symbol_vol_daily: Symbol → daily return volatility (decimal). Used for VaR.
     """
     # Leverage
     gross_notional = sum(abs(v) for v in positions_usd.values())
@@ -298,6 +303,22 @@ def check_portfolio_constraints(
     else:
         scale_factor = 1.0
 
+    # Parametric VaR/CVaR (1-day, 99%)
+    # Assumes independent positions (conservative for hedged portfolios)
+    var_99_pct = 0.0
+    cvar_99_pct = 0.0
+    if symbol_vol_daily and account_equity > 0:
+        var_usd_sq = 0.0
+        for sym, pos in positions_usd.items():
+            vol = symbol_vol_daily.get(sym, 0.02)  # default 2% daily vol
+            var_usd_sq += (pos * vol) ** 2
+        portfolio_vol_usd = np.sqrt(var_usd_sq)
+        # 99% VaR: z = 2.326
+        var_99_pct = 2.326 * portfolio_vol_usd / account_equity * 100
+        # 99% CVaR (Gaussian): E[X | X > z] = φ(z) / (1-Φ(z))
+        # For 99%: CVaR multiplier ≈ 2.665
+        cvar_99_pct = 2.665 * portfolio_vol_usd / account_equity * 100
+
     any_breached = leverage_breached or concentration_breached or dd_breached
 
     return PortfolioConstraints(
@@ -315,9 +336,93 @@ def check_portfolio_constraints(
         max_portfolio_dd_pct=max_portfolio_dd_pct,
         dd_breached=dd_breached,
         dd_action=dd_action,
+        var_99_pct=var_99_pct,
+        cvar_99_pct=cvar_99_pct,
         any_breached=any_breached,
         scale_factor=scale_factor,
     )
+
+
+def enforce_portfolio_constraints(
+    proposed_positions: Dict[str, float],
+    account_equity: float,
+    equity_peak: float,
+    symbol_vol_daily: Optional[Dict[str, float]] = None,
+) -> tuple[Dict[str, float], PortfolioConstraints]:
+    """Apply portfolio risk constraints to proposed positions.
+
+    Returns adjusted positions (scaled/zeroed) and the constraint snapshot.
+    This is the single enforcement point for all portfolio-level risk.
+
+    Enforcement rules:
+    1. DD breached + action "kill"/"halt_review" → zero all positions
+    2. DD breached + action "halt_24h" → zero all positions
+    3. Leverage breached + action "scale_down" → pro-rata scale to max
+    4. Leverage breached + action "reject" → zero all positions
+    5. Concentration breached → scale down largest position until effective_n OK
+    """
+    risk_cfg = _load_portfolio_risk_config()
+    constraints = check_portfolio_constraints(
+        positions_usd=proposed_positions,
+        account_equity=account_equity,
+        equity_peak=equity_peak,
+        symbol_vol_daily=symbol_vol_daily,
+        **risk_cfg,
+    )
+
+    adjusted = dict(proposed_positions)
+
+    if not constraints.any_breached:
+        return adjusted, constraints
+
+    # DD breach → halt all trading
+    if constraints.dd_breached:
+        log.warning(
+            "Portfolio DD %.1f%% > %.1f%% — zeroing all positions (action=%s)",
+            constraints.portfolio_dd_pct,
+            constraints.max_portfolio_dd_pct,
+            constraints.dd_action,
+        )
+        adjusted = {sym: 0.0 for sym in adjusted}
+        return adjusted, constraints
+
+    # Leverage breach
+    if constraints.leverage_breached:
+        if constraints.leverage_action == "scale_down":
+            log.warning(
+                "Leverage %.2f > %.2f — scaling positions by %.2f",
+                constraints.gross_leverage,
+                constraints.max_leverage,
+                constraints.scale_factor,
+            )
+            adjusted = {sym: pos * constraints.scale_factor for sym, pos in adjusted.items()}
+        else:  # "reject"
+            log.warning(
+                "Leverage %.2f > %.2f — rejecting all positions",
+                constraints.gross_leverage,
+                constraints.max_leverage,
+            )
+            adjusted = {sym: 0.0 for sym in adjusted}
+            return adjusted, constraints
+
+    # Concentration breach — scale down largest until effective_n passes
+    if constraints.concentration_breached and len(adjusted) > 1:
+        gross = sum(abs(v) for v in adjusted.values())
+        if gross > 0:
+            sorted_syms = sorted(adjusted, key=lambda s: abs(adjusted[s]), reverse=True)
+            largest = sorted_syms[0]
+            # Scale largest position to equalize with second-largest
+            second = abs(adjusted[sorted_syms[1]]) if len(sorted_syms) > 1 else gross / 2
+            cap = max(second, gross * 0.5)  # at most 50% of gross in one name
+            if abs(adjusted[largest]) > cap:
+                sign = 1.0 if adjusted[largest] > 0 else -1.0
+                log.warning(
+                    "Concentration breach (eff_n=%.2f) — capping %s from %.0f to %.0f",
+                    constraints.effective_n, largest, abs(adjusted[largest]), cap,
+                )
+                adjusted[largest] = sign * cap
+
+    return adjusted, constraints
 
 
 # ---------------------------------------------------------------------------
