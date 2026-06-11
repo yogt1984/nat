@@ -25,7 +25,10 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+SCRIPTS_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPTS_DIR.parent
+
+sys.path.insert(0, str(SCRIPTS_DIR))
 
 from cluster_pipeline.preprocess import aggregate_bars
 from cluster_pipeline.loader import load_parquet
@@ -36,6 +39,7 @@ from algorithms.hierarchical_combiner import (
 )
 
 HORIZON_BARS = 60  # 60 * 5min = 5h forward return
+DEFAULT_OUTPUT_DIR = str(PROJECT_ROOT / "models" / "hierarchical_combiner")
 VALID_MODES = ("walk_forward", "purged_kfold")
 
 ABLATION_MODES = ["full", "l1_only", "no_l3", "no_l2"]
@@ -88,9 +92,10 @@ def _compute_composite(
     return composite.clip(-1, 1), l1_dir
 
 
-def load_bars(data_dir: str, symbol: str, start_date: str | None = None) -> pd.DataFrame:
+def load_bars(data_dir: str, symbol: str, start_date: str | None = None,
+              max_memory_mb: float = 8000) -> pd.DataFrame:
     """Load parquet data and aggregate to 5-min bars."""
-    df = load_parquet(data_dir, symbols=[symbol], start_date=start_date, max_memory_mb=4000)
+    df = load_parquet(data_dir, symbols=[symbol], start_date=start_date, max_memory_mb=max_memory_mb)
     print(f"Loaded {len(df):,} ticks for {symbol}")
     if len(df) < 1000:
         print(f"ERROR: Only {len(df)} ticks, need at least 1000")
@@ -338,10 +343,12 @@ def main():
                         help="Z-score threshold for L1 directional activation")
     parser.add_argument("--zscore-window", type=int, default=200,
                         help="Rolling z-score window in bars")
-    parser.add_argument("--output-dir", default="models/hierarchical_combiner",
+    parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR,
                         help="Output directory for trained weights")
     parser.add_argument("--start-date", default=None,
                         help="Earliest date to load (YYYY-MM-DD)")
+    parser.add_argument("--max-memory-mb", type=float, default=8000,
+                        help="Max memory in MB for data loading (default: 8000)")
     parser.add_argument("--dry-run", action="store_true", help="Evaluate only, don't save")
     parser.add_argument("--ablation", action="store_true",
                         help="Run layer ablation analysis (auto-enabled with --dry-run)")
@@ -355,7 +362,8 @@ def main():
     print(f"Data: {args.data_dir}, horizon: {args.horizon} bars ({args.horizon * 5}min)")
 
     # Load and build dataset
-    bars = load_bars(args.data_dir, args.symbol, start_date=args.start_date)
+    bars = load_bars(args.data_dir, args.symbol, start_date=args.start_date,
+                     max_memory_mb=args.max_memory_mb)
     fwd_returns = build_forward_returns(bars, horizon=args.horizon)
 
     valid_count = np.isfinite(fwd_returns).sum()
@@ -461,7 +469,6 @@ def main():
     if not args.dry_run:
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        weights_path = output_dir / "weights.json"
 
         weights_data = {
             "l1_weights": l1_weights,
@@ -482,9 +489,20 @@ def main():
             },
         }
 
-        with open(weights_path, "w") as f:
-            json.dump(weights_data, f, indent=2)
-        print(f"\nSaved weights to {weights_path}")
+        # Save per-symbol file (primary) + generic fallback
+        symbol_path = output_dir / f"weights_{args.symbol}.json"
+        generic_path = output_dir / "weights.json"
+        for path in (symbol_path, generic_path):
+            with open(path, "w") as f:
+                json.dump(weights_data, f, indent=2)
+        print(f"\nSaved weights to {symbol_path}")
+
+        # Verify roundtrip
+        with open(symbol_path) as f:
+            loaded = json.load(f)
+        assert loaded["l1_weights"] == l1_weights, "Roundtrip verification failed"
+        assert loaded["symbol"] == args.symbol
+        print(f"Verified: {symbol_path} loads correctly")
 
     print("\nDone.")
 
