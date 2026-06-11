@@ -25,6 +25,7 @@ from scipy import stats as sp_stats
 from cluster_pipeline.loader import load_parquet
 from polymarket.probability_model import ProbabilityModel, EmpiricalModel
 from polymarket.edge_detector import EdgeDetector, polymarket_fee
+from utils.metrics import annualized_sharpe
 
 
 def load_btc_data(data_dir: str, max_days: int | None = None) -> pd.DataFrame:
@@ -224,7 +225,9 @@ def analyze_results(results: pd.DataFrame, horizon_minutes: int, strike_offset: 
         total_pnl = trades["pnl"].sum()
         mean_pnl = trades["pnl"].mean()
         win_rate = (trades["pnl"] > 0).mean()
-        sharpe = trades["pnl"].mean() / (trades["pnl"].std() + 1e-12)
+        # Aggregate to daily PnL for annualized Sharpe (crypto = 365d)
+        daily_pnl = trades.groupby(trades["i"] // 86400)["pnl"].sum()
+        sharpe = annualized_sharpe(daily_pnl.values, periods_per_year=365) if len(daily_pnl) >= 2 else 0.0
 
         # By side
         yes_trades = trades[trades["trade_side"] == "BUY_YES"]
@@ -233,7 +236,7 @@ def analyze_results(results: pd.DataFrame, horizon_minutes: int, strike_offset: 
         print(f"    Total P&L:     {total_pnl:+.2f} per $1 notional")
         print(f"    Mean P&L:      {mean_pnl:+.4f} per trade")
         print(f"    Win rate:      {win_rate:.1%}")
-        print(f"    Sharpe (per-trade): {sharpe:.3f}")
+        print(f"    Sharpe (ann.):     {sharpe:.3f}")
         print(f"    BUY YES:       {len(yes_trades)} trades, "
               f"mean={yes_trades['pnl'].mean():+.4f}" if len(yes_trades) > 0 else "")
         print(f"    BUY NO:        {len(no_trades)} trades, "
