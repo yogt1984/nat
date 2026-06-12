@@ -17,6 +17,9 @@ use ing::dashboard::{run_dashboard_server, BroadcastLayer, DashboardState};
 use ing::features::CrossSymbolState;
 use ing::metrics::Metrics;
 use ing::output::{ParquetWriter, TradeParquetWriter, TradeRecord};
+use ing::positions::{
+    PositionTracker, PositionTrackerConfig, SharedPositionState, WalletDiscovery,
+};
 use ing::redis_publisher::{RedisConfig, RedisPublisher};
 use ing::state::MarketState;
 use ing::ws::{HyperliquidClient, WsMessage};
@@ -150,6 +153,83 @@ async fn main() -> Result<()> {
         None
     };
 
+    // Initialize position tracker (optional — polls wallet positions via REST)
+    // tracker_wallets_handle is shared with wallet discovery in symbol tasks
+    let mut tracker_wallets_handle: Option<Arc<parking_lot::RwLock<Vec<String>>>> = None;
+    let shared_position_state: Option<Arc<SharedPositionState>> =
+        if let Some(ref pt_config) = config.position_tracker {
+            if pt_config.enabled {
+                let shared = Arc::new(SharedPositionState::new());
+
+                let (snapshot_tx, mut snapshot_rx) = mpsc::channel(1000);
+                let (delta_tx, mut delta_rx) = mpsc::channel(1000);
+
+                let tracker_config = PositionTrackerConfig {
+                    poll_interval_secs: pt_config.poll_interval_secs,
+                    symbols: config.symbols.assets.clone(),
+                    max_concurrent_requests: pt_config.max_concurrent_requests,
+                };
+                let tracker = match PositionTracker::new(tracker_config) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        error!(?e, "Failed to create position tracker");
+                        return Err(e);
+                    }
+                };
+                let tracker = tracker
+                    .with_snapshot_channel(snapshot_tx)
+                    .with_delta_channel(delta_tx);
+
+                if !pt_config.initial_wallets.is_empty() {
+                    tracker.add_wallets(&pt_config.initial_wallets);
+                    info!(
+                        count = pt_config.initial_wallets.len(),
+                        "Position tracker: loaded initial wallets"
+                    );
+                }
+
+                // Extract wallet handle for discovery before moving tracker
+                if pt_config.discover_from_trades {
+                    tracker_wallets_handle = Some(tracker.wallets_handle());
+                }
+
+                // Spawn tracker polling loop
+                tokio::spawn(async move {
+                    if let Err(e) = tracker.run().await {
+                        error!(?e, "Position tracker error");
+                    }
+                });
+
+                // Spawn consumer: channels -> SharedPositionState
+                let sps = Arc::clone(&shared);
+                tokio::spawn(async move {
+                    loop {
+                        tokio::select! {
+                            Some(snapshot) = snapshot_rx.recv() => {
+                                sps.update_snapshot(snapshot);
+                            }
+                            Some(delta) = delta_rx.recv() => {
+                                sps.update_delta(delta);
+                            }
+                            else => break,
+                        }
+                    }
+                });
+
+                info!(
+                    poll_secs = pt_config.poll_interval_secs,
+                    max_wallets = pt_config.max_tracked_wallets,
+                    discover = pt_config.discover_from_trades,
+                    "Position tracker started"
+                );
+                Some(shared)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
     // Initialize market state for each symbol
     let mut handles = Vec::new();
     let cross_symbol_state = CrossSymbolState::new();
@@ -165,6 +245,8 @@ async fn main() -> Result<()> {
         let alert_config = alert_config.clone();
         let cross_symbol = cross_symbol_state.clone();
         let shutdown_rx = shutdown_rx.clone();
+        let position_state = shared_position_state.clone();
+        let wallets_handle = tracker_wallets_handle.clone();
 
         let handle = tokio::spawn(async move {
             run_symbol_ingestor(
@@ -178,6 +260,8 @@ async fn main() -> Result<()> {
                 alert_config,
                 cross_symbol,
                 shutdown_rx,
+                position_state,
+                wallets_handle,
             )
             .await
         });
@@ -243,12 +327,33 @@ async fn run_symbol_ingestor(
     alert_config: AlertConfig,
     cross_symbol_state: CrossSymbolState,
     mut shutdown_rx: watch::Receiver<bool>,
+    position_state: Option<Arc<SharedPositionState>>,
+    wallets_handle: Option<Arc<parking_lot::RwLock<Vec<String>>>>,
 ) -> Result<()> {
     info!(%symbol, "Starting ingestor");
 
     let algorithms = ing::algorithms::create_algorithms(&config.algorithms.enabled);
     let mut state = MarketState::new_with_algorithms(&symbol, &config.features, algorithms);
     state.set_cross_symbol_state(cross_symbol_state);
+
+    // Wire position tracker data if available
+    if let Some(ref ps) = position_state {
+        state.set_position_state(Arc::clone(ps));
+        if let Some(ref pt_config) = config.position_tracker {
+            state.set_concentration_whale_threshold(pt_config.whale_threshold_usd);
+        }
+        info!(%symbol, "Position tracker wired into feature computation");
+    }
+
+    // Initialize wallet discovery if tracker is active with discover_from_trades
+    let mut wallet_discovery = wallets_handle.as_ref().map(|_| {
+        let max_wallets = config
+            .position_tracker
+            .as_ref()
+            .map(|pt| pt.max_tracked_wallets)
+            .unwrap_or(50);
+        WalletDiscovery::new(max_wallets)
+    });
     let mut client = HyperliquidClient::new(&config.websocket, &symbol);
     let mut sequence_id: u64 = 0;
     let mut message_count: u64 = 0;
@@ -298,6 +403,11 @@ async fn run_symbol_ingestor(
     // Per-channel liveness tracking — see health.rs for thresholds and docs.
     let mut channel_health = ChannelHealth::new();
 
+    // Wallet discovery promotion ticker (every 5 minutes)
+    let mut discovery_ticker =
+        tokio::time::interval(tokio::time::Duration::from_secs(300));
+    discovery_ticker.tick().await; // skip immediate first tick
+
     loop {
         tokio::select! {
             // Bias towards WebSocket messages to ensure we don't miss data
@@ -329,6 +439,20 @@ async fn run_symbol_ingestor(
                                         };
                                         // Non-blocking: if channel is full, drop the trade
                                         let _ = trade_tx.try_send(rec);
+                                    }
+                                }
+                                // Wallet discovery: observe maker/taker addresses
+                                if let Some(ref mut discovery) = wallet_discovery {
+                                    for t in trades {
+                                        if let Some((maker, taker)) = &t.users {
+                                            let first = discovery.observe_trade(maker, taker);
+                                            if first {
+                                                info!(
+                                                    %symbol,
+                                                    "WsTrade.users field IS populated — wallet discovery active"
+                                                );
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -591,6 +715,22 @@ async fn run_symbol_ingestor(
                         uptime = format!("{}m{}s", mins, secs),
                         "Health summary"
                     );
+                }
+            }
+
+            // Wallet discovery: promote top wallets to tracker every 5 minutes
+            _ = discovery_ticker.tick() => {
+                if let (Some(ref mut discovery), Some(ref wh)) = (&mut wallet_discovery, &wallets_handle) {
+                    if discovery.users_field_available() {
+                        discovery.promote_top(5, wh);
+                    } else if connect_time.elapsed().as_secs() > 300 {
+                        // After 5 minutes with no users field, warn once
+                        warn!(
+                            %symbol,
+                            "WsTrade.users field not populated after 5min — \
+                             wallet discovery unavailable, using initial_wallets only"
+                        );
+                    }
                 }
             }
 

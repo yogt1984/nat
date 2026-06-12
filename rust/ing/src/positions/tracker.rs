@@ -99,6 +99,11 @@ impl PositionTracker {
         self.wallets.read().clone()
     }
 
+    /// Get a shared handle to the wallet list (for external wallet discovery)
+    pub fn wallets_handle(&self) -> Arc<RwLock<Vec<String>>> {
+        Arc::clone(&self.wallets)
+    }
+
     /// Poll positions for all tracked wallets
     pub async fn poll_all(&self) -> Result<Vec<PositionSnapshot>> {
         let wallets = self.wallets.read().clone();
