@@ -1,8 +1,11 @@
 # NAT Action Plan — Sequential Implementation & Test Order
 
-**Date:** 2026-06-12 (rev. 5 — rev. 4 added the M0 cloud-ingestion milestone; rev. 5 records the
-process framework (T9.5, done) and its Stage-B payoff (T11b). Data continuity, not research
-capacity, is the binding constraint: every reliable day of ingestion appreciates all existing research)
+**Date:** 2026-06-12 (rev. 6 — rev. 4 added the M0 cloud-ingestion milestone; rev. 5 recorded the
+process framework (T9.5, done) and its Stage-B payoff (T11b); rev. 6 reorders Stage A: the
+missing-features issue (M1, T0) resolves FIRST, cloud ingestion (M2, T0b) second — the cloud box
+doubles as the deployment vehicle for the wired binary while su-35 is streak-frozen. Data continuity,
+not research capacity, is the binding constraint: every reliable day of ingestion appreciates all
+existing research)
 **Sources:** `Q/*.md`, `P/*.md`, `nat_cli_tasks/*.md`, `data_inventory.md`, `situation_analysis.md`,
 `feature_algorithm_gaps.md`, `algorithm_classification.md`, `algorithm_candidates_literature.md`,
 `phd_vs_quant_roadmap.md`. Detailed network design: git history of this file (rev. 2).
@@ -18,29 +21,45 @@ capacity, is the binding constraint: every reliable day of ingestion appreciates
 
 ---
 
-## Stage A — Jun 12–17 (pure Python, zero ingestor risk)
+## Stage A — Jun 12–17 (zero su-35 risk; T0/T0b deploy only to the cloud box, rest is pure Python)
 
-### T0. M0 — Continuous cloud ingestion (Hetzner) — FIRST MILESTONE, parallel to su-35
+### T0. M1 — Resolve the missing-features issue FIRST (Q1.2 / K2)
+Of the 82 dead columns, 40 (whale_flow 12 / liquidation_risk 13 / concentration 15) are unlocked by
+the wiring already committed in 38aa7e1 (whale trade-classification, PositionTracker bridge,
+WalletDiscovery; `cargo test -p ing -p ing-features` 556 green). What remains is deployment, live
+validation, and the viability verdict — in that order:
+1. Enable `[position_tracker]` in `config/ing.toml` (ships commented out); release build.
+2. Deploy WITHOUT touching su-35 mid-streak: first deployment target is the T0b cloud box
+   (pre-Jun-17); su-35 upgrades to the wired binary only after the streak completes.
+3. Live validation, first 24h — via the `nat nightly` wiring section:
+   per-column non-NaN coverage for all 40 columns; sanity ranges (top5 0.05–0.50, top10 0.10–0.60,
+   HHI 0.01–0.25, Gini 0.30–0.80); `WsTrade.users` population diagnostic in the ingestor log
+   (unverified Hyperliquid behavior — hard dependency for wallet discovery).
+4. 48h viability gate (decision matrix, `docs/nan_wiring/05`): 50+ wallets & >20% OI → viable;
+   20–50 & 5–20% → noisy (FEATURES.md disclaimer); below → keep NaN, documented unavailable.
+   Any verdict is a valid exit — "unavailable" is a result, not a failure.
+**Test:** whale/liquidation coverage < 100% NaN within 1h of wired-binary deployment; schema contract
+intact (`names_all()` == 236, NaN padding when sources absent); concentration verdict recorded after
+48h in the 01_concentration doc; nightly wiring section verdict ≠ "unavailable by config".
+**Exit/validation:** verdict unblocks T9's LF3 (liquidation cascade) and the agents' dead-column skip
+lists — or documents those as permanently gated. Only then are the remaining parts (T0b cutover
+choice, T8/T9 priorities touching whale data) finalized.
+
+### T0b. M2 — Continuous cloud ingestion (Hetzner) — starts with T0 step 2, parallel to su-35
 Provider already decided: **Hetzner AX52 dedicated** (8-core/64GB, ~€60/mo) per
-`docs/cloud_deployment/0_overview.md` — sized for ingestion + the evaluation swarm. If milestone 1
-is split to ingestion-only first, a CX/CPX VM (~€10–20/mo) suffices until the swarm moves over.
-Deploy the existing Tier-1 docker
-stack: ingestor + watchdog + Prometheus + **gap alerting via Telegram (<5 min page on any data gap —
-not next-day discovery via nightly report)**. Runs as a second, independent ingestor; su-35 stays
-untouched (constraint 1 intact). Cutover decision after Jun 17: compare cloud vs su-35 parquet
-(row counts, gap profile, feature parity on overlapping hours); cleaner box becomes primary, the
-other stays as redundancy. Include a disk retention policy (raw parquet growth/day × 3 symbols;
-downsample or expire after N days).
+`docs/cloud_deployment/0_overview.md` — sized for ingestion + the evaluation swarm. If milestone is
+split to ingestion-only first, a CX/CPX VM (~€10–20/mo) suffices until the swarm moves over.
+Deploy the existing Tier-1 docker stack with the T0 wired binary from day one: ingestor + watchdog +
+Prometheus + **gap alerting via Telegram (<5 min page on any data gap — not next-day discovery via
+nightly report)**. Runs as a second, independent ingestor; su-35 stays untouched (constraint 1
+intact). Cutover decision after Jun 17: compare cloud vs su-35 parquet (row counts, gap profile,
+feature parity on overlapping hours); cleaner box becomes primary, the other stays as redundancy.
+Include a disk retention policy (raw parquet growth/day × 3 symbols; downsample or expire after N days).
 **Test:** 48h unattended cloud ingestion, zero gaps >60s; Telegram alert fires on forced disconnect;
-feature parity spot-check vs su-35 within float noise on overlapping columns.
+feature parity spot-check vs su-35 within float noise on overlapping columns; T0's 48h viability
+clock runs on this box's data.
 **Latency note:** Hetzner EU adds ~250ms RTT to Hyperliquid (Tokyo) — fine for research ingestion;
 live execution (T21) needs Tokyo-proximate hosting, decided then, not now.
-
-### T1. Verify NaN-wiring fixes on live data (Q1.2 / K2)
-Whale flow, position tracker, wallet discovery were wired in commit 38aa7e1. Confirm the 82 dead
-columns start filling: run feature NaN-rate check on today's parquet; start the 48h concentration
-viability clock (01_concentration doc — verdict: viable if 20+ wallets / >5% OI coverage, else keep NaN).
-**Test:** NaN% report shows whale/liquidation columns < 100% NaN on Jun 12+ dates; no schema change (236 cols).
 
 ### T2. Shared foundations: costs + provenance (Q1.4 + P1.5, ~1 day)
 Create `scripts/costs.py` (`load_costs(exchange)` reading `config/costs.toml`) and `scripts/provenance.py`
@@ -94,7 +113,7 @@ real parquet (smoke-test rule) before commit.
 2. **LF1 funding-settlement** (6h) — needs F1; best-replicated family in the literature.
 3. **HF1 microprice fair-value** (6h) — needs F2; maker-side anchor.
 4. **HF2 integrated OFI** (8h) — needs F3; redeems failed weighted_ofi.
-Defer: HF3 Hawkes (10h), LF3 liquidation cascade (gated on T1 whale data), A1 ETH/SOL ratio (6h).
+Defer: HF3 Hawkes (10h), LF3 liquidation cascade (gated on T0 whale data verdict), A1 ETH/SOL ratio (6h).
 **Test per algo:** smoke test + `nat algorithm evaluate --algorithm <name> --symbol BTC`; walk-forward
 OOS before any deployable claim (momentum_continuation overfit is the cautionary tale).
 
@@ -106,7 +125,7 @@ chainable via `--score-with`); JSON records + `process_results` index in nat.db;
 
 ### T10. Decision-trace viz: NAT4 + NAT5 (~14h)
 `nat viz features` (per-feature value/z-score/NaN%/IC/sparkline, `--alive-only`, `--live`) — directly
-verifies T1. `nat viz algorithm <name>` (signal timeline, entry/exit markers, features at trigger, P&L).
+verifies T0. `nat viz algorithm <name>` (signal timeline, entry/exit markers, features at trigger, P&L).
 **Test:** `nat viz features --symbol BTC --alive-only` < 3s; `nat viz algorithm jump_detector --symbol BTC`
 renders 4h trace; both support `--json` and `--output <png>`.
 
@@ -217,8 +236,8 @@ per Q4 tier gates. Requires T16 healthy + G8 passed. **Test:** fill-conditional 
 
 | When | Quant/infra | Milestone |
 |------|-------------|-----------|
-| Jun 12–17 | T0 (cloud ingestor, parallel) + T1–T10 (Stage A) | Streak completes Jun 17 — touch nothing on su-35 |
-| Jun 17–24 | T11–T13 + T0 cutover decision | Combiner verdict; ~Jun 20: 30 good dates → OOS30 feasible |
+| Jun 12–17 | T0 (missing features FIRST, deployed via T0b cloud box) + T2–T10 | Streak completes Jun 17 — touch nothing on su-35; T0 verdict due ~Jun 15 (48h clock) |
+| Jun 17–24 | T11–T13 + T0b cutover decision; su-35 upgrades to wired binary | Combiner verdict; ~Jun 20: 30 good dates → OOS30 feasible |
 | Jun 24–Jul 8 | T14–T17 | Promotion + risk layer live |
 | Jul 8–Aug | T18–T19, P1 | First G8 windows; D1 decision (Aug) |
 | Sep–Oct | T20–T21, P2–P3 | First LIVE at 1% (Q4.1); D3 paper-vs-backtest |
