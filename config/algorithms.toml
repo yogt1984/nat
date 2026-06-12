@@ -47,6 +47,14 @@ reversion_horizon = 50       # ticks to measure post-jump reversion
 [bipower_jump]
 window = 100                 # rolling window for bipower variation
 
+[vol_squeeze]
+window = 6000                # rolling window for ratio percentiles (~10min)
+squeeze_pct = 25.0           # ratio below this percentile = compressing
+expansion_pct = 75.0         # ratio above this percentile = expanding
+min_squeeze_ticks = 600      # squeeze must persist ~1min to arm
+breakout_lookback = 300      # direction from return over ~30s
+hold_ticks = 3000            # signal decays over ~5min
+
 # ── Group D: Toxicity ────────────────────────────────────────────
 
 [vpin_regime]
