@@ -51,7 +51,7 @@ DAILY_ALGOS = [
     "surprise_signal", "bipower_jump", "cascade_probability", "convolver",
     "entropy_momentum", "hawkes_intensity", "kalman_imbalance",
     "oi_divergence", "propagator", "regime_gated", "spread_decomp",
-    "switching_ou", "trade_through", "vpin_regime", "weighted_ofi",
+    "switching_ou", "trade_through", "vol_squeeze", "vpin_regime", "weighted_ofi",
     "change_point_detector",
     "momentum_continuation",
     "regime_state_machine",

@@ -92,6 +92,11 @@ ALGO_CONFIG = {
         "polarity": "low_long",  # low jump fraction → stable → momentum
         "bar_agg": "mean",
     },
+    "vol_squeeze": {
+        "primary": "alg_vsq_breakout_signal",
+        "polarity": "high_long",  # signed ±(0,1]: positive breakout → long
+        "bar_agg": "mean",
+    },
     "spread_decomp": {
         "primary": "alg_adverse_component",
         "polarity": "low_long",  # low adverse selection → less informed trading → safe
