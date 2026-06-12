@@ -7,6 +7,12 @@ in Python, IC-validated on real data, and promoted into the Rust ingestor
 only if they earn a place in the feature-vector contract.
 """
 
+from features.microprice import (  # noqa: F401
+    MICROPRICE_FEATURES,
+    MicropriceEstimator,
+    compute_microprice,
+    fit_per_symbol,
+)
 from features.settlement_clock import (  # noqa: F401
     SETTLEMENT_CLOCK_FEATURES,
     compute_settlement_clock,
