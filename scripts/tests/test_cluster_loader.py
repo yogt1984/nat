@@ -382,10 +382,11 @@ class TestLoadParquet:
     def test_partial_schema_loads(self, tmp_partial_dir):
         df = load_parquet(tmp_partial_dir)
         assert len(df) == 200
-        # Entropy columns present
-        assert "ent_permutation_returns_8" in df.columns
-        # Trend columns NOT present
-        assert "trend_momentum_60" not in df.columns
+        # Entropy columns present with real data
+        assert df["ent_permutation_returns_8"].notna().any()
+        # Trend columns absent from the files are NaN-padded by normalize_schema
+        assert "trend_momentum_60" in df.columns
+        assert df["trend_momentum_60"].isna().all()
 
     def test_error_on_nonexistent_dir(self):
         with pytest.raises(FileNotFoundError):
@@ -488,7 +489,13 @@ class TestValidateSchema:
         assert len(result["vectors_complete"]) == len(FEATURE_VECTORS)
 
     def test_partial_data_valid(self, tmp_partial_dir):
-        df = load_parquet(tmp_partial_dir)
+        # Explicit columns= skips full-schema padding, so the frame stays
+        # genuinely partial
+        cols = ["timestamp_ns", "symbol"] + (
+            FEATURE_VECTORS["entropy"]["columns"]
+            + FEATURE_VECTORS["volatility"]["columns"]
+        )
+        df = load_parquet(tmp_partial_dir, columns=cols)
         result = validate_schema(df)
         assert result["valid"] is True
         assert "entropy" in result["vectors_available"]
@@ -514,7 +521,11 @@ class TestValidateSchema:
         assert any("Too few rows" in e for e in result["errors"])
 
     def test_require_specific_vectors(self, tmp_partial_dir):
-        df = load_parquet(tmp_partial_dir)
+        cols = ["timestamp_ns", "symbol"] + (
+            FEATURE_VECTORS["entropy"]["columns"]
+            + FEATURE_VECTORS["volatility"]["columns"]
+        )
+        df = load_parquet(tmp_partial_dir, columns=cols)
         # Requiring a vector that exists
         result = validate_schema(df, require_vectors=["entropy"])
         assert result["valid"] is True
@@ -728,17 +739,28 @@ class TestDataIntegrity:
         assert (df["timestamp_ns"] > 0).all()
 
     def test_concatenation_preserves_column_count(self, tmp_data_dir):
+        from data.schema import ALL_BASE, ALL_OPTIONAL
+
         df = load_parquet(tmp_data_dir)
-        expected_cols = _all_feature_columns()
-        # 3 meta + all features
-        assert len(df.columns) == 3 + len(expected_cols)
+        # 3 meta + all file features, plus NaN padding up to the full
+        # data.schema contract (full loads only)
+        expected = (
+            {"timestamp_ns", "symbol", "sequence_id"}
+            | set(_all_feature_columns())
+            | set(ALL_BASE)
+            | set(ALL_OPTIONAL)
+        )
+        assert set(df.columns) == expected
 
     def test_multi_file_merge_no_schema_mismatch(self, tmp_data_dir):
         """All files should merge without schema conflicts."""
         df = load_parquet(tmp_data_dir)
-        # If there was a schema mismatch, concat would fail or produce NaNs
+        # If there was a schema mismatch, concat would fail or produce NaNs.
+        # Only check columns the files actually contain — schema padding
+        # adds all-NaN columns by design.
+        file_cols = set(_all_feature_columns())
         meta_cols = [c for c in df.columns if c in META_COLUMNS or c == "sequence_id"]
-        feature_cols = [c for c in df.columns if c not in meta_cols]
+        feature_cols = [c for c in df.columns if c not in meta_cols and c in file_cols]
         # No all-NaN feature columns
         for col in feature_cols:
             assert df[col].notna().any(), f"Column {col} is all NaN after merge"
