@@ -2017,14 +2017,19 @@ def cmd_process_help(args=None):
     nat process results        Past runs from the index (--process, --symbol)
     nat process show RUN_ID    Full findings of one run
 
-  Processes:
+  Evaluation processes (score existing features):
     ic_horizon        Expanding Spearman IC x horizon sweep, decay half-life, BH-FDR
     mi_ksg            KSG mutual information vs forward returns, cost-viability gate
     transfer_entropy  Directed information flow with reverse-direction control
     spectral          PSD / Hurst / OU half-life / frequency-band IC (tick-level)
     ml_importance     LightGBM walk-forward importance + confidence-filtered PnL
 
+  Transform processes (derive new evaluable series; chain with --score-with):
+    triple_barrier    Lopez de Prado 3-barrier labels (tb_label/tb_ret/tb_hit_bars)
+    pca_combo         Orthogonal PCA composites pc_1..pc_k, holdout-IC scored
+
   Start with:  nat process run ic_horizon --symbol BTC --start-date 2026-06-10
+  Chain:       nat process run pca_combo --symbol BTC --score-with ic_horizon
 """)
 
 
@@ -2130,7 +2135,8 @@ def cmd_test_process(args):
     _exec(f"{PY} -m pytest tests/test_process_base.py tests/test_process_ic.py "
           f"tests/test_process_persistence.py tests/test_process_info.py "
           f"tests/test_process_spectral.py tests/test_process_ml.py "
-          f"tests/test_process_real_data.py -v", cwd=ROOT / "scripts")
+          f"tests/test_process_transforms.py tests/test_process_real_data.py -v",
+          cwd=ROOT / "scripts")
 
 
 def cmd_backtest_algorithm(args):
@@ -3274,7 +3280,8 @@ def cmd_help(args=None):
   {BOLD}Analytical Processes{W}
     Third first-class citizen: statistical / signal-processing / ML
     descriptions of whether a feature carries price-action information.
-    ic_horizon, mi_ksg, transfer_entropy, spectral, ml_importance.
+    Evaluation: ic_horizon, mi_ksg, transfer_entropy, spectral, ml_importance.
+    Transforms: triple_barrier, pca_combo (chain via --score-with ic_horizon).
     nat process                Group help and process catalog
     nat process list           Registered processes (+ --kind, --json)
     nat process run NAME       Run on feature data (--symbol, --start-date, --param)

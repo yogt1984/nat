@@ -20,6 +20,8 @@ from . import ic_horizon  # noqa: F401,E402
 from . import info_theory  # noqa: F401,E402
 from . import spectral  # noqa: F401,E402
 from . import ml_importance  # noqa: F401,E402
+from . import labeling  # noqa: F401,E402
+from . import pca_combo  # noqa: F401,E402
 
 __all__ = [
     "Process", "EvaluationProcess", "TransformProcess",

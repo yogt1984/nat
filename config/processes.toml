@@ -39,3 +39,15 @@ top_k = 20
 confidence_threshold = 0.60
 min_obs = 300
 lgbm = { n_estimators = 200, max_depth = 6, learning_rate = 0.05, min_child_samples = 50 }
+
+[triple_barrier]                # transform -> tb_label / tb_ret / tb_hit_bars
+pt_mult = 2.0
+sl_mult = 1.0
+max_holding_bars = 16
+vol_window = 96
+
+[pca_combo]                     # transform -> pc_1..pc_k, holdout-IC scored
+n_components = 5
+fit_frac = 0.7
+standardize = true
+min_obs = 100
