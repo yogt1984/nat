@@ -1,6 +1,8 @@
 # NAT Action Plan — Sequential Implementation & Test Order
 
-**Date:** 2026-06-12 (rev. 3 — condensed to sequential task list, ≤200 lines)
+**Date:** 2026-06-12 (rev. 5 — rev. 4 added the M0 cloud-ingestion milestone; rev. 5 records the
+process framework (T9.5, done) and its Stage-B payoff (T11b). Data continuity, not research
+capacity, is the binding constraint: every reliable day of ingestion appreciates all existing research)
 **Sources:** `Q/*.md`, `P/*.md`, `nat_cli_tasks/*.md`, `data_inventory.md`, `situation_analysis.md`,
 `feature_algorithm_gaps.md`, `algorithm_classification.md`, `algorithm_candidates_literature.md`,
 `phd_vs_quant_roadmap.md`. Detailed network design: git history of this file (rev. 2).
@@ -17,6 +19,22 @@
 ---
 
 ## Stage A — Jun 12–17 (pure Python, zero ingestor risk)
+
+### T0. M0 — Continuous cloud ingestion (Hetzner) — FIRST MILESTONE, parallel to su-35
+Provider already decided: **Hetzner AX52 dedicated** (8-core/64GB, ~€60/mo) per
+`docs/cloud_deployment/0_overview.md` — sized for ingestion + the evaluation swarm. If milestone 1
+is split to ingestion-only first, a CX/CPX VM (~€10–20/mo) suffices until the swarm moves over.
+Deploy the existing Tier-1 docker
+stack: ingestor + watchdog + Prometheus + **gap alerting via Telegram (<5 min page on any data gap —
+not next-day discovery via nightly report)**. Runs as a second, independent ingestor; su-35 stays
+untouched (constraint 1 intact). Cutover decision after Jun 17: compare cloud vs su-35 parquet
+(row counts, gap profile, feature parity on overlapping hours); cleaner box becomes primary, the
+other stays as redundancy. Include a disk retention policy (raw parquet growth/day × 3 symbols;
+downsample or expire after N days).
+**Test:** 48h unattended cloud ingestion, zero gaps >60s; Telegram alert fires on forced disconnect;
+feature parity spot-check vs su-35 within float noise on overlapping columns.
+**Latency note:** Hetzner EU adds ~250ms RTT to Hyperliquid (Tokyo) — fine for research ingestion;
+live execution (T21) needs Tokyo-proximate hosting, decided then, not now.
 
 ### T1. Verify NaN-wiring fixes on live data (Q1.2 / K2)
 Whale flow, position tracker, wallet discovery were wired in commit 38aa7e1. Confirm the 82 dead
@@ -80,6 +98,12 @@ Defer: HF3 Hawkes (10h), LF3 liquidation cascade (gated on T1 whale data), A1 ET
 **Test per algo:** smoke test + `nat algorithm evaluate --algorithm <name> --symbol BTC`; walk-forward
 OOS before any deployable claim (momentum_continuation overfit is the cautionary tale).
 
+### T9.5. Process framework Stage 1+2 — DONE (branch `feat/process-framework`)
+Third first-class citizen (see `process_concept.md`): `scripts/processes/` — ic_horizon, mi_ksg,
+transfer_entropy, spectral, ml_importance (evaluation) + triple_barrier, pca_combo (transforms,
+chainable via `--score-with`); JSON records + `process_results` index in nat.db; `nat process` CLI.
+**Test:** `nat test process` (48 tests: planted-signal contracts, no-lookahead, K2 dead-column smoke) — green.
+
 ### T10. Decision-trace viz: NAT4 + NAT5 (~14h)
 `nat viz features` (per-feature value/z-score/NaN%/IC/sparkline, `--alive-only`, `--live`) — directly
 verifies T1. `nat viz algorithm <name>` (signal timeline, entry/exit markers, features at trigger, P&L).
@@ -92,9 +116,16 @@ renders 4h trace; both support `--json` and `--output <png>`.
 
 ### T11. Q2.1 hierarchical revalidation + Q2.2 alpha screen with FDR
 Rerun hierarchical_combiner on the 7-day clean dataset (its 2-day monotone-IC folds are unverified).
-Run the alpha screen with BH-FDR (G1) across the 154 live features + new T8 features.
+Run the alpha screen with BH-FDR (G1) across the 154 live features + new T8 features, plus
+`nat process run ic_horizon|mi_ksg` on the same window (cross-method evidence, provenance-logged).
 **Test:** G1 gate report generated; combiner transitions DISCOVERED → VALIDATED in lifecycle *only* if
 G4 criteria pass on ≥7 clean days; otherwise REJECTED with reason recorded.
+
+### T11b. Process transforms on clean data (T9.5 Stage-2 payoff)
+`nat process run pca_combo --score-with ic_horizon` and triple_barrier→`target_col` reruns on the
+7-day dataset — PCA composites and barrier labels are noise on <100 bars (verified Jun 12: holdout
+under min-obs) and only become decision-grade here. Components clearing holdout IC feed T11.
+**Test:** pca_combo holdout ≥30 obs, orthogonality <0.15, chained run linked via `derived.scored_by`.
 
 ### T12. Dockerize existing agents (~2 days)
 `docker/Dockerfile.agent` (shared Python image) + compose services: agent-micro, agent-mf, agent-macro,
@@ -186,8 +217,8 @@ per Q4 tier gates. Requires T16 healthy + G8 passed. **Test:** fill-conditional 
 
 | When | Quant/infra | Milestone |
 |------|-------------|-----------|
-| Jun 12–17 | T1–T10 (Stage A) | Streak completes Jun 17 — touch nothing on su-35 |
-| Jun 17–24 | T11–T13 | Combiner verdict; ~Jun 20: 30 good dates → OOS30 feasible |
+| Jun 12–17 | T0 (cloud ingestor, parallel) + T1–T10 (Stage A) | Streak completes Jun 17 — touch nothing on su-35 |
+| Jun 17–24 | T11–T13 + T0 cutover decision | Combiner verdict; ~Jun 20: 30 good dates → OOS30 feasible |
 | Jun 24–Jul 8 | T14–T17 | Promotion + risk layer live |
 | Jul 8–Aug | T18–T19, P1 | First G8 windows; D1 decision (Aug) |
 | Sep–Oct | T20–T21, P2–P3 | First LIVE at 1% (Q4.1); D3 paper-vs-backtest |

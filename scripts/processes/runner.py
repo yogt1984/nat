@@ -191,6 +191,11 @@ def run_process(
         "fingerprint": _data_fingerprint(data_dir, start_date, end_date),
     }
 
+    # An errored or empty transform produces nothing worth saving or scoring
+    if derived_df is not None and (result.summary.get("error") or derived_df.empty
+                                   or not len(derived_df.columns)):
+        derived_df = None
+
     if derived_df is not None and save:
         parquet_path = persistence.save_derived(result, derived_df, out_dir=out_dir)
         result.derived = {
