@@ -2209,6 +2209,39 @@ def cmd_gauntlet_report_all(args):
     return r.returncode
 
 
+# ── Nightly Report ───────────────────────────────────────────────────────────
+
+def cmd_nightly_run(args):
+    """Run the full overnight report pass (one-shot)."""
+    _banner("Nightly Report")
+    sys.stdout.flush()
+    cmd = f"scripts/nightly_report.py run --last {getattr(args, 'last', 7)}"
+    cmd += f" --data-dir {getattr(args, 'data_dir', 'data/features')}"
+    symbols = getattr(args, 'symbols', None)
+    if symbols:
+        cmd += f" --symbols {' '.join(symbols)}"
+    if getattr(args, 'quick', False):
+        cmd += " --quick"
+    if getattr(args, 'skip_gauntlet', False):
+        cmd += " --skip-gauntlet"
+    if getattr(args, 'sections', None):
+        cmd += f" --sections {args.sections}"
+    r = _py(cmd)
+    return r.returncode
+
+
+def cmd_nightly_report(args):
+    """Print the latest nightly report summary."""
+    r = _py("scripts/nightly_report.py report")
+    return r.returncode
+
+
+def cmd_nightly_open(args):
+    """Open the latest nightly HTML report."""
+    r = _py("scripts/nightly_report.py open")
+    return r.returncode
+
+
 # ── Tournament ──────────────────────────────────────────────────────────────
 
 def cmd_tournament(args):
@@ -3249,6 +3282,13 @@ def cmd_help(args=None):
     nat gauntlet stop          Kill running gauntlet, print partial results
     nat gauntlet report        Print latest gauntlet report
     nat gauntlet report_all    Merge all gauntlet runs into combined summary
+
+  {BOLD}Nightly Report{W}
+    One-shot overnight pass: data health, feature stats, NaN-wiring
+    diagnostics, gauntlet OOS sweep, embedded plots -> self-contained HTML.
+    nat nightly                Full pass (~2h) -> reports/nightly/DATE.html
+    nat nightly report         Print latest nightly summary
+    nat nightly open           Open latest nightly HTML in browser
 
   {BOLD}Tournament{W}
     Continuous algorithm testing with performance tracking and lifecycle management.
@@ -4442,6 +4482,46 @@ def build_parser():
     # gauntlet report_all
     g_all = gsub.add_parser('report_all', help='Merge all gauntlet runs into combined summary')
     g_all.set_defaults(func=cmd_gauntlet_report_all)
+
+    # ── nightly (overnight stats + performance report) ──
+    nightly_p = sub.add_parser('nightly', help='Overnight feature stats + algo performance report',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        One-shot overnight pass producing a self-contained HTML report:
+        data health, feature NaN coverage + distributions + drift, NaN-wiring
+        diagnostics (position tracker viability), full gauntlet OOS sweep,
+        and embedded plots. Saves incrementally — a crash still leaves a
+        valid partial report.
+
+        Output: reports/nightly/YYYY-MM-DD.html (+ .json sidecar)
+
+        Example:
+          nat nightly &                          # start before bed (~2h)
+          tmux new -d -s nightly 'nat nightly'   # or detached in tmux
+          nat nightly --last 2 --quick --skip-gauntlet   # fast smoke run
+          nat nightly report                     # morning summary in terminal
+          nat nightly open                       # open HTML in browser
+        """))
+    nightly_p.add_argument('--last', type=int, default=7,
+                           help='Lookback: last N available dates (default 7)')
+    nightly_p.add_argument('--data-dir', default='data/features',
+                           help='Feature data directory')
+    nightly_p.add_argument('--symbols', nargs='+', default=['BTC', 'ETH', 'SOL'],
+                           help='Symbols to analyze')
+    nightly_p.add_argument('--quick', action='store_true',
+                           help='Coarser subsampling, never launch the screener')
+    nightly_p.add_argument('--skip-gauntlet', action='store_true',
+                           help='Use cached gauntlet results instead of running the sweep')
+    nightly_p.add_argument('--sections', type=str, default=None,
+                           help='Comma list: health,wiring,features,gauntlet,viz')
+    nightly_p.set_defaults(func=cmd_nightly_run)
+    nsub = nightly_p.add_subparsers(dest='nightly_cmd')
+
+    n_report = nsub.add_parser('report', help='Print latest nightly summary')
+    n_report.set_defaults(func=cmd_nightly_report)
+
+    n_open = nsub.add_parser('open', help='Open latest nightly HTML report')
+    n_open.set_defaults(func=cmd_nightly_open)
 
     # ── tournament (continuous algorithm testing) ──
     tour_p = sub.add_parser('tournament', help='Continuous algorithm testing engine',
