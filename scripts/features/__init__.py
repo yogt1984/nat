@@ -13,6 +13,11 @@ from features.microprice import (  # noqa: F401
     compute_microprice,
     fit_per_symbol,
 )
+from features.multilevel_ofi import (  # noqa: F401
+    MULTILEVEL_OFI_FEATURES,
+    OFIEstimator,
+    compute_multilevel_ofi,
+)
 from features.settlement_clock import (  # noqa: F401
     SETTLEMENT_CLOCK_FEATURES,
     compute_settlement_clock,
