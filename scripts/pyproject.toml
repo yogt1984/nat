@@ -24,6 +24,7 @@ include = [
     "it_engine*",
     "kalman*",
     "polymarket*",
+    "processes*",
     "strategies*",
     "utils*",
     "viz*",

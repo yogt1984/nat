@@ -1,0 +1,41 @@
+# Analytical process parameters (third first-class citizen — see
+# docs/tasks_assigned_12_6_26/process_concept.md).
+#
+# Convention (same as algorithms.toml): section name == registry name ==
+# constructor kwargs. CLI --param k=v overrides win over this file.
+
+[defaults]                      # runner-level, not per-process
+timeframe = "15min"
+price_col = "raw_midprice"
+max_memory_mb = 4000
+
+[ic_horizon]
+fdr_alpha = 0.05
+min_ic = 0.015
+min_breakeven_bps = 2.0
+min_obs = 50
+recent_k = 10
+
+[mi_ksg]
+ksg_k = 5
+max_samples = 20000             # KSG kd-tree cost guard — the real perf risk
+min_obs = 200
+conditioning = []               # e.g. ["ent_book_shape_mean"] -> CMI mode
+kurtosis_correction = true
+
+[transfer_entropy]
+te_method = "linear"            # "ksg" is orders of magnitude slower
+lag = 1
+order = 1
+min_obs = 200
+
+[spectral]
+min_band_ic = 0.05
+min_obs = 5000                  # tick-level; Welch needs ~2 full segments
+
+[ml_importance]
+n_splits = 5
+top_k = 20
+confidence_threshold = 0.60
+min_obs = 300
+lgbm = { n_estimators = 200, max_depth = 6, learning_rate = 0.05, min_child_samples = 50 }
