@@ -10,7 +10,7 @@ pub mod regime;
 pub mod ring_buffer;
 pub mod state;
 
-pub use config::FeaturesConfig;
+pub use config::{FeaturesConfig, WhaleFlowTradeConfig};
 pub use messages::*;
 pub use regime::{GmmClassificationFeatures, Regime, RegimeFeatures};
 pub use ring_buffer::RingBuffer;

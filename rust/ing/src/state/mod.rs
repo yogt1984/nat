@@ -10,15 +10,19 @@ pub use order_book::OrderBook;
 pub use ring_buffer::RingBuffer;
 pub use trade_buffer::{Trade, TradeBuffer};
 
+use std::path::Path;
+use std::sync::Arc;
+
 use crate::algorithms::{self, MicrostructureAlgorithm};
 use crate::config::FeaturesConfig;
 use crate::features::{
-    CrossSymbolState, FeatureComputer, Features, GmmClassificationFeatures, RegimeBuffer,
-    RegimeConfig,
+    ConcentrationBuffer, ConcentrationConfig, CrossSymbolState, FeatureComputer, Features,
+    GmmClassificationFeatures, LiquidationRiskConfig, RegimeBuffer, RegimeConfig, WhaleFlowBuffer,
+    WhaleFlowConfig, WhalePositionChange,
 };
 use crate::ml::regime::RegimeClassifier;
+use crate::positions::SharedPositionState;
 use crate::ws::WsMessage;
-use std::path::Path;
 
 /// Aggregated market state for a single symbol
 pub struct MarketState {
@@ -47,6 +51,18 @@ pub struct MarketState {
     minute_last_price: Option<f64>,
     /// Pluggable microstructure algorithms (compute alg_features each tick)
     algorithms: Vec<Box<dyn MicrostructureAlgorithm>>,
+    /// Whale flow buffer for trade-size-based whale detection
+    whale_flow_buffer: Option<WhaleFlowBuffer>,
+    /// Minimum trade notional (USD) to classify as whale activity
+    whale_threshold_usd: f64,
+    /// Shared position state from PositionTracker (optional)
+    position_state: Option<Arc<SharedPositionState>>,
+    /// Concentration feature buffer
+    concentration_buffer: ConcentrationBuffer,
+    /// Liquidation risk config
+    liquidation_config: LiquidationRiskConfig,
+    /// Whale threshold for concentration classification (USD)
+    concentration_whale_threshold: f64,
 }
 
 impl MarketState {
@@ -80,6 +96,15 @@ impl MarketState {
             }
         });
 
+        // Initialize whale flow buffer if configured
+        let (whale_flow_buffer, whale_threshold_usd) = match &config.whale_flow {
+            Some(wf_config) => (
+                Some(WhaleFlowBuffer::new(WhaleFlowConfig::default())),
+                wf_config.whale_threshold_usd,
+            ),
+            None => (None, 0.0),
+        };
+
         Self {
             symbol: symbol.to_string(),
             order_book: OrderBook::new(config.book_levels),
@@ -97,6 +122,12 @@ impl MarketState {
             minute_sell_volume: 0.0,
             minute_last_price: None,
             algorithms,
+            whale_flow_buffer,
+            whale_threshold_usd,
+            position_state: None,
+            concentration_buffer: ConcentrationBuffer::new(ConcentrationConfig::default()),
+            liquidation_config: LiquidationRiskConfig::default(),
+            concentration_whale_threshold: 500_000.0,
         }
     }
 
@@ -144,6 +175,23 @@ impl MarketState {
                         self.current_minute = trade_minute;
                     }
 
+                    // Classify large trades as whale activity
+                    if let Some(ref mut wfb) = self.whale_flow_buffer {
+                        let price = trade.px.parse::<f64>().unwrap_or(0.0);
+                        let size = trade.sz.parse::<f64>().unwrap_or(0.0);
+                        let notional = price * size;
+                        if notional >= self.whale_threshold_usd {
+                            let is_buy = trade.side == "B";
+                            wfb.add_change(WhalePositionChange {
+                                timestamp_ms: trade.time as i64,
+                                wallet: format!("trade_{}", trade.tid),
+                                symbol: self.symbol.clone(),
+                                position_change_usd: if is_buy { notional } else { -notional },
+                                is_market_maker: false,
+                            });
+                        }
+                    }
+
                     self.trade_buffer.add(trade.clone());
                 }
             }
@@ -188,6 +236,54 @@ impl MarketState {
             &self.context,
             &self.price_buffer,
         );
+
+        // Add whale flow features if buffer has data
+        if let Some(ref mut wfb) = self.whale_flow_buffer {
+            if !wfb.is_empty() {
+                features.whale_flow = Some(wfb.compute());
+            }
+        }
+
+        // Feed position tracker data into feature buffers (if tracker is active)
+        if let Some(ref pos_state) = self.position_state {
+            // Upgrade whale flow with real position deltas
+            let deltas = pos_state.drain_deltas(&self.symbol);
+            if let Some(ref mut wfb) = self.whale_flow_buffer {
+                for d in &deltas {
+                    wfb.add_change(WhalePositionChange {
+                        timestamp_ms: d.timestamp_ms,
+                        wallet: d.wallet.clone(),
+                        symbol: d.symbol.clone(),
+                        position_change_usd: d.size_delta * d.curr_entry_price,
+                        is_market_maker: false,
+                    });
+                }
+            }
+
+            // Liquidation risk features (13)
+            let liq_positions = pos_state.get_liquidation_positions(&self.symbol);
+            if !liq_positions.is_empty() {
+                let price = self.order_book.midprice().unwrap_or(0.0);
+                let oi = self.context.open_interest();
+                features.liquidation_risk = Some(ing_features::liquidation::compute(
+                    &liq_positions,
+                    price,
+                    oi,
+                    &self.liquidation_config,
+                ));
+            }
+
+            // Concentration features (15)
+            let conc_positions = pos_state.get_concentration_positions(
+                &self.symbol,
+                self.concentration_whale_threshold,
+            );
+            if !conc_positions.is_empty() {
+                let oi = self.context.open_interest();
+                features.concentration =
+                    Some(self.concentration_buffer.compute(&conc_positions, oi));
+            }
+        }
 
         // Add cross-symbol features if shared state is available
         if let Some(ref css) = self.cross_symbol_state {
@@ -254,6 +350,16 @@ impl MarketState {
         self.regime_classifier.is_some()
     }
 
+    /// Set shared position state from PositionTracker
+    pub fn set_position_state(&mut self, state: Arc<SharedPositionState>) {
+        self.position_state = Some(state);
+    }
+
+    /// Set whale threshold for concentration classification (USD)
+    pub fn set_concentration_whale_threshold(&mut self, threshold: f64) {
+        self.concentration_whale_threshold = threshold;
+    }
+
     /// Set shared cross-symbol state for cross-symbol feature computation
     pub fn set_cross_symbol_state(&mut self, state: CrossSymbolState) {
         self.cross_symbol_state = Some(state);
@@ -276,6 +382,7 @@ mod tests {
             book_levels: 10,
             price_buffer_size: 1000,
             gmm_model_path: None,
+            whale_flow: None,
         }
     }
 
@@ -606,5 +713,70 @@ mod tests {
             let state = MarketState::new(sym, &config);
             assert_eq!(state.symbol(), *sym);
         }
+    }
+
+    fn whale_config() -> FeaturesConfig {
+        FeaturesConfig {
+            whale_flow: Some(ing_types::WhaleFlowTradeConfig {
+                whale_threshold_usd: 50_000.0, // low threshold for testing
+            }),
+            ..default_config()
+        }
+    }
+
+    #[test]
+    fn test_whale_flow_large_trade_produces_features() {
+        let config = whale_config();
+        let mut state = MarketState::new("BTC", &config);
+
+        // Initialize with book
+        state.update(&make_book(50000.0, 50001.0, 10, 1_700_000_000_000));
+
+        // Send a large trade: 50000 * 2.0 = $100K > $50K threshold
+        state.update(&make_trade(50000.0, 2.0, true, 1_700_000_000_100, 1));
+
+        let (features, _) = state.compute_features().unwrap();
+        assert!(
+            features.whale_flow.is_some(),
+            "Whale flow should be Some after a large trade"
+        );
+        let wf = features.whale_flow.unwrap();
+        assert!(wf.whale_net_flow_1h > 0.0, "Net flow should be positive for buy");
+        assert!(wf.active_whale_count >= 1.0, "Should count at least 1 whale");
+    }
+
+    #[test]
+    fn test_whale_flow_small_trade_stays_none() {
+        let config = whale_config();
+        let mut state = MarketState::new("BTC", &config);
+
+        // Initialize with book
+        state.update(&make_book(50000.0, 50001.0, 10, 1_700_000_000_000));
+
+        // Send a small trade: 50000 * 0.5 = $25K < $50K threshold
+        state.update(&make_trade(50000.0, 0.5, true, 1_700_000_000_100, 1));
+
+        let (features, _) = state.compute_features().unwrap();
+        assert!(
+            features.whale_flow.is_none(),
+            "Whale flow should be None when only small trades"
+        );
+    }
+
+    #[test]
+    fn test_whale_flow_disabled_when_no_config() {
+        // default_config() has whale_flow: None
+        let config = default_config();
+        let mut state = MarketState::new("BTC", &config);
+
+        state.update(&make_book(50000.0, 50001.0, 10, 1_700_000_000_000));
+        // Large trade, but whale flow not configured
+        state.update(&make_trade(50000.0, 10.0, true, 1_700_000_000_100, 1));
+
+        let (features, _) = state.compute_features().unwrap();
+        assert!(
+            features.whale_flow.is_none(),
+            "Whale flow should be None when not configured"
+        );
     }
 }

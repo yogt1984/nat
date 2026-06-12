@@ -216,6 +216,30 @@ class StateStore:
              """),
             ("create_arxiv_index",
              "CREATE INDEX IF NOT EXISTS idx_arxiv_processed ON arxiv_papers(processed)"),
+            ("create_process_results", """
+                CREATE TABLE IF NOT EXISTS process_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL UNIQUE,
+                    process TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    symbol TEXT,
+                    timeframe TEXT,
+                    start_date TEXT,
+                    end_date TEXT,
+                    n_tested INTEGER NOT NULL DEFAULT 0,
+                    n_informative INTEGER NOT NULL DEFAULT 0,
+                    top_feature TEXT,
+                    top_metric TEXT,
+                    top_value REAL,
+                    json_path TEXT NOT NULL,
+                    git_sha TEXT,
+                    data_fingerprint TEXT,
+                    created_at TEXT NOT NULL
+                )
+             """),
+            ("create_process_results_index",
+             "CREATE INDEX IF NOT EXISTS idx_process_results "
+             "ON process_results(process, symbol, created_at DESC)"),
         ]
         for name, sql in migrations:
             already = self._conn.execute(
@@ -563,6 +587,51 @@ class StateStore:
                 (record_id, kind, agent, generator, status, payload,
                  created_at, schema_version),
             )
+
+    def insert_process_result(self, row: dict) -> None:
+        """Insert (or replace) one row into the process_results index.
+
+        `row` keys mirror the table columns; full records live as JSON at
+        `json_path` (data/research/processes/). See scripts/processes/.
+        """
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO process_results "
+                "(run_id, process, kind, symbol, timeframe, start_date, end_date, "
+                " n_tested, n_informative, top_feature, top_metric, top_value, "
+                " json_path, git_sha, data_fingerprint, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    row["run_id"], row["process"], row["kind"],
+                    row.get("symbol"), row.get("timeframe"),
+                    row.get("start_date"), row.get("end_date"),
+                    row.get("n_tested", 0), row.get("n_informative", 0),
+                    row.get("top_feature"), row.get("top_metric"), row.get("top_value"),
+                    row["json_path"], row.get("git_sha"), row.get("data_fingerprint"),
+                    row.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
+    def list_process_results(
+        self,
+        process: str | None = None,
+        symbol: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Query the process_results index, newest first."""
+        where_parts, params = [], []
+        if process:
+            where_parts.append("process = ?")
+            params.append(process)
+        if symbol:
+            where_parts.append("symbol = ?")
+            params.append(symbol)
+        where = (" WHERE " + " AND ".join(where_parts)) if where_parts else ""
+        rows = self._conn.execute(
+            f"SELECT * FROM process_results{where} ORDER BY created_at DESC LIMIT ?",
+            params + [limit],
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def query_research_output(
         self,

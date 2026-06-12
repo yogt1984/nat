@@ -345,8 +345,12 @@ def load_parquet(
     combined = pa.concat_tables(tables, promote_options="default")
     df = combined.to_pandas()
 
-    # Schema compat: warn on version mismatch, pad missing columns
-    df = normalize_schema(df, files)
+    # Schema compat: warn on version mismatch, pad missing columns.
+    # Skipped when the caller requested an explicit column subset — padding
+    # would expand every load to the full ~239-column schema, which OOMs
+    # bulk multi-symbol loads (e.g. `nat algorithm evaluate`).
+    if columns is None:
+        df = normalize_schema(df, files)
 
     # Apply max_rows after concatenation if needed
     if max_rows is not None and len(df) > max_rows:

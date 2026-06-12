@@ -192,6 +192,19 @@ def cmd_run(args):
         print("No testable dates in range.")
         return 1
 
+    # Algo filtering (--algos = explicit include list, --exclude-algos = skip list)
+    active_algos = list(DAILY_ALGOS)
+    run_3f = True
+    if args.algos:
+        active_algos = [a for a in active_algos if a in args.algos]
+        run_3f = "3f_liquidity" in args.algos
+    if args.exclude_algos:
+        active_algos = [a for a in active_algos if a not in args.exclude_algos]
+        run_3f = run_3f and "3f_liquidity" not in args.exclude_algos
+    n_active = len(active_algos) + (1 if run_3f else 0)
+    excluded = sorted(set(DAILY_ALGOS + ["3f_liquidity"])
+                      - set(active_algos) - ({"3f_liquidity"} if run_3f else set()))
+
     cost_model = DEFAULT_COST
 
     # Write PID file
@@ -201,7 +214,8 @@ def cmd_run(args):
     print(f"Gauntlet Sweep")
     print(f"  PID: {os.getpid()}")
     print(f"  Dates to test: {len(testable)} ({testable[0]} -> {testable[-1]})")
-    print(f"  Algorithms: {len(DAILY_ALGOS) + 1} (18 generic + 3f_liquidity)")
+    print(f"  Algorithms: {n_active}"
+          + (f" (excluded: {', '.join(excluded)})" if excluded else ""))
     print(f"  Symbols: {symbols}")
     print(f"  Cost: {cost_model.round_trip_cost_bps:.2f} bps RT ({args.cost_mode})")
     print(f"  Started: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
@@ -252,18 +266,26 @@ def cmd_run(args):
 
         t0 = time.time()
         algo_results = {}
+        algo_elapsed = {}
 
-        r = run_3f_liquidity(data_dir, train_dates, test_date, symbols, cost_model=cost_model)
-        if r:
-            algo_results["3f_liquidity"] = r
+        if run_3f:
+            t_a = time.time()
+            r = run_3f_liquidity(data_dir, train_dates, test_date, symbols, cost_model=cost_model)
+            algo_elapsed["3f_liquidity"] = round(time.time() - t_a, 1)
+            if r:
+                algo_results["3f_liquidity"] = r
 
-        for algo_name in DAILY_ALGOS:
+        for algo_name in active_algos:
+            t_a = time.time()
             r = run_algo_single_date(algo_name, data_dir, train_dates, test_date, symbols, cost_model=cost_model)
+            algo_elapsed[algo_name] = round(time.time() - t_a, 1)
             if r:
                 algo_results[algo_name] = r
 
         elapsed = time.time() - t0
-        print(f"  [{test_date}] Done in {elapsed:.0f}s — {len(algo_results)} algos produced results")
+        slowest = sorted(algo_elapsed.items(), key=lambda kv: -kv[1])[:3]
+        print(f"  [{test_date}] Done in {elapsed:.0f}s — {len(algo_results)} algos produced results"
+              f" (slowest: {', '.join(f'{a} {s:.0f}s' for a, s in slowest)})")
         sys.stdout.flush()
 
         daily_reports.append({
@@ -272,6 +294,7 @@ def cmd_run(args):
             "bars": n_bars,
             "train_dates": train_dates,
             "elapsed_s": round(elapsed, 1),
+            "algo_elapsed_s": algo_elapsed,
             "algorithms": algo_results,
         })
 
@@ -458,6 +481,10 @@ def main():
     run_p.add_argument("--from", dest="date_from", type=str, default=None)
     run_p.add_argument("--to", dest="date_to", type=str, default=None)
     run_p.add_argument("--symbols", nargs="+", default=SYMBOLS_DEFAULT)
+    run_p.add_argument("--algos", nargs="+", default=None,
+                       help="Only run these algorithms (names from DAILY_ALGOS / 3f_liquidity)")
+    run_p.add_argument("--exclude-algos", nargs="+", default=None,
+                       help="Run all algorithms except these")
     run_p.add_argument("--cost-mode", choices=["binance_vip9", "taker", "maker"],
                        default="binance_vip9")
     run_p.set_defaults(func=cmd_run)

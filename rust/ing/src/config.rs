@@ -22,6 +22,47 @@ pub struct Config {
     pub algorithms: AlgorithmsConfig,
     #[serde(default)]
     pub trade_output: TradeOutputConfig,
+    #[serde(default)]
+    pub position_tracker: Option<PositionTrackerTomlConfig>,
+}
+
+fn default_poll_interval_secs() -> u64 {
+    60
+}
+fn default_max_concurrent() -> usize {
+    10
+}
+fn default_max_tracked_wallets() -> usize {
+    50
+}
+fn default_whale_threshold_usd_tracker() -> f64 {
+    500_000.0
+}
+
+/// Configuration for the position tracker (polls wallet positions via REST API)
+#[derive(Debug, Clone, Deserialize)]
+pub struct PositionTrackerTomlConfig {
+    /// Enable position tracking (default: false)
+    #[serde(default)]
+    pub enabled: bool,
+    /// Polling interval in seconds
+    #[serde(default = "default_poll_interval_secs")]
+    pub poll_interval_secs: u64,
+    /// Maximum concurrent API requests per poll cycle
+    #[serde(default = "default_max_concurrent")]
+    pub max_concurrent_requests: usize,
+    /// Seed wallet addresses to track from startup
+    #[serde(default)]
+    pub initial_wallets: Vec<String>,
+    /// Discover whale wallets from trade stream (requires WsTrade.users)
+    #[serde(default)]
+    pub discover_from_trades: bool,
+    /// Maximum number of wallets to track
+    #[serde(default = "default_max_tracked_wallets")]
+    pub max_tracked_wallets: usize,
+    /// Position value (USD) above which a wallet is classified as whale
+    #[serde(default = "default_whale_threshold_usd_tracker")]
+    pub whale_threshold_usd: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -291,6 +332,7 @@ impl Default for Config {
                 book_levels: 10,
                 price_buffer_size: 1000,
                 gmm_model_path: None,
+                whale_flow: None,
             },
             output: OutputConfig {
                 format: default_format(),
@@ -304,6 +346,7 @@ impl Default for Config {
             redis: RedisTomlConfig::default(),
             algorithms: AlgorithmsConfig::default(),
             trade_output: TradeOutputConfig::default(),
+            position_tracker: None,
         }
     }
 }

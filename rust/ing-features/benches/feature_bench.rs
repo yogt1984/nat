@@ -85,6 +85,7 @@ fn bench_feature_computation(c: &mut Criterion) {
         book_levels: 10,
         price_buffer_size: 3000,
         gmm_model_path: None,
+        whale_flow: None,
     };
     let ts = 1717574400000_u64;
 

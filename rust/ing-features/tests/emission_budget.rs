@@ -84,6 +84,7 @@ fn emission_budget_p99_under_80ms() {
         book_levels: 10,
         price_buffer_size: 3000,
         gmm_model_path: None,
+        whale_flow: None,
     };
     let ts = 1717574400000_u64;
 
