@@ -1,5 +1,8 @@
 """Python-side derived features.
 
+(The relative-value pairs strategy lives in scripts/strategies/
+relative_value_pairs.py — it is pair-level, not a per-symbol feature.)
+
 Features here are computed from existing parquet columns — no ingestor or
 schema changes. Per the design rule in
 docs/tasks_assigned_12_6_26/feature_algorithm_gaps.md, new features are born
