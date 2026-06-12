@@ -78,6 +78,12 @@ SCREEN_MAX_AGE_H = 24.0
 
 NAN_WIRING_CATEGORIES = ["whale", "liquidation", "concentration"]
 
+# Algorithms excluded from the nightly gauntlet by default (override with
+# --full-gauntlet). Measured 2026-06-12 on a 10h date: cascade_probability
+# took 4065s of the 4297s total; every other algo (incl. the ML ones)
+# finished in <45s. Tune using the per-algo "s/date" column in the report.
+SLOW_ALGOS = ["cascade_probability"]
+
 # Expected ranges from docs/tasks_assigned_12_6_26/01_concentration_viability_assessment.md
 RANGE_SPECS = {
     "top5_concentration": (0.05, 0.50),
@@ -570,6 +576,8 @@ def _parse_gauntlet(symbols: list[str]) -> dict | None:
         per_symbol = {}
         all_daily = np.zeros(len(daily))
         trades = 0
+        elapsed = [r.get("algo_elapsed_s", {}).get(algo) for r in daily]
+        elapsed = [e for e in elapsed if e is not None]
         for s in symbols:
             arr = np.array([r["algorithms"].get(algo, {}).get(s, {})
                             .get("total_net_bps", 0.0) for r in daily])
@@ -586,6 +594,7 @@ def _parse_gauntlet(symbols: list[str]) -> dict | None:
             "sharpe": round(_sharpe(all_daily), 2),
             "win_pct": round(float(np.mean(all_daily > 0) * 100), 0),
             "trades": int(trades),
+            "mean_s_per_date": round(float(np.mean(elapsed)), 1) if elapsed else None,
             "per_symbol": per_symbol,
         })
     summary.sort(key=lambda r: -r["sharpe"])
@@ -612,6 +621,10 @@ def section_gauntlet(state: dict, args) -> dict:
            "run", "--data-dir", args.data_dir, "--symbols", *args.symbols]
     if args.last:
         cmd += ["--last", str(args.last)]
+    excluded = []
+    if not getattr(args, "full_gauntlet", False):
+        excluded = SLOW_ALGOS
+        cmd += ["--exclude-algos", *excluded]
     _log(f"  [gauntlet] launching: {' '.join(cmd[1:])}")
     r = subprocess.run(cmd, cwd=str(ROOT))
     parsed = _parse_gauntlet(args.symbols)
@@ -619,6 +632,7 @@ def section_gauntlet(state: dict, args) -> dict:
         return {"source": f"run exited {r.returncode}, no parsable results"}
     parsed["source"] = "fresh run" if r.returncode == 0 else \
         f"run exited {r.returncode} — partial results"
+    parsed["excluded_algos"] = excluded
     parsed["partial"] = r.returncode != 0 or parsed.get("gauntlet_status") != "complete"
     return parsed
 
@@ -963,19 +977,26 @@ def _render_gauntlet(state: dict) -> str:
             f'dates: {_esc(sec.get("dates_tested", "?"))}/{_esc(sec.get("dates_total", "?"))} '
             f'· cost: {_esc(sec.get("cost_bps_rt", "?"))} bps RT · '
             f'gauntlet elapsed: {_esc(sec.get("elapsed_min", "?"))} min</div>')
+    if sec.get("excluded_algos"):
+        html += (f'<div class="meta">excluded (slow, see SLOW_ALGOS; rerun with '
+                 f'--full-gauntlet to include): '
+                 f'{_esc(", ".join(sec["excluded_algos"]))}</div>')
     if sec.get("partial"):
         html += '<div class="banner warn">Partial gauntlet results.</div>'
     if not sec.get("summary"):
         return html + '<div class="panel warn">No gauntlet results available.</div>'
     syms = sorted(sec["summary"][0]["per_symbol"].keys())
-    headers = ["Algorithm", "Σ bps", "Sharpe", "Win%", "Trades"] + \
+    headers = ["Algorithm", "Σ bps", "Sharpe", "Win%", "Trades", "s/date"] + \
         [f"{s} bps / SR" for s in syms]
     rows = []
     for r in sec["summary"]:
         cls = "good" if r["sharpe"] > 1 else ("bad" if r["sharpe"] < 0 else "")
+        spd = r.get("mean_s_per_date")
         row = [r["algo"], (f"{r['total_bps']:+.1f}", cls),
                (f"{r['sharpe']:+.2f}", cls), f"{r['win_pct']:.0f}%",
-               f"{r['trades']:,}"]
+               f"{r['trades']:,}",
+               ("—" if spd is None else
+                (f"{spd:.0f}", "bad") if spd > 300 else f"{spd:.0f}")]
         for s in syms:
             ps = r["per_symbol"][s]
             row.append(f"{ps['total_bps']:+.0f} / {ps['sharpe']:+.1f}")
@@ -1088,8 +1109,9 @@ def cmd_run(args) -> int:
         "generated": _now_iso(),
         "status": "running",
         "args": {"last": args.last, "quick": args.quick,
-                 "skip_gauntlet": args.skip_gauntlet, "symbols": args.symbols,
-                 "sections": wanted},
+                 "skip_gauntlet": args.skip_gauntlet,
+                 "full_gauntlet": getattr(args, "full_gauntlet", False),
+                 "symbols": args.symbols, "sections": wanted},
         "header": {**_header_snapshot(_resolve_data_dir(args)),
                    "window": _window_dates(args)},
         "elapsed_min": 0.0,
@@ -1201,6 +1223,8 @@ def main():
                        help="Coarser subsampling, never launch the screener")
     run_p.add_argument("--skip-gauntlet", action="store_true",
                        help="Use cached gauntlet results instead of running the sweep")
+    run_p.add_argument("--full-gauntlet", action="store_true",
+                       help=f"Include the slow algos excluded by default: {', '.join(SLOW_ALGOS)}")
     run_p.add_argument("--sections", type=str, default=None,
                        help=f"Comma list of sections to run ({','.join(SECTION_ORDER)})")
     run_p.add_argument("--date", type=str, default=None,

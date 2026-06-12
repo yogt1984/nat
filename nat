@@ -2186,6 +2186,10 @@ def cmd_gauntlet_run(args):
         cmd += f" --from {date_from}"
     if date_to:
         cmd += f" --to {date_to}"
+    if getattr(args, 'algos', None):
+        cmd += f" --algos {' '.join(args.algos)}"
+    if getattr(args, 'exclude_algos', None):
+        cmd += f" --exclude-algos {' '.join(args.exclude_algos)}"
 
     r = _py(cmd)
     return r.returncode
@@ -2224,6 +2228,8 @@ def cmd_nightly_run(args):
         cmd += " --quick"
     if getattr(args, 'skip_gauntlet', False):
         cmd += " --skip-gauntlet"
+    if getattr(args, 'full_gauntlet', False):
+        cmd += " --full-gauntlet"
     if getattr(args, 'sections', None):
         cmd += f" --sections {args.sections}"
     r = _py(cmd)
@@ -3286,7 +3292,8 @@ def cmd_help(args=None):
   {BOLD}Nightly Report{W}
     One-shot overnight pass: data health, feature stats, NaN-wiring
     diagnostics, gauntlet OOS sweep, embedded plots -> self-contained HTML.
-    nat nightly                Full pass (~2h) -> reports/nightly/DATE.html
+    nat nightly                Full pass (~30-60 min) -> reports/nightly/DATE.html
+    nat nightly --full-gauntlet  Include cascade_probability (~70 min/date extra)
     nat nightly report         Print latest nightly summary
     nat nightly open           Open latest nightly HTML in browser
 
@@ -4466,6 +4473,10 @@ def build_parser():
                        help='Feature data directory')
     g_run.add_argument('--symbols', nargs='+', default=['BTC', 'ETH', 'SOL'],
                        help='Symbols to test')
+    g_run.add_argument('--algos', nargs='+', default=None,
+                       help='Only run these algorithms')
+    g_run.add_argument('--exclude-algos', nargs='+', default=None,
+                       help='Run all algorithms except these')
     g_run.add_argument('--cost-mode', choices=['binance_vip9', 'taker', 'maker'],
                        default='binance_vip9',
                        help='Cost model (default: binance_vip9 = 1.61 bps RT)')
@@ -4489,16 +4500,22 @@ def build_parser():
         epilog=textwrap.dedent("""\
         One-shot overnight pass producing a self-contained HTML report:
         data health, feature NaN coverage + distributions + drift, NaN-wiring
-        diagnostics (position tracker viability), full gauntlet OOS sweep,
-        and embedded plots. Saves incrementally — a crash still leaves a
-        valid partial report.
+        diagnostics (position tracker viability), gauntlet OOS sweep, and
+        embedded plots. Saves incrementally — a crash still leaves a valid
+        partial report.
+
+        By default the gauntlet skips cascade_probability, which alone takes
+        ~70 min/date (measured: 4065s of a 4297s date; every other algo runs
+        in <45s). Default full pass: ~30-60 min. --full-gauntlet includes
+        it (~1-1.5h per tested date).
 
         Output: reports/nightly/YYYY-MM-DD.html (+ .json sidecar)
 
         Example:
-          nat nightly &                          # start before bed (~2h)
+          nat nightly &                          # start before bed
           tmux new -d -s nightly 'nat nightly'   # or detached in tmux
           nat nightly --last 2 --quick --skip-gauntlet   # fast smoke run
+          nat nightly --full-gauntlet            # include cascade_probability
           nat nightly report                     # morning summary in terminal
           nat nightly open                       # open HTML in browser
         """))
@@ -4512,6 +4529,8 @@ def build_parser():
                            help='Coarser subsampling, never launch the screener')
     nightly_p.add_argument('--skip-gauntlet', action='store_true',
                            help='Use cached gauntlet results instead of running the sweep')
+    nightly_p.add_argument('--full-gauntlet', action='store_true',
+                           help='Include slow algos excluded by default (cascade_probability)')
     nightly_p.add_argument('--sections', type=str, default=None,
                            help='Comma list: health,wiring,features,gauntlet,viz')
     nightly_p.set_defaults(func=cmd_nightly_run)
