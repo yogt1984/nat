@@ -28,6 +28,8 @@
 
 NAT is a fully autonomous quantitative research platform that discovers tradeable alpha signals from [Hyperliquid](https://hyperliquid.xyz) perpetual futures microstructure. A Rust ingestor computes 236 order book features at 100ms tick resolution; four autonomous Python agents generate hypotheses, test them through a 5-gate replication protocol with FDR control, and register validated signals — without human intervention. A three-tier cloud deployment architecture automates parameter optimization via config swarm evaluation and Optuna-driven evolutionary search (CMA-ES/NSGA-II) with walk-forward guard rails.
 
+> **Project objective:** see [`docs/OBJECTIVE.md`](docs/OBJECTIVE.md) for the mission and the end-to-end loop (Ingest → Discover → Cluster → Visualize → Generate → Validate → Deploy).
+
 ---
 
 ## Table of Contents
