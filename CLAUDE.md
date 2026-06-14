@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 NAT is a quantitative research platform for extracting alpha signals from Hyperliquid perpetual futures. Rust handles real-time ingestion and feature computation; Python handles analysis, backtesting, and ML training.
 
+See `docs/OBJECTIVE.md` for the project objective and the end-to-end loop (Ingest → Discover → Cluster → Visualize → Generate → Validate → Deploy).
+
 ## CLI
 
 The `nat` command is the primary interface (251 commands). Run `nat help` for full docs, `nat commands` for a structured list, `nat commands --json` for machine-readable output.
