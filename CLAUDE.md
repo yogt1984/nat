@@ -8,6 +8,8 @@ NAT is a quantitative research platform for extracting alpha signals from Hyperl
 
 See `docs/OBJECTIVE.md` for the project objective and the end-to-end loop (Ingest → Discover → Cluster → Visualize → Generate → Validate → Deploy).
 
+See `docs/METHODOLOGY.md` for how that capability is built, integrated into `nat`, tested, and promoted.
+
 ## CLI
 
 The `nat` command is the primary interface (251 commands). Run `nat help` for full docs, `nat commands` for a structured list, `nat commands --json` for machine-readable output.
