@@ -12,3 +12,7 @@ future price action lives, and graduating the resulting algorithms from test to 
 5. **Generate** — synthesize candidate algorithms from the signals those processes surface.
 6. **Validate** — put each algorithm through a battery of tests (backtest → walk-forward → paper trading).
 7. **Deploy** — promote graduated algorithms to live trading.
+
+---
+
+*How we build toward this: see [`METHODOLOGY.md`](METHODOLOGY.md).*
