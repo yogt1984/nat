@@ -240,6 +240,32 @@ class StateStore:
             ("create_process_results_index",
              "CREATE INDEX IF NOT EXISTS idx_process_results "
              "ON process_results(process, symbol, created_at DESC)"),
+            ("create_signal_lifecycle", """
+                CREATE TABLE IF NOT EXISTS signal_lifecycle (
+                    signal_id   TEXT PRIMARY KEY,
+                    name        TEXT NOT NULL DEFAULT '',
+                    agent       TEXT,
+                    state       TEXT NOT NULL,
+                    metadata    TEXT NOT NULL DEFAULT '{}',
+                    git_sha     TEXT,
+                    created_at  TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL
+                )
+             """),
+            ("create_lifecycle_history", """
+                CREATE TABLE IF NOT EXISTS lifecycle_history (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    signal_id  TEXT NOT NULL,
+                    from_state TEXT NOT NULL DEFAULT '',
+                    to_state   TEXT NOT NULL,
+                    msg        TEXT NOT NULL DEFAULT '',
+                    git_sha    TEXT,
+                    at         TEXT NOT NULL
+                )
+             """),
+            ("create_lifecycle_history_index",
+             "CREATE INDEX IF NOT EXISTS idx_lifecycle_hist "
+             "ON lifecycle_history(signal_id, id)"),
         ]
         for name, sql in migrations:
             already = self._conn.execute(
