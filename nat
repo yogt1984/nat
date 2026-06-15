@@ -112,6 +112,7 @@ def cmd_start(args):
     pid = _pid()
     if pid:
         _p("*", G, f"Already running (PID {pid})")
+        _ensure_gap_alert()  # still ensure the data-gap monitor is up
         return
 
     if not BIN_ING.exists():
@@ -137,6 +138,7 @@ def cmd_start(args):
 
     cmd_dashboard(args)
     _install_watchdog()
+    _ensure_gap_alert()
 
     r = _sh("hostname -I")
     ip = r.stdout.strip().split()[0] if r.stdout.strip() else "localhost"
@@ -165,7 +167,16 @@ def cmd_stop(args):
     else:
         _p("-", W, "Ingestor was not running")
 
-    for s in ["ingestor", "nat-monitor", "nat-dashboard"]:
+    # Stop the gap-alert daemon first so an intentional shutdown does not
+    # trigger a false data-gap page.
+    _remove_gap_watchdog()
+    if _gap_running():
+        try:
+            os.kill(int(GAP_PIDFILE.read_text().strip()), sig.SIGTERM)
+        except (ValueError, ProcessLookupError, FileNotFoundError):
+            pass
+
+    for s in ["ingestor", "nat-monitor", "nat-dashboard", GAP_TMUX]:
         subprocess.run(f"tmux kill-session -t {s} 2>/dev/null", shell=True)
 
     _remove_watchdog()
@@ -2428,6 +2439,15 @@ def cmd_gap_stop(args):
         _p("–", Y, "No running gap-alert daemon found")
 
 
+def cmd_gap_watchdog(args):
+    """Install (or --remove) the gap-alert cron watchdog (auto-restart every 5 min)."""
+    if getattr(args, 'remove', False):
+        _remove_gap_watchdog()
+        _p("~", W, "Gap-alert watchdog removed")
+    else:
+        _ensure_gap_alert()  # start daemon if down + install the watchdog cron
+
+
 def cmd_viz_features(args):
     """nat viz features — per-feature overview (value / z-score / NaN% / IC / sparkline)."""
     import math as _math
@@ -3590,6 +3610,76 @@ def _remove_watchdog():
     proc = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
     proc.communicate(input=new_cron)
     _p("~", W, "Watchdog removed")
+
+
+# ── Gap-alert daemon (T0b) ─────────────────────────────────────────────────
+GAP_TMUX = "nat-gap-alert"
+GAP_PIDFILE = ROOT / "data" / "ops" / "gap_alert.pid"
+GAP_WATCHDOG_MARKER = "# nat-gap-watchdog"
+
+
+def _gap_running():
+    """True if the gap-alert pidfile points at a live process (no self-match)."""
+    try:
+        os.kill(int(GAP_PIDFILE.read_text().strip()), 0)
+        return True
+    except (FileNotFoundError, ValueError, ProcessLookupError, PermissionError):
+        return False
+
+
+def _start_gap_alert():
+    if _gap_running():
+        _p("~", G, "Gap-alert: already running")
+        return
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        f"tmux new-session -d -s {GAP_TMUX} "
+        f"'cd {ROOT} && {PY} {GAP_SCRIPT} start >> {LOG_DIR}/gap_alert.log 2>&1'",
+        shell=True,
+    )
+    time.sleep(1)
+    if _gap_running():
+        _p("~", G, "Gap-alert: started (pages on ingestion stalls)")
+    else:
+        _p("~", Y, "Gap-alert: failed to start (see logs/gap_alert.log)")
+
+
+def _install_gap_watchdog():
+    r = _sh("crontab -l 2>/dev/null")
+    existing = r.stdout or ""
+    if GAP_WATCHDOG_MARKER in existing:
+        return
+    # pidfile-based liveness (not pgrep) so the cron line never self-matches.
+    cron_line = (
+        f"*/5 * * * * cd {ROOT} && "
+        f"(kill -0 $(cat {GAP_PIDFILE} 2>/dev/null) 2>/dev/null || "
+        f"tmux new-session -d -s {GAP_TMUX} "
+        f"'{PY} {GAP_SCRIPT} start >> {LOG_DIR}/gap_alert.log 2>&1') {GAP_WATCHDOG_MARKER}"
+    )
+    new_cron = existing.rstrip() + "\n" + cron_line + "\n"
+    proc = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
+    proc.communicate(input=new_cron)
+    if proc.returncode == 0:
+        _p("~", G, "Gap-alert watchdog installed (checks every 5 min)")
+    else:
+        _p("~", Y, "Could not install gap-alert watchdog cron")
+
+
+def _remove_gap_watchdog():
+    r = _sh("crontab -l 2>/dev/null")
+    existing = r.stdout or ""
+    if GAP_WATCHDOG_MARKER not in existing:
+        return
+    lines = [l for l in existing.split("\n") if GAP_WATCHDOG_MARKER not in l]
+    new_cron = "\n".join(lines).strip() + "\n"
+    proc = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
+    proc.communicate(input=new_cron)
+
+
+def _ensure_gap_alert():
+    """Start the gap-alert daemon (if not running) and install its watchdog."""
+    _start_gap_alert()
+    _install_gap_watchdog()
 
 
 # ── Help ─────────────────────────────────────────────────────────────────────
@@ -5088,6 +5178,9 @@ def build_parser():
     gpsta.set_defaults(func=cmd_gap_start)
     gpsto = gapsub.add_parser('stop', help='Graceful shutdown (SIGTERM)')
     gpsto.set_defaults(func=cmd_gap_stop)
+    gpwd = gapsub.add_parser('watchdog', help='Install cron watchdog (auto-restart every 5 min)')
+    gpwd.add_argument('--remove', action='store_true', help='Remove the watchdog cron')
+    gpwd.set_defaults(func=cmd_gap_watchdog)
 
     # ── viz (terminal-first per-unit visualization, T7/NAT3) ──
     viz_p = sub.add_parser('viz', help='Terminal-first visualization (features/algorithm/paper)')
