@@ -42,14 +42,17 @@ whale_threshold_usd = 100000.0
 
 # Position tracker — polls wallet positions via Hyperliquid REST API
 # Feeds liquidation risk (13), concentration (15), and upgraded whale flow features
-# [position_tracker]
-# enabled = false
-# poll_interval_secs = 60
-# max_concurrent_requests = 10
-# discover_from_trades = true
-# max_tracked_wallets = 50
-# whale_threshold_usd = 500000.0
-# initial_wallets = []
+# T0/Q1.1: enabled for cloud-box (T0b) deployment to resolve the 82 dead features.
+# Deploy target is the Hetzner cloud box ONLY — su-35 stays on the prior binary
+# until the Jun-17 7-day clean streak completes (hard guardrail).
+[position_tracker]
+enabled = true
+poll_interval_secs = 60
+max_concurrent_requests = 10
+discover_from_trades = true
+max_tracked_wallets = 50
+whale_threshold_usd = 500000.0
+initial_wallets = []
 
 [output]
 # Output format (only parquet supported)
