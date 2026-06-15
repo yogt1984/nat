@@ -2291,6 +2291,38 @@ def cmd_lifecycle_seed(args):
     print(f"  Seeded {seeded} new signal(s) (idempotent).")
 
 
+def cmd_viz_features(args):
+    """nat viz features — per-feature overview (value / z-score / NaN% / IC / sparkline)."""
+    import math as _math
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from viz.common import load_features, feature_table
+    from viz.terminal import sparkline, ic_color, RESET
+    symbol = _sym(args)
+    df = load_features(symbol, hours=getattr(args, 'hours', None))
+    rows = feature_table(df, alive_only=getattr(args, 'alive_only', False))
+    top = getattr(args, 'top', 40)
+    if _json_mode(args):
+        _output({"symbol": symbol, "n_features": len(rows),
+                 "features": [{k: r[k] for k in ("feature", "last", "zscore", "nan_pct", "ic")}
+                              for r in rows[:top]]}, args)
+        return
+    if df.empty:
+        print(f"  {Y}No data for {symbol}{W} — latest day may be thin (see `nat data validate`).")
+        return
+    shown = min(top, len(rows))
+    print(f"\n  {BOLD}nat viz features{W} — {symbol}  ({len(rows)} features, top {shown} by |IC|)\n")
+    print(f"    {'feature':<32} {'last':>11} {'z':>6} {'NaN%':>5} {'IC':>7}  spark")
+    print(f"    {'-'*32} {'-'*11} {'-'*6} {'-'*5} {'-'*7}  {'-'*24}")
+    for r in rows[:top]:
+        ic, z = r['ic'], r['zscore']
+        ic_s = "   -   " if _math.isnan(ic) else f"{ic:+.3f}"
+        z_s = "   -" if _math.isnan(z) else f"{z:+.1f}"
+        col = ic_color(None if _math.isnan(ic) else ic)
+        print(f"    {r['feature']:<32} {r['last']:>11.4g} {z_s:>6} {r['nan_pct']:>4.0f}% "
+              f"{col}{ic_s:>7}{RESET}  {sparkline(r['spark'])}")
+    print()
+
+
 def cmd_test_process(args):
     """Run process framework tests."""
     _exec(f"{PY} -m pytest tests/test_process_base.py tests/test_process_ic.py "
@@ -3404,6 +3436,7 @@ GROUP_HELP = {
     "validate": ("validation suites", "nat validate -h"),
     "visualize": ("static analysis plots (PNG)", "nat visualize -h"),
     "eamm": ("EAMM market-making simulation", "nat eamm -h"),
+    "viz": ("terminal-first visualization — features / algorithm / paper", "nat viz features -s BTC"),
 }
 
 
@@ -4825,6 +4858,17 @@ def build_parser():
     lcr.set_defaults(func=cmd_lifecycle_reject)
     lcs = lcsub.add_parser('seed', help='Seed deployable winners (idempotent)')
     lcs.set_defaults(func=cmd_lifecycle_seed)
+
+    # ── viz (terminal-first per-unit visualization, T7/NAT3) ──
+    viz_p = sub.add_parser('viz', help='Terminal-first visualization (features/algorithm/paper)')
+    vizsub = viz_p.add_subparsers(dest='subcmd')
+    vzf = vizsub.add_parser('features', help='Per-feature overview (value/z/NaN%/IC/sparkline)')
+    vzf.add_argument('--symbol', '-s', default='BTC')
+    vzf.add_argument('--hours', type=float, default=None, help='Last N hours only')
+    vzf.add_argument('--alive-only', action='store_true', help='Skip all-NaN features')
+    vzf.add_argument('--top', type=int, default=40, help='Rows to show')
+    vzf.add_argument('--json', action='store_true', help='JSON output')
+    vzf.set_defaults(func=cmd_viz_features)
 
     # ── alg1 (MF 3-feature liquidity signal) ──
     a1_p = sub.add_parser('alg1', help='MF 3-feature liquidity signal (100min)',
