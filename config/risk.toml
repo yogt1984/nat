@@ -1,0 +1,37 @@
+# Kill-switch daemon (T16) configuration.
+#
+# NOTE: thresholds are NOT here. They are imported from ROADMAP Step 9 via
+# scripts/alpha/deployer.py::evaluate_kill_switches and must never be re-encoded
+# (daily >1% halt_24h · weekly DD >2% halt_review · monthly DD >5% kill_strategy
+#  · IC<0 for 5 consecutive days halt). This file only configures polling and
+# the data paths the daemon reads / publishes.
+
+[risk]
+poll_interval_s = 60
+
+# Halt-state IPC contract the signal bridge (T17) reads before every cycle.
+halt_state_path = "data/risk/halt_state.json"
+audit_path      = "data/risk/halt_history.jsonl"
+pid_file        = "data/risk/kill_switch.pid"
+
+# PnL feed — the execution log is a portfolio daily return (percent), written by
+# the signal bridge (T17). Pre-T17 it is absent, so the daemon sees no data and
+# does not halt — correct, since nothing is trading at the portfolio level yet.
+exec_log         = "data/execution/daily_pnl.json"
+
+# Paper-trade fallback: OFF by default. paper total_net_bps is the SUM of
+# per-trade returns, not a portfolio daily return; feeding it to the drawdown
+# gates overstates losses and false-trips the kill-switch. Enable only with a
+# proper portfolio-return series in paper_report.
+use_paper_fallback = false
+paper_report       = "data/paper_trades/batch_report.json"
+paper_trades_dir   = "data/paper_trades"
+
+# Lifecycle DB — kill_strategy retires any LIVE/MONITORING signal here.
+db_path = "data/nat.db"
+
+# Minimum trades/day required to compute a real Spearman IC (else NaN, no gate).
+ic_min_obs = 10
+
+# Prometheus metrics HTTP port (0 disables the exporter).
+prometheus_port = 0
