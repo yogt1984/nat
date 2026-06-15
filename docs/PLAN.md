@@ -15,17 +15,20 @@ imported not invented · all costs via `load_costs()` · no live capital.
 
 ## Week 1 — Jun 14–17 · Stage A (zero su-35 risk; cloud + pure Python)
 **Theme: earn the substrate while the streak finishes.**
+
+> **Progress (2026-06-15):** T2, T3–T5, T6, T7 (+ NAT4/NAT5) all merged & tested. Remaining in Week 1:
+> T0/T0b (ops — deploy the wired binary to the cloud box), Q1.3 (SQLite store, partial). Streak completes Jun 17.
 - **T0 / Q1.1 — dead-features resolution.** Enable `[position_tracker]`; deploy the wired binary to the
   **T0b cloud box**; 24h coverage check; **48h viability verdict due ~Jun 15** (viable / noisy / unavailable).
   *Test:* whale/liq coverage <100% NaN within 1h; `names_all()` == 236; verdict recorded in `01_concentration…`.
 - **T0b / M2 — cloud ingestion** (Hetzner AX52): Tier-1 docker stack + wired binary + Telegram <5min gap
   alert. *Test:* 48h zero gaps >60s; alert fires on forced disconnect; feature parity vs su-35.
-- **T2 + Q1.4 + P1.5 — costs + provenance** (`scripts/costs.py`, `scripts/provenance.py`).
+- **[✓ DONE] T2 + Q1.4 + P1.5 — costs + provenance** (`scripts/utils/costs.py`, `scripts/provenance.py`).
   *Test:* `load_costs("hyperliquid")` reproduces current `nat oos30` exactly; fingerprint deterministic.
-- **T3–T5 — lifecycle spine** (DB tables, `signal_lifecycle.py`, `nat lifecycle`, agent integration;
-  seed 4 winners VALIDATED). *Test:* scripted transition walk; illegal transition raises;
-  `nat agent once` → DISCOVERED row.
-- **T6 — CLI quick wins** (NAT1/NAT2). **T7 — viz foundation** (NAT3; blocks NAT4–8).
+- **[✓ DONE] T3–T5 — lifecycle spine** (DB tables, `signal_lifecycle.py`, `nat lifecycle`, agent integration;
+  seeded 4 VALIDATED / 2 DISCOVERED). *Test:* scripted transition walk; illegal transition raises;
+  register_signal → DISCOVERED row.
+- **[✓ DONE] T6 — CLI quick wins** (NAT1/NAT2). **[✓ DONE] T7 — viz foundation** (NAT3 + NAT4/NAT5: `nat viz features|algorithm`).
 - **Start Q1.3** (SQLite store) if capacity. **P-track:** P1.5 done here; begin P1 preprint draft (long lead).
 - **Streak watch:** daily data check only; **do not touch su-35.** Re-check the Jun 10–11 thin-day risk
   against the Jun-17 target.

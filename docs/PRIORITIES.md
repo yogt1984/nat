@@ -8,6 +8,13 @@ before scaling; front-load all non-data-gated work into the accumulation window.
 not invented** (G4 = walk-forward + deflated Sharpe; G8 = 14-day paper, 5 criteria; kill thresholds =
 ROADMAP Step 9). Task IDs follow `plan.md`'s reconciled T-numbering (with Q/P cross-refs).
 
+> **Status (updated 2026-06-15).** Shipped since this doc was written: **T2** provenance
+> (`scripts/provenance.py`; costs already at `scripts/utils/costs.py`), **T3–T5** signal-lifecycle
+> spine (`signal_lifecycle.py` + `nat lifecycle` + agent hook, seeded), **T6** CLI help
+> (`nat help --grep` + group-level help), **T7** viz foundation + **NAT4/NAT5**
+> (`nat viz features|algorithm`). Also `test_algorithm_smoke.py` + `.claude` scaffolding-drift fixes.
+> Remaining P0: T0/T0b (ops/deploy), Q1.3 (partial), kill-switch. P1+ stays gated on the Jun-17 streak.
+
 ## Implementation priorities
 
 ### P0 — Now, non-data-gated (Jun 11–17 window; zero su-35 contact)
@@ -16,15 +23,15 @@ ROADMAP Step 9). Task IDs follow `plan.md`'s reconciled T-numbering (with Q/P cr
    verdict. *Highest leverage — unblocks the FDR screen's full 191-feature coverage and LF3.*
 2. **T0b / M2 — continuous cloud ingestion (Hetzner)** with Telegram <5min gap alerting. Redundant second
    ingestor; doubles as the wired-binary deployment vehicle while su-35 is streak-frozen.
-3. **T2 + Q1.4 — costs + provenance** (`scripts/costs.py` `load_costs()`, `scripts/provenance.py` git SHA
+3. **[✓ DONE] T2 + Q1.4 — costs + provenance** (`scripts/utils/costs.py` `load_costs()`, `scripts/provenance.py` git SHA
    + data fingerprint). Single cost source; reproducibility. **Shared with P1.5** — one job, both tracks.
 4. **Q1.3 — SQLite research store** (~25h): atomic writes, schema versioning, contract tests.
-5. **T3–T5 — signal lifecycle spine** (DB tables + `signal_lifecycle.py` + `nat lifecycle` CLI + agent
-   integration; seed 4 winners VALIDATED). The spine the promotion daemon will drive.
+5. **[✓ DONE] T3–T5 — signal lifecycle spine** (DB tables + `signal_lifecycle.py` + `nat lifecycle` CLI +
+   agent integration; seeded 4 winners VALIDATED / 2 DISCOVERED). The spine the promotion daemon will drive.
 6. **T16 / Q3.1 — kill-switch daemon** (can start early; *must* ship before any bridge). 4 thresholds,
    Telegram <60s, `nat risk status/resume`.
-7. **CLI/viz foundations** — T6 (NAT1/2 help) + T7 (NAT3 viz lib). The cheap integration substrate
-   (METHODOLOGY: enabling-infra-first).
+7. **[✓ DONE] CLI/viz foundations** — T6 (NAT1/2 help) + T7 (NAT3 viz lib) + NAT4/5
+   (`nat viz features|algorithm`). The cheap integration substrate (METHODOLOGY: enabling-infra-first).
 
 ### P1 — Jun-17 gated (execute the moment the 7-day streak + Q1.1 land)
 8. **T11 / Q2.3 — full alpha screen with BH-FDR (Gate G1)** across 191 feats × 3 symbols, plus
