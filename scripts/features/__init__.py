@@ -27,6 +27,10 @@ from features.multilevel_ofi import (  # noqa: F401
     OFIEstimator,
     compute_multilevel_ofi,
 )
+from features.realized_moments import (  # noqa: F401
+    REALIZED_MOMENTS_FEATURES,
+    compute_realized_moments,
+)
 from features.settlement_clock import (  # noqa: F401
     SETTLEMENT_CLOCK_FEATURES,
     compute_settlement_clock,
