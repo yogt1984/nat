@@ -70,7 +70,7 @@ nat test validate                       # Live API validation (4 binaries agains
 pytest scripts/tests/                   # Python tests
 nat test dashboard                      # Dashboard endpoint tests
 nat test pipeline                       # Pipeline state machine tests
-nat test agent                          # Agent tests (350+ tests: unit + integration + logging + research output)
+pytest scripts/tests/test_agent_*.py    # Agent tests (350+; run via pytest — 'nat test agent' is NOT wired)
 ```
 
 ## Architecture
@@ -172,7 +172,7 @@ class MyAlgorithm(MicrostructureAlgorithm):
 - Warmup period: first `warmup` rows of `run_batch()` output are NaN-blanked automatically
 - Parameters should be configurable via `config/algorithms.toml`
 
-**Verification:** `pytest scripts/tests/test_algorithm_smoke.py -k <name>`, then `nat algorithm evaluate --algorithm <name> --symbol BTC` on real data.
+**Verification:** `pytest scripts/tests/test_bar_level_dispatch.py` (algorithm dispatch/conformance), then `nat algorithm evaluate --algorithm <name> --symbol BTC` on real data.
 
 **Current winners (tested via `nat oos30`):** `jump_detector` (Lee-Mykland), `optimal_entry` (SPRT/Kalman), `funding_reversion`, `surprise_signal` (entropy), `3f_liquidity` (composite).
 
