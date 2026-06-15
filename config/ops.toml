@@ -1,0 +1,17 @@
+# Operational monitoring daemons (T0b).
+
+[gap_alert]
+# Page if no new feature data has been written for longer than this. Default 300s
+# ("<5 min page") sits comfortably above the writer's flush cadence so normal
+# row-group buffering never false-alarms. Lower it once the deploy's real cadence
+# is known (the 48h test targets zero gaps >60s, measured from row timestamps).
+gap_threshold_s = 300
+poll_interval_s = 30
+
+# Dirs watched for freshness (newest *.parquet OR *.parquet.tmp mtime wins).
+data_dirs = ["data/features"]
+
+# State + liveness files.
+state_path     = "data/ops/gap_state.json"
+heartbeat_path = "data/ops/gap_alert.heartbeat"
+pid_file       = "data/ops/gap_alert.pid"

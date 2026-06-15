@@ -59,6 +59,30 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # Gap-alert daemon (T0b) — pages via Telegram when feature ingestion stalls.
+  # Watches the shared data volume; reads only, so safe alongside any ingestor.
+  gap-alert:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gapalert
+    container_name: nat-gap-alert
+    depends_on:
+      ingestor:
+        condition: service_healthy
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "python", "scripts/ops/gap_alert.py", "health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
   # REST API + WebSocket server
   api:
     build:

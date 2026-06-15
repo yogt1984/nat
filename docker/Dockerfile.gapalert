@@ -1,0 +1,20 @@
+# NAT Gap-Alert Daemon (T0b)
+# Watches feature ingestion freshness and pages via Telegram when it stalls.
+# Mount the project data dir so it sees the ingestor's output and writes its own
+# state under data/ops/:  volumes: [ "./data:/app/data" ]
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Only requests is needed (Telegram). No numpy/scipy on this daemon's path,
+# so the image stays tiny. tomllib is stdlib in 3.11+.
+RUN pip install --no-cache-dir "requests>=2.31.0"
+
+COPY scripts/ ./scripts/
+COPY config/ ./config/
+
+# Liveness via heartbeat freshness — detects a hung daemon, not just a live PID.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD ["python", "scripts/ops/gap_alert.py", "health"]
+
+CMD ["python", "scripts/ops/gap_alert.py", "start"]

@@ -2358,6 +2358,76 @@ def cmd_risk_stop(args):
         _p("–", Y, "No running kill-switch daemon found")
 
 
+# ── gap-alert / ingestion freshness (T0b) ─────────────────────────────────
+GAP_SCRIPT = "scripts/ops/gap_alert.py"
+
+
+def _gap_alerter(args=None):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from ops.gap_alert import GapAlerter
+    return GapAlerter()
+
+
+def cmd_gap_help(args=None):
+    """Gap-alert — group help."""
+    print(f"""
+  {BOLD}nat gap{W} — data-gap alert daemon (T0b); Telegram page when ingestion stalls
+
+    status     show current gap state (gapping / seconds since last write)
+    check      one-shot freshness check (exit 1 if gapping) — for cron/CI
+    start      run the gap-alert daemon (foreground; polls data freshness)
+    stop       graceful shutdown (SIGTERM)
+
+  Pages once on gap-open and once on recovery. Read-only re su-35 (stats files only).
+""")
+
+
+def cmd_gap_status(args):
+    """Show data-gap state."""
+    a = _gap_alerter(args)
+    st = a.status()
+    if _json_mode(args):
+        _output(st, args)
+        return
+    if st.get("gapping"):
+        _p("GAP", R, f"no data for {st.get('age_s') or 0:.0f}s (threshold {st.get('threshold_s'):.0f}s)")
+        if st.get("gap_started_at"):
+            print(f"        since: {st['gap_started_at']}")
+    else:
+        age = st.get("age_s")
+        _p("✓", G, f"Ingestion fresh ({age:.0f}s ago)" if age is not None else "No data yet")
+    print(f"        watching: {', '.join(st.get('data_dirs', []))}")
+
+
+def cmd_gap_check(args):
+    """One-shot freshness check; exit 1 if gapping."""
+    a = _gap_alerter(args)
+    st = a.check()
+    if _json_mode(args):
+        _output(st.to_dict(), args)
+    else:
+        _p("GAP" if st.gapping else "✓", R if st.gapping else G,
+           f"age {st.age_s:.0f}s" if st.age_s is not None else "no data")
+    return 1 if st.gapping else 0
+
+
+def cmd_gap_start(args):
+    _banner("Starting gap-alert daemon")
+    _py(f"{GAP_SCRIPT} start")
+
+
+def cmd_gap_stop(args):
+    """Send SIGTERM to running gap-alert daemon."""
+    import signal as sig
+    r = _sh("pgrep -f 'gap_alert.py start'")
+    if r.returncode == 0 and r.stdout.strip():
+        pid = int(r.stdout.strip().split("\n")[0])
+        os.kill(pid, sig.SIGTERM)
+        _p("✓", G, f"Sent SIGTERM to gap-alert (pid {pid})")
+    else:
+        _p("–", Y, "No running gap-alert daemon found")
+
+
 def cmd_viz_features(args):
     """nat viz features — per-feature overview (value / z-score / NaN% / IC / sparkline)."""
     import math as _math
@@ -5003,6 +5073,21 @@ def build_parser():
     rksta.set_defaults(func=cmd_risk_start)
     rksto = risksub.add_parser('stop', help='Graceful shutdown (SIGTERM)')
     rksto.set_defaults(func=cmd_risk_stop)
+
+    # ── gap-alert / ingestion freshness daemon (T0b) ──
+    gap_p = sub.add_parser('gap', help='Data-gap alert daemon (Telegram page on ingestion stall, T0b)')
+    gap_p.set_defaults(func=cmd_gap_help)
+    gapsub = gap_p.add_subparsers(dest='subcmd')
+    gpst = gapsub.add_parser('status', help='Show current gap state')
+    gpst.add_argument('--json', action='store_true', help='JSON output')
+    gpst.set_defaults(func=cmd_gap_status)
+    gpck = gapsub.add_parser('check', help='One-shot freshness check (exit 1 if gapping)')
+    gpck.add_argument('--json', action='store_true', help='JSON output')
+    gpck.set_defaults(func=cmd_gap_check)
+    gpsta = gapsub.add_parser('start', help='Run the gap-alert daemon (foreground)')
+    gpsta.set_defaults(func=cmd_gap_start)
+    gpsto = gapsub.add_parser('stop', help='Graceful shutdown (SIGTERM)')
+    gpsto.set_defaults(func=cmd_gap_stop)
 
     # ── viz (terminal-first per-unit visualization, T7/NAT3) ──
     viz_p = sub.add_parser('viz', help='Terminal-first visualization (features/algorithm/paper)')
