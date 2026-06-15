@@ -322,6 +322,20 @@ class BaseRunner(ABC):
             hypothesis_id=self.h.id,
         )
         self._store.append_signal(self._agent, signal.to_dict())
+        # T5: mirror into the signal lifecycle as DISCOVERED, reusing the agent's
+        # nat.db connection. Non-fatal — a lifecycle hiccup must never abort a cycle.
+        try:
+            from signal_lifecycle import SignalLifecycle
+            lc = SignalLifecycle(store=self._store)
+            if lc.get_signal(self.h.id) is None:
+                lc.discover(self.h.id, name=signal.name, agent=self._agent,
+                            metadata={"hypothesis_id": self.h.id,
+                                      "expected_ic": signal.expected_ic,
+                                      "horizon_s": horizon_s,
+                                      "symbols": signal.symbols},
+                            msg="auto-registered by agent")
+        except Exception as e:
+            log.warning("  lifecycle insert skipped: %s", e)
         log.info("  REGISTERED: %s (IC=%.3f, horizon=%.0fs)",
                  signal.name, signal.expected_ic, horizon_s)
         return signal

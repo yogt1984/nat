@@ -251,6 +251,48 @@ class TestBaseRunnerABC:
         assert len(registry) == 1
         assert registry[0]["hypothesis_id"] == h.id
 
+    def test_register_signal_mirrors_to_lifecycle(self, tmp_path):
+        """register_signal() also inserts a DISCOVERED row in the lifecycle (T5)."""
+        from data.state import StateStore
+        from signal_lifecycle import SignalLifecycle
+        store = StateStore(":memory:")
+
+        class TestRunner(BaseRunner):
+            DEFAULT_HORIZON_S = 42.0
+            DEFAULT_FEATURE = "test_feat"
+
+        h = Hypothesis.create("test claim", "gen",
+                              ["cmd --data d --symbol BTC"], 1.0)
+        h.results = {"gate_results": [{"msg": "IC=0.15 PASS"}]}
+        TestRunner(h, {}, store=store, agent="micro").register_signal()
+
+        lc = SignalLifecycle(store=store)  # same connection => :memory: visible
+        sig = lc.get_signal(h.id)
+        assert sig is not None and sig["state"] == "DISCOVERED"
+        hist = lc.history(h.id)
+        assert len(hist) == 1 and hist[0]["to_state"] == "DISCOVERED"
+        assert hist[0]["git_sha"]  # provenance-stamped
+
+    def test_register_signal_lifecycle_failure_is_nonfatal(self, monkeypatch):
+        """A lifecycle error must not break registration (signal still persisted)."""
+        from data.state import StateStore
+        import signal_lifecycle
+        store = StateStore(":memory:")
+
+        def _boom(*a, **k):
+            raise RuntimeError("boom")
+        monkeypatch.setattr(signal_lifecycle.SignalLifecycle, "discover", _boom)
+
+        class TestRunner(BaseRunner):
+            DEFAULT_HORIZON_S = 5.0
+            DEFAULT_FEATURE = "test_feat"
+
+        h = Hypothesis.create("claim2", "gen", ["cmd --data d --symbol BTC"], 1.0)
+        h.results = {"gate_results": [{"msg": "IC=0.10 PASS"}]}
+        sig = TestRunner(h, {}, store=store, agent="micro").register_signal()
+        assert sig is not None                          # registration survived
+        assert len(store.load_registry("micro")) == 1   # registry write survived
+
 
 # ===========================================================================
 # BaseRunner behavior
