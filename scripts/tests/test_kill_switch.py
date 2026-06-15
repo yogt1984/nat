@@ -14,6 +14,7 @@ breach can only trip the gate under test.
 """
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from risk.kill_switch import (
     write_halt_state,
     effective_level,
     load_pnl_history,
+    healthy,
 )
 
 
@@ -330,6 +332,28 @@ class TestPaperFallbackGating:
         # opt-in: the breaching paper report now drives the gates
         st = self._ks(tmp_path, use_fallback=True).check(ic_series=[])
         assert st.halted
+
+
+class TestHealthcheck:
+    """`kill_switch.py health` (compose healthcheck) reads heartbeat freshness."""
+
+    def _cfg(self, tmp_path):
+        return {"heartbeat_path": str(tmp_path / "hb"), "poll_interval_s": 60}
+
+    def test_missing_heartbeat_is_unhealthy(self, tmp_path):
+        assert healthy(self._cfg(tmp_path)) is False
+
+    def test_fresh_heartbeat_is_healthy(self, tmp_path):
+        hb = tmp_path / "hb"
+        hb.write_text("2026-05-01T00:00:00+00:00")
+        assert healthy(self._cfg(tmp_path)) is True
+
+    def test_stale_heartbeat_is_unhealthy(self, tmp_path):
+        hb = tmp_path / "hb"
+        hb.write_text("old")
+        old = 1_700_000_000.0  # far in the past
+        os.utime(hb, (old, old))
+        assert healthy(self._cfg(tmp_path)) is False
 
 
 # Helper: import evaluate_kill_switches from the module under test (re-exported

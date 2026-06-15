@@ -1,0 +1,24 @@
+# NAT Kill-Switch Daemon (T16)
+# Independent risk-control process: polls realised PnL/IC and publishes halt
+# state to data/risk/halt_state.json (the IPC contract the T17 bridge reads).
+#
+# Mount the project data dir as a volume so the daemon reads the PnL feed and
+# its halt state is shared with the host / other services:
+#   volumes: [ "./data:/app/data" ]
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Minimal deps for the kill-switch import chain (numpy, scipy, requests).
+# pandas/torch are NOT on the daemon's path, so the image stays small.
+RUN pip install --no-cache-dir "numpy>=2.0.0" "scipy>=1.11.0" "requests>=2.31.0"
+
+# Source + config. data/ is provided at runtime as a volume.
+COPY scripts/ ./scripts/
+COPY config/ ./config/
+
+# Liveness via heartbeat freshness — detects a hung daemon, not just a live PID.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+    CMD ["python", "scripts/risk/kill_switch.py", "health"]
+
+CMD ["python", "scripts/risk/kill_switch.py", "start"]
