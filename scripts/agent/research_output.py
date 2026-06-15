@@ -306,6 +306,15 @@ def _extract_pvalue(msg: str) -> Optional[float]:
     return None
 
 
+def _provenance() -> dict:
+    """git_sha + dirty stamp (scripts/provenance.py, plan T2); never fatal."""
+    try:
+        from provenance import get_provenance
+        return get_provenance()
+    except Exception:
+        return {}
+
+
 def build_hypothesis_record(
     hypothesis,
     agent_type: str,
@@ -339,6 +348,7 @@ def build_hypothesis_record(
             "created": h.created,
             "completed": h.completed,
         },
+        "provenance": _provenance(),
     }
 
     if output_root is not None:
@@ -408,6 +418,7 @@ def build_cycle_summary(
         "fdr_q": fdr_q,
         "hypotheses": hyp_summaries,
         "generator_stats": gen_stats,
+        "provenance": _provenance(),
     }
 
     if output_root is not None:
