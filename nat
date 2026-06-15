@@ -2323,6 +2323,68 @@ def cmd_viz_features(args):
     print()
 
 
+def cmd_viz_algorithm(args):
+    """nat viz algorithm <name> — signal timeline, IC, entry/exit count, P&L proxy."""
+    import math as _math
+    import numpy as _np
+    import contextlib as _ctx, io as _io
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from viz.common import load_features, forward_return, _spearman_ic, _downsample
+    from viz.terminal import sparkline, ic_color, RESET, DIM, GREEN, RED
+    name, symbol = args.name, _sym(args)
+    feats = load_features(symbol, hours=getattr(args, 'hours', None))
+    with _ctx.redirect_stdout(_io.StringIO()):       # ML algos print on import/load — mute it
+        from algorithms.autodiscover import discover_all
+        from algorithms.registry import get_algorithm, list_algorithms
+        discover_all()
+        known = name in list_algorithms()
+        sig = get_algorithm(name).run_batch(feats) if (known and not feats.empty) else None
+    if not known:
+        print(f"  {R}Unknown algorithm:{W} {name}  (try `nat algorithm list`)")
+        return 1
+    if feats.empty:
+        if _json_mode(args):
+            _output({"algorithm": name, "symbol": symbol, "outputs": []}, args)
+            return
+        print(f"  {Y}No data for {symbol}{W} — latest day may be thin (see `nat data validate`).")
+        return
+    target = forward_return(feats, horizon=getattr(args, 'horizon', 50))
+    thr = getattr(args, 'threshold', 0.3)
+    outs = []
+    for col in sig.columns:
+        s = sig[col].astype(float)
+        active = s.abs() > thr
+        entries = int((active & ~active.shift(1, fill_value=False)).sum())
+        equity = (_np.sign(s) * target).dropna().cumsum()
+        outs.append({
+            "output": col,
+            "last": float(s.dropna().iloc[-1]) if s.notna().any() else float("nan"),
+            "ic": _spearman_ic(s, target),
+            "entries": entries,
+            "pnl_proxy": float(equity.iloc[-1]) if len(equity) else float("nan"),
+            "spark": _downsample(s.dropna(), 30),
+            "equity_spark": _downsample(equity, 30) if len(equity) else [],
+        })
+    if _json_mode(args):
+        _output({"algorithm": name, "symbol": symbol,
+                 "outputs": [{k: o[k] for k in ("output", "last", "ic", "entries", "pnl_proxy")}
+                             for o in outs]}, args)
+        return
+    print(f"\n  {BOLD}nat viz algorithm{W} — {name} on {symbol}  ({len(feats)} ticks)\n")
+    for o in outs:
+        ic, pnl = o["ic"], o["pnl_proxy"]
+        ic_s = "  -  " if _math.isnan(ic) else f"{ic:+.3f}"
+        pnl_s = "  -  " if _math.isnan(pnl) else f"{pnl:+.4f}"
+        pnl_c = GREEN if (pnl == pnl and pnl > 0) else (RED if (pnl == pnl and pnl < 0) else "")
+        print(f"    {BOLD}{o['output']}{W}")
+        print(f"      last={o['last']:.4g}  IC={ic_color(None if _math.isnan(ic) else ic)}{ic_s}{RESET}"
+              f"  entries={o['entries']}  P&L(proxy)={pnl_c}{pnl_s}{RESET}")
+        print(f"      signal {sparkline(o['spark'])}")
+        if o["equity_spark"]:
+            print(f"      equity {sparkline(o['equity_spark'])}")
+    print(f"\n  {DIM}P&L proxy = Σ sign(signal)·fwd-return — not a cost-aware backtest; use `nat oos30`.{W}\n")
+
+
 def cmd_test_process(args):
     """Run process framework tests."""
     _exec(f"{PY} -m pytest tests/test_process_base.py tests/test_process_ic.py "
@@ -4869,6 +4931,14 @@ def build_parser():
     vzf.add_argument('--top', type=int, default=40, help='Rows to show')
     vzf.add_argument('--json', action='store_true', help='JSON output')
     vzf.set_defaults(func=cmd_viz_features)
+    vza = vizsub.add_parser('algorithm', help='Algorithm signal timeline, IC, entry/exit, P&L proxy')
+    vza.add_argument('name', help='Algorithm name (see nat algorithm list)')
+    vza.add_argument('--symbol', '-s', default='BTC')
+    vza.add_argument('--hours', type=float, default=None, help='Last N hours only')
+    vza.add_argument('--horizon', type=int, default=50, help='Forward-return horizon (ticks)')
+    vza.add_argument('--threshold', type=float, default=0.3, help='Entry threshold on |signal|')
+    vza.add_argument('--json', action='store_true', help='JSON output')
+    vza.set_defaults(func=cmd_viz_algorithm)
 
     # ── alg1 (MF 3-feature liquidity signal) ──
     a1_p = sub.add_parser('alg1', help='MF 3-feature liquidity signal (100min)',
