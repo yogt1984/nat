@@ -2291,6 +2291,73 @@ def cmd_lifecycle_seed(args):
     print(f"  Seeded {seeded} new signal(s) (idempotent).")
 
 
+# ── risk / kill-switch (T16) ───────────────────────────────────────────────
+RISK_SCRIPT = "scripts/risk/kill_switch.py"
+
+
+def _risk_ks(args=None):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from risk.kill_switch import KillSwitch
+    return KillSwitch()
+
+
+def cmd_risk_help(args=None):
+    """Risk / kill-switch — group help."""
+    print(f"""
+  {BOLD}nat risk{W} — kill-switch daemon (T16); thresholds imported from ROADMAP Step 9
+
+    status              show current halt state (level/reason/resume_at)
+    resume [--confirm]  clear a halt (refuses kill_strategy; halt_review/halt need --confirm)
+    start               run the kill-switch daemon (foreground; polls PnL/IC every 60s)
+    stop                graceful shutdown (SIGTERM)
+
+  daily >1% halt_24h · weekly DD >2% halt_review · monthly DD >5% kill_strategy · IC<0 5d halt
+""")
+
+
+def cmd_risk_status(args):
+    """Show kill-switch halt state."""
+    ks = _risk_ks(args)
+    status = ks.get_status()
+    if _json_mode(args):
+        _output(status, args)
+        return
+    if status.get("halted"):
+        _p("HALT", R, f"{status['level']} — {status.get('reason', '')}")
+        if status.get("resume_at"):
+            print(f"        resume_at: {status['resume_at']}")
+        if status.get("triggered"):
+            print(f"        triggered: {', '.join(status['triggered'])}")
+    else:
+        _p("✓", G, "Trading ACTIVE — no halt")
+    print(f"        pnl source: {status.get('pnl_source')}")
+
+
+def cmd_risk_resume(args):
+    """Clear an active halt, honouring resume rules."""
+    ks = _risk_ks(args)
+    ok, msg = ks.resume(confirm=getattr(args, 'confirm', False))
+    _p("✓" if ok else "✗", G if ok else R, msg)
+    return 0 if ok else 1
+
+
+def cmd_risk_start(args):
+    _banner("Starting kill-switch daemon")
+    _py(f"{RISK_SCRIPT} start")
+
+
+def cmd_risk_stop(args):
+    """Send SIGTERM to running kill-switch daemon."""
+    import signal as sig
+    r = _sh("pgrep -f 'kill_switch.py start'")
+    if r.returncode == 0 and r.stdout.strip():
+        pid = int(r.stdout.strip().split("\n")[0])
+        os.kill(pid, sig.SIGTERM)
+        _p("✓", G, f"Sent SIGTERM to kill-switch (pid {pid})")
+    else:
+        _p("–", Y, "No running kill-switch daemon found")
+
+
 def cmd_viz_features(args):
     """nat viz features — per-feature overview (value / z-score / NaN% / IC / sparkline)."""
     import math as _math
@@ -4920,6 +4987,22 @@ def build_parser():
     lcr.set_defaults(func=cmd_lifecycle_reject)
     lcs = lcsub.add_parser('seed', help='Seed deployable winners (idempotent)')
     lcs.set_defaults(func=cmd_lifecycle_seed)
+
+    # ── risk / kill-switch daemon (T16) ──
+    risk_p = sub.add_parser('risk', help='Kill-switch daemon + halt control (T16)')
+    risk_p.set_defaults(func=cmd_risk_help)
+    risksub = risk_p.add_subparsers(dest='subcmd')
+    rkst = risksub.add_parser('status', help='Show current halt state')
+    rkst.add_argument('--json', action='store_true', help='JSON output')
+    rkst.set_defaults(func=cmd_risk_status)
+    rkr = risksub.add_parser('resume',
+        help='Clear a halt (kill_strategy refused; halt_review/halt need --confirm)')
+    rkr.add_argument('--confirm', action='store_true', help='Actually clear the halt')
+    rkr.set_defaults(func=cmd_risk_resume)
+    rksta = risksub.add_parser('start', help='Run the kill-switch daemon (foreground)')
+    rksta.set_defaults(func=cmd_risk_start)
+    rksto = risksub.add_parser('stop', help='Graceful shutdown (SIGTERM)')
+    rksto.set_defaults(func=cmd_risk_stop)
 
     # ── viz (terminal-first per-unit visualization, T7/NAT3) ──
     viz_p = sub.add_parser('viz', help='Terminal-first visualization (features/algorithm/paper)')
