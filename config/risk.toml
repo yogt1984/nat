@@ -13,6 +13,8 @@ poll_interval_s = 60
 halt_state_path = "data/risk/halt_state.json"
 audit_path      = "data/risk/halt_history.jsonl"
 pid_file        = "data/risk/kill_switch.pid"
+# Heartbeat touched every cycle; the compose healthcheck reads its freshness.
+heartbeat_path  = "data/risk/kill_switch.heartbeat"
 
 # PnL feed — the execution log is a portfolio daily return (percent), written by
 # the signal bridge (T17). Pre-T17 it is absent, so the daemon sees no data and

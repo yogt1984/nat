@@ -221,6 +221,21 @@ def _git_sha() -> str | None:
         return None
 
 
+def healthy(config: dict | None = None, now: float | None = None) -> bool:
+    """True if the daemon's heartbeat is fresh (< 3 poll intervals, min 180s).
+
+    Used by the docker-compose healthcheck (`kill_switch.py health`) to detect a
+    *hung* daemon, not merely a live process.
+    """
+    cfg = config or load_config()
+    hb = Path(cfg["heartbeat_path"])
+    if not hb.exists():
+        return False
+    now = now if now is not None else time.time()
+    max_age = max(180, 3 * int(cfg.get("poll_interval_s", 60)))
+    return (now - hb.stat().st_mtime) < max_age
+
+
 # ───────────────────────────────────────────────────────────────────────────
 # Data loaders
 # ───────────────────────────────────────────────────────────────────────────
@@ -242,6 +257,7 @@ def load_config(path: Path | str | None = None) -> dict:
         "ic_min_obs": 10,
         "prometheus_port": 0,  # 0 disables the metrics HTTP server
         "pid_file": str(ROOT / "data" / "risk" / "kill_switch.pid"),
+        "heartbeat_path": str(ROOT / "data" / "risk" / "kill_switch.heartbeat"),
     }
     cfg_path = Path(path) if path else ROOT / "config" / "risk.toml"
     if cfg_path.exists():
@@ -579,6 +595,7 @@ class KillSwitch:
     def run(self) -> None:
         poll = int(self.config["poll_interval_s"])
         pid_file = Path(self.config["pid_file"])
+        heartbeat = Path(self.config["heartbeat_path"])
         pid_file.parent.mkdir(parents=True, exist_ok=True)
         pid_file.write_text(str(os.getpid()))
 
@@ -599,6 +616,9 @@ class KillSwitch:
                         log.warning("HALT active: %s (%s)", st.level, st.reason)
                 except Exception as e:
                     log.error("Kill-switch cycle error: %s", e, exc_info=True)
+                # Heartbeat after every cycle (even on error) — the healthcheck
+                # reads its freshness to distinguish a live daemon from a hung one.
+                heartbeat.write_text(self._now().isoformat())
                 for _ in range(poll):
                     if self._shutdown:
                         break
@@ -631,6 +651,9 @@ def main(argv: list[str] | None = None) -> int:
         ok, msg = ks.resume(confirm="--confirm" in argv)
         print(msg)
         return 0 if ok else 1
+    if cmd == "health":
+        # Quiet, exit-code only — consumed by the docker-compose healthcheck.
+        return 0 if healthy(ks.config) else 1
     print(f"unknown command: {cmd}", file=sys.stderr)
     return 2
 

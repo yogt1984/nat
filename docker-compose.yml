@@ -98,6 +98,26 @@ services:
       - RUST_LOG=info
     restart: unless-stopped
 
+  # Kill-switch daemon (T16) — polls PnL/IC; publishes halts to
+  # data/risk/halt_state.json (the IPC contract the T17 bridge reads).
+  kill-switch:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.killswitch
+    container_name: nat-kill-switch
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "scripts/risk/kill_switch.py", "health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    restart: unless-stopped
+
   # Research frontend
   web:
     build:
