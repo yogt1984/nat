@@ -176,6 +176,12 @@ class MyAlgorithm(MicrostructureAlgorithm):
 
 **Current winners (tested via `nat oos30`):** `jump_detector` (Lee-Mykland), `optimal_entry` (SPRT/Kalman), `funding_reversion`, `surprise_signal` (entropy), `3f_liquidity` (composite).
 
+### Signal Lifecycle (Python)
+
+`scripts/signal_lifecycle.py`: the single source of truth for a signal's promotion state, persisted to `nat.db` (tables `signal_lifecycle` + `lifecycle_history`, created via `scripts/data/state.py` migrations — one migration framework). State machine: DISCOVERED → VALIDATED → PAPER_TRADING → APPROVAL_PENDING → LIVE → MONITORING → RETIRED (+ REJECTED). Illegal transitions raise; every insert/transition is provenance-stamped (`git_sha`) and recorded in `lifecycle_history`. `approve()` (APPROVAL_PENDING → LIVE) is the sole human gate. Maps onto the maturity ladder in `docs/contracts/README.md`.
+
+CLI: `nat lifecycle status|list|history|approve|reject|seed` (`--db` to target a non-default db). `seed` idempotently loads the deployable winners (4 VALIDATED + 2 DISCOVERED). Tests: `pytest scripts/tests/test_signal_lifecycle.py scripts/tests/test_lifecycle_cli.py`. (The promotion daemon T14 will drive these transitions automatically; agent `register_signal()` integration is T5.)
+
 ## Cargo Workspace
 
 Four crates in `rust/` (dependency chain: `ing-types` → `ing-features` → `ing`):
