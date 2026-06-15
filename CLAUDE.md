@@ -10,9 +10,33 @@ See `docs/OBJECTIVE.md` for the project objective and the end-to-end loop (Inges
 
 See `docs/METHODOLOGY.md` for how that capability is built, integrated into `nat`, tested, and promoted.
 
+See `docs/contracts/` for the per-unit contracts (feature / algorithm / process) — read the one
+contract before building that kind of unit. See `docs/GLOSSARY.md` to decode the planning shorthand
+(`T0`, `Q1.1`, `G4`, `NAT9`, `su-35`, `K2`, conditional-IC, the maturity ladder, …).
+
+## Guardrails (hard constraints — these OVERRIDE default behavior)
+
+These are the non-negotiables. Violating one can cause real damage (lost data, a false discovery
+shipped, capital at risk). Sourced from `METHODOLOGY.md`, `MASTER_PLAN.md`, and `PRIORITIES.md`.
+
+- **su-35: zero contact until the Jun-17 clean-data streak completes.** The ingestor on su-35 is the
+  milestone's critical dependency; deploy wiring/validation to the T0b cloud box instead.
+- **Gates imported, not invented.** G1/G4/G8 and kill thresholds come from ROADMAP — never introduce
+  a new number. In alpha work, "looks right" ≠ "is right"; correctness is enforced by gates.
+- **All costs via `load_costs()`** (`scripts/costs.py` → `config/costs.toml`). Never hardcode a fee
+  or slippage.
+- **Plan before any feature-vector / schema change** — it ripples to Parquet and every reader.
+- **Planted (synthetic) test before any real-data use; real-parquet smoke before commit.** Level-1
+  planted tests are non-negotiable (three estimator bugs were caught only that way).
+- **Re-check `git status` before every commit** — this checkout has concurrent human activity;
+  conventional commits, feat branches, `merge --no-ff`, no PRs.
+- **No live capital before G8 + a healthy kill-switch.**
+
 ## CLI
 
-The `nat` command is the primary interface (251 commands). Run `nat help` for full docs, `nat commands` for a structured list, `nat commands --json` for machine-readable output.
+The `nat` command is the primary interface (~260 commands). Run `nat help` for full docs,
+`nat commands` for a structured list, `nat commands --json` for the machine-readable source of truth
+(don't trust hardcoded counts in prose — they drift; the CLI tree is authoritative).
 
 Key command groups: `start/stop/status`, `test`, `build`, `alpha`, `agent/mf-agent/macro-agent/meta-agent`, `discovery`, `backtest`, `algorithm`, `config`, `docker`, `swarm`, `evolve`.
 
