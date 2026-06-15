@@ -92,15 +92,24 @@ def _provenance() -> dict:
 class SignalLifecycle:
     """State-machine API over the `signal_lifecycle` / `lifecycle_history` tables."""
 
-    def __init__(self, db_path: Path | str | None = None):
-        if db_path is None:
-            db_path = Path(__file__).resolve().parent.parent / "data" / "nat.db"
-        # StateStore.__init__ runs _run_migrations(), creating our tables.
-        self._store = StateStore(Path(db_path))
+    def __init__(self, db_path: Path | str | None = None, *,
+                 store: StateStore | None = None):
+        if store is not None:
+            # Reuse a caller's StateStore (e.g. the agent's nat.db connection) —
+            # same db, no second connection. We don't own it, so we don't close it.
+            self._store = store
+            self._owns_store = False
+        else:
+            if db_path is None:
+                db_path = Path(__file__).resolve().parent.parent / "data" / "nat.db"
+            # StateStore.__init__ runs _run_migrations(), creating our tables.
+            self._store = StateStore(Path(db_path))
+            self._owns_store = True
         self._conn = self._store._conn
 
     def close(self) -> None:
-        self._store.close()
+        if self._owns_store:
+            self._store.close()
 
     # -- creation -----------------------------------------------------------
     def discover(self, signal_id: str, name: str = "", agent: str | None = None,
