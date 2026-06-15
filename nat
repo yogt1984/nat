@@ -3363,7 +3363,83 @@ def _remove_watchdog():
 
 # ── Help ─────────────────────────────────────────────────────────────────────
 
+def _walk_commands(parser_obj, commands, prefix=""):
+    """Flatten the parser tree into [{name, help}] (used by `nat help --grep`)."""
+    for action in parser_obj._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        help_map = {ca.dest: (ca.help or "") for ca in action._choices_actions}
+        for name, subparser in action.choices.items():
+            full = f"{prefix} {name}".strip() if prefix else name
+            commands.append({"name": full, "help": help_map.get(name, "")})
+            _walk_commands(subparser, commands, full)
+
+
+# NAT2: one-line blurb + optional "start with" hint per group. Subcommands are
+# listed automatically from the parser tree, so this never drifts when commands change.
+GROUP_HELP = {
+    "alpha": ("9-step systematic alpha discovery (quality gates G1-G8)", "nat alpha pipeline-status"),
+    "agent": ("autonomous microstructure research agent (5-gate protocol)", "nat agent status"),
+    "mf-agent": ("medium-frequency research agent, 1min-1h (4-gate)", "nat mf-agent status"),
+    "macro-agent": ("macro research agent, 1h-24h (4-gate)", "nat macro-agent status"),
+    "meta-agent": ("cross-agent budget, correlation, portfolio", "nat meta-agent status"),
+    "backtest": ("event-driven / walk-forward / ML backtests", "nat backtest -h"),
+    "model": ("ML models — ElasticNet, LightGBM, GMM, hierarchical", "nat model -h"),
+    "cluster": ("regime clustering (GMM/HDBSCAN) + Q1-Q3 quality gates", "nat cluster -h"),
+    "algorithm": ("microstructure algorithm library — IC evaluation", "nat algorithm list"),
+    "process": ("analytical processes — where information lives", "nat process list"),
+    "lifecycle": ("signal promotion lifecycle (DISCOVERED->LIVE->RETIRED)", "nat lifecycle status"),
+    "docker": ("Docker stack — build, deploy, observe", "nat docker ps"),
+    "swarm": ("config swarm — ~35D parameter sweep", "nat swarm status"),
+    "evolve": ("Optuna evolutionary optimization (CMA-ES/TPE/NSGA-II)", "nat evolve status"),
+    "experiment": ("experiment tracking, comparison, snapshots", "nat experiment list"),
+    "pipeline": ("ingestion->analysis state machine (IDLE->DONE)", "nat pipeline status"),
+    "discovery": ("continuous alpha discovery daemon", "nat discovery status"),
+    "data": ("parquet inspection + validation", "nat data validate -h"),
+    "config": ("TOML config inspection + validation", "nat config show"),
+    "spannung": ("signal grid search + spectral analysis", "nat spannung -h"),
+    "gauntlet": ("multi-day OOS algorithm sweep", "nat gauntlet report"),
+    "tournament": ("continuous algorithm ranking", "nat tournament -h"),
+    "test": ("test suites (Rust, Python, process)", "nat test -h"),
+    "validate": ("validation suites", "nat validate -h"),
+    "visualize": ("static analysis plots (PNG)", "nat visualize -h"),
+    "eamm": ("EAMM market-making simulation", "nat eamm -h"),
+}
+
+
+def _group_help(group_name, group_parser):
+    """Return a handler printing scoped, parser-derived help for a group (NAT2)."""
+    def handler(args=None):
+        blurb, start = GROUP_HELP.get(
+            group_name, (group_parser.description or f"nat {group_name}", None))
+        print(f"\n  {BOLD}nat {group_name}{W} — {blurb}\n")
+        for action in group_parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                help_map = {ca.dest: (ca.help or "") for ca in action._choices_actions}
+                for name in action.choices:
+                    print(f"    nat {group_name} {name:<20} {help_map.get(name, '')}")
+        if start:
+            print(f"\n  Start with: {BOLD}{start}{W}")
+        print(f"  Details:    nat {group_name} <subcommand> -h\n")
+    return handler
+
+
 def cmd_help(args=None):
+    grep = getattr(args, 'grep', None) if args else None
+    if grep:
+        commands = []
+        _walk_commands(build_parser(), commands)
+        term = grep.lower()
+        matches = [c for c in commands
+                   if term in c['name'].lower() or term in c['help'].lower()]
+        if matches:
+            print(f"\n  {BOLD}Commands matching '{grep}' ({len(matches)}){W}\n")
+            for m in matches:
+                print(f"    nat {m['name']:<34} {m['help']}")
+        else:
+            print(f"\n  No commands matching '{grep}'")
+        print()
+        return
     print(f"""
   {BOLD}nat{W} -- unified NAT research terminal
   Quantitative research platform for Hyperliquid perpetual futures.
@@ -4006,7 +4082,9 @@ def build_parser():
                            help='Initial tab: 1=Health, 2=Agent, 3=Features')
     monitor_p.set_defaults(func=cmd_monitor)
     sub.add_parser('macro', help='Daily macro signals').set_defaults(func=cmd_macro)
-    sub.add_parser('help', help='Show full help').set_defaults(func=cmd_help)
+    help_p = sub.add_parser('help', help='Show full help')
+    help_p.add_argument('--grep', default=None, help='Search commands/help by keyword')
+    help_p.set_defaults(func=cmd_help)
 
     screen_p = sub.add_parser('screen', help='Alpha screening')
     screen_p.add_argument('screen_args', nargs=argparse.REMAINDER)
@@ -5557,6 +5635,19 @@ def build_parser():
     it_status.add_argument('--top', type=int, default=10, help='Top N features')
     it_status.set_defaults(func=cmd_it_engine_status)
 
+    # NAT2: scoped group-level help. Override the bare-group handler (argparse-usage
+    # lambda, or a daemon entry that errors without a subcommand) with a parser-derived
+    # listing — for the blessed groups in GROUP_HELP, preserving the bespoke ones.
+    _CURATED_GROUP_HELP = {"process", "lifecycle"}
+    for _action in p._actions:
+        if not isinstance(_action, argparse._SubParsersAction):
+            continue
+        for _gname, _gp in _action.choices.items():
+            if _gname not in GROUP_HELP or _gname in _CURATED_GROUP_HELP:
+                continue
+            if any(isinstance(a, argparse._SubParsersAction) for a in _gp._actions):
+                _gp.set_defaults(func=_group_help(_gname, _gp))
+
     return p
 
 
@@ -5571,7 +5662,7 @@ def main():
         sys.exit(0)
 
     if args.command is None or args.command == 'help':
-        cmd_help()
+        cmd_help(args)
         sys.exit(0)
 
     if hasattr(args, 'func'):
