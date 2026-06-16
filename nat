@@ -1835,7 +1835,9 @@ def cmd_15m_viz(args):
         extra += f" --window {window}"
     page = getattr(args, 'page', 'all')
     extra += f" --page {page}"
-    _py(f"scripts/15m_visualize.py{extra} --symbol {sym} -v")
+    if getattr(args, 'open_after', True):
+        extra += " --open"
+    return _py(f"scripts/15m_visualize.py{extra} --symbol {sym} -v").returncode
 
 
 def cmd_15m_test(args):
@@ -2788,6 +2790,58 @@ def cmd_viz_portfolio(args):
             print(f"    {n:<22} {r['sharpe']:>7.2f} {r['max_dd_bps']:>7.0f}b {r['n_days']:>7}")
         print(f"\n  {DIM}Portfolio-level VaR/leverage/effective-N pending live positions.{W}")
     print()
+
+
+# Time-granularity → (bar timeframe for whole-day overview, window minutes,
+# fine bar timeframe inside a single page) for `nat viz render`.
+_TF_MAP = {
+    '1m':  ('1min',  1,  '2s'),
+    '5m':  ('5min',  5,  '10s'),
+    '15m': ('15min', 15, '30s'),
+}
+
+
+def _latest_feature_day(args):
+    """Resolve the most recent YYYY-MM-DD dir under the feature data dir."""
+    dd = Path(_data(args))
+    days = sorted(d.name for d in dd.glob('*') if d.is_dir() and d.name[:4].isdigit())
+    return days[-1] if days else None
+
+
+def cmd_viz_render(args):
+    """nat viz render — paged PNG viewer over the feature parquet at 1m/5m/15m.
+
+    No INDEX → whole-day overview (all features as --tf bars); INDEX N → zoom
+    into the Nth --tf-width window at fine resolution (data-relative anchor)."""
+    tf = getattr(args, 'tf', '15m')
+    overview_tf, win_min, page_tf = _TF_MAP[tf]
+    index = getattr(args, 'index', None)
+    sym = _sym(args)
+
+    date = getattr(args, 'date', None) or _latest_feature_day(args)
+    if not date:
+        _p("x", R, f"No feature data days found under {_data(args)}")
+        return 1
+    data_dir = f"{_data(args)}/{date}"
+    if not Path(data_dir).exists():
+        _p("x", R, f"No data for {date}: {data_dir}")
+        return 1
+
+    out = getattr(args, 'output', None) or str(ROOT / "reports" / "figures" / "snapshots")
+    mode = "overview" if index is None else f"page {index}"
+    _banner(f"viz render — {sym} {tf} {mode} ({date})")
+    sys.stdout.flush()
+
+    cmd = (f"scripts/15m_visualize.py --data-dir {data_dir} --symbol {sym} "
+           f"--output {out} --page all")
+    if index is None:
+        cmd += f" --timeframe {overview_tf}"
+    else:
+        cmd += f" --window {win_min} --window-index {index} --timeframe {page_tf}"
+    if getattr(args, 'open_after', False):
+        cmd += " --open"
+    cmd += " -v"
+    return _py(cmd).returncode
 
 
 def cmd_test_process(args):
@@ -5493,6 +5547,18 @@ def build_parser():
     vzpo.add_argument('--symbol', '-s', default='BTC')
     vzpo.add_argument('--json', action='store_true', help='JSON output')
     vzpo.set_defaults(func=cmd_viz_portfolio)
+    vzr = vizsub.add_parser('render',
+                            help='Paged PNG viewer at 1m/5m/15m (overview, or page INDEX)')
+    vzr.add_argument('--tf', default='15m', choices=['1m', '5m', '15m'],
+                     help='Time granularity / page width (default: 15m)')
+    vzr.add_argument('index', nargs='?', type=int,
+                     help='1-based page: omit for whole-day overview, N to zoom into the Nth window')
+    vzr.add_argument('--symbol', '-s', default='BTC', help="Symbol or 'all' (default: BTC)")
+    vzr.add_argument('--date', default=None, help='Day YYYY-MM-DD (default: latest available)')
+    vzr.add_argument('--open', dest='open_after', action='store_true',
+                     help='Open the produced PNG(s) with the default viewer')
+    vzr.add_argument('--output', default=None, help='Output directory (default: reports/figures/snapshots)')
+    vzr.set_defaults(func=cmd_viz_render)
 
     # ── alg1 (MF 3-feature liquidity signal) ──
     a1_p = sub.add_parser('alg1', help='MF 3-feature liquidity signal (100min)',
@@ -5937,7 +6003,9 @@ def build_parser():
     smv.add_argument('--window', type=int, default=None, help='Window size in minutes')
     smv.add_argument('--page', type=str, default='all', choices=['0', '1', 'all'],
                      help='Page: 0=basic, 1=advanced, all=both')
-    smv.set_defaults(func=cmd_15m_viz)
+    smv.add_argument('--no-open', dest='open_after', action='store_false',
+                     help='Do not auto-open the PNG (default: open)')
+    smv.set_defaults(func=cmd_15m_viz, open_after=True)
     smsub.add_parser('test', help='Run unit tests').set_defaults(func=cmd_15m_test)
 
     # ── Trade visualization ──────────────────────────────────────────────────
