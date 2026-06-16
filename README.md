@@ -72,22 +72,30 @@ nat log                               # tail live output
 nat status                            # health check (JSON)
 nat dashboard                         # web dashboard at :8050
 
-# 3. Launch autonomous research agents
+# 3. Inspect & validate the captured parquet
+nat data validate                     # validate the whole feature dir (continuity/NaN/ranges)
+nat data validate data/features/2026-06-15/20260615_140000.parquet  # one file → PASS/WARN/FAIL
+nat viz render --tf 15m               # whole-day all-features PNG snapshot (overview), auto path
+nat viz render --tf 5m 1 --open       # zoom into the first 5-min page (1m/5m/15m); open the PNG
+nat viz render --tf 5m 1 --features flow   # scope a page to one feature category/vector/list
+nat viz3d --tf 15m --features entropy --open   # interactive 3D feature-surface (Plotly HTML)
+
+# 4. Launch autonomous research agents
 nat agent start                       # microstructure agent (tick-level)
 nat mf_agent start                    # medium-frequency agent (1min-1h)
 nat macro_agent start                 # macro agent (1h-24h)
 nat meta_agent start                  # meta orchestrator (cross-agent)
 
-# 4. Monitor research progress
+# 5. Monitor research progress
 nat agent status                      # phase, cycle count, registry size
 nat agent dashboard                   # IC heatmap on :8060
 nat agent registry                    # validated signals
 nat agent report                      # full summary
 
-# 5. Run paper trading (after 30 days of data)
+# 6. Run paper trading (after 30 days of data)
 nat oos30                             # all 5 winning algorithms, walk-forward
 
-# 6. Manual research
+# 7. Manual research
 nat spannung --symbol BTC             # signal IC grid search
 nat spannung regime --symbol BTC      # regime screener
 nat profile scalp --symbol BTC        # walk-forward profiling
@@ -841,6 +849,9 @@ The agent orchestrates these tools autonomously. They can also be used interacti
 | `nat profile scalp --symbol BTC` | Walk-forward feature profiler | `reports/profiler/profile_{sym}.json` |
 | `nat cluster hmm` | Gaussian HMM fitting (Baum-Welch EM) | `reports/hmm_fit.json` |
 | `nat validate skeptical` | 20+ statistical tests (FDR, bootstrap, permutation) | `reports/skeptical_validation/` |
+| `nat data validate <file.parquet>` | Single-file validation (schema/quality/continuity/NaN/ranges) | PASS/WARN/FAIL, `--json`, nonzero exit on FAIL |
+| `nat viz render --tf {1m,5m,15m} [N]` | Paged PNG viewer: whole-day overview, or zoom into the Nth window; `--features` scopes a panel grid | `reports/figures/snapshots/*.png` |
+| `nat viz3d` / `nat mesh --tf {1m,5m,15m} [N]` | Interactive 3D feature-surface-over-time (Plotly) | `reports/figures/mesh/*.html` |
 | `nat scan --symbol BTC` | Signal discovery scan | JSON report |
 | `nat macro --symbol BTC` | Macro regime analysis | JSON report |
 | `nat kalman analysis --symbol BTC` | Kalman filter analysis | `reports/kalman/` |
@@ -1137,6 +1148,16 @@ nat risk {status,resume,start,stop}                        # kill-switch daemon 
 nat gap {status,check,start,stop}                          # data-gap alert daemon
 nat bridge {status,once,start,stop}                        # signal-bridge daemon (LIVE execution)
 nat viz {features,algorithm,paper,portfolio}               # terminal viz + approval evidence
+nat viz render --tf {1m,5m,15m} [N]                        # paged PNG viewer (overview / Nth window; --features, --open)
+nat viz3d | nat mesh --tf {1m,5m,15m} [N]                  # interactive 3D feature-surface (Plotly HTML; --open)
+```
+
+#### Data & Validation
+```bash
+nat data validate [<file.parquet>] [--json]   # validate a dir or one file → PASS/WARN/FAIL (nonzero on FAIL)
+nat data schema                                # scan parquet schema & vector coverage
+nat data explore                               # launch Jupyter on the feature data
+nat 15m viz [--no-open]                        # all-features 15m snapshot PNG (auto-opens by default)
 ```
 
 #### Analysis
