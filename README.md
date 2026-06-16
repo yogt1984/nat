@@ -44,12 +44,12 @@ NAT is a fully autonomous quantitative research platform that discovers tradeabl
 - [Information-Theoretic Engine](#information-theoretic-engine)
 - [Paper Trading & OOS Validation](#paper-trading--oos-validation)
 - [Analysis & Profiling Tools](#analysis--profiling-tools)
-- [Execution Layer](#execution-layer)
+- [Lifecycle, Promotion & Risk Automation](#lifecycle-promotion--risk-automation)
 - [Web Dashboard & API](#web-dashboard--api)
 - [Polymarket Integration](#polymarket-integration)
 - [Entropy-Adaptive Market Making (EAMM)](#entropy-adaptive-market-making-eamm)
 - [Config Swarm & Evolutionary Optimization](#config-swarm--evolutionary-optimization)
-- [The `nat` CLI (251 Commands)](#the-nat-cli-251-commands)
+- [The `nat` CLI (~280 commands)](#the-nat-cli-280-commands)
 - [Configuration](#configuration)
 - [Testing](#testing)
 - [Docker](#docker)
@@ -873,21 +873,96 @@ Walk-forward validation with configurable cost models (taker/maker at various fe
 
 ---
 
-## Execution Layer
+## Lifecycle, Promotion & Risk Automation
 
-### Signal Bridge
+The path from a validated signal to live capital is automated end-to-end, behind a
+single human gate and hard risk controls. Each stage is an independent daemon
+sharing the same conventions: pidfile + heartbeat + `health` subcommand + graceful
+SIGTERM, dry-run by default, and a Docker Compose service with a healthcheck. All
+gate thresholds are **imported, not invented** (`config/alpha.toml`, ROADMAP Step 9).
 
-`scripts/execution/signal_bridge.py` — translates validated signals into executable orders:
-- Dry-run mode (logging only) and live mode
-- Position sizing with risk limits
-- Integration with paper trading results
+### Signal Lifecycle (state machine)
 
-### Hyperliquid Client
+`scripts/signal_lifecycle.py` is the single source of truth for a signal's
+promotion state, persisted to `nat.db` (`signal_lifecycle` + `lifecycle_history`,
+shared migration framework in `scripts/data/state.py`). Every transition is
+provenance-stamped (git SHA) and recorded; illegal transitions raise.
 
-`scripts/execution/hyperliquid_client.py` — trading API wrapper for Hyperliquid exchange:
-- Order placement (limit, market, stop)
-- Position management
-- Account state queries
+```
+DISCOVERED → VALIDATED → PAPER_TRADING → APPROVAL_PENDING → LIVE → MONITORING → RETIRED   (+ REJECTED)
+```
+
+`approve()` (APPROVAL_PENDING → LIVE) is the **sole human gate**.
+
+```bash
+nat lifecycle status|list|history|approve|reject|seed
+```
+
+### Promotion Daemon
+
+`scripts/promotion_daemon.py` drives the lifecycle automatically: a data-sufficiency
++ ≥7-clean-day guard, then rigorous **G4** (walk-forward + deflated Sharpe via
+`alpha/adapter.py`) → VALIDATED, paper trading → PAPER_TRADING, and **G8** (5 criteria
+over 14 days) → APPROVAL_PENDING. It never auto-promotes to LIVE.
+
+```bash
+nat promotion status|once [--dry-run]|start|stop
+```
+
+### Kill-Switch Daemon (risk)
+
+`scripts/risk/kill_switch.py` polls realized PnL/IC every 60s and halts trading on
+ROADMAP Step-9 thresholds: daily loss >1% → `halt_24h`, weekly DD >2% →
+`halt_review`, monthly DD >5% → `kill_strategy` (retires the signal in the
+lifecycle), IC<0 for 5 days → `halt`. Publishes `data/risk/halt_state.json` (the IPC
+the bridge reads before every cycle) and a Telegram page within 60s.
+
+```bash
+nat risk status|resume [--confirm]|start|stop
+```
+
+### Gap-Alert Daemon (data continuity)
+
+`scripts/ops/gap_alert.py` pages via Telegram within minutes when feature ingestion
+stalls — the real-time complement to the next-day report. Freshness = newest
+`*.parquet`/`*.parquet.tmp` mtime; alerts once on gap-open and once on recovery.
+Read-only, so it is safe to run alongside a streak-frozen ingestor.
+
+```bash
+nat gap status|check|start|stop
+```
+
+### Signal Bridge Daemon
+
+`scripts/execution/signal_bridge.py` (`run_daemon()`) reads LIVE signals from the
+lifecycle, **checks `halt_state.json` before every cycle (cannot be skipped)**, sizes
+via `meta_portfolio` risk parity (never independent per-signal), logs fills to
+`data/execution/fills_*.jsonl` (fill-conditional IC), and rolls up
+`data/execution/daily_pnl.json` — the file the kill-switch reads back, closing the
+loop. **Dry-run by default**; live requires an explicit `mode=live` + a healthy
+kill-switch. The one-shot `run_bridge()` and `scripts/execution/hyperliquid_client.py`
+(order placement, position/account queries) remain available.
+
+```bash
+nat bridge status|once [--dry-run]|start|stop
+```
+
+### Approval-Evidence Visualization
+
+```bash
+nat viz paper <signal>      # cumulative P&L, IC decay, the 5-criterion G8 scorecard
+nat viz portfolio --tab N   # P&L / exposure / cross-signal correlation (<0.35) / risk
+nat viz features|algorithm  # per-feature and per-algorithm terminal views (z/IC/sparkline)
+```
+
+### Observability
+
+A pure-stdlib Prometheus exporter (`scripts/monitoring/metrics_exporter.py`, `:9094`)
+turns lifecycle/paper/live-PnL state (SQLite/JSON, which Grafana can't scrape
+directly) into gauges (`nat_lifecycle_signals{state}`, `nat_paper_sharpe{signal}`,
+`nat_live_cum_pnl_pct`, …), feeding three auto-provisioned Grafana dashboards
+(lifecycle funnel, paper performance, live P&L). The agent dashboard gains a
+lifecycle tab (`/api/lifecycle`).
 
 ---
 
@@ -1030,7 +1105,7 @@ nat evolve export                                # export best config to TOML
 
 ---
 
-## The `nat` CLI (251 Commands)
+## The `nat` CLI (~280 commands)
 
 `nat` is a unified research terminal (~5,000 lines) that replaces the Makefile for production use. All commands follow the pattern `nat <command> [subcommand] [flags]`.
 
@@ -1052,6 +1127,16 @@ nat agent {start,stop,once,status,queue,registry,graveyard,report,dashboard}
 nat mf_agent {start,stop,once,status,queue,registry,graveyard,report}
 nat macro_agent {start,stop,once,status,queue,registry,graveyard,report}
 nat meta_agent {start,stop,once,status,portfolio,correlation,budget,report}
+```
+
+#### Lifecycle, Promotion & Risk Automation
+```bash
+nat lifecycle {status,list,history,approve,reject,seed}   # signal promotion state machine
+nat promotion {status,once,start,stop}                    # auto-promotion daemon (G4/G8 gates)
+nat risk {status,resume,start,stop}                        # kill-switch daemon (halt on breach)
+nat gap {status,check,start,stop}                          # data-gap alert daemon
+nat bridge {status,once,start,stop}                        # signal-bridge daemon (LIVE execution)
+nat viz {features,algorithm,paper,portfolio}               # terminal viz + approval evidence
 ```
 
 #### Analysis
@@ -1176,6 +1261,11 @@ nat help                                 # usage help
 | `config/kalman.toml` | Kalman filter parameters |
 | `config/hypothesis_testing.toml` | Hypothesis test parameters (H1-H5) |
 | `config/symbols.toml` | Tradeable symbol list |
+| `config/risk.toml` | Kill-switch daemon: poll interval, paths (thresholds imported from `alpha.toml`) |
+| `config/ops.toml` | Gap-alert daemon: gap threshold, poll interval, watched data dirs |
+| `config/promotion.toml` | Promotion daemon: poll interval, ≥7-clean-day guard, paths |
+| `config/execution.toml` | Signal-bridge daemon: mode (dry-run default), account value, paths |
+| `config/monitoring.toml` | Metrics exporter: port, refresh interval, data paths |
 
 ### Environment Variables
 
@@ -1270,6 +1360,11 @@ make docker_logs                       # tail logs
 | **ingestor** | 8080 | Market data collection + real-time dashboard |
 | **api** | 3000 | REST/WebSocket endpoints |
 | **alerts** | — | Telegram alert service |
+| **kill-switch** | — | Risk kill-switch daemon (halts on PnL/IC breach) |
+| **gap-alert** | — | Data-gap alert daemon (pages on ingestion stall) |
+| **promotion** | — | Signal promotion daemon (lifecycle automation) |
+| **signal-bridge** | — | LIVE signal execution daemon (`depends_on` kill-switch healthy) |
+| **metrics-exporter** | 9094 | Lifecycle/paper/live-P&L state → Prometheus gauges |
 | **web** | 3001 | Next.js frontend (depends on api) |
 | **prometheus** | 9090 | Metrics collection (90-day retention) |
 | **grafana** | 3002 | Pre-configured dashboards (anonymous access) |
@@ -1287,8 +1382,13 @@ The Docker stack includes Prometheus + Grafana for production monitoring.
 - `ing_feature_latency_seconds` — histogram, feature compute time
 - `ing_update_latency_seconds` — histogram, WebSocket update processing time
 
+**Business-state metrics** (via the `metrics-exporter` service on `:9094`, which turns SQLite/JSON state into Prometheus gauges):
+- `nat_lifecycle_signals{state}` — signals by lifecycle state (the funnel)
+- `nat_paper_sharpe{signal}`, `nat_paper_max_drawdown_bps{signal}` — per-signal paper metrics
+- `nat_live_cum_pnl_pct`, `nat_live_last_daily_pnl_pct`, `nat_live_pnl_days` — live P&L
+
 **Access:**
-- Grafana: http://localhost:3002 (no login required, "NAT Overview" dashboard auto-provisioned)
+- Grafana: http://localhost:3002 (no login required) — auto-provisioned dashboards: **NAT Overview** (ingestor), **NAT Lifecycle Funnel**, **NAT Paper Performance**, **NAT Live P&L**
 - Prometheus: http://localhost:9090
 - Optuna Dashboard: http://localhost:8070 (optimization history, parameter importance, Pareto fronts)
 
@@ -1318,7 +1418,7 @@ The Rust ingestor runs on a separate machine (`su-35`) for low-latency data coll
 
 ```
 nat/
-├── nat                            # Unified CLI (~5,000 lines, 251 commands)
+├── nat                            # Unified CLI (~5,000 lines, ~280 commands)
 ├── Makefile                       # Build/dev targets (compat, prefer nat CLI)
 ├── FEATURES.md                    # 209-feature manifest with formulas
 ├── CLAUDE.md                      # Architecture guide
@@ -1397,7 +1497,13 @@ nat/
 │   ├── cluster_quality/           # Quality metrics (5 modules)
 │   ├── data/                      # Data utilities (6 modules)
 │   ├── eamm/                      # Entropy-adaptive market making (10 modules)
-│   ├── execution/                 # Signal bridge + Hyperliquid client
+│   ├── execution/                 # Signal-bridge daemon (LIVE exec) + Hyperliquid client
+│   ├── risk/                      # Kill-switch daemon (publishes halt_state.json)
+│   ├── ops/                       # Gap-alert daemon (ingestion-freshness pager)
+│   ├── monitoring/                # Prometheus metrics exporter (lifecycle/paper/PnL gauges)
+│   ├── signal_lifecycle.py        # Lifecycle state machine (nat.db, provenance-stamped)
+│   ├── promotion_daemon.py        # Auto-promotion daemon (G4/G8 gates)
+│   ├── provenance.py              # git-SHA + data-fingerprint stamping (T2)
 │   ├── experiment/                # Experiment monitoring (6 modules)
 │   ├── it_engine/                 # Information theory engine (6 modules)
 │   ├── polymarket/                # Prediction market integration (6 modules)
