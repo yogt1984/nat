@@ -20,6 +20,7 @@ Examples:
 """
 
 import argparse
+import json as _json
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -64,6 +65,17 @@ class ValidationConfig:
 # Validation Results
 # =============================================================================
 
+# Checks whose failure is a hard FAIL (data is unusable). Any other failing
+# check is a soft WARN. Used to derive the three-level verdict (PASS/WARN/FAIL).
+HARD_CHECKS = frozenset({
+    "Data Presence",
+    "File Integrity",
+    "Continuity",
+    "NaN Ratio",
+    "Sequence Monotonicity",
+})
+
+
 @dataclass
 class CheckResult:
     """Result of a single validation check."""
@@ -87,6 +99,39 @@ class ValidationReport:
     @property
     def passed(self) -> bool:
         return all(c.passed for c in self.checks)
+
+    @property
+    def verdict(self) -> str:
+        """Three-level verdict: FAIL if any hard check fails, else WARN if any
+        soft check fails, else PASS."""
+        if any(not c.passed and c.name in HARD_CHECKS for c in self.checks):
+            return "FAIL"
+        if any(not c.passed for c in self.checks):
+            return "WARN"
+        return "PASS"
+
+    def to_dict(self) -> dict:
+        """Machine-readable report (JSON-serializable)."""
+        return {
+            "data_dir": self.data_dir,
+            "timestamp": self.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            "verdict": self.verdict,
+            "passed": self.passed,
+            "total_files": self.total_files,
+            "total_rows": self.total_rows,
+            "symbols": self.symbols,
+            "date_range": list(self.date_range),
+            "checks": [
+                {
+                    "name": c.name,
+                    "passed": c.passed,
+                    "hard": c.name in HARD_CHECKS,
+                    "message": c.message,
+                    "details": c.details,
+                }
+                for c in self.checks
+            ],
+        }
 
     def print_report(self, verbose: bool = False):
         """Print formatted report."""
@@ -113,12 +158,18 @@ class ValidationReport:
             print()
 
         print("=" * 70)
-        if self.passed:
-            print("  \033[92mOVERALL: ALL CHECKS PASSED\033[0m")
+        verdict = self.verdict
+        if verdict == "PASS":
+            print("  \033[92mOVERALL: PASS — all checks passed\033[0m")
+        elif verdict == "WARN":
+            warned = [c.name for c in self.checks if not c.passed]
+            print(f"  \033[93mOVERALL: WARN — {len(warned)} soft check(s) flagged\033[0m")
+            print(f"  Warnings: {', '.join(warned)}")
         else:
             failed = [c.name for c in self.checks if not c.passed]
-            print(f"  \033[91mOVERALL: {len(failed)} CHECK(S) FAILED\033[0m")
-            print(f"  Failed: {', '.join(failed)}")
+            hard = [c.name for c in self.checks if not c.passed and c.name in HARD_CHECKS]
+            print(f"  \033[91mOVERALL: FAIL — {len(failed)} check(s) failed\033[0m")
+            print(f"  Failed: {', '.join(failed)}  (hard: {', '.join(hard)})")
         print("=" * 70 + "\n")
 
 
@@ -127,7 +178,15 @@ class ValidationReport:
 # =============================================================================
 
 def find_parquet_files(data_dir: Path, hours: Optional[int] = None) -> list:
-    """Find all Parquet files, optionally filtered by age."""
+    """Find Parquet files, optionally filtered by age.
+
+    If ``data_dir`` points at a single ``.parquet`` file, that file is returned
+    verbatim (the ``--hours`` age filter does not apply to an explicitly named
+    file). Otherwise the directory is scanned recursively.
+    """
+    if data_dir.is_file():
+        return [data_dir]
+
     files = list(data_dir.rglob("*.parquet"))
 
     if hours:
@@ -512,13 +571,18 @@ def check_sequence_monotonicity(df: pd.DataFrame) -> CheckResult:
 # Main Validation
 # =============================================================================
 
-def validate(data_dir: Path, config: ValidationConfig, hours: Optional[int] = None) -> ValidationReport:
-    """Run all validation checks."""
-    print(f"\n  Scanning {data_dir}...")
+def validate(data_dir: Path, config: ValidationConfig, hours: Optional[int] = None,
+             quiet: bool = False) -> ValidationReport:
+    """Run all validation checks. ``quiet`` suppresses progress prints (for --json)."""
+    def _say(msg):
+        if not quiet:
+            print(msg)
+
+    _say(f"\n  Scanning {data_dir}...")
 
     # Find files
     files = find_parquet_files(data_dir, hours)
-    print(f"  Found {len(files)} Parquet file(s)")
+    _say(f"  Found {len(files)} Parquet file(s)")
 
     if not files:
         return ValidationReport(
@@ -536,9 +600,9 @@ def validate(data_dir: Path, config: ValidationConfig, hours: Optional[int] = No
         )
 
     # Load data
-    print("  Loading data...")
+    _say("  Loading data...")
     df = load_data(files)
-    print(f"  Loaded {len(df):,} rows")
+    _say(f"  Loaded {len(df):,} rows")
 
     # Extract metadata
     symbols = sorted(df['symbol'].unique().tolist()) if not df.empty else []
@@ -555,7 +619,7 @@ def validate(data_dir: Path, config: ValidationConfig, hours: Optional[int] = No
         date_range = (None, None)
 
     # Run checks
-    print("  Running validation checks...")
+    _say("  Running validation checks...")
     checks = [
         check_file_integrity(files),
         check_continuity(df, config),
@@ -587,12 +651,18 @@ def main():
         "data_dir",
         nargs="?",
         default="./data/features",
-        help="Data directory to validate (default: ./data/features)"
+        help="Data directory OR a single .parquet file to validate "
+             "(default: ./data/features)"
     )
     parser.add_argument(
         "--hours",
         type=int,
-        help="Only validate data from last N hours"
+        help="Only validate data from last N hours (ignored for a single file)"
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the report as JSON (machine-readable)"
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -621,15 +691,35 @@ def main():
     )
 
     # Run validation
-    data_dir = Path(args.data_dir)
-    if not data_dir.exists():
-        print(f"\n  Error: Directory does not exist: {data_dir}")
+    target = Path(args.data_dir)
+    if not target.exists():
+        msg = f"Path does not exist: {target}"
+        if args.json:
+            print(_json.dumps({"verdict": "FAIL", "error": msg}))
+        else:
+            print(f"\n  Error: {msg}")
         sys.exit(1)
 
-    report = validate(data_dir, config, args.hours)
-    report.print_report(verbose=args.verbose)
+    single_file = target.is_file()
+    if single_file and target.suffix != ".parquet":
+        msg = f"Not a .parquet file: {target}"
+        if args.json:
+            print(_json.dumps({"verdict": "FAIL", "error": msg}))
+        else:
+            print(f"\n  Error: {msg}")
+        sys.exit(1)
 
-    # Exit with appropriate code
+    report = validate(target, config, args.hours, quiet=args.json)
+
+    if args.json:
+        print(_json.dumps(report.to_dict(), indent=2, default=str))
+    else:
+        report.print_report(verbose=args.verbose)
+
+    # Exit code: a single file exits nonzero only on a hard FAIL (WARN is ok);
+    # directory mode keeps its historical strict behavior (any failing check → 1).
+    if single_file:
+        sys.exit(1 if report.verdict == "FAIL" else 0)
     sys.exit(0 if report.passed else 1)
 
 

@@ -27,6 +27,7 @@ from .config import FEATURE_VECTORS, COMPOSITE_VECTORS, META_COLUMNS, get_vector
 # ---------------------------------------------------------------------------
 
 TIMEFRAMES = {
+    "1min": {"label": "1 min", "freq": "1min", "use": "Tick-level intraday viewing"},
     "5min": {"label": "5 min", "freq": "5min", "use": "Fine-grained intraday"},
     "15min": {"label": "15 min", "freq": "15min", "use": "Primary analysis horizon"},
     "1h": {"label": "1 hour", "freq": "1h", "use": "Swing-level regimes"},

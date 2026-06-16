@@ -36,6 +36,7 @@ from cluster_pipeline.config import META_COLUMNS
 from cluster_pipeline.loader import load_parquet, get_symbols
 from cluster_pipeline.preprocess import aggregate_bars
 from viz.features import STYLE, COLORS, apply_style
+from viz.pager import window_edges, window_bounds  # noqa: F401 (re-exported for tests)
 
 log = logging.getLogger("15m_viz")
 
@@ -749,10 +750,12 @@ def generate_visualization(
     timeframe: str = "1min",
     window_minutes: Optional[int] = None,
     page: str = "all",
+    window_index: Optional[int] = None,
 ) -> list[Path]:
     """Generate microstructure snapshot(s) for one symbol.
 
     page: "1" = existing panels, "2" = new panels, "all" = both pages.
+    window_index: with window_minutes, render only this 1-based page.
     """
     df_sym = df[df["symbol"] == symbol].copy()
     if df_sym.empty:
@@ -770,7 +773,7 @@ def generate_visualization(
                               "Microstructure Snapshot")
 
     return _render_windowed(df_sym, symbol, output_dir, timeframe, page,
-                            window_minutes)
+                            window_minutes, window_index=window_index)
 
 
 def _render_single(
@@ -809,23 +812,37 @@ def _render_windowed(
     timeframe: str,
     page: str,
     window_minutes: int,
+    window_index: Optional[int] = None,
 ) -> list[Path]:
-    """Split data into consecutive windows and render each."""
+    """Split data into consecutive windows and render them.
+
+    If ``window_index`` (1-based) is given, render only that one window (the
+    paginated-viewer page); otherwise render every window. Out-of-range index
+    raises IndexError (the CLI maps that to a clean error + nonzero exit).
+    """
     ts_min = df_sym["timestamp_ns"].min()
     ts_max = df_sym["timestamp_ns"].max()
-    window_ns = int(window_minutes * 60 * 1e9)
+    edges = window_edges(ts_min, ts_max, window_minutes)
 
-    edges = list(range(int(ts_min), int(ts_max) + 1, window_ns))
-    if edges[-1] < ts_max:
-        edges.append(int(ts_max) + 1)
+    if window_index is not None:
+        # Validates range and selects just this page.
+        _t0, _t1, _n, _partial = window_bounds(ts_min, ts_max, window_minutes, window_index)
+        indices = [window_index - 1]
+    else:
+        indices = list(range(len(edges) - 1))
 
     outputs = []
-    for i in range(len(edges) - 1):
+    for i in indices:
         t0, t1 = edges[i], edges[i + 1]
         chunk = df_sym[(df_sym["timestamp_ns"] >= t0) & (df_sym["timestamp_ns"] < t1)]
         if len(chunk) < 100:
-            log.warning("Window %d: only %d rows, skipping", i + 1, len(chunk))
-            continue
+            if window_index is not None:
+                log.warning("Window %d: only %d rows (partial/sparse page)", i + 1, len(chunk))
+                if chunk.empty:
+                    raise ValueError(f"page {window_index} has no rows")
+            else:
+                log.warning("Window %d: only %d rows, skipping", i + 1, len(chunk))
+                continue
 
         chunk = chunk.reset_index(drop=True)
         try:
@@ -837,7 +854,9 @@ def _render_windowed(
 
         win_start = pd.to_datetime(t0, unit="ns").strftime("%H:%M")
         win_end = pd.to_datetime(t1, unit="ns").strftime("%H:%M")
-        title = f"{window_minutes}min Window {i + 1} ({win_start}\u2013{win_end})"
+        partial = (t1 - t0) < int(window_minutes * 60 * 1e9)
+        partial_tag = " \u2014 partial" if partial else ""
+        title = f"{window_minutes}min Window {i + 1} ({win_start}\u2013{win_end}){partial_tag}"
         base = f"15m_viz_{symbol}_w{i + 1:02d}_{win_start.replace(':', '')}_{win_end.replace(':', '')}__{{pg}}.png"
 
         if page in ("0", "all"):
@@ -912,8 +931,12 @@ def main():
                         help="Bar aggregation timeframe (default: 1min)")
     parser.add_argument("--window", type=int, default=None, metavar="MINUTES",
                         help="Split data into N-minute windows (e.g. --window 15)")
+    parser.add_argument("--window-index", type=int, default=None, metavar="N",
+                        help="With --window, render only the Nth (1-based) window/page")
     parser.add_argument("--page", type=str, default="all", choices=["0", "1", "all"],
                         help="Which page(s) to generate: 0=basic, 1=advanced, all=both")
+    parser.add_argument("--open", dest="open_after", action="store_true",
+                        help="Open the produced PNG(s) with the default viewer")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -976,13 +999,26 @@ def main():
 
     print_summary(df, symbols, str(args.data_dir))
 
+    all_outputs: list[Path] = []
     for sym in targets:
         log.info("Generating visualization for %s (page=%s)...", sym, args.page)
-        outputs = generate_visualization(
-            df, sym, args.output, args.timeframe, args.window, args.page,
-        )
+        try:
+            outputs = generate_visualization(
+                df, sym, args.output, args.timeframe, args.window, args.page,
+                window_index=args.window_index,
+            )
+        except (IndexError, ValueError) as e:
+            log.error("%s", e)
+            sys.exit(1)
         for out in outputs:
             print(f"  Saved: {out}")
+        all_outputs.extend(outputs)
+
+    if getattr(args, "open_after", False) and all_outputs:
+        from viz.open_helper import open_all
+        n = open_all(all_outputs)
+        if n == 0:
+            print("  (no opener available — open the path(s) above manually)")
 
     print()
 
