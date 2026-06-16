@@ -1,0 +1,23 @@
+# Signal-bridge daemon (T17) configuration.
+#
+# Executes LIVE lifecycle signals under risk gating. mode is "dry-run" by
+# default — it places NO real orders. "live" requires an explicit change here
+# AND is only meaningful post-G8/approval (a healthy kill-switch is mandatory).
+
+[bridge]
+poll_interval_s   = 300
+account_value_usd = 10000.0
+mode              = "dry-run"   # dry-run | paper | live
+
+# Risk IPC: read every cycle (cannot be skipped). Written by the kill-switch (T16).
+halt_state_path = "data/risk/halt_state.json"
+
+# Outputs. daily_pnl_path is the exact shape kill_switch.load_pnl_history reads
+# back — this closes the kill-switch ↔ bridge loop.
+daily_pnl_path = "data/execution/daily_pnl.json"
+fills_dir      = "data/execution"
+
+# Lifecycle DB (source of LIVE signals) + daemon liveness files.
+db_path        = "data/nat.db"
+pid_file       = "data/execution/signal_bridge.pid"
+heartbeat_path = "data/execution/signal_bridge.heartbeat"

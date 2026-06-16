@@ -36,6 +36,15 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+# `nat bridge start` / direct invocation puts scripts/execution/ on sys.path[0];
+# add scripts/ so sibling packages (risk, agent, signal_lifecycle) resolve when
+# the daemon is launched directly (not just imported under conftest).
+import sys
+_SCRIPTS_ROOT = Path(__file__).resolve().parents[1]
+if str(_SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_ROOT))
+
 from data.features import load_features
 
 
@@ -44,7 +53,10 @@ from alpha.deployer import (
     evaluate_kill_switches,
     compute_position_limits,
 )
-from execution.hyperliquid_client import HyperliquidClient
+# NOTE: HyperliquidClient is imported lazily where it's actually used (run_bridge
+# / live execution) so the dry-run daemon, `status`, and `health` don't require
+# the exchange SDK (msgpack/eth-account). The type hint below is stringized via
+# `from __future__ import annotations`, so no runtime import is needed for it.
 
 log = logging.getLogger(__name__)
 
@@ -408,7 +420,9 @@ def run_bridge(
     if symbols is None:
         symbols = SYMBOLS
 
-    # Initialize client
+    # Initialize client (lazy import — keeps the dry-run daemon free of the SDK)
+    from execution.hyperliquid_client import HyperliquidClient
+
     if mode == "live":
         client = HyperliquidClient.from_env(dry_run=False)
     elif mode == "paper":
@@ -538,9 +552,277 @@ def run_bridge(
         time.sleep(cycle_seconds)
 
 
+# ── T17: bridge daemon (executes LIVE lifecycle signals under risk gating) ──
+
+log = logging.getLogger("nat.signal_bridge")
+
+
+def load_config(path: Path | str | None = None) -> dict:
+    """Bridge daemon config (paths + poll + account). Mode defaults to dry-run."""
+    defaults = {
+        "poll_interval_s": CYCLE_SECONDS,
+        "account_value_usd": 10000.0,
+        "mode": "dry-run",  # dry-run | paper | live (live requires explicit opt-in)
+        "db_path": str(ROOT / "data" / "nat.db"),
+        "halt_state_path": str(ROOT / "data" / "risk" / "halt_state.json"),
+        "daily_pnl_path": str(EXEC_LOG_DIR / "daily_pnl.json"),
+        "fills_dir": str(EXEC_LOG_DIR),
+        "pid_file": str(EXEC_LOG_DIR / "signal_bridge.pid"),
+        "heartbeat_path": str(EXEC_LOG_DIR / "signal_bridge.heartbeat"),
+    }
+    cfg_path = Path(path) if path else ROOT / "config" / "execution.toml"
+    if cfg_path.exists():
+        try:
+            import tomllib
+
+            with open(cfg_path, "rb") as f:
+                defaults.update(tomllib.load(f).get("bridge", {}))
+        except Exception as e:  # pragma: no cover
+            log.warning("Failed to read %s: %s — using defaults", cfg_path, e)
+    return defaults
+
+
+def healthy(config: dict | None = None, now: float | None = None) -> bool:
+    """True if the daemon heartbeat is fresh (< 3 poll intervals, min 180s)."""
+    cfg = config or load_config()
+    hb = Path(cfg["heartbeat_path"])
+    if not hb.exists():
+        return False
+    now = now if now is not None else time.time()
+    max_age = max(180, 3 * int(cfg.get("poll_interval_s", 300)))
+    return (now - hb.stat().st_mtime) < max_age
+
+
+class SignalBridgeDaemon:
+    """Polls LIVE lifecycle signals and executes them under risk gating.
+
+    Hard rules: the halt check runs at the TOP of every cycle and cannot be
+    skipped; sizing is portfolio-level (risk parity), never independent; the
+    daemon is dry-run unless mode=='live' AND dry_run is False. The daily P&L
+    rollup writes data/execution/daily_pnl.json in the shape the kill-switch
+    reads — closing the kill-switch ↔ bridge loop.
+
+    The expensive/exchange-touching steps are seams (_read_halt / _live_signals /
+    _size / _signal_value / _mid / _execute / _log_fill / _rollup_daily_pnl /
+    _now) so the cycle logic is unit-tested without real execution.
+    """
+
+    def __init__(
+        self,
+        config: dict | None = None,
+        *,
+        lc=None,
+        client=None,
+        clock=None,
+        dry_run: bool = True,
+    ):
+        self.config = config or load_config()
+        self.dry_run = dry_run
+        self.mode = self.config.get("mode", "dry-run")
+        self.account_value = float(self.config.get("account_value_usd", 10000.0))
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
+        self.client = client  # None in dry-run; a real client only for live
+        self.halt_path = Path(self.config["halt_state_path"])
+        self.daily_pnl_path = Path(self.config["daily_pnl_path"])
+        self.fills_dir = Path(self.config["fills_dir"])
+        self.pid_file = Path(self.config["pid_file"])
+        self.heartbeat_path = Path(self.config["heartbeat_path"])
+        self._shutdown = False
+        if lc is not None:
+            self.lc = lc
+        else:
+            from signal_lifecycle import SignalLifecycle
+
+            self.lc = SignalLifecycle(db_path=self.config["db_path"])
+
+    def _now(self):
+        return self._clock()
+
+    def _live(self) -> bool:
+        return self.mode == "live" and not self.dry_run
+
+    # -- seams --------------------------------------------------------------
+    def _read_halt(self):
+        from risk.kill_switch import read_halt_state
+
+        return read_halt_state(self.halt_path)
+
+    def _live_signals(self) -> list[dict]:
+        return self.lc.list_signals(state="LIVE")
+
+    def _size(self, signals: list[dict]) -> list[float]:
+        """Portfolio weights via risk parity (never independent sizing)."""
+        from agent.meta_portfolio import compute_risk_parity_weights
+
+        prepared = [
+            {"ic_history": (s.get("metadata") or {}).get("ic_history", [])}
+            for s in signals
+        ]
+        return compute_risk_parity_weights(prepared)
+
+    def _symbol(self, sig: dict) -> str:
+        return (sig.get("metadata") or {}).get("symbol") or (SYMBOLS[0] if SYMBOLS else "BTC")
+
+    def _mid(self, sig: dict) -> float:  # pragma: no cover - exchange query at live
+        return 1.0
+
+    def _signal_value(self, sig: dict):  # pragma: no cover - real feed at live
+        """Latest signal value for a LIVE signal's algorithm; None if unavailable.
+
+        Real bar-load + algorithm evaluation is wired at live deployment; until
+        then this returns None (no trade), which is safe — there are no LIVE
+        signals pre-paper-window anyway. The cycle plumbing (halt gate, sizing,
+        fills, rollup) is fully exercised by the planted tests, which inject this.
+        """
+        return None
+
+    def _execute(self, sig: dict, weight: float, now) -> dict | None:
+        val = self._signal_value(sig)
+        if val is None or val == 0:
+            return None
+        side = "BUY" if val > 0 else "SELL"
+        mid = self._mid(sig)
+        size_usd = self.account_value * float(weight)
+        if self._live() and self.client is not None:  # pragma: no cover - live only
+            self.client.place_order(
+                symbol=self._symbol(sig), side=side, size_usd=size_usd, price=mid
+            )
+        return {
+            "timestamp": now.isoformat(),
+            "signal_id": sig["signal_id"],
+            "signal_name": sig.get("name"),
+            "symbol": self._symbol(sig),
+            "side": side,
+            "entry_price": float(mid),
+            "entry_size": (size_usd / mid) if mid else 0.0,
+            "weight": float(weight),
+            "pnl": 0.0,
+            "pnl_pct": 0.0,  # realized P&L is filled on close; open/dry-run => 0
+            "ic": float((sig.get("metadata") or {}).get("latest_ic", 0.0) or 0.0),
+            "mode": "live" if self._live() else "dry-run",
+        }
+
+    def _log_fill(self, fill: dict, now) -> None:
+        self.fills_dir.mkdir(parents=True, exist_ok=True)
+        path = self.fills_dir / f"fills_{now.strftime('%Y-%m-%d')}.jsonl"
+        with open(path, "a") as f:
+            f.write(json.dumps(fill) + "\n")
+
+    def _rollup_daily_pnl(self, now) -> None:
+        """Aggregate fills_*.jsonl pnl_pct per date → daily_pnl.json [{date,pnl_pct}].
+
+        This is exactly the shape kill_switch.load_pnl_history reads back.
+        """
+        by_date: dict[str, float] = {}
+        if self.fills_dir.exists():
+            for fp in sorted(self.fills_dir.glob("fills_*.jsonl")):
+                for ln in fp.read_text().splitlines():
+                    if not ln.strip():
+                        continue
+                    try:
+                        r = json.loads(ln)
+                    except json.JSONDecodeError:
+                        continue
+                    d = (r.get("timestamp") or "")[:10]
+                    if d:
+                        by_date[d] = by_date.get(d, 0.0) + float(r.get("pnl_pct", 0.0))
+        out = [{"date": d, "pnl_pct": round(v, 6)} for d, v in sorted(by_date.items())]
+        self.daily_pnl_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.daily_pnl_path.with_suffix(self.daily_pnl_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(out, indent=2))
+        os.replace(tmp, self.daily_pnl_path)
+
+    # -- cycle / loop -------------------------------------------------------
+    def run_cycle(self) -> dict:
+        now = self._now()
+        halt = self._read_halt()
+        if halt.halted:  # CANNOT be skipped — gate before any signal eval/order
+            log.warning("HALT active (%s) — skipping bridge cycle", halt.level)
+            return {"halted": True, "picked_up": [], "fills": 0}
+        sigs = self._live_signals()
+        if not sigs:
+            log.info("no LIVE signals — nothing to execute")
+            return {"halted": False, "picked_up": [], "fills": 0}
+        weights = self._size(sigs)
+        picked, n_fills = [], 0
+        for sig, w in zip(sigs, weights):
+            picked.append(sig["signal_id"])
+            fill = self._execute(sig, w, now)
+            if fill:
+                self._log_fill(fill, now)
+                n_fills += 1
+        self._rollup_daily_pnl(now)
+        log.info("bridge cycle: %d LIVE signals, %d fills (%s)",
+                 len(picked), n_fills, "dry-run" if not self._live() else "live")
+        return {"halted": False, "picked_up": picked, "fills": n_fills}
+
+    def status(self) -> dict:
+        halt = self._read_halt()
+        return {
+            "mode": "live" if self._live() else "dry-run",
+            "halted": halt.halted,
+            "halt_level": halt.level,
+            "live_signals": [s["signal_id"] for s in self._live_signals()],
+            "account_value_usd": self.account_value,
+        }
+
+    def run(self) -> None:
+        poll = int(self.config["poll_interval_s"])
+        self.pid_file.parent.mkdir(parents=True, exist_ok=True)
+        self.pid_file.write_text(str(os.getpid()))
+        import signal as _signal
+
+        _signal.signal(_signal.SIGTERM, self._handle_signal)
+        _signal.signal(_signal.SIGINT, self._handle_signal)
+        log.info("Signal-bridge daemon started (PID %d, poll %ds, mode %s)",
+                 os.getpid(), poll, "live" if self._live() else "dry-run")
+        try:
+            while not self._shutdown:
+                try:
+                    self.run_cycle()
+                except Exception as e:
+                    log.error("bridge cycle error: %s", e, exc_info=True)
+                self.heartbeat_path.parent.mkdir(parents=True, exist_ok=True)
+                self.heartbeat_path.write_text(self._now().isoformat())
+                for _ in range(poll):
+                    if self._shutdown:
+                        break
+                    time.sleep(1)
+        finally:
+            self.pid_file.unlink(missing_ok=True)
+            log.info("Signal-bridge daemon stopped")
+
+    def _handle_signal(self, signum, frame):  # pragma: no cover
+        log.info("Received signal %d, shutting down after cycle", signum)
+        self._shutdown = True
+
+
+def _daemon_main(argv: list[str]) -> int:
+    from logging_config import setup_logging
+
+    setup_logging("nat.signal_bridge")
+    cmd = argv[0]
+    if cmd == "health":
+        return 0 if healthy(load_config()) else 1
+    cfg = load_config()
+    dry = ("--dry-run" in argv) or (cfg.get("mode", "dry-run") != "live")
+    d = SignalBridgeDaemon(config=cfg, dry_run=dry)
+    if cmd == "start":
+        d.run()
+        return 0
+    if cmd == "once":
+        print(json.dumps(d.run_cycle(), indent=2))
+        return 0
+    if cmd == "status":
+        print(json.dumps(d.status(), indent=2))
+        return 0
+    print(f"unknown command: {cmd}", file=sys.stderr)
+    return 2
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────
 
-def main():
+def _run_bridge_cli():
     parser = argparse.ArgumentParser(description="Signal-to-Order Bridge")
     parser.add_argument("--mode", choices=["dry-run", "paper", "live"],
                         default="dry-run",
@@ -566,5 +848,14 @@ def main():
     )
 
 
+def main(argv: list[str] | None = None) -> int:
+    """Dispatch: daemon subcommands (start/status/once/health) vs one-shot bridge."""
+    argv = argv if argv is not None else sys.argv[1:]
+    if argv and argv[0] in ("start", "status", "once", "health"):
+        return _daemon_main(argv)
+    _run_bridge_cli()
+    return 0
+
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

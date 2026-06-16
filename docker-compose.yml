@@ -162,6 +162,30 @@ services:
       start_period: 120s
     restart: unless-stopped
 
+  # Signal bridge daemon (T17) — executes LIVE signals; checks halt_state.json
+  # every cycle. depends_on the kill-switch being healthy (no execution without it).
+  signal-bridge:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.bridge
+    container_name: nat-signal-bridge
+    depends_on:
+      kill-switch:
+        condition: service_healthy
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "python", "scripts/execution/signal_bridge.py", "health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
   # Research frontend
   web:
     build:

@@ -2515,6 +2515,74 @@ def cmd_promotion_stop(args):
         _p("–", Y, "No running promotion daemon found")
 
 
+# ── signal bridge daemon (T17) ──────────────────────────────────────────────
+BRIDGE_SCRIPT = "scripts/execution/signal_bridge.py"
+
+
+def _bridge(args=None):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from execution.signal_bridge import SignalBridgeDaemon, load_config
+    cfg = load_config()
+    dry = getattr(args, 'dry_run', False) or cfg.get("mode", "dry-run") != "live"
+    return SignalBridgeDaemon(config=cfg, dry_run=dry)
+
+
+def cmd_bridge_help(args=None):
+    """Signal bridge daemon — group help."""
+    print(f"""
+  {BOLD}nat bridge{W} — signal bridge daemon (T17); executes LIVE signals under risk gating
+
+    status            mode / halt state / LIVE signals
+    once [--dry-run]  run a single execution cycle (dry-run = no orders, the default)
+    start             run the bridge daemon (foreground; polls every 5 min)
+    stop              graceful shutdown (SIGTERM)
+
+  Checks halt_state.json every cycle (cannot be skipped); risk-parity sizing.
+  Dry-run by default — no live orders without mode=live in config/execution.toml.
+""")
+
+
+def cmd_bridge_status(args):
+    """Bridge mode / halt state / LIVE signals."""
+    st = _bridge(args).status()
+    if _json_mode(args):
+        _output(st, args)
+        return
+    _p("HALT" if st["halted"] else "✓", R if st["halted"] else G,
+       f"mode={st['mode']}  halt={st['halt_level'] or 'none'}  LIVE signals={len(st['live_signals'])}")
+    if st["live_signals"]:
+        print(f"        {', '.join(st['live_signals'])}")
+
+
+def cmd_bridge_once(args):
+    """Run a single bridge execution cycle."""
+    summary = _bridge(args).run_cycle()
+    if _json_mode(args):
+        _output(summary, args)
+        return
+    if summary["halted"]:
+        _p("HALT", R, "cycle skipped (kill-switch halt active)")
+    else:
+        _p("✓", G, f"cycle: {len(summary['picked_up'])} LIVE signals, {summary['fills']} fills")
+
+
+def cmd_bridge_start(args):
+    _banner("Starting signal-bridge daemon")
+    _py(f"{BRIDGE_SCRIPT} start")
+
+
+def cmd_bridge_stop(args):
+    """Send SIGTERM to running signal-bridge daemon."""
+    import signal as sig
+    r = _sh("pgrep -f 'signal_bridge.py start'")
+    if r.returncode == 0 and r.stdout.strip():
+        pid = int(r.stdout.strip().split("\n")[0])
+        os.kill(pid, sig.SIGTERM)
+        _p("✓", G, f"Sent SIGTERM to signal-bridge (pid {pid})")
+    else:
+        _p("–", Y, "No running signal-bridge daemon found")
+
+
 def cmd_viz_features(args):
     """nat viz features — per-feature overview (value / z-score / NaN% / IC / sparkline)."""
     import math as _math
@@ -5368,6 +5436,22 @@ def build_parser():
     pmsta.set_defaults(func=cmd_promotion_start)
     pmsto = promsub.add_parser('stop', help='Graceful shutdown (SIGTERM)')
     pmsto.set_defaults(func=cmd_promotion_stop)
+
+    # ── signal bridge daemon (T17) ──
+    br_p = sub.add_parser('bridge', help='Signal bridge daemon — executes LIVE signals under risk gating (T17)')
+    br_p.set_defaults(func=cmd_bridge_help)
+    brsub = br_p.add_subparsers(dest='subcmd')
+    brst = brsub.add_parser('status', help='Mode / halt state / LIVE signals')
+    brst.add_argument('--json', action='store_true', help='JSON output')
+    brst.set_defaults(func=cmd_bridge_status)
+    bron = brsub.add_parser('once', help='Run a single execution cycle')
+    bron.add_argument('--dry-run', action='store_true', help='No orders (the default)')
+    bron.add_argument('--json', action='store_true', help='JSON output')
+    bron.set_defaults(func=cmd_bridge_once)
+    brsta = brsub.add_parser('start', help='Run the bridge daemon (foreground)')
+    brsta.set_defaults(func=cmd_bridge_start)
+    brsto = brsub.add_parser('stop', help='Graceful shutdown (SIGTERM)')
+    brsto.set_defaults(func=cmd_bridge_stop)
 
     # ── viz (terminal-first per-unit visualization, T7/NAT3) ──
     viz_p = sub.add_parser('viz', help='Terminal-first visualization (features/algorithm/paper)')
