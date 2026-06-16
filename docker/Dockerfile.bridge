@@ -1,0 +1,21 @@
+# NAT Signal-Bridge Daemon (T17)
+# Executes LIVE lifecycle signals under risk gating: checks halt_state.json every
+# cycle, sizes via risk parity, logs fills + daily P&L. Dry-run by default.
+# Mount data (lifecycle DB, halt_state, execution logs) + config:
+#   volumes: [ "./data:/app/data", "./config:/app/config:ro" ]
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Data stack for signal evaluation + sizing.
+RUN pip install --no-cache-dir \
+    "numpy>=2.0.0" "scipy>=1.11.0" "pandas>=2.0.0" "pyarrow>=15.0.0" "requests>=2.31.0"
+
+COPY scripts/ ./scripts/
+COPY config/ ./config/
+
+# Liveness via heartbeat freshness (written each cycle).
+HEALTHCHECK --interval=60s --timeout=10s --start-period=120s --retries=3 \
+    CMD ["python", "scripts/execution/signal_bridge.py", "health"]
+
+CMD ["python", "scripts/execution/signal_bridge.py", "start"]
