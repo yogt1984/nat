@@ -710,12 +710,21 @@ def cmd_data(args):
 
 
 def cmd_data_validate(args):
-    _banner("Validating collected data")
+    path = getattr(args, 'path', None)
+    target = path or _data(args)
+    as_json = _json_mode(args)
+    if not as_json:
+        _banner(f"Validating {'file' if path else 'collected data'}: {target}")
+        sys.stdout.flush()
     hours = getattr(args, 'hours', None)
-    cmd = f"scripts/validate_data.py {_data(args)} --verbose"
+    cmd = f"scripts/validate_data.py {target}"
+    if not as_json:
+        cmd += " --verbose"
     if hours:
         cmd += f" --hours {hours}"
-    _py(cmd)
+    if as_json:
+        cmd += " --json"
+    return _py(cmd).returncode
 
 
 def cmd_data_explore(args):
@@ -4871,8 +4880,10 @@ def build_parser():
     data_p.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     data_p.set_defaults(func=cmd_data)
     dsub = data_p.add_subparsers(dest='subcmd')
-    dv = dsub.add_parser('validate', help='Validate parquet data')
-    dv.add_argument('--hours', type=int, help='Validate only last N hours')
+    dv = dsub.add_parser('validate', help='Validate parquet data (a directory or a single file)')
+    dv.add_argument('path', nargs='?', help='A single .parquet file to validate (default: scan the data dir)')
+    dv.add_argument('--hours', type=int, help='Validate only last N hours (ignored for a single file)')
+    dv.add_argument('--json', action='store_true', help='Emit the report as JSON')
     dv.set_defaults(func=cmd_data_validate)
     dsub.add_parser('explore', help='Launch Jupyter').set_defaults(func=cmd_data_explore)
     dsub.add_parser('schema', help='Scan parquet schema').set_defaults(func=cmd_data_schema)
