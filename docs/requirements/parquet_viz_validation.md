@@ -347,10 +347,13 @@ real-parquet smoke):
   Plotly `Surface`, `include_plotlyjs=True` (offline self-contained HTML).
 
 **Deviations from the spec above (intentional, for velocity / legibility):**
-1. **Panels (A):** `nat viz render` reuses the curated `15m_visualize` panel layout (price /
-   depth / flow / microstructure / entropy / heatmap / toxicity / …) — a faithful "all features
-   captured" view — rather than bespoke strict per-category panels (FR-A4). `--features` is
-   **wired on `viz3d` but not yet on `viz render`** (future enhancement).
+1. **Panels (A):** with no `--features`, `nat viz render` shows the curated `15m_visualize`
+   panel layout (price / depth / flow / microstructure / entropy / heatmap / toxicity / …) — a
+   faithful "all features captured" view. **`--features` IS now wired on `viz render`** (and on
+   `viz3d`): a category / named vector / comma-list / 'all' selector switches to a per-feature
+   panel grid (stacked `viz.features.plot_feature_panel`), capped to top-N by variance
+   (`--max-features`, default 16), all-NaN columns dropped. Selector grammar shared via
+   `scripts/viz/feature_select.py`.
 2. **viz3d default (C):** defaults to **all features capped to top-N (40) by variance** with
    `--max-features` (legible "all features"), instead of R-1's "single category default";
    `--features <category|vector|list>` narrows it.

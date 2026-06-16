@@ -35,7 +35,8 @@ import pandas as pd
 from cluster_pipeline.config import META_COLUMNS
 from cluster_pipeline.loader import load_parquet, get_symbols
 from cluster_pipeline.preprocess import aggregate_bars
-from viz.features import STYLE, COLORS, apply_style
+from viz.features import STYLE, COLORS, apply_style, plot_feature_panel
+from viz.feature_select import select_features, cap_by_variance
 from viz.pager import window_edges, window_bounds  # noqa: F401 (re-exported for tests)
 
 log = logging.getLogger("15m_viz")
@@ -751,11 +752,15 @@ def generate_visualization(
     window_minutes: Optional[int] = None,
     page: str = "all",
     window_index: Optional[int] = None,
+    features: Optional[str] = None,
+    max_features: int = 16,
 ) -> list[Path]:
     """Generate microstructure snapshot(s) for one symbol.
 
     page: "1" = existing panels, "2" = new panels, "all" = both pages.
     window_index: with window_minutes, render only this 1-based page.
+    features: if set, render a per-feature panel grid (scoped to a category /
+              vector / comma-list / 'all') instead of the curated panels.
     """
     df_sym = df[df["symbol"] == symbol].copy()
     if df_sym.empty:
@@ -763,6 +768,28 @@ def generate_visualization(
 
     df_sym = df_sym.sort_values("timestamp_ns").reset_index(drop=True)
     df_sym = _ensure_datetime(df_sym)
+
+    # ── feature-scoped grid path (nat viz render --features) ──
+    if features:
+        ts_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        if window_minutes is None:
+            return [_render_feature_grid(
+                df_sym, symbol, output_dir, timeframe, features,
+                "Feature panel (overview)", max_features,
+                f"feat_{symbol}__{ts_str}.png")]
+        ts_min, ts_max = df_sym["timestamp_ns"].min(), df_sym["timestamp_ns"].max()
+        idx = window_index or 1
+        t0, t1, _n, partial = window_bounds(ts_min, ts_max, window_minutes, idx)
+        chunk = df_sym[(df_sym["timestamp_ns"] >= t0) & (df_sym["timestamp_ns"] < t1)]
+        if chunk.empty:
+            raise ValueError(f"page {idx} has no rows")
+        ws = pd.to_datetime(t0, unit="ns").strftime("%H:%M")
+        we = pd.to_datetime(t1, unit="ns").strftime("%H:%M")
+        tag = " — partial" if partial else ""
+        title = f"Feature panel · {window_minutes}min Window {idx} ({ws}–{we}){tag}"
+        return [_render_feature_grid(
+            chunk, symbol, output_dir, timeframe, features, title, max_features,
+            f"feat_{symbol}_w{idx:02d}_{ws.replace(':', '')}_{we.replace(':', '')}__{ts_str}.png")]
 
     # Compute derived features for page 1 (advanced)
     if page in ("1", "all"):
@@ -803,6 +830,43 @@ def _render_single(
         outputs.append(out)
 
     return outputs
+
+
+def _render_feature_grid(
+    chunk: pd.DataFrame,
+    symbol: str,
+    output_dir: Path,
+    freq: str,
+    features: str,
+    title: str,
+    max_features: int,
+    fname: str,
+) -> Path:
+    """Render a stacked per-feature panel grid for the selected features.
+
+    Resamples the chosen columns to ``freq`` (overview tf, or the fine page
+    freq) for a manageable, smooth panel, then reuses viz.features.plot_feature_panel.
+    """
+    cols = select_features(chunk, features)
+    cols, capped = cap_by_variance(chunk, cols, max_features)
+    if not cols:
+        raise ValueError(f"--features '{features}' selected no populated columns")
+
+    idx = pd.DatetimeIndex(pd.to_datetime(chunk["timestamp_ns"].values, unit="ns"), name="datetime")
+    sub = chunk[cols].copy()
+    sub.index = idx
+    res = sub.resample(freq).mean().reset_index()
+
+    fig = plot_feature_panel(res, cols, symbol=None)
+    cap_note = f" — top {len(cols)} by variance" if capped else ""
+    fig.suptitle(f"{symbol} — {title}{cap_note}", fontsize=12, fontweight="bold", y=1.005)
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out = output_dir / fname
+    fig.savefig(out, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close(fig)
+    return out
 
 
 def _render_windowed(
@@ -935,6 +999,11 @@ def main():
                         help="With --window, render only the Nth (1-based) window/page")
     parser.add_argument("--page", type=str, default="all", choices=["0", "1", "all"],
                         help="Which page(s) to generate: 0=basic, 1=advanced, all=both")
+    parser.add_argument("--features", default=None,
+                        help="Render a per-feature panel grid scoped to a category / named "
+                             "vector / comma-list / 'all' (instead of the curated panels)")
+    parser.add_argument("--max-features", type=int, default=16,
+                        help="Cap the feature-grid panels to the top-N by variance (default: 16)")
     parser.add_argument("--open", dest="open_after", action="store_true",
                         help="Open the produced PNG(s) with the default viewer")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -1006,6 +1075,7 @@ def main():
             outputs = generate_visualization(
                 df, sym, args.output, args.timeframe, args.window, args.page,
                 window_index=args.window_index,
+                features=args.features, max_features=args.max_features,
             )
         except (IndexError, ValueError) as e:
             log.error("%s", e)

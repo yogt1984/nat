@@ -28,13 +28,12 @@ import pandas as pd
 
 from cluster_pipeline.loader import load_parquet, get_symbols
 from viz.pager import window_bounds
+from viz.feature_select import META_COLS, select_features  # noqa: F401 (re-exported)
 
 log = logging.getLogger("viz_mesh")
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT = ROOT / "reports" / "figures" / "mesh"
-
-META_COLS = {"timestamp_ns", "symbol", "sequence_id", "datetime"}
 
 # Time granularity → (overview bar freq, page window minutes, fine page freq).
 TF_MAP = {
@@ -42,63 +41,6 @@ TF_MAP = {
     "5m": ("5min", 5, "10s"),
     "15m": ("15min", 15, "30s"),
 }
-
-
-# --------------------------------------------------------------------------- #
-# Feature selection
-# --------------------------------------------------------------------------- #
-
-def _category_map():
-    """Return (ordered_categories, {column: category}) from the schema, so the
-    surface's y-axis can be grouped by feature category."""
-    try:
-        from data.schema import BASE_FEATURES, OPTIONAL_FEATURES
-    except Exception:
-        return [], {}
-    cats, col2cat = [], {}
-    for src in (BASE_FEATURES, OPTIONAL_FEATURES):
-        for cat, cols in src.items():
-            cats.append(cat)
-            for c in cols:
-                col2cat[c] = cat
-    return cats, col2cat
-
-
-def select_features(df: pd.DataFrame, features: Optional[str]):
-    """Resolve --features into an ordered list of numeric feature columns.
-
-    features may be a category name, a named FEATURE_VECTORS vector, a
-    comma-list of columns, 'all'/None (every numeric feature). Columns are
-    ordered by category so the y-axis groups sensibly.
-    """
-    numeric = [
-        c for c in df.columns
-        if c not in META_COLS and pd.api.types.is_numeric_dtype(df[c])
-    ]
-    cats, col2cat = _category_map()
-
-    chosen = None
-    if features and features != "all":
-        if "," in features:
-            chosen = [c for c in features.split(",") if c in df.columns]
-        elif col2cat and features in set(col2cat.values()):
-            chosen = [c for c in numeric if col2cat.get(c) == features]
-        else:
-            try:
-                from cluster_pipeline.config import FEATURE_VECTORS, get_vector_columns
-                if features in FEATURE_VECTORS:
-                    chosen = [c for c in get_vector_columns(features) if c in numeric]
-            except Exception:
-                chosen = None
-        if not chosen:
-            raise ValueError(f"--features '{features}' matched no columns")
-    else:
-        chosen = numeric
-
-    # Order by category (grouped y-axis), stable within category.
-    order = {cat: i for i, cat in enumerate(cats)}
-    chosen.sort(key=lambda c: (order.get(col2cat.get(c), 10_000), c))
-    return chosen
 
 
 # --------------------------------------------------------------------------- #

@@ -2838,6 +2838,9 @@ def cmd_viz_render(args):
         cmd += f" --timeframe {overview_tf}"
     else:
         cmd += f" --window {win_min} --window-index {index} --timeframe {page_tf}"
+    feats = getattr(args, 'features', None)
+    if feats:
+        cmd += f" --features {feats} --max-features {getattr(args, 'max_features', 16)}"
     if getattr(args, 'open_after', False):
         cmd += " --open"
     cmd += " -v"
@@ -5589,6 +5592,11 @@ def build_parser():
                      help='1-based page: omit for whole-day overview, N to zoom into the Nth window')
     vzr.add_argument('--symbol', '-s', default='BTC', help="Symbol or 'all' (default: BTC)")
     vzr.add_argument('--date', default=None, help='Day YYYY-MM-DD (default: latest available)')
+    vzr.add_argument('--features', default=None,
+                     help="Scope to a category / named vector / comma-list / 'all' "
+                          "(renders a per-feature panel grid instead of the curated panels)")
+    vzr.add_argument('--max-features', type=int, default=16,
+                     help='With --features, cap the grid to top-N by variance (default: 16)')
     vzr.add_argument('--open', dest='open_after', action='store_true',
                      help='Open the produced PNG(s) with the default viewer')
     vzr.add_argument('--output', default=None, help='Output directory (default: reports/figures/snapshots)')
