@@ -2609,6 +2609,110 @@ def cmd_viz_algorithm(args):
     print(f"\n  {DIM}P&L proxy = Σ sign(signal)·fwd-return — not a cost-aware backtest; use `nat oos30`.{W}\n")
 
 
+def cmd_viz_paper(args):
+    """nat viz paper — approval evidence: cumulative P&L, IC decay, G8 scorecard (NAT6)."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from viz.approval import (load_oos_state, resolve_name, paper_pnl_series,
+                              ic_decay_series, per_signal_risk, g8_scorecard)
+    from viz.terminal import sparkline, DIM
+    from promotion_daemon import load_gates
+
+    name, symbol = args.name, _sym(args)
+    state = load_oos_state()
+    gates = load_gates()
+    risk = per_signal_risk(state, name, symbol)
+    sc = g8_scorecard(state, name, gates, symbol)
+
+    if _json_mode(args):
+        _output({"signal": name, "symbol": symbol, "risk": risk, "g8": sc,
+                 "n_pnl_points": len(paper_pnl_series(state, name, symbol))}, args)
+        return
+    if resolve_name(state, name) is None or not risk:
+        print(f"  {Y}No OOS/paper data for {name}{W} — pending the paper window (run `nat oos30`, or after promotion).")
+        return
+
+    cum = [p["cum_bps"] for p in paper_pnl_series(state, name, symbol)]
+    sh = [d["sharpe"] for d in ic_decay_series(state, name, symbol)]
+    print(f"\n  {BOLD}nat viz paper{W} — {name} on {symbol}  ({risk['n_days']} days)\n")
+    print(f"    cum P&L (bps)  last={(cum[-1] if cum else float('nan')):.0f}  {sparkline(cum)}")
+    print(f"    IC decay (7d sharpe)         {sparkline(sh)}")
+    print(f"    sharpe={risk['sharpe']:.2f}  maxDD={risk['max_dd_bps']:.0f}bps  "
+          f"PF={risk['profit_factor']:.2f}  cumP&L={risk['cum_pnl_bps']:.0f}bps")
+    print(f"\n    {BOLD}G8 scorecard{W} (provisional from OOS):")
+    checks = [
+        ("sharpe within 2x", sc.get("gate_sharpe_within_2x")),
+        ("no big daily loss", sc.get("gate_no_big_daily_loss")),
+        ("IC stable", sc.get("gate_ic_stable")),
+        ("infra stable", sc.get("gate_infra_stable")),
+        (f"duration ≥ {gates['g8_min_days']}d (n={sc.get('n_days', 0)})",
+         sc.get("n_days", 0) >= gates["g8_min_days"]),
+    ]
+    for label, ok in checks:
+        print(f"      {G}✓{W} {label}" if ok else f"      {R}✗{W} {label}")
+    overall = all(ok for _, ok in checks)
+    print(f"    → {G}G8 PASS{W}" if overall else f"    → {R}G8 FAIL{W}")
+    print(f"\n  {DIM}Provisional: OOS proxies until a live 14-day paper window accrues.{W}\n")
+
+
+def cmd_viz_portfolio(args):
+    """nat viz portfolio — P&L / exposure / correlation / risk across signals (NAT7)."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from viz.approval import load_oos_state, per_signal_risk, signal_correlation_matrix
+    from viz.terminal import DIM
+
+    tab, symbol = getattr(args, 'tab', 1), _sym(args)
+    state = load_oos_state()
+    names = sorted(state.get("algos", {}).keys())
+
+    if _json_mode(args):
+        out = {"tab": tab, "symbol": symbol, "signals": names}
+        if tab in (1, 4):
+            out["risk"] = {n: per_signal_risk(state, n, symbol) for n in names}
+        elif tab == 2:
+            out["exposure"] = None  # pending live positions
+        elif tab == 3:
+            out["correlation"] = signal_correlation_matrix(state, names, symbol)
+        _output(out, args)
+        return
+    if not names:
+        print(f"  {Y}No portfolio data{W} — pending OOS/paper data (run `nat oos30`).")
+        return
+
+    if tab == 1:
+        print(f"\n  {BOLD}Portfolio — P&L{W} ({symbol})\n")
+        print(f"    {'signal':<22} {'sharpe':>7} {'cumP&L':>9} {'maxDD':>8} {'PF':>6}")
+        for n in names:
+            r = per_signal_risk(state, n, symbol)
+            print(f"    {n:<22} {r['sharpe']:>7.2f} {r['cum_pnl_bps']:>8.0f}b "
+                  f"{r['max_dd_bps']:>7.0f}b {r['profit_factor']:>6.2f}")
+    elif tab == 2:
+        print(f"\n  {BOLD}Portfolio — Exposure{W}\n")
+        print(f"  {Y}No live positions yet{W} — gross/net exposure lights up at live deployment (post-approval).")
+    elif tab == 3:
+        m = signal_correlation_matrix(state, names, symbol)
+        sigs, mat = m["signals"], m["matrix"]
+        print(f"\n  {BOLD}Portfolio — Cross-signal correlation{W} ({symbol}, target < 0.35)\n")
+        print("    " + " ".join(f"{s[:8]:>8}" for s in sigs))
+        worst = 0.0
+        for i, s in enumerate(sigs):
+            cells = []
+            for j in range(len(sigs)):
+                cells.append(f"{mat[i][j]:>8.2f}")
+                if i != j and mat[i][j] == mat[i][j] and abs(mat[i][j]) > worst:
+                    worst = abs(mat[i][j])
+            print(f"    {s[:8]:<8}" + " ".join(cells))
+        col = G if worst < 0.35 else R
+        print(f"\n    max |off-diagonal| = {col}{worst:.2f}{W} (target < 0.35)")
+    elif tab == 4:
+        print(f"\n  {BOLD}Portfolio — Risk{W} ({symbol})\n")
+        print(f"    {'signal':<22} {'sharpe':>7} {'maxDD':>8} {'n_days':>7}")
+        for n in names:
+            r = per_signal_risk(state, n, symbol)
+            print(f"    {n:<22} {r['sharpe']:>7.2f} {r['max_dd_bps']:>7.0f}b {r['n_days']:>7}")
+        print(f"\n  {DIM}Portfolio-level VaR/leverage/effective-N pending live positions.{W}")
+    print()
+
+
 def cmd_test_process(args):
     """Run process framework tests."""
     _exec(f"{PY} -m pytest tests/test_process_base.py tests/test_process_ic.py "
@@ -5283,6 +5387,17 @@ def build_parser():
     vza.add_argument('--threshold', type=float, default=0.3, help='Entry threshold on |signal|')
     vza.add_argument('--json', action='store_true', help='JSON output')
     vza.set_defaults(func=cmd_viz_algorithm)
+    vzp = vizsub.add_parser('paper', help='Approval evidence: P&L, IC decay, G8 scorecard (NAT6)')
+    vzp.add_argument('name', help='Signal/algorithm name (e.g. 3f_liquidity, jump_detector)')
+    vzp.add_argument('--symbol', '-s', default='BTC')
+    vzp.add_argument('--json', action='store_true', help='JSON output')
+    vzp.set_defaults(func=cmd_viz_paper)
+    vzpo = vizsub.add_parser('portfolio', help='Portfolio P&L / exposure / correlation / risk (NAT7)')
+    vzpo.add_argument('--tab', type=int, default=1, choices=[1, 2, 3, 4],
+                      help='1 P&L · 2 exposure · 3 correlation · 4 risk')
+    vzpo.add_argument('--symbol', '-s', default='BTC')
+    vzpo.add_argument('--json', action='store_true', help='JSON output')
+    vzpo.set_defaults(func=cmd_viz_portfolio)
 
     # ── alg1 (MF 3-feature liquidity signal) ──
     a1_p = sub.add_parser('alg1', help='MF 3-feature liquidity signal (100min)',

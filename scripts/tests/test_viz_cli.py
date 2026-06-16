@@ -41,4 +41,30 @@ def test_viz_algorithm_unknown_returns_error():
 def test_viz_group_help_lists_subcommands():
     r = _run("viz")
     assert "features" in r.stdout and "algorithm" in r.stdout
+    assert "paper" in r.stdout and "portfolio" in r.stdout
     assert "usage: nat viz" not in r.stdout
+
+
+# ── T15: nat viz paper (NAT6) + nat viz portfolio (NAT7) ──────────────────────
+
+
+def test_viz_paper_json_shape():
+    r = _run("viz", "paper", "jump_detector", "--symbol", "BTC", "--json")
+    assert r.returncode == 0, r.stderr
+    d = json.loads(r.stdout)
+    assert d["signal"] == "jump_detector" and "g8" in d and "risk" in d
+
+
+def test_viz_paper_unknown_is_graceful():
+    r = _run("viz", "paper", "definitely_not_a_signal")
+    assert r.returncode == 0  # graceful no-data, not an error
+    assert "no oos" in r.stdout.lower() or "pending" in r.stdout.lower()
+
+
+def test_viz_portfolio_correlation_json_shape():
+    r = _run("viz", "portfolio", "--tab", "3", "--json")
+    assert r.returncode == 0, r.stderr
+    d = json.loads(r.stdout)
+    assert d["tab"] == 3
+    corr = d["correlation"]
+    assert isinstance(corr["signals"], list) and isinstance(corr["matrix"], list)
