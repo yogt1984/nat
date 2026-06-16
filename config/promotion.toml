@@ -1,0 +1,23 @@
+# Promotion daemon (T14) configuration.
+#
+# NOTE: gate thresholds are NOT here. G4/G8 are imported from
+# config/alpha.toml [gates] (g4_*, g8_*; g8_min_days=14) per "gates imported,
+# not invented". This file only configures polling, paths, and the data guard.
+
+[promotion]
+poll_interval_s      = 300
+subprocess_timeout_s = 600
+
+# ≥N consecutive "good" (≥ good_day_mb) calendar days required before any G4 run.
+min_clean_days = 7
+good_day_mb    = 200
+
+# Lifecycle DB + daemon state/liveness files.
+db_path        = "data/nat.db"
+state_file     = "data/promotion/state.json"
+heartbeat_path = "data/promotion/promotion.heartbeat"
+pid_file       = "data/promotion/promotion.pid"
+
+# Symbols to paper-trade; representative symbol used for the G4 signal.
+symbols         = ["BTC", "ETH", "SOL"]
+validate_symbol = "BTC"

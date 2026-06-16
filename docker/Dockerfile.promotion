@@ -1,0 +1,22 @@
+# NAT Promotion Daemon (T14)
+# Automates signal-lifecycle promotion (DISCOVERED→VALIDATED→PAPER→APPROVAL_PENDING),
+# orchestrating G4 validation + paper trading as subprocesses. Mount the project
+# data dir (lifecycle DB + feature parquet) and config:
+#   volumes: [ "./data:/app/data", "./config:/app/config:ro" ]
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Data stack for the validation/paper subprocesses the daemon orchestrates.
+RUN pip install --no-cache-dir \
+    "numpy>=2.0.0" "scipy>=1.11.0" "pandas>=2.0.0" "pyarrow>=15.0.0" \
+    "polars>=0.20.0" "requests>=2.31.0"
+
+COPY scripts/ ./scripts/
+COPY config/ ./config/
+
+# Liveness via heartbeat freshness (written each cycle) — detects a hung daemon.
+HEALTHCHECK --interval=60s --timeout=10s --start-period=120s --retries=3 \
+    CMD ["python", "scripts/promotion_daemon.py", "health"]
+
+CMD ["python", "scripts/promotion_daemon.py", "start"]

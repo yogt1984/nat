@@ -2448,6 +2448,73 @@ def cmd_gap_watchdog(args):
         _ensure_gap_alert()  # start daemon if down + install the watchdog cron
 
 
+# ── promotion daemon (T14) ─────────────────────────────────────────────────
+PROMOTION_SCRIPT = "scripts/promotion_daemon.py"
+
+
+def _promotion(args=None):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from promotion_daemon import PromotionDaemon
+    return PromotionDaemon(dry_run=getattr(args, 'dry_run', False))
+
+
+def cmd_promotion_help(args=None):
+    """Promotion daemon — group help."""
+    print(f"""
+  {BOLD}nat promotion{W} — signal promotion daemon (T14)
+  Drives DISCOVERED→VALIDATED→PAPER_TRADING→APPROVAL_PENDING (stops at the human gate)
+
+    status            signals by state + clean-day guard
+    once [--dry-run]  run a single cycle (--dry-run logs intended transitions, no DB writes)
+    start             run the daemon (foreground; polls every 300s)
+    stop              graceful shutdown (SIGTERM)
+
+  Gates imported from alpha.toml (g4_*/g8_*); never promotes APPROVAL_PENDING→LIVE.
+""")
+
+
+def cmd_promotion_status(args):
+    """Signals by state + the clean-day guard."""
+    st = _promotion(args).status()
+    if _json_mode(args):
+        _output(st, args)
+        return
+    print(f"\n  {BOLD}Promotion{W} — clean days: {st['clean_days_now']} (need {st['min_clean_days']})\n")
+    if not st.get("by_state"):
+        print("    (no signals — try: nat lifecycle seed)\n")
+        return
+    for state, n in st["by_state"].items():
+        print(f"    {state:<18} {n}")
+    print()
+
+
+def cmd_promotion_once(args):
+    """Run a single promotion cycle."""
+    summary = _promotion(args).run_cycle()
+    if _json_mode(args):
+        _output(summary, args)
+        return
+    mode = " (dry-run)" if getattr(args, 'dry_run', False) else ""
+    _p("✓", G, f"Cycle complete{mode}: {summary['transitions']} transitions, {summary['errors']} errors")
+
+
+def cmd_promotion_start(args):
+    _banner("Starting promotion daemon")
+    _py(f"{PROMOTION_SCRIPT} start")
+
+
+def cmd_promotion_stop(args):
+    """Send SIGTERM to running promotion daemon."""
+    import signal as sig
+    r = _sh("pgrep -f 'promotion_daemon.py start'")
+    if r.returncode == 0 and r.stdout.strip():
+        pid = int(r.stdout.strip().split("\n")[0])
+        os.kill(pid, sig.SIGTERM)
+        _p("✓", G, f"Sent SIGTERM to promotion daemon (pid {pid})")
+    else:
+        _p("–", Y, "No running promotion daemon found")
+
+
 def cmd_viz_features(args):
     """nat viz features — per-feature overview (value / z-score / NaN% / IC / sparkline)."""
     import math as _math
@@ -5181,6 +5248,22 @@ def build_parser():
     gpwd = gapsub.add_parser('watchdog', help='Install cron watchdog (auto-restart every 5 min)')
     gpwd.add_argument('--remove', action='store_true', help='Remove the watchdog cron')
     gpwd.set_defaults(func=cmd_gap_watchdog)
+
+    # ── promotion daemon (T14) ──
+    prom_p = sub.add_parser('promotion', help='Signal promotion daemon (lifecycle automation, T14)')
+    prom_p.set_defaults(func=cmd_promotion_help)
+    promsub = prom_p.add_subparsers(dest='subcmd')
+    pmst = promsub.add_parser('status', help='Signals by state + clean-day guard')
+    pmst.add_argument('--json', action='store_true', help='JSON output')
+    pmst.set_defaults(func=cmd_promotion_status)
+    pmon = promsub.add_parser('once', help='Run a single promotion cycle')
+    pmon.add_argument('--dry-run', action='store_true', help='Log intended transitions without applying')
+    pmon.add_argument('--json', action='store_true', help='JSON output')
+    pmon.set_defaults(func=cmd_promotion_once)
+    pmsta = promsub.add_parser('start', help='Run the promotion daemon (foreground)')
+    pmsta.set_defaults(func=cmd_promotion_start)
+    pmsto = promsub.add_parser('stop', help='Graceful shutdown (SIGTERM)')
+    pmsto.set_defaults(func=cmd_promotion_stop)
 
     # ── viz (terminal-first per-unit visualization, T7/NAT3) ──
     viz_p = sub.add_parser('viz', help='Terminal-first visualization (features/algorithm/paper)')
