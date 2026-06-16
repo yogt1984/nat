@@ -1,0 +1,52 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Cumulative live P&L (%)",
+      "type": "stat",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 0 } ] } } },
+      "targets": [ { "expr": "nat_live_cum_pnl_pct", "instant": true } ]
+    },
+    {
+      "title": "Most recent daily P&L (%)",
+      "type": "stat",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 0 } ] } } },
+      "targets": [ { "expr": "nat_live_last_daily_pnl_pct", "instant": true } ]
+    },
+    {
+      "title": "Days of live P&L history",
+      "type": "stat",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "targets": [ { "expr": "nat_live_pnl_days", "instant": true } ]
+    },
+    {
+      "title": "Cumulative live P&L over time (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 7 },
+      "datasource": { "type": "prometheus", "uid": "PBFA97CFB590B2093" },
+      "fieldConfig": { "defaults": { "unit": "percent", "custom": { "drawStyle": "line", "fillOpacity": 10 } } },
+      "targets": [ { "expr": "nat_live_cum_pnl_pct", "legendFormat": "cum P&L %" } ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["nat", "live", "pnl"],
+  "templating": { "list": [] },
+  "time": { "from": "now-14d", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "NAT Live P&L",
+  "uid": "nat-live-pnl",
+  "version": 1
+}
