@@ -11,3 +11,11 @@ scrape_configs:
       - targets: ['nat-ingestor:9090']
         labels:
           service: 'ingestor'
+
+  # T18: business-state metrics (lifecycle funnel / paper / live P&L) exposed by
+  # the Python metrics exporter (turns SQLite/JSON into Prometheus gauges).
+  - job_name: 'nat-metrics-exporter'
+    static_configs:
+      - targets: ['nat-metrics-exporter:9094']
+        labels:
+          service: 'metrics-exporter'

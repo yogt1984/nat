@@ -16,6 +16,7 @@ scipy>=1.11.0
 pyarrow>=14.0.0
 joblib>=1.3.0
 tomli>=2.0.0; python_version < "3.11"
+prometheus-client>=0.20.0   # T18: metrics exporter + daemon metrics endpoints
 
 # ============================================================================
 # Cluster Pipeline (scripts/cluster_pipeline/)

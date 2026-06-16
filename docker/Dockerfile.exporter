@@ -1,0 +1,20 @@
+# NAT Metrics Exporter (T18)
+# Exposes lifecycle/paper/live-P&L state as Prometheus gauges on :9094.
+# Mount data (nat.db, execution, oos_validation) + config:
+#   volumes: [ "./data:/app/data", "./config:/app/config:ro" ]
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Pure-stdlib exporter (sqlite3 + json) — only prometheus_client is needed.
+# Deliberately NOT coupled to the research/viz/lifecycle-ORM stacks.
+RUN pip install --no-cache-dir "prometheus-client>=0.20.0"
+
+COPY scripts/ ./scripts/
+COPY config/ ./config/
+
+EXPOSE 9094
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["python", "scripts/monitoring/metrics_exporter.py", "health"]
+
+CMD ["python", "scripts/monitoring/metrics_exporter.py", "start"]
