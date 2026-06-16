@@ -2,11 +2,14 @@
 
 **Scope:** the human-only checks that the automated suites cannot cover. The repo has heavy automated
 coverage (~260 `nat` commands, 118 Python test files, ~55 Rust test modules) but it is almost
-entirely synthetic-fixture unit testing. Two things only a human can confirm:
+entirely synthetic-fixture unit testing. Three things only a human can confirm:
 
-1. **Terminal connectivity** — is every implemented capability actually reachable through `nat`, and
+1. **Parquet viewing & validation tooling** *(newest — test first)* — do `nat data validate <file>`,
+   `nat viz render`, and `nat viz3d`/`nat mesh` dispatch, validate, and *render* correctly on real
+   parquet? (Spec: `docs/requirements/parquet_viz_validation.md`.)
+2. **Terminal connectivity** — is every implemented capability actually reachable through `nat`, and
    does each command dispatch without crashing?
-2. **Visualization correctness** — do the plots, the nightly HTML report, the web dashboards, and the
+3. **Visualization correctness** — do the plots, the nightly HTML report, the web dashboards, and the
    terminal UIs actually *render correctly* (not merely "the function ran")?
 
 **Out of scope (covered elsewhere — do not duplicate):**
@@ -22,19 +25,86 @@ Record each run in the sign-off log. All commands are run from the repo root (`/
 
 ## Sign-off log
 
-| Date | Tester | git SHA (`git rev-parse --short HEAD`) | Section A | Section B | Notes |
-|------|--------|----------------------------------------|-----------|-----------|-------|
-|      |        |                                        | ☐ pass    | ☐ pass    |       |
-|      |        |                                        | ☐ pass    | ☐ pass    |       |
+| Date | Tester | git SHA (`git rev-parse --short HEAD`) | Section A | Section B | Section C | Notes |
+|------|--------|----------------------------------------|-----------|-----------|-----------|-------|
+|      |        |                                        | ☐ pass    | ☐ pass    | ☐ pass    |       |
+|      |        |                                        | ☐ pass    | ☐ pass    | ☐ pass    |       |
 
 ---
 
-## Section A — Terminal connectivity
+## Section A — Parquet viewing & validation tooling
+
+Goal: a human confirms the newest data-inspection commands both **dispatch** and produce **correct
+output** (a verdict, a PNG, an interactive surface) on *real* parquet — neither of which the planted
+unit tests assert. Spec + acceptance criteria: `docs/requirements/parquet_viz_validation.md`.
+Run from repo root; pick a real recent file first:
+
+```bash
+F=$(ls -t data/features/*/*.parquet | head -1); echo "$F"
+```
+
+### A1. Single-file validation — `nat data validate`
+
+- [ ] `nat data validate "$F"` → per-check report ending in **PASS / WARN / FAIL**; `echo $?` matches
+  (0 for PASS/WARN, **nonzero on FAIL**). On current production data **FAIL is expected** (dead
+  optional columns → NaN Ratio; real gaps → Continuity). Hard checks = integrity/continuity/NaN/
+  sequence; soft (ranges/cross-symbol/rate) only warn.
+- [ ] `nat data validate "$F" --json` → **clean JSON on stdout** (no progress prose). Has `verdict`,
+  `passed`, and a `checks` array with per-check `hard` flags. Pipe through
+  `python3 -c "import json,sys; json.load(sys.stdin)"` → no error.
+- [ ] `nat data validate` (no path) → directory-mode behaviour **unchanged** (scans the feature dir).
+- [ ] `nat data validate /tmp/nope.parquet` → clean error ("Path does not exist"), exit 1, **no
+  traceback**.
+
+### A2. Paged PNG viewer — `nat viz render`
+
+Writes PNGs to `reports/figures/snapshots/`. Open each: non-empty, dark GitHub theme, correct
+title/axes. `--tf` is the granularity/page width; an optional **1-based index** pages the day
+(data-relative: page 1 = first available tick).
+
+- [ ] `nat viz render --tf 15m --symbol BTC` → **overview** (whole day, all-features curated panels;
+  basic + advanced PNGs). Title shows the day.
+- [ ] `nat viz render --tf 5m 1 --symbol BTC` → **page 1** = first 5-min window (filename `…_w01_…`);
+  `nat viz render --tf 5m 2` → the 5–10 min window.
+- [ ] `nat viz render --tf 5m 9999 --symbol BTC` → clean error "page 9999 out of range; N 5min
+  page(s) available", exit 1.
+- [ ] `nat viz render --tf 5m 1 --features flow --symbol BTC` → a **per-feature panel grid** of just
+  the `flow` category (filename `feat_…`); `--features raw_midprice,raw_spread` → exactly those two
+  panels; capped to top-N by variance (`--max-features`, default 16) when a category is large.
+- [ ] `nat viz render --tf 5m 1 --features nope_xyz` → "matched no columns", exit 1.
+- [ ] `nat viz render --tf 15m --open` → produced PNG opens in the default viewer (or prints the path
+  if headless — no crash).
+- [ ] A final partial window is flagged "— partial" in the title — expected, not a defect.
+
+### A3. Interactive 3D feature-surface — `nat viz3d` / `nat mesh`
+
+Writes self-contained HTML to `reports/figures/mesh/`.
+
+- [ ] `nat viz3d --tf 15m --symbol BTC` (and the alias `nat mesh --tf 15m --symbol BTC`) → writes
+  `<sym>_<tf>_<date>.html`; open it: a 3D **surface** renders, rotatable/zoomable, x = time,
+  y = features (grouped by category), z = value; colourbar present; dark template.
+- [ ] **Self-contained / offline:** open with no network — surface still renders (Plotly JS embedded).
+  `grep -c "Plotly.newPlot" reports/figures/mesh/*.html` → ≥ 1.
+- [ ] `nat viz3d --tf 5m 2 --features entropy --symbol BTC` → page 2; y-axis scoped to entropy
+  features (a "capped" note prints if > `--max-features`).
+- [ ] `nat viz3d --tf 5m 9999 --symbol BTC` → out-of-range error, exit 1.
+- [ ] If `plotly` is absent → clean message ("plotly is required … pip install plotly"), exit 1
+  (**not** a traceback).
+
+### A4. 15-minute snapshot auto-open — `nat 15m viz`
+
+- [ ] `nat 15m viz --symbol BTC` → renders the latest-experiment all-features snapshot and
+  **auto-opens** the PNG(s).
+- [ ] `nat 15m viz --symbol BTC --no-open` → renders but does **not** open.
+
+---
+
+## Section B — Terminal connectivity
 
 Goal: confirm the full command surface is reachable and dispatches, and that no implemented
 capability is stranded outside the CLI.
 
-### A1. Enumerate the surface
+### B1. Enumerate the surface
 
 - [ ] `nat --json commands | python3 -c "import json,sys; print(len(json.load(sys.stdin)['commands']))"`
   → **Expected:** prints `260` (or higher if commands were added). The JSON form is
@@ -43,7 +113,7 @@ capability is stranded outside the CLI.
 - [ ] `nat commands` → **Expected:** human-readable list, header reads `Available Commands (260)`.
 - [ ] `nat help` → **Expected:** curated grouped help renders, exit code 0, no Python traceback.
 
-### A2. Unwired-capability scan (documented heuristic)
+### B2. Unwired-capability scan (documented heuristic)
 
 `nat` invokes most subcommands by shelling out to a `scripts/…` file. This snippet lists scripts that
 **define their own argparse CLI but are never referenced by the `nat` dispatcher** — i.e. capability
@@ -76,7 +146,7 @@ done | sort
   > Note: `nat model train` exists but routes to a *different* code path than the per-algorithm
   > trainers above — those four are reachable only by direct `python scripts/train_*.py`.
 
-### A3. Doc / implementation consistency
+### B3. Doc / implementation consistency
 
 - [ ] `nat test agent -h` → **Expected (current reality):** **fails** — `test agent` is *not* in the
   dispatcher, even though `CLAUDE.md` advertises it ("350+ tests"). Record as a known doc/impl
@@ -85,7 +155,7 @@ done | sort
 - [ ] Spot-check 3–4 other commands named in `CLAUDE.md` / `README` actually dispatch
   (e.g. `nat test`, `nat test validate`, `nat oos30 -h`, `nat algorithm evaluate -h`).
 
-### A4. Per-group dispatch smoke
+### B4. Per-group dispatch smoke
 
 For each major group, run the representative command. **Expected for every row:** output
 renders / JSON parses, exit 0, **no argparse error or Python traceback**. Pure-compute/JSON commands
@@ -100,6 +170,8 @@ are safe to run for real; **daemon / live / destructive** commands are checked w
 | algorithm | `nat algorithm list` | read |
 | process | `nat process list` | read |
 | data | `nat data validate -h` | read |
+| viz render | `nat viz render -h` | read |
+| viz3d / mesh | `nat viz3d -h` / `nat mesh -h` | read |
 | gauntlet | `nat gauntlet report` | read |
 | nightly | `nat nightly report` | read |
 | reports | `nat reports latest` | read |
@@ -123,19 +195,19 @@ are safe to run for real; **daemon / live / destructive** commands are checked w
 
 ---
 
-## Section B — Visualization correctness
+## Section C — Visualization correctness
 
 Goal: a human confirms the visual output is actually correct — axes, legends, colours, layout, live
 updates — none of which the unit tests assert.
 
-### B1. Terminal UIs
+### C1. Terminal UIs
 
 - [ ] `nat monitor` → **Expected:** `rich` dashboard renders; Unicode sparklines (`▁▂▃▄▅▆▇█`) and
   tables are aligned, colours sensible, refreshes smoothly, no ANSI corruption. `Ctrl-C` exits
   cleanly. (Needs some data under `data/features/`; with none, expect a graceful "no data" state, not
   a traceback.)
 
-### B2. Static plots (`nat visualize …`)
+### C2. Static plots (`nat visualize …`)
 
 Each command writes PNGs under `reports/figures/` (skeptical → `reports/skeptical_validation/`).
 Open the PNGs and check, per category: image is **non-empty**; title / axis labels / legend present
@@ -154,7 +226,7 @@ window.
 - [ ] Open a handful: `xdg-open reports/figures/<one>.png` — confirm no truncated/blank/garbled
   images.
 
-### B3. Nightly HTML report
+### C3. Nightly HTML report
 
 - [ ] `nat nightly report` → prints latest report summary + file paths.
 - [ ] `nat nightly open` → opens latest `reports/nightly/<date>.html` in the browser. **Expected:**
@@ -168,7 +240,7 @@ window.
   - The "NO DATA" placeholders for still-dead wiring columns are **expected**, not a failure (the
     position tracker is disabled by default).
 
-### B4. Web dashboards
+### C4. Web dashboards
 
 Start each, open the URL, confirm it loads, updates, and renders tables/heatmaps correctly. Stop when
 done.
@@ -180,7 +252,7 @@ done.
 - [ ] Agent dashboard — `nat agent dashboard` → http://localhost:8060 — IC heatmap renders with a
   sane colour gradient; registry / cycle tables populate (or show a graceful empty state).
 
-### B5. Out-of-scope visual surfaces (pointers only)
+### C5. Out-of-scope visual surfaces (pointers only)
 
 - [ ] Grafana (:3002) and Optuna dashboard (:8070) are part of the Docker stack — verify via
   `docs/cloud_deployment/1_4_testing_verification.md`, not here.
