@@ -186,6 +186,25 @@ services:
       start_period: 120s
     restart: unless-stopped
 
+  # Metrics exporter (T18) — turns lifecycle/paper/live-P&L state into Prometheus
+  # gauges on :9094 (scraped by prometheus; the datasource for the Grafana
+  # lifecycle-funnel / paper / live-P&L dashboards).
+  metrics-exporter:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.exporter
+    container_name: nat-metrics-exporter
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "python", "scripts/monitoring/metrics_exporter.py", "health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
   # Research frontend
   web:
     build:

@@ -1,0 +1,11 @@
+# Metrics exporter (T18) — exposes NAT's SQLite/JSON state as Prometheus gauges
+# so the Grafana dashboards (lifecycle funnel / paper / live P&L) have a datasource.
+
+[metrics_exporter]
+port      = 9094
+refresh_s = 15
+
+db_path        = "data/nat.db"                       # lifecycle funnel
+daily_pnl_path = "data/execution/daily_pnl.json"      # live P&L (bridge rollup)
+oos_state_path = "data/oos_validation/state.json"     # paper performance
+heartbeat_path = "data/monitoring/metrics_exporter.heartbeat"
