@@ -142,6 +142,26 @@ services:
       start_period: 90s
     restart: unless-stopped
 
+  # Promotion daemon (T14) — automates lifecycle DISCOVERED→…→APPROVAL_PENDING.
+  promotion:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.promotion
+    container_name: nat-promotion
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD", "python", "scripts/promotion_daemon.py", "health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
   # Research frontend
   web:
     build:
