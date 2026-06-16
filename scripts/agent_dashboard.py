@@ -119,6 +119,37 @@ def read_registry(agent: str = "microstructure") -> list[dict]:
     return []
 
 
+def read_lifecycle() -> dict:
+    """Lifecycle funnel (T18): counts by state, signals table, approval-pending list."""
+    empty = {"by_state": {}, "total": 0, "approval_pending": [], "signals": []}
+    if not DB_PATH.exists():
+        return empty
+    try:
+        from signal_lifecycle import APPROVAL_PENDING, SignalLifecycle
+
+        lc = SignalLifecycle(db_path=DB_PATH)
+        try:
+            sigs = lc.list_signals()
+        finally:
+            lc.close()
+    except Exception as e:
+        log.warning("read_lifecycle failed: %s", e)
+        return empty
+    by_state: dict[str, int] = {}
+    for s in sigs:
+        by_state[s["state"]] = by_state.get(s["state"], 0) + 1
+    return {
+        "by_state": by_state,
+        "total": len(sigs),
+        "approval_pending": [s["signal_id"] for s in sigs if s["state"] == APPROVAL_PENDING],
+        "signals": [
+            {"signal_id": s["signal_id"], "name": s.get("name"),
+             "state": s["state"], "updated_at": s.get("updated_at")}
+            for s in sigs
+        ],
+    }
+
+
 def read_gen_stats(agent: str = "microstructure") -> dict:
     store = _get_store()
     if store:
@@ -516,6 +547,14 @@ td { font-family: monospace; }
         <tbody id="registry-body"></tbody></table>
     </div>
 
+    <!-- Lifecycle funnel (T18) -->
+    <div class="card card-full">
+        <h2>Signal Lifecycle</h2>
+        <div id="lifecycle-funnel">Loading...</div>
+        <table><thead><tr><th>Signal</th><th>State</th><th>Updated</th></tr></thead>
+        <tbody id="lifecycle-body"></tbody></table>
+    </div>
+
     <!-- Heatmap -->
     <div class="card card-full">
         <h2>Signal x Gate IC Heatmap</h2>
@@ -637,6 +676,21 @@ async function refreshRegistry() {
         <td>${s.discovery_date||''}</td>
     </tr>`).join('');
     document.getElementById('registry-body').innerHTML = rows || '<tr><td colspan=5 style="color:#8b949e">No signals registered</td></tr>';
+}
+
+async function refreshLifecycle() {
+    const d = await fetch(API+'/api/lifecycle').then(r=>r.json());
+    const order = ['DISCOVERED','VALIDATED','PAPER_TRADING','APPROVAL_PENDING','LIVE','MONITORING','RETIRED','REJECTED'];
+    const funnel = order.filter(st => d.by_state[st]).map(st =>
+        `<div class="stat"><div class="stat-value">${d.by_state[st]}</div><div class="stat-label">${st}</div></div>`).join('');
+    const ap = (d.approval_pending||[]).length;
+    document.getElementById('lifecycle-funnel').innerHTML =
+        (funnel || '<span style="color:#8b949e">No signals (try: nat lifecycle seed)</span>') +
+        (ap ? `<p style="color:var(--yellow)">${ap} awaiting approval: ${d.approval_pending.join(', ')}</p>` : '');
+    const rows = (d.signals||[]).map(s => `<tr>
+        <td>${(s.name||s.signal_id||'').substring(0,40)}</td><td>${s.state}</td>
+        <td>${(s.updated_at||'').substring(0,19)}</td></tr>`).join('');
+    document.getElementById('lifecycle-body').innerHTML = rows || '<tr><td colspan=3 style="color:#8b949e">No signals</td></tr>';
 }
 
 async function refreshHeatmap() {
@@ -952,7 +1006,7 @@ async function refreshICThreshold() {
 }
 
 async function refreshAll() {
-    await Promise.all([refreshSummary(), refreshRegistry(), refreshHeatmap(),
+    await Promise.all([refreshSummary(), refreshRegistry(), refreshLifecycle(), refreshHeatmap(),
                        refreshGraveyard(), refreshQueue(), refreshGenStats(), refreshCache(),
                        refreshSankey(), refreshCrossSymbol(), refreshICDecay(), refreshCorrMatrix(),
                        refreshICThreshold()]);
@@ -1019,6 +1073,9 @@ class AgentDashboardHandler(BaseHTTPRequestHandler):
 
         elif path == "/api/registry":
             self._json_response(_cached("registry", read_registry))
+
+        elif path == "/api/lifecycle":
+            self._json_response(_cached("lifecycle", read_lifecycle))
 
         elif path == "/api/graveyard":
             self._json_response(
