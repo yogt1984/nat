@@ -1,6 +1,7 @@
 # Requirements — Parquet Visualization & Validation Tooling for `nat`
 
-Status: **proposed** (requirements analysis; implementation is a follow-up slice).
+Status: **implemented** (all three capabilities shipped on `feat/viz-validation-tooling`;
+see §12 Implementation notes for what was built and the deviations from this spec).
 Owner: research tooling. Scope: read-only consumers of the existing feature parquet —
 **no feature-vector / schema change is implied**.
 
@@ -327,3 +328,33 @@ Per `CLAUDE.md` (planted test before real data; real-parquet smoke before commit
 4. **Capability C** (`nat viz3d`/`nat mesh`) — Plotly surface + HTML export, same pagination.
 5. Planted tests precede each; real-parquet smoke before commit; conventional commits on a
    feat branch, `merge --no-ff` to master.
+
+---
+
+## 12. Implementation notes (as built)
+
+Shipped test-first on `feat/viz-validation-tooling` (3 commits; 18 planted tests across
+`test_validate_data_file.py`, `test_viz_render_pagination.py`, `test_viz_mesh.py`; each with a
+real-parquet smoke):
+
+- **Capability B** — `scripts/validate_data.py` extended for single files + three-level verdict
+  (`HARD_CHECKS`/`verdict`/`to_dict`); `nat data validate <path> [--json]`. As-built.
+- **Capability A** — `nat viz render` wraps the existing `scripts/15m_visualize.py`, which
+  already does data-relative windowing; added `window_index` + `--open`. The shared §3b math
+  lives in `scripts/viz/pager.py` (`window_edges`/`window_bounds`); the opener in
+  `scripts/viz/open_helper.py`; `"1min"` registered in `preprocess.TIMEFRAMES`.
+- **Capability C** — `scripts/viz_mesh.py` (`build_surface`/`render`) + `nat viz3d`/`nat mesh`,
+  Plotly `Surface`, `include_plotlyjs=True` (offline self-contained HTML).
+
+**Deviations from the spec above (intentional, for velocity / legibility):**
+1. **Panels (A):** `nat viz render` reuses the curated `15m_visualize` panel layout (price /
+   depth / flow / microstructure / entropy / heatmap / toxicity / …) — a faithful "all features
+   captured" view — rather than bespoke strict per-category panels (FR-A4). `--features` is
+   **wired on `viz3d` but not yet on `viz render`** (future enhancement).
+2. **viz3d default (C):** defaults to **all features capped to top-N (40) by variance** with
+   `--max-features` (legible "all features"), instead of R-1's "single category default";
+   `--features <category|vector|list>` narrows it.
+3. **`--hours`** was dropped from `viz render`/`viz3d` (the `INDEX` page supersedes it), as
+   noted in FR-A6; it remains on `nat data validate`.
+4. **plotly** (already in `requirements.txt`) was installed into the active environment to run
+   Capability C; `viz_mesh` imports it lazily and errors cleanly if absent.
