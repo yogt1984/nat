@@ -2844,6 +2844,40 @@ def cmd_viz_render(args):
     return _py(cmd).returncode
 
 
+def cmd_viz3d(args):
+    """nat viz3d / nat mesh — interactive 3D feature-surface-over-time (Plotly HTML)."""
+    tf = getattr(args, 'tf', '15m')
+    index = getattr(args, 'index', None)
+    sym = _sym(args)
+
+    date = getattr(args, 'date', None) or _latest_feature_day(args)
+    if not date:
+        _p("x", R, f"No feature data days found under {_data(args)}")
+        return 1
+    data_dir = f"{_data(args)}/{date}"
+    if not Path(data_dir).exists():
+        _p("x", R, f"No data for {date}: {data_dir}")
+        return 1
+
+    out = getattr(args, 'output', None) or str(ROOT / "reports" / "figures" / "mesh")
+    mode = "overview" if index is None else f"page {index}"
+    _banner(f"viz3d — {sym} {tf} {mode} ({date})")
+    sys.stdout.flush()
+
+    cmd = (f"scripts/viz_mesh.py --tf {tf} --symbol {sym} --data-dir {data_dir} "
+           f"--date {date} --output {out} --z {getattr(args, 'zmode', 'zscore')} "
+           f"--max-features {getattr(args, 'max_features', 40)}")
+    if index is not None:
+        cmd += f" {index}"
+    feats = getattr(args, 'features', None)
+    if feats:
+        cmd += f" --features {feats}"
+    if getattr(args, 'open_after', False):
+        cmd += " --open"
+    cmd += " -v"
+    return _py(cmd).returncode
+
+
 def cmd_test_process(args):
     """Run process framework tests."""
     _exec(f"{PY} -m pytest tests/test_process_base.py tests/test_process_ic.py "
@@ -5559,6 +5593,26 @@ def build_parser():
                      help='Open the produced PNG(s) with the default viewer')
     vzr.add_argument('--output', default=None, help='Output directory (default: reports/figures/snapshots)')
     vzr.set_defaults(func=cmd_viz_render)
+
+    # ── viz3d / mesh (interactive 3D feature-surface-over-time) ──
+    v3 = sub.add_parser('viz3d', aliases=['mesh'],
+                        help='Interactive 3D feature-surface-over-time (Plotly HTML)')
+    v3.add_argument('--tf', default='15m', choices=['1m', '5m', '15m'],
+                    help='Time granularity / page width (default: 15m)')
+    v3.add_argument('index', nargs='?', type=int,
+                    help='1-based page: omit for whole-day overview, N for the Nth window')
+    v3.add_argument('--symbol', '-s', default='BTC', help='Symbol (default: BTC)')
+    v3.add_argument('--date', default=None, help='Day YYYY-MM-DD (default: latest available)')
+    v3.add_argument('--features', default=None,
+                    help="Category, named vector, comma-list, or 'all' (default: all, capped)")
+    v3.add_argument('--z', dest='zmode', default='zscore', choices=['zscore', 'value'],
+                    help='Per-feature normalization (default: zscore)')
+    v3.add_argument('--max-features', type=int, default=40,
+                    help='Cap y-axis to top-N features by variance (default: 40)')
+    v3.add_argument('--open', dest='open_after', action='store_true',
+                    help='Open the produced HTML in the browser')
+    v3.add_argument('--output', default=None, help='Output directory (default: reports/figures/mesh)')
+    v3.set_defaults(func=cmd_viz3d)
 
     # ── alg1 (MF 3-feature liquidity signal) ──
     a1_p = sub.add_parser('alg1', help='MF 3-feature liquidity signal (100min)',

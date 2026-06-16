@@ -36,6 +36,7 @@ from cluster_pipeline.config import META_COLUMNS
 from cluster_pipeline.loader import load_parquet, get_symbols
 from cluster_pipeline.preprocess import aggregate_bars
 from viz.features import STYLE, COLORS, apply_style
+from viz.pager import window_edges, window_bounds  # noqa: F401 (re-exported for tests)
 
 log = logging.getLogger("15m_viz")
 
@@ -802,41 +803,6 @@ def _render_single(
         outputs.append(out)
 
     return outputs
-
-
-def window_edges(ts_min: int, ts_max: int, window_minutes: float) -> list[int]:
-    """Consecutive window edges (ns), data-relative: the first edge is the first
-    available tick. Mirrors the slicing used to paginate a day into tf-windows."""
-    window_ns = int(window_minutes * 60 * 1e9)
-    edges = list(range(int(ts_min), int(ts_max) + 1, window_ns))
-    if not edges:
-        edges = [int(ts_min)]
-    if edges[-1] < ts_max:
-        edges.append(int(ts_max) + 1)
-    if len(edges) == 1:  # span shorter than one window → a single partial page
-        edges.append(int(ts_max) + 1)
-    return edges
-
-
-def window_bounds(ts_min: int, ts_max: int, window_minutes: float, index: int):
-    """1-based page bounds for the data-relative pagination model (§3b).
-
-    Returns ``(t0, t1, n_pages, partial)``. ``index`` is 1-based and counts
-    windows forward from the first available tick. Raises IndexError if out of
-    range. ``partial`` is True when the page is shorter than a full window
-    (i.e. the final page where data ends mid-window).
-    """
-    edges = window_edges(ts_min, ts_max, window_minutes)
-    n_pages = len(edges) - 1
-    if index < 1 or index > n_pages:
-        raise IndexError(
-            f"page {index} out of range; {n_pages} {window_minutes:g}min "
-            f"page(s) available for this data"
-        )
-    t0, t1 = edges[index - 1], edges[index]
-    window_ns = int(window_minutes * 60 * 1e9)
-    partial = (t1 - t0) < window_ns
-    return t0, t1, n_pages, partial
 
 
 def _render_windowed(
