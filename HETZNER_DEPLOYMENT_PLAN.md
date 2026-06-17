@@ -145,7 +145,7 @@ as redundancy. su-35 upgrades to the wired binary at this point — **not before
 - **Security:** `ufw` as above; `GRAFANA_ANON=false`; keep the `prometheus.` vhost
   internal (drop its DNS record or IP-restrict in `docker/Caddyfile`).
 - **Monitoring:** gap-alert pages within ~5 min on a stall; kill-switch halts on a
-  PnL/IC breach (paper/live only). Health: `nat gap health`, `nat risk status`,
+  PnL/IC breach (paper/live only). Health: `nat gap status`, `nat risk status`,
   `python scripts/monitoring/metrics_exporter.py health`.
 - **Rollback:** `docker compose up -d --no-deps <service>` after a `git checkout` of
   the prior code, or stop a daemon with its `nat <x> stop`.
