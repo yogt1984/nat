@@ -37,7 +37,7 @@ from cluster_pipeline.loader import load_parquet, get_symbols
 from cluster_pipeline.preprocess import aggregate_bars
 from viz.features import STYLE, COLORS, apply_style, plot_feature_panel
 from viz.feature_select import select_features, cap_by_variance
-from viz.pager import window_edges, window_bounds  # noqa: F401 (re-exported for tests)
+from viz.pager import window_edges, window_bounds, tail_bounds, parse_duration_minutes  # noqa: F401
 
 log = logging.getLogger("15m_viz")
 
@@ -978,6 +978,54 @@ def print_summary(df: pd.DataFrame, symbols: list[str], data_dir: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _render_last(args) -> None:
+    """Render the LAST N minutes of the freshest *readable* data under the live
+    feature dir, and be honest about staleness (the current hour is an unreadable
+    `.parquet.tmp` until hourly rotation, so readable data can lag up to ~1 h)."""
+    import math
+    import time
+    from swarm.parquet_reader import read_evaluation_data
+
+    minutes = parse_duration_minutes(args.last)          # ValueError on garbage → caught in main()
+    sym = args.symbol
+    out_dir = args.output or DEFAULT_OUTPUT
+    data_dir = str(args.data_dir) if args.data_dir else str(ROOT / "data" / "features")
+
+    hours_needed = max(1, math.ceil(minutes / 60) + 1)   # cover the window + an hour boundary
+    try:
+        df = read_evaluation_data(data_dir, symbol=sym, hours=hours_needed, max_memory_mb=500.0)
+    except FileNotFoundError as e:
+        log.error("%s", e); sys.exit(1)
+    if df is None or df.empty or "timestamp_ns" not in df.columns:
+        log.error("No readable data under %s for %s", data_dir, sym); sys.exit(1)
+
+    ts_min, ts_max = int(df["timestamp_ns"].min()), int(df["timestamp_ns"].max())
+    t0, t1 = tail_bounds(ts_min, ts_max, minutes)
+    chunk = df[(df["timestamp_ns"] >= t0) & (df["timestamp_ns"] < t1)].reset_index(drop=True)
+    if chunk.empty:
+        log.error("No rows in the last %g min window", minutes); sys.exit(1)
+
+    now_ns = int(time.time() * 1e9)
+    age_min = max(0.0, (now_ns - ts_max) / 1e9 / 60)
+    span_min = (t1 - 1 - t0) / 1e9 / 60
+    ws = pd.to_datetime(t0, unit="ns", utc=True).strftime("%H:%M:%S")
+    we = pd.to_datetime(t1 - 1, unit="ns", utc=True).strftime("%H:%M:%S")
+    print(f"  → Last {minutes:g}m: {ws}–{we} UTC ({span_min:.1f} min, {age_min:.0f} min old)")
+    if age_min > 5:
+        print("    current hour still buffering — readable parquet lags hourly rotation")
+
+    outputs = generate_visualization(
+        chunk, sym, out_dir, timeframe="10s", window_minutes=None, page=args.page,
+        features=args.features, max_features=args.max_features,
+    )
+    for o in outputs:
+        print(f"  Saved: {o}")
+    if getattr(args, "open_after", False) and outputs:
+        from viz.open_helper import open_all
+        if open_all(outputs) == 0:
+            print("  (no opener available — open the path(s) above manually)")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="15m_visualize",
@@ -1006,6 +1054,8 @@ def main():
                         help="Cap the feature-grid panels to the top-N by variance (default: 16)")
     parser.add_argument("--open", dest="open_after", action="store_true",
                         help="Open the produced PNG(s) with the default viewer")
+    parser.add_argument("--last", default=None, metavar="DURATION",
+                        help="Render the last N minutes of the freshest readable data (e.g. 15m, 1h)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -1013,6 +1063,14 @@ def main():
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
+
+    # --last: freshest-readable tail view (its own data source: the live feature dir)
+    if args.last:
+        try:
+            _render_last(args)
+        except ValueError as e:          # bad --last duration
+            log.error("%s", e); sys.exit(1)
+        return
 
     # Resolve data source
     data_file = None

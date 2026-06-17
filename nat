@@ -2854,6 +2854,22 @@ def cmd_viz_render(args):
     index = getattr(args, 'index', None)
     sym = _sym(args)
 
+    # --last: freshest-readable tail view (data/features root; bypass day/INDEX/--tf)
+    last = getattr(args, 'last', None)
+    if last:
+        out = getattr(args, 'output', None) or str(ROOT / "reports" / "figures" / "snapshots")
+        _banner(f"viz render — {sym} last {last} (freshest readable)")
+        sys.stdout.flush()
+        cmd = (f"scripts/15m_visualize.py --data-dir {_data(args)} --last {last} "
+               f"--symbol {sym} --output {out} --page all")
+        feats = getattr(args, 'features', None)
+        if feats:
+            cmd += f" --features {feats} --max-features {getattr(args, 'max_features', 16)}"
+        if getattr(args, 'open_after', False):
+            cmd += " --open"
+        cmd += " -v"
+        return _py(cmd).returncode
+
     date = getattr(args, 'date', None) or _latest_feature_day(args)
     if not date:
         _p("x", R, f"No feature data days found under {_data(args)}")
@@ -5628,6 +5644,8 @@ def build_parser():
                      help='1-based page: omit for whole-day overview, N to zoom into the Nth window')
     vzr.add_argument('--symbol', '-s', default='BTC', help="Symbol or 'all' (default: BTC)")
     vzr.add_argument('--date', default=None, help='Day YYYY-MM-DD (default: latest available)')
+    vzr.add_argument('--last', default=None, metavar='DURATION',
+                     help='Render the last N of the freshest readable data (e.g. 15m, 1h); bypasses --date/INDEX')
     vzr.add_argument('--features', default=None,
                      help="Scope to a category / named vector / comma-list / 'all' "
                           "(renders a per-feature panel grid instead of the curated panels)")
