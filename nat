@@ -8,6 +8,7 @@ Run 'nat help' for full command reference.
 from __future__ import annotations
 
 import argparse
+import getpass
 import json as _json
 import os
 import signal as sig
@@ -111,6 +112,73 @@ def _ensure_release():
             sys.exit(1)
 
 
+def _dir_owner(path):
+    """Best-effort username owning `path`."""
+    try:
+        import pwd
+        return pwd.getpwuid(os.stat(path).st_uid).pw_name
+    except Exception:
+        return "?"
+
+
+def _unwritable_data_dirs(bases=None):
+    """Data dirs the ingestor must write but the current user CANNOT — the
+    root-owned-dir silent-stall cause (Docker-as-root vs native-as-user). Returns
+    [(path, owner)]. Pass `bases` to test against arbitrary dirs."""
+    if bases is None:
+        bases = [ROOT / "data" / "features", ROOT / "data" / "trades"]
+    issues = []
+    for base in bases:
+        base = Path(base)
+        if not base.exists():
+            continue
+        if not os.access(base, os.W_OK):
+            issues.append((str(base), _dir_owner(base)))
+        for d in sorted(base.glob("20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]")):
+            if d.is_dir() and not os.access(d, os.W_OK):
+                issues.append((str(d), _dir_owner(d)))
+    return issues
+
+
+def cmd_doctor(args):
+    """Preflight for ingestion startup: data-dir ownership, binary, disk."""
+    _banner("nat doctor — ingestion preflight")
+    me = getpass.getuser()
+    ok = True
+
+    issues = _unwritable_data_dirs()
+    if issues:
+        ok = False
+        _p("x", R, f"{len(issues)} data path(s) NOT writable by '{me}' — the ingestor will STALL silently:")
+        for path, owner in issues:
+            _p(" ", Y, f"{path}  (owned by {owner})")
+        _p(" ", W, f"Fix:  sudo chown -R {me}:{me} {ROOT / 'data'}")
+    else:
+        _p("+", G, f"Data dirs writable by '{me}'")
+
+    if BIN_ING.exists():
+        _p("+", G, "Ingestor binary present")
+    else:
+        ok = False
+        _p("x", R, "Ingestor binary missing — run: nat build")
+
+    import shutil as _shutil
+    du = _shutil.disk_usage(str(ROOT))
+    free_pct = du.free / du.total * 100
+    if free_pct >= 5:
+        _p("+", G, f"Disk: {du.free / 1e9:.0f} GB free ({free_pct:.0f}%)")
+    else:
+        ok = False
+        _p("x", R, f"Disk LOW: only {free_pct:.0f}% free")
+
+    print()
+    if ok:
+        _p("*", G, "Preflight OK — safe to nat start")
+    else:
+        _p("x", R, "Preflight FAILED — fix the above before nat start")
+    return 0 if ok else 1
+
+
 # ── Top-level commands ───────────────────────────────────────────────────────
 
 def cmd_start(args):
@@ -124,6 +192,16 @@ def cmd_start(args):
     if not BIN_ING.exists():
         _p("...", Y, "Binary not found, building...")
         cmd_build(args)
+
+    # Preflight: a root-owned data dir (Docker-era) makes the native ingestor
+    # stall silently — warn loudly with the fix before launching.
+    issues = _unwritable_data_dirs()
+    if issues:
+        me = getpass.getuser()
+        _p("x", R, f"PREFLIGHT: {len(issues)} data path(s) NOT writable by '{me}' — the ingestor will stall:")
+        for path, owner in issues[:6]:
+            _p(" ", Y, f"{path}  (owned by {owner})")
+        _p(" ", W, f"Fix first:  sudo chown -R {me}:{me} {ROOT / 'data'}   (then re-run; see `nat doctor`)")
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     logfile = LOG_DIR / f"ingestor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -4785,6 +4863,7 @@ def build_parser():
     sub.add_parser('start', help='Start ingestor + watchdog + dashboard').set_defaults(func=cmd_start)
     sub.add_parser('stop', help='Stop everything').set_defaults(func=cmd_stop)
     sub.add_parser('status', help='Health check').set_defaults(func=cmd_status)
+    sub.add_parser('doctor', help='Ingestion preflight (data-dir ownership, binary, disk)').set_defaults(func=cmd_doctor)
     log_p = sub.add_parser('log', help='Tail ingestor log')
     log_p.set_defaults(func=cmd_log)
     log_sub = log_p.add_subparsers(dest='subcmd')
