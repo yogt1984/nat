@@ -104,8 +104,11 @@ def poll_system_health() -> dict:
         health["redis"] = ("OK", f"{len(keys)} feature keys")
     except ImportError:
         health["redis"] = ("N/A", "redis-py not installed")
-    except (ConnectionError, OSError, TimeoutError):
-        health["redis"] = ("DOWN", "connection refused")
+    except Exception:
+        # Catch broadly: r.ping() raises redis.exceptions.ConnectionError, which
+        # is a RedisError — NOT a builtin ConnectionError — so a narrow tuple
+        # misses it and crashes the whole monitor. Redis-down must degrade, not crash.
+        health["redis"] = ("DOWN", "not reachable")
 
     # API server
     try:
@@ -231,7 +234,9 @@ def poll_features() -> dict:
             if raw:
                 features[sym] = json.loads(raw)
         return features
-    except (ImportError, ConnectionError, OSError, TimeoutError, json.JSONDecodeError):
+    except Exception:
+        # Any redis/parse failure — incl. redis.exceptions.ConnectionError when
+        # Redis is down — means no live features, but must never crash the monitor.
         return {}
 
 
