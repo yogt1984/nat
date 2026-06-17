@@ -6,7 +6,8 @@
 /target/
 rust/target/
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock is intentionally tracked — this workspace builds binaries, so the
+# locked dependency graph is committed for reproducible builds.
 
 # Python
 __pycache__/
