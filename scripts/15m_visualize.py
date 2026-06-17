@@ -1056,11 +1056,14 @@ def main():
                         help="Open the produced PNG(s) with the default viewer")
     parser.add_argument("--last", default=None, metavar="DURATION",
                         help="Render the last N minutes of the freshest readable data (e.g. 15m, 1h)")
+    parser.add_argument("--quiet", action="store_true",
+                        help="Suppress logs and the summary; print only the 'Saved:' line(s)")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=(logging.ERROR if args.quiet              # quiet: only 'Saved:' lines (+ real errors)
+               else (logging.DEBUG if args.verbose else logging.INFO)),
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
 
@@ -1124,7 +1127,8 @@ def main():
             sys.exit(1)
         targets = [args.symbol]
 
-    print_summary(df, symbols, str(args.data_dir))
+    if not args.quiet:
+        print_summary(df, symbols, str(args.data_dir))
 
     all_outputs: list[Path] = []
     for sym in targets:
