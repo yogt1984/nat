@@ -515,6 +515,7 @@ def cmd_visualize_scan(args):
     dpi = getattr(args, 'dpi', 150)
 
     sys.path.insert(0, str(ROOT / "scripts"))
+    sys.path.insert(0, str(ROOT / "scripts" / "exploration"))  # visualize_scanner lives here
     from visualize_scanner import run_all
     paths = run_all(data_dir=data_dir, symbol=symbol, output_dir=output,
                     report_path=report_path, dpi=dpi, plots="scanner")
@@ -530,6 +531,7 @@ def cmd_visualize_data(args):
     dpi = getattr(args, 'dpi', 150)
 
     sys.path.insert(0, str(ROOT / "scripts"))
+    sys.path.insert(0, str(ROOT / "scripts" / "exploration"))  # visualize_scanner lives here
     from visualize_scanner import run_all
     paths = run_all(data_dir=data_dir, symbol=symbol, output_dir=output,
                     dpi=dpi, plots="data")
@@ -586,6 +588,7 @@ def cmd_visualize_all(args):
     dpi = getattr(args, 'dpi', 150)
 
     sys.path.insert(0, str(ROOT / "scripts"))
+    sys.path.insert(0, str(ROOT / "scripts" / "exploration"))  # visualize_scanner lives here
     from visualize_scanner import run_all
     paths = run_all(data_dir=data_dir, symbol=symbol, output_dir=output,
                     report_path=report_path, dpi=dpi, plots="all")
