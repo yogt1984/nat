@@ -49,18 +49,23 @@ for the wired binary** (`[position_tracker]` enabled) while su-35 stays frozen.
 ## Bring-up sequence (named services, in order)
 
 ```bash
+nat doctor                                         # preflight: data-dir ownership/writability, binary, disk
 nat docker build                                   # or: docker compose build
-docker compose up -d redis
+docker compose up -d redis postgres
 docker compose up -d ingestor                      # wired binary; writes ./data/features
-docker compose up -d gap-alert                     # <5min Telegram page on any data gap
+docker compose up -d gap-alert alerts              # <5min Telegram page on any data gap
 docker compose up -d kill-switch                   # risk halt (publishes halt_state.json)
 docker compose up -d promotion signal-bridge metrics-exporter
 docker compose up -d prometheus grafana caddy api web optuna-dashboard
-docker compose ps                                  # confirm all healthy
+docker compose ps                                  # confirm all 15 healthy
 ```
-`depends_on` health-gates the order (redis→ingestor→gap-alert; kill-switch→signal-bridge;
-prometheus→grafana; caddy→{grafana,api}). Grafana: `http://<host>:3002` (anonymous) —
-NAT Overview + Lifecycle Funnel + Paper Performance + Live P&L auto-provision.
+That is the full **15-service** set (`docker compose config --services`): redis, postgres,
+ingestor, gap-alert, alerts, kill-switch, promotion, signal-bridge, metrics-exporter, prometheus,
+grafana, caddy, api, web, optuna-dashboard. `postgres` backs the Optuna studies; `alerts` is the
+Telegram service. `depends_on` health-gates the order (redis→ingestor→gap-alert; kill-switch→
+signal-bridge; prometheus→grafana; caddy→{grafana,api}; postgres→optuna-dashboard). Grafana:
+`http://<host>:3002` (anonymous) — NAT Overview + Lifecycle Funnel + Paper Performance + Live P&L
+auto-provision.
 
 ## Step 1 — first 24h: coverage check (resolve the dead features)
 
@@ -92,7 +97,7 @@ Apply the decision matrix in `01_concentration_viability_assessment.md`:
 Record the verdict in the `01_…` doc. It unblocks T9's LF3 (liquidation cascade)
 and the agents' dead-column skip lists — or documents them as permanently gated.
 
-## Step 3 — cutover decision (after Jun-17 streak completes)
+## Step 3 — cutover decision (after the 7-day clean-data streak completes)
 
 Compare cloud vs su-35 over overlapping hours: row counts, gap profile (`nat gap`),
 feature parity within float noise. The cleaner box becomes primary; the other stays
@@ -106,7 +111,12 @@ after N days) so the box doesn't fill. (Track growth from the first 24h.)
 ## Rollback / monitoring
 
 - Gap-alert pages within ~5 min on any ingestion stall; kill-switch halts on a
-  PnL/IC breach (paper/live only). Health: `nat gap health`, `nat risk status`.
+  PnL/IC breach (paper/live only). Health: `nat gap status`, `nat risk status`.
 - Roll back a service with `docker compose up -d --no-deps <service>` after a
   `git checkout` of the prior image, or stop a daemon with its `nat <x> stop`.
 - The 48h viability clock runs on **this box's** data, not su-35's.
+- **Data-dir ownership (silent-stall gotcha):** the Docker ingestor runs as **root** and creates
+  **root-owned** `data/features` & `data/trades`. If you ever run a **native (non-root) ingestor**
+  against the same tree (e.g. at cutover), it can't write the root-owned dirs and **stalls
+  silently**. Fix: `sudo chown -R <user>:<user> data/`. **`nat doctor` detects this** — run it
+  before switching ingestors.

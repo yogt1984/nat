@@ -74,6 +74,9 @@ title/axes. `--tf` is the granularity/page width; an optional **1-based index** 
 - [ ] `nat viz render --tf 5m 1 --features nope_xyz` → "matched no columns", exit 1.
 - [ ] `nat viz render --tf 15m --open` → produced PNG opens in the default viewer (or prints the path
   if headless — no crash).
+- [ ] `nat viz render --last 15m --symbol BTC` → freshest-readable tail: prints the analyzed window
+  + its **age** ("Last 15m: …–… UTC (15.0 min, N min old)"; "current hour still buffering" when the
+  current hour hasn't rotated) and writes the snapshot — does NOT beat the ~1h readable lag.
 - [ ] A final partial window is flagged "— partial" in the title — expected, not a defect.
 
 ### A3. Interactive 3D feature-surface — `nat viz3d` / `nat mesh`
@@ -94,8 +97,9 @@ Writes self-contained HTML to `reports/figures/mesh/`.
 ### A4. 15-minute snapshot auto-open — `nat 15m viz`
 
 - [ ] `nat 15m viz --symbol BTC` → renders the latest-experiment all-features snapshot and
-  **auto-opens** the PNG(s).
-- [ ] `nat 15m viz --symbol BTC --no-open` → renders but does **not** open.
+  **auto-opens** the PNG(s). **Quiet by design**: output is *only* the two `Saved:` PNG paths (no
+  banner/logs/summary).
+- [ ] `nat 15m viz --symbol BTC --no-open` → renders (the two `Saved:` lines) but does **not** open.
 
 ---
 
@@ -164,7 +168,8 @@ are safe to run for real; **daemon / live / destructive** commands are checked w
 
 | Group | Command to type | Kind |
 |-------|-----------------|------|
-| system | `nat status --json` | read |
+| system | `nat --json status` | read (global `--json` is a **prefix** flag — `nat status --json` errors) |
+| doctor | `nat doctor` | read (ingestion preflight: data-dir ownership/binary/disk) |
 | commands | `nat --json commands >/dev/null` | read |
 | config | `nat config show` | read |
 | algorithm | `nat algorithm list` | read |
@@ -202,10 +207,13 @@ updates — none of which the unit tests assert.
 
 ### C1. Terminal UIs
 
-- [ ] `nat monitor` → **Expected:** `rich` dashboard renders; Unicode sparklines (`▁▂▃▄▅▆▇█`) and
-  tables are aligned, colours sensible, refreshes smoothly, no ANSI corruption. `Ctrl-C` exits
-  cleanly. (Needs some data under `data/features/`; with none, expect a graceful "no data" state, not
-  a traceback.)
+- [ ] `nat monitor` → **Expected (redefined):** the live **feature probe** (`show_features`) — its
+  own WebSocket, prints instantaneous feature values at ~10 Hz, **persists nothing**. Connects,
+  shows the refreshing PRICE/TRADE-ACTIVITY display (values fill in after ~warmup), `Ctrl-C` exits.
+  Works independent of the persistent ingestor; needs no Redis. (`--hz`, `-s/--symbol`.)
+- [ ] `nat monitor tui` → **Expected:** the legacy `rich` dashboard (health/agent/features tabs,
+  Redis-backed); with Redis down it shows a graceful "Redis DOWN/not available" state, **not** a
+  traceback (it no longer crashes).
 
 ### C2. Static plots (`nat visualize …`)
 
