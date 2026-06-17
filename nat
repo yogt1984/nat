@@ -43,6 +43,12 @@ def _sh(cmd, **kw):
 
 def _exec(cmd, cwd=None, env=None):
     """Run shell command in foreground, inheriting stdio."""
+    # Flush our buffered output first so banners/prints appear *before* the
+    # child's output. Without this, Python fully buffers stdout when it is a
+    # pipe (e.g. `nat build | tail`), so the child writes to the terminal first
+    # and our banner lands last — making a successful command look broken.
+    sys.stdout.flush()
+    sys.stderr.flush()
     e = {**os.environ, **(env or {})}
     return subprocess.run(cmd, shell=True, cwd=str(cwd) if cwd else None, env=e)
 
