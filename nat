@@ -344,7 +344,22 @@ def cmd_dashboard(args):
 
 
 def cmd_monitor(args):
-    """Unified terminal monitor (health, agents, features)."""
+    """Live feature probe — stream computed features to the terminal (no ingestion).
+
+    Runs the `show_features` binary: its own WebSocket, computes features, prints
+    their instantaneous values at ~N Hz, persists nothing. The quickest "is the
+    system functional?" check — works whether or not the persistent ingestor runs."""
+    sf = RUST / "target" / "release" / "show_features"
+    if not sf.exists():
+        _p("...", Y, "show_features binary missing — building release binaries...")
+        _ensure_release()
+    sym = _sym(args)
+    hz = getattr(args, "hz", 10)
+    return _exec(f"./target/release/show_features {sym} {hz}", cwd=RUST).returncode
+
+
+def cmd_monitor_tui(args):
+    """Legacy rich dashboard (Redis-backed health/agent/features tabs)."""
     cmd = [PY, str(ROOT / "scripts" / "monitor.py")]
     if hasattr(args, "tab") and args.tab:
         cmd += ["--tab", str(args.tab)]
@@ -1875,15 +1890,11 @@ def cmd_15m_offline(args):
 
 
 def cmd_15m_viz(args):
-    """Visualize latest 15-minute experiment."""
-    _banner("15-MINUTE VISUALIZATION")
+    """Visualize latest 15-minute experiment (quiet: prints only the saved PNG paths)."""
     sym = _sym(args)
     extra = ""
     data = getattr(args, 'data', None)
-    if data:
-        extra += f" --data-dir {data}"
-    else:
-        extra += " --latest"
+    extra += f" --data-dir {data}" if data else " --latest"
     window = getattr(args, 'window', None)
     if window:
         extra += f" --window {window}"
@@ -1891,9 +1902,7 @@ def cmd_15m_viz(args):
     extra += f" --page {page}"
     if getattr(args, 'open_after', True):
         extra += " --open"
-    if not data:  # --latest path → say which slice we're rendering
-        _print_15m_window("Rendering window")
-    return _py(f"scripts/15m_visualize.py{extra} --symbol {sym} -v").returncode
+    return _py(f"scripts/15m_visualize.py{extra} --symbol {sym} --quiet").returncode
 
 
 def cmd_15m_test(args):
@@ -4810,10 +4819,15 @@ def build_parser():
     ps.set_defaults(func=cmd_profile_scalp)
     sub.add_parser('report', help='Generate experiment report').set_defaults(func=cmd_report)
     sub.add_parser('dashboard', help='Start dashboard').set_defaults(func=cmd_dashboard)
-    monitor_p = sub.add_parser('monitor', help='Unified terminal monitor (health/agent/features)')
-    monitor_p.add_argument('--tab', type=int, default=1, choices=[1, 2, 3],
-                           help='Initial tab: 1=Health, 2=Agent, 3=Features')
+    monitor_p = sub.add_parser('monitor', help='Live feature probe: stream computed features (no ingestion)')
+    monitor_p.add_argument('--symbol', '-s', default='BTC', help='Symbol (default: BTC)')
+    monitor_p.add_argument('--hz', type=int, default=10, help='Update frequency in Hz (default: 10, max 50)')
     monitor_p.set_defaults(func=cmd_monitor)
+    monsub = monitor_p.add_subparsers(dest='subcmd')
+    montui = monsub.add_parser('tui', help='Legacy rich dashboard (Redis health/agent/features tabs)')
+    montui.add_argument('--tab', type=int, default=1, choices=[1, 2, 3],
+                        help='Initial tab: 1=Health, 2=Agent, 3=Features')
+    montui.set_defaults(func=cmd_monitor_tui)
     sub.add_parser('macro', help='Daily macro signals').set_defaults(func=cmd_macro)
     help_p = sub.add_parser('help', help='Show full help')
     help_p.add_argument('--grep', default=None, help='Search commands/help by keyword')
