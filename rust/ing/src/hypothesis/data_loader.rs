@@ -59,7 +59,7 @@ pub fn load_all_data(data_dir: &Path) -> Result<Vec<RecordBatch>> {
         let builder = ParquetRecordBatchReaderBuilder::try_new(file)
             .with_context(|| format!("Failed to create reader for {}", path.display()))?;
 
-        let mut reader = builder.build()?;
+        let reader = builder.build()?;
 
         for batch in reader {
             let batch =
