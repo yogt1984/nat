@@ -13,7 +13,7 @@
 | **algorithm** | `scripts/algorithms/` | [`algorithm.md`](algorithm.md) | `@register` |
 | **process** | `scripts/processes/` | [`process.md`](process.md) | `@register` |
 | **cli-capability** | `nat` (→ `nat/commands/*` after NAT10) | *(2nd-wave)* | `build_parser()` |
-| **viz-component** | `web/src/components/` | *(2nd-wave; P3-deferred)* | `nat viz *` |
+| **viz-component** | `nat` (CLI) · `web/src/components/` (P3-deferred) | [`viz.md`](viz.md) | `nat viz *` |
 
 Every increment is **exactly one** citizen — registered, contract-bound, dual-tested
 (planted + real-data), maturity-tagged.
