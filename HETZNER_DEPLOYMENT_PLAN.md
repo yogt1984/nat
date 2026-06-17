@@ -71,19 +71,38 @@ Cloud deployment is the next P0 action. One bring-up does three things at once:
 ## Phase 2 — Build & bring up (named services, in order)
 
 ```bash
+nat doctor                            # preflight: data-dir ownership/writability, binary, disk
 nat docker build                      # or: docker compose build
-docker compose up -d redis
+docker compose up -d redis postgres
 docker compose up -d ingestor         # WIRED binary; writes ./data/features
-docker compose up -d gap-alert        # <5min Telegram page on any data gap
+docker compose up -d gap-alert alerts # <5min Telegram page on any data gap
 docker compose up -d kill-switch
 docker compose up -d promotion signal-bridge metrics-exporter
 docker compose up -d prometheus grafana caddy api web optuna-dashboard
 nat docker ps                         # confirm all 15 services healthy
 ```
 
-Order is health-gated by `depends_on` (redis→ingestor→gap-alert; kill-switch→
-signal-bridge; prometheus→grafana; caddy→{grafana,api}). See
-`docs/cloud_deployment/2_observability_and_e2e.md` for the full chain.
+That brings up all **15** services (`docker compose config --services`): redis, postgres,
+ingestor, gap-alert, alerts, kill-switch, promotion, signal-bridge, metrics-exporter, prometheus,
+grafana, caddy, api, web, optuna-dashboard. `postgres` backs the Optuna studies (optuna-dashboard
+depends on it); `alerts` is the Telegram service. Order is health-gated by `depends_on`
+(redis→ingestor→gap-alert; kill-switch→signal-bridge; prometheus→grafana; caddy→{grafana,api};
+postgres→optuna-dashboard). See `docs/cloud_deployment/2_observability_and_e2e.md` for the full
+chain. `nat doctor` up front catches the silent-stall case where a data dir is owned by a different
+user than the ingestor process (see Operations).
+
+## 24/7 / always-on (what keeps it up without babysitting)
+
+Once Phase 2 is up, the stack is self-running — no cron/manual restarts:
+
+- **`restart: unless-stopped` on all 15 services** — Docker auto-restarts any service that crashes
+  **and on host/Docker reboot**, until you explicitly `docker compose stop` it. This (not a script)
+  is what makes the box 24/7.
+- **Self-healing/monitoring** — gap-alert pages within ~5 min on any ingestion stall; the
+  kill-switch halts on a PnL/IC breach (paper/live only); Prometheus/Grafana track health; Caddy
+  renews TLS automatically.
+- **Always-on box** — the point of the cloud box: a redundant ingestor independent of su-35, since
+  data continuity is the binding constraint.
 
 ## Phase 3 — Verify (first 24h)
 
@@ -109,7 +128,7 @@ Apply the decision matrix (`0_overview.md` Step 2 + the `01_…` doc):
 Record the verdict in the `01_…` doc. It unblocks LF3 + the agents' dead-column
 skip lists, or documents them as permanently gated.
 
-## Phase 5 — Cutover (only after the Jun-17 streak completes)
+## Phase 5 — Cutover (only after the 7-day clean-data streak completes)
 
 Compare cloud vs su-35 over overlapping hours: row counts, gap profile (`nat gap`),
 feature parity within float noise. The cleaner box becomes primary; the other stays
@@ -130,6 +149,12 @@ as redundancy. su-35 upgrades to the wired binary at this point — **not before
   `python scripts/monitoring/metrics_exporter.py health`.
 - **Rollback:** `docker compose up -d --no-deps <service>` after a `git checkout` of
   the prior code, or stop a daemon with its `nat <x> stop`.
+- **Data-dir ownership (silent-stall gotcha):** the Docker ingestor runs as **root** and creates
+  **root-owned** `data/features` & `data/trades` dirs. If you ever run a **native (non-root)
+  ingestor** against the same tree (e.g. at cutover, or a local `nat start`), it **cannot write the
+  root-owned dirs and stalls silently** (the writer task dies; no error to the operator). Fix:
+  `sudo chown -R <user>:<user> data/`. **`nat doctor` detects this** before `nat start` — run it
+  first whenever you switch between the Docker and native ingestor.
 
 ## Out of scope
 
