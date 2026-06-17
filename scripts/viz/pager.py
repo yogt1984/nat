@@ -25,6 +25,30 @@ def window_edges(ts_min: int, ts_max: int, window_minutes: float) -> list[int]:
     return edges
 
 
+def tail_bounds(ts_min: int, ts_max: int, minutes: float):
+    """Bounds for the LAST `minutes` of available data: ``[t0, t1)`` where
+    ``t1 = ts_max + 1`` (exclusive upper, so a ``< t1`` filter keeps the final
+    tick) and ``t0 = max(ts_min, ts_max - minutes)``. If the data spans less
+    than `minutes`, ``t0`` clamps to ``ts_min`` (a partial tail)."""
+    window_ns = int(minutes * 60 * 1e9)
+    t0 = max(int(ts_min), int(ts_max) - window_ns)
+    t1 = int(ts_max) + 1
+    return t0, t1
+
+
+def parse_duration_minutes(s) -> float:
+    """Parse a duration into minutes: ``"15m"``→15, ``"1h"``→60, ``"90m"``→90,
+    bare ``"15"``→15. Raises ValueError on anything else."""
+    s = str(s).strip().lower()
+    if not s:
+        raise ValueError("empty duration")
+    if s.endswith("m"):
+        return float(s[:-1])          # float() raises ValueError on garbage
+    if s.endswith("h"):
+        return float(s[:-1]) * 60.0
+    return float(s)                   # bare value = minutes
+
+
 def window_bounds(ts_min: int, ts_max: int, window_minutes: float, index: int):
     """1-based page bounds for the data-relative pagination model.
 
