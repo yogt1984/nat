@@ -103,7 +103,7 @@ def _ensure_release():
     if not BIN_ING.exists():
         _p("...", Y, "Release binaries not found, building...")
         r = _cargo(
-            "build --release --bin ing --bin validate_api --bin validate_positions "
+            "build --locked --release --bin ing --bin validate_api --bin validate_positions "
             "--bin validate_whales --bin validate_entropy --bin show_features --bin test_hypotheses"
         )
         if r.returncode != 0:
@@ -601,19 +601,19 @@ def cmd_build(args):
     """Build all release binaries."""
     _banner("Building release binaries")
     _cargo(
-        "build --release --bin ing --bin validate_api --bin validate_positions "
+        "build --locked --release --bin ing --bin validate_api --bin validate_positions "
         "--bin validate_whales --bin validate_entropy --bin show_features --bin test_hypotheses"
     )
 
 
 def cmd_build_debug(args):
     _banner("Building debug binary")
-    _cargo("build --bin ing")
+    _cargo("build --locked --bin ing")
 
 
 def cmd_build_api(args):
     _banner("Building API server")
-    _cargo("build --release --bin nat-api")
+    _cargo("build --locked --release --bin nat-api")
 
 
 def cmd_build_clean(args):
@@ -626,11 +626,11 @@ def cmd_build_fmt(args):
 
 
 def cmd_build_lint(args):
-    _cargo("clippy -- -D warnings")
+    _cargo("clippy --locked -- -D warnings")
 
 
 def cmd_build_check(args):
-    _cargo("check")
+    _cargo("check --locked")
 
 
 # ── Run commands (foreground, for development) ───────────────────────────────
@@ -1644,7 +1644,7 @@ def cmd_eamm_backtest(args):
 
 def cmd_api_start(args):
     _ensure_release()
-    _cargo("build --release --bin nat-api")
+    _cargo("build --locked --release --bin nat-api")
     _banner("NAT API server")
     print("  REST: http://localhost:3000")
     print("  WebSocket: ws://localhost:3000/ws/stream/:symbol\n")
@@ -1652,14 +1652,14 @@ def cmd_api_start(args):
 
 
 def cmd_api_alerts(args):
-    _cargo("build --release --bin nat-api")
+    _cargo("build --locked --release --bin nat-api")
     _banner("Telegram alert service")
     _exec("./target/release/alert-service", cwd=RUST)
 
 
 def cmd_api_serve_all(args):
     _ensure_release()
-    _cargo("build --release --bin nat-api")
+    _cargo("build --locked --release --bin nat-api")
     _banner("Starting full NAT stack in tmux")
     _exec("tmux kill-session -t nat 2>/dev/null || true")
     _exec(f"tmux new-session -d -s nat -n ingestor "
@@ -3855,7 +3855,7 @@ def cmd_deploy(args):
 
     # Step 1: build
     _p("1", B, "Building release binary...")
-    r = _cargo("build --release --bin ing")
+    r = _cargo("build --locked --release --bin ing")
     if r.returncode != 0:
         _p("x", R, "Build failed")
         sys.exit(1)
