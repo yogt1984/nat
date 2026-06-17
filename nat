@@ -164,12 +164,32 @@ def cmd_stop(args):
     """Stop ingestor and remove watchdog."""
     pid = _pid()
     if pid:
-        os.kill(pid, sig.SIGTERM)
-        time.sleep(8)  # allow graceful shutdown (flush Parquet, close WS)
-        if _pid():
-            os.kill(pid, sig.SIGKILL)
-            time.sleep(1)
-        _p("-", Y, "Ingestor stopped")
+        # The ingestor may be Docker-managed (a container process owned by root):
+        # the host user can't signal it, and `restart: unless-stopped` would just
+        # bring it back. Detect that and guide to the right tool instead of
+        # crashing with a PermissionError.
+        try:
+            os.kill(pid, 0)  # permission probe — sends no signal
+        except PermissionError:
+            _p("x", Y, f"Ingestor (PID {pid}) is Docker-managed — `nat stop` can't signal it.")
+            _p(" ", W, "To stop it:  nat docker down   (or: docker stop nat-ingestor)")
+            _p(" ", W, "Ingestor and nat daemons left running (nothing changed).")
+            return 0
+        except ProcessLookupError:
+            pid = None  # vanished between pgrep and the probe
+    if pid:
+        try:
+            os.kill(pid, sig.SIGTERM)
+            time.sleep(8)  # allow graceful shutdown (flush Parquet, close WS)
+            if _pid():
+                os.kill(pid, sig.SIGKILL)
+                time.sleep(1)
+            _p("-", Y, "Ingestor stopped")
+        except PermissionError:
+            _p("x", Y, f"Cannot signal ingestor PID {pid} (Docker-managed?) — try: nat docker down")
+            return 0
+        except ProcessLookupError:
+            _p("-", W, "Ingestor already stopped")
     else:
         _p("-", W, "Ingestor was not running")
 
