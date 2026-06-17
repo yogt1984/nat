@@ -15,7 +15,7 @@ import subprocess
 import sys
 import textwrap
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -1758,6 +1758,27 @@ def _stop_ingestor_bg(proc):
             proc.wait()
 
 
+def _print_15m_window(label="Analyzed window"):
+    """Print the time window of the latest 15m experiment (from its data_ref.json).
+
+    Makes it obvious which 15-min slice was analyzed — two runs inside the same
+    data-flush window analyze the *same* slice (the ingestor buffers a row group
+    and rotates hourly, so freshly-ingested ticks aren't readable yet), which is
+    why repeated runs can produce identical graphs."""
+    ref = ROOT / "reports" / "smoke_test" / "latest" / "data_ref.json"
+    if not ref.exists():
+        return
+    try:
+        d = _json.loads(ref.read_text())
+        tmin = datetime.fromtimestamp(d["ts_min"] / 1e9, tz=timezone.utc)
+        tmax = datetime.fromtimestamp(d["ts_max"] / 1e9, tz=timezone.utc)
+        dur = (d["ts_max"] - d["ts_min"]) / 1e9 / 60
+        _p("→", B, f"{label}: {tmin:%Y-%m-%d %H:%M:%S}–{tmax:%H:%M:%S} UTC "
+                   f"({dur:.1f} min, {d.get('rows', '?')} rows)")
+    except Exception:
+        pass
+
+
 def cmd_15m(args):
     """Full 15-minute experiment: ingest → collect → stop → validate → profile → cluster → report."""
     duration = getattr(args, 'duration', FIFTEEN_MIN)
@@ -1815,6 +1836,8 @@ def cmd_15m(args):
     if getattr(args, 'skip_cluster', False):
         extra += " --skip-cluster"
     _py(f"scripts/15m_test.py run --data-dir {data_dir} --output reports/smoke_test -v{extra}")
+    _print_15m_window()
+    _p(" ", B, "Visualize: nat 15m viz")
 
 
 def cmd_15m_offline(args):
@@ -1827,6 +1850,8 @@ def cmd_15m_offline(args):
     if getattr(args, 'skip_cluster', False):
         extra += " --skip-cluster"
     _py(f"scripts/15m_test.py run --data-dir {data} --output reports/smoke_test -v{extra}")
+    _print_15m_window()
+    _p(" ", B, "Visualize: nat 15m viz")
 
 
 def cmd_15m_viz(args):
@@ -1846,6 +1871,8 @@ def cmd_15m_viz(args):
     extra += f" --page {page}"
     if getattr(args, 'open_after', True):
         extra += " --open"
+    if not data:  # --latest path → say which slice we're rendering
+        _print_15m_window("Rendering window")
     return _py(f"scripts/15m_visualize.py{extra} --symbol {sym} -v").returncode
 
 
