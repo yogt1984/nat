@@ -14,6 +14,7 @@ numpy>=2.0.0
 pandas>=2.0.0
 scipy>=1.11.0
 pyarrow>=14.0.0
+redis>=4.0.0          # client for the ingestor's live nat:latest:* / nat:features:* (nat monitor, it-engine, research_output)
 joblib>=1.3.0
 tomli>=2.0.0; python_version < "3.11"
 prometheus-client>=0.20.0   # T18: metrics exporter + daemon metrics endpoints
