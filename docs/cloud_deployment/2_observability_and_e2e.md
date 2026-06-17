@@ -35,6 +35,7 @@ Dropped in `docker/grafana/dashboards/` (provider loads `/var/lib/grafana/dashbo
 | NAT Lifecycle Funnel | `nat-lifecycle-funnel` | `nat_lifecycle_signals{state}` |
 | NAT Paper Performance | `nat-paper-performance` | `nat_paper_sharpe`, `nat_paper_max_drawdown_bps` |
 | NAT Live P&L | `nat-live-pnl` | `nat_live_*` |
+| NAT Overview | `nat-overview` | ingestor metrics (throughput / freshness) |
 
 The lifecycle funnel highlights `APPROVAL_PENDING` (the human gate). Paper/live
 panels are empty until the paper window accrues (~Aug) — by design.
@@ -54,16 +55,24 @@ signal-bridge`; `prometheus → grafana`; `caddy → {grafana, api}`.
 
 Runbook (on the deploy box):
 ```bash
-nat docker build            # or: docker compose build
-docker compose up -d redis ingestor          # data first
-docker compose up -d kill-switch gap-alert    # safety/monitoring
+nat doctor                                    # preflight: data-dir ownership/writability, binary, disk
+nat docker build                              # or: docker compose build
+docker compose up -d redis postgres           # data + Optuna store first
+docker compose up -d ingestor                 # wired binary
+docker compose up -d gap-alert alerts kill-switch   # monitoring/safety
 docker compose up -d promotion signal-bridge metrics-exporter
-docker compose up -d prometheus grafana caddy api web
-docker compose ps           # all healthy?
+docker compose up -d prometheus grafana caddy api web optuna-dashboard
+docker compose ps                             # all 15 healthy?
 # Grafana: http://<host>:3002  (anonymous); dashboards auto-provisioned.
 ```
-Named-service invocations only — never a bare `docker compose up` while su-35 is
-streak-frozen (constraint 1).
+All **15** services (`docker compose config --services`): redis, postgres, ingestor, gap-alert,
+alerts, kill-switch, promotion, signal-bridge, metrics-exporter, prometheus, grafana, caddy, api,
+web, optuna-dashboard. Named-service invocations only — never a bare `docker compose up` while
+su-35 is streak-frozen (constraint 1).
+
+> **Data-dir ownership gotcha:** the Docker ingestor runs as root and creates root-owned
+> `data/` dirs; a native (non-root) ingestor against the same tree stalls silently on writes.
+> `nat doctor` detects it; fix with `sudo chown -R <user>:<user> data/`.
 
 ## Deferred (follow-on)
 

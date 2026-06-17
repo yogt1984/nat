@@ -78,6 +78,7 @@ nat data validate data/features/2026-06-15/20260615_140000.parquet  # one file â
 nat viz render --tf 15m               # whole-day all-features PNG snapshot (overview), auto path
 nat viz render --tf 5m 1 --open       # zoom into the first 5-min page (1m/5m/15m); open the PNG
 nat viz render --tf 5m 1 --features flow   # scope a page to one feature category/vector/list
+nat viz render --last 15m --open      # freshest-readable window + its age (honest about rotation lag)
 nat viz3d --tf 15m --features entropy --open   # interactive 3D feature-surface (Plotly HTML)
 
 # 4. Launch autonomous research agents
@@ -1124,10 +1125,12 @@ nat evolve export                                # export best config to TOML
 
 #### Ingestor Control
 ```bash
+nat doctor                 # ingestion preflight (data-dir ownership/writability, binary, disk)
 nat start                  # production launch (tmux + watchdog + dashboard + logging)
 nat stop                   # graceful shutdown
-nat status                 # health check (JSON-compatible)
+nat status                 # health check (JSON-compatible; use `nat --json status`)
 nat log                    # tail latest log
+nat monitor                # live feature probe (show_features, ~10Hz, no ingestion); `nat monitor tui` = dashboard
 nat dashboard              # start/show dashboard at :8050
 nat health                 # system health overview
 ```

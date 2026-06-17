@@ -361,3 +361,15 @@ real-parquet smoke):
    noted in FR-A6; it remains on `nat data validate`.
 4. **plotly** (already in `requirements.txt`) was installed into the active environment to run
    Capability C; `viz_mesh` imports it lazily and errors cleanly if absent.
+
+**Post-spec additions (shipped after this spec was written):**
+- `nat viz render --last <duration>` — freshest-readable *tail* view (last N min of readable
+  parquet) that prints the analyzed window + its age; honest about the ~1 h hourly-rotation lag
+  (`scripts/viz/pager.py::tail_bounds`/`parse_duration_minutes`).
+- `nat 15m viz` is now **quiet** (only the `Saved:` lines; `15m_visualize.py --quiet`).
+- `nat monitor` was **redefined** to the live `show_features` probe (~10 Hz, no ingestion); the
+  legacy Redis dashboard is `nat monitor tui`.
+- `nat doctor` — ingestion preflight (data-dir ownership/writability, binary, disk) + a `nat start`
+  warning, to catch the root-owned-dir silent stall.
+- Tests grew **4 → 7** files (added `test_viz_render_last.py`, `test_viz_render_features.py` was in
+  the core set; plus the broader `test_viz_*`); `redis` was added to `requirements.txt`.
