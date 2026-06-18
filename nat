@@ -3141,6 +3141,25 @@ def cmd_oos30(args):
     return 0
 
 
+# ── OOS window: longitudinal analysis over accumulated daily P&L ─────────────
+
+def cmd_oos_window(args):
+    """Longitudinal OOS validation over a trailing window of gauntlet daily P&L."""
+    cmd = f"scripts/alpha/oos_window.py --window {getattr(args, 'window', '30d')}"
+    symbols = getattr(args, 'symbols', None)
+    if symbols:
+        cmd += f" --symbols {' '.join(symbols)}"
+    algos = getattr(args, 'algos', None)
+    if algos:
+        cmd += f" --algos {' '.join(algos)}"
+    tf = getattr(args, 'train_frac', None)
+    if tf is not None:
+        cmd += f" --train-frac {tf}"
+    if _json_mode(args):
+        cmd += " --json"
+    return _py(cmd).returncode
+
+
 # ── Gauntlet: Multi-Day OOS Sweep ────────────────────────────────────────────
 
 def cmd_gauntlet_run(args):
@@ -4452,6 +4471,7 @@ def cmd_help(args=None):
     Walk-forward paper trading with z-score calibration and cost modeling.
     nat daily                  Single-date OOS snapshot (latest or --date)
     nat oos30                  30-day batch OOS for 5 winners (--symbols, --data-dir)
+    nat oos --window 30d       Longitudinal verdict over accumulated gauntlet P&L (walk-forward + deflated Sharpe)
     nat gauntlet run           Multi-day sweep, all 19 algos (--last N, --from, --to)
     nat gauntlet stop          Kill running gauntlet, print partial results
     nat gauntlet report        Print latest gauntlet report
@@ -5803,6 +5823,33 @@ def build_parser():
     oos_p.add_argument('--data-dir', default='data/features', help='Feature data directory')
     oos_p.add_argument('--symbols', nargs='+', default=['BTC', 'ETH', 'SOL'], help='Symbols to test')
     oos_p.set_defaults(func=cmd_oos30)
+
+    # ── oos (longitudinal window analysis over accumulated gauntlet P&L) ──
+    oosw_p = sub.add_parser('oos',
+        help='Longitudinal OOS validation over a trailing window of gauntlet P&L',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+        Analyzes the daily P&L the gauntlet already produced (reports/gauntlet_*.json)
+        over a trailing window of trading days. Per (algorithm, symbol): annualized
+        Sharpe, a daily-P&L walk-forward holdout (IS vs OOS -- the overfit signal),
+        max drawdown, win rate, deflated Sharpe (multiple-testing adjusted), and
+        cross-algorithm complementarity. Metrics only -- G4 gates live in the alpha
+        pipeline. Run `nat gauntlet run --last N` first to (re)generate the daily
+        P&L; coverage is reported honestly, never silently truncated.
+
+        Example:
+          nat gauntlet run --last 30        # accumulate/refresh 30 days of daily P&L
+          nat oos --window 30d              # longitudinal verdict on the 5 deployables
+          nat --json oos --window 14d       # machine-readable
+        """))
+    oosw_p.add_argument('--window', default='30d',
+        help='Trailing window in trading days, e.g. 30d (default: 30d)')
+    oosw_p.add_argument('--symbols', nargs='+', default=['BTC', 'ETH', 'SOL'])
+    oosw_p.add_argument('--algos', nargs='+', default=None,
+        help='Algorithms to analyze (default: the 5 deployables)')
+    oosw_p.add_argument('--train-frac', type=float, default=0.67,
+        help='Walk-forward train fraction (default: 0.67)')
+    oosw_p.set_defaults(func=cmd_oos_window)
 
     # ── daily (6-hour OOS snapshot) ──
     daily_p = sub.add_parser('daily', help='Daily 6-hour OOS snapshot for winning algorithms',
