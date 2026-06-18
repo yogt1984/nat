@@ -1466,24 +1466,29 @@ def cmd_pipeline_dashboard(args):
 
 AGENT_SCRIPT = "scripts/agent/daemon.py"
 
-def cmd_agent_start(args):
-    _banner("Starting NAT Agent daemon")
-    _py(f"{AGENT_SCRIPT} start")
 
-def cmd_agent_stop(args):
-    """Send SIGTERM to running agent."""
+def _agent_run(script, verb, banner=None):
+    """Run a research-agent daemon subcommand (the common passthrough)."""
+    if banner:
+        _banner(banner)
+    _py(f"{script} {verb}")
+
+
+def _agent_stop(daemon_match, label):
+    """SIGTERM a running agent daemon, matched by its launch command line."""
     import signal as sig
-    r = _sh("pgrep -f 'agent/daemon.py start'")
+    r = _sh(f"pgrep -f '{daemon_match}'")
     if r.returncode == 0 and r.stdout.strip():
         pid = int(r.stdout.strip().split("\n")[0])
         os.kill(pid, sig.SIGTERM)
-        _p("✓", G, f"Sent SIGTERM to agent (pid {pid})")
+        _p("✓", G, f"Sent SIGTERM to {label} (pid {pid})")
     else:
-        _p("–", Y, "No running agent found")
+        _p("–", Y, f"No running {label} found")
 
-def cmd_agent_once(args):
-    _banner("Running single agent cycle")
-    _py(f"{AGENT_SCRIPT} once")
+
+def cmd_agent_start(args):  _agent_run(AGENT_SCRIPT, "start", "Starting NAT Agent daemon")
+def cmd_agent_stop(args):   _agent_stop("agent/daemon.py start", "agent")
+def cmd_agent_once(args):   _agent_run(AGENT_SCRIPT, "once", "Running single agent cycle")
 
 def cmd_agent_status(args):
     if _json_mode(args):
@@ -1552,117 +1557,42 @@ def cmd_agent_report(args):
 
 MF_AGENT_SCRIPT = "scripts/agent/mf_daemon.py"
 
-def cmd_mf_agent_start(args):
-    _banner("Starting Medium-Frequency Agent daemon")
-    _py(f"{MF_AGENT_SCRIPT} start")
-
-def cmd_mf_agent_stop(args):
-    """Send SIGTERM to running MF agent."""
-    import signal as sig
-    r = _sh("pgrep -f 'agent/mf_daemon.py start'")
-    if r.returncode == 0 and r.stdout.strip():
-        pid = int(r.stdout.strip().split("\n")[0])
-        os.kill(pid, sig.SIGTERM)
-        _p("✓", G, f"Sent SIGTERM to MF agent (pid {pid})")
-    else:
-        _p("–", Y, "No running MF agent found")
-
-def cmd_mf_agent_once(args):
-    _banner("Running single MF agent cycle")
-    _py(f"{MF_AGENT_SCRIPT} once")
-
-def cmd_mf_agent_status(args):
-    _py(f"{MF_AGENT_SCRIPT} status")
-
-def cmd_mf_agent_queue(args):
-    _py(f"{MF_AGENT_SCRIPT} queue")
-
-def cmd_mf_agent_registry(args):
-    _py(f"{MF_AGENT_SCRIPT} registry")
-
-def cmd_mf_agent_graveyard(args):
-    _py(f"{MF_AGENT_SCRIPT} graveyard")
-
-def cmd_mf_agent_report(args):
-    _py(f"{MF_AGENT_SCRIPT} report")
+def cmd_mf_agent_start(args):     _agent_run(MF_AGENT_SCRIPT, "start", "Starting Medium-Frequency Agent daemon")
+def cmd_mf_agent_stop(args):      _agent_stop("agent/mf_daemon.py start", "MF agent")
+def cmd_mf_agent_once(args):      _agent_run(MF_AGENT_SCRIPT, "once", "Running single MF agent cycle")
+def cmd_mf_agent_status(args):    _agent_run(MF_AGENT_SCRIPT, "status")
+def cmd_mf_agent_queue(args):     _agent_run(MF_AGENT_SCRIPT, "queue")
+def cmd_mf_agent_registry(args):  _agent_run(MF_AGENT_SCRIPT, "registry")
+def cmd_mf_agent_graveyard(args): _agent_run(MF_AGENT_SCRIPT, "graveyard")
+def cmd_mf_agent_report(args):    _agent_run(MF_AGENT_SCRIPT, "report")
 
 
 # ── Macro agent commands ─────────────────────────────────────────────────────
 
 MACRO_AGENT_SCRIPT = "scripts/agent/macro_daemon.py"
 
-def cmd_macro_agent_start(args):
-    _banner("Starting Macro Agent daemon")
-    _py(f"{MACRO_AGENT_SCRIPT} start")
-
-def cmd_macro_agent_stop(args):
-    """Send SIGTERM to running macro agent."""
-    import signal as sig
-    r = _sh("pgrep -f 'agent/macro_daemon.py start'")
-    if r.returncode == 0 and r.stdout.strip():
-        pid = int(r.stdout.strip().split("\n")[0])
-        os.kill(pid, sig.SIGTERM)
-        _p("✓", G, f"Sent SIGTERM to macro agent (pid {pid})")
-    else:
-        _p("–", Y, "No running macro agent found")
-
-def cmd_macro_agent_once(args):
-    _banner("Running single macro agent cycle")
-    _py(f"{MACRO_AGENT_SCRIPT} once")
-
-def cmd_macro_agent_status(args):
-    _py(f"{MACRO_AGENT_SCRIPT} status")
-
-def cmd_macro_agent_queue(args):
-    _py(f"{MACRO_AGENT_SCRIPT} queue")
-
-def cmd_macro_agent_registry(args):
-    _py(f"{MACRO_AGENT_SCRIPT} registry")
-
-def cmd_macro_agent_graveyard(args):
-    _py(f"{MACRO_AGENT_SCRIPT} graveyard")
-
-def cmd_macro_agent_report(args):
-    _py(f"{MACRO_AGENT_SCRIPT} report")
+def cmd_macro_agent_start(args):     _agent_run(MACRO_AGENT_SCRIPT, "start", "Starting Macro Agent daemon")
+def cmd_macro_agent_stop(args):      _agent_stop("agent/macro_daemon.py start", "macro agent")
+def cmd_macro_agent_once(args):      _agent_run(MACRO_AGENT_SCRIPT, "once", "Running single macro agent cycle")
+def cmd_macro_agent_status(args):    _agent_run(MACRO_AGENT_SCRIPT, "status")
+def cmd_macro_agent_queue(args):     _agent_run(MACRO_AGENT_SCRIPT, "queue")
+def cmd_macro_agent_registry(args):  _agent_run(MACRO_AGENT_SCRIPT, "registry")
+def cmd_macro_agent_graveyard(args): _agent_run(MACRO_AGENT_SCRIPT, "graveyard")
+def cmd_macro_agent_report(args):    _agent_run(MACRO_AGENT_SCRIPT, "report")
 
 
 # ── Meta-Agent (orchestrator) commands ────────────────────────────────────────
 
 META_AGENT_SCRIPT = "scripts/agent/meta_daemon.py"
 
-def cmd_meta_agent_start(args):
-    _banner("Starting Meta-Agent orchestrator")
-    _py(f"{META_AGENT_SCRIPT} start")
-
-def cmd_meta_agent_stop(args):
-    """Send SIGTERM to running meta-agent."""
-    import signal as sig
-    r = _sh("pgrep -f 'agent/meta_daemon.py start'")
-    if r.returncode == 0 and r.stdout.strip():
-        pid = int(r.stdout.strip().split("\n")[0])
-        os.kill(pid, sig.SIGTERM)
-        _p("✓", G, f"Sent SIGTERM to meta-agent (pid {pid})")
-    else:
-        _p("–", Y, "No running meta-agent found")
-
-def cmd_meta_agent_once(args):
-    _banner("Running single meta-agent cycle")
-    _py(f"{META_AGENT_SCRIPT} once")
-
-def cmd_meta_agent_status(args):
-    _py(f"{META_AGENT_SCRIPT} status")
-
-def cmd_meta_agent_portfolio(args):
-    _py(f"{META_AGENT_SCRIPT} portfolio")
-
-def cmd_meta_agent_correlation(args):
-    _py(f"{META_AGENT_SCRIPT} correlation")
-
-def cmd_meta_agent_budget(args):
-    _py(f"{META_AGENT_SCRIPT} budget")
-
-def cmd_meta_agent_report(args):
-    _py(f"{META_AGENT_SCRIPT} report")
+def cmd_meta_agent_start(args):       _agent_run(META_AGENT_SCRIPT, "start", "Starting Meta-Agent orchestrator")
+def cmd_meta_agent_stop(args):        _agent_stop("agent/meta_daemon.py start", "meta-agent")
+def cmd_meta_agent_once(args):        _agent_run(META_AGENT_SCRIPT, "once", "Running single meta-agent cycle")
+def cmd_meta_agent_status(args):      _agent_run(META_AGENT_SCRIPT, "status")
+def cmd_meta_agent_portfolio(args):   _agent_run(META_AGENT_SCRIPT, "portfolio")
+def cmd_meta_agent_correlation(args): _agent_run(META_AGENT_SCRIPT, "correlation")
+def cmd_meta_agent_budget(args):      _agent_run(META_AGENT_SCRIPT, "budget")
+def cmd_meta_agent_report(args):      _agent_run(META_AGENT_SCRIPT, "report")
 
 
 # ── IT Engine commands ──────────────────────────────────────────────────────
