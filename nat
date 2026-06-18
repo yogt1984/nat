@@ -4263,7 +4263,7 @@ def cmd_help(args=None):
     print(f"""
   {BOLD}nat{W} -- unified NAT research terminal
   Quantitative research platform for Hyperliquid perpetual futures.
-  Rust ingestor (209 features, 100ms) + Python analysis/ML/backtesting.
+  Rust ingestor (real-time microstructure features, 100ms) + Python analysis/ML/backtesting.
 
   Global: nat --json <command>   Machine-readable JSON output (for AI agents)
 
@@ -4277,6 +4277,9 @@ def cmd_help(args=None):
     nat log agent              Tail agent daemon log
     nat log list               List all log files with sizes and dates
     nat dashboard              Start analysis dashboard (:8050)
+    nat monitor                Live feature probe — stream computed features (no ingest)
+    nat doctor                 Ingestion preflight (data-dir ownership, binary, disk)
+    nat api start              API + alert services (also: serve-all, alerts)
 
   {BOLD}Configuration{W}
     Inspect and validate TOML configuration files.
@@ -4290,11 +4293,13 @@ def cmd_help(args=None):
     nat data validate          Schema + value validation (--hours N)
     nat data explore           Launch Jupyter notebook
     nat data schema            Parquet schema & vector coverage
+    nat fetch candles          Fetch historical candles from exchanges
 
   {BOLD}Signal Testing{W}
     IC = Spearman rho(feature, forward_return). Tests feature predictiveness.
     nat signal test            Per-feature IC at horizon h (--symbol, --horizon, --spread-bps)
     nat signal test-all        Full sweep: all symbols x feature sets
+    nat screen                 Alpha feature screening
 
   {BOLD}Analysis{W}
     Regime profiling, signal scanning, macro indicators.
@@ -4327,7 +4332,7 @@ def cmd_help(args=None):
     nat alpha pipeline-step N  Run single step (1-9)
 
   {BOLD}Algorithm Research{W}
-    18 microstructure algorithms: OFI, Hawkes, jump detection, VPIN regime,
+    A library of microstructure algorithms: OFI, Hawkes, jump detection, VPIN regime,
     spread decomposition, entropy-gated momentum, switching OU, SPRT entry,
     online ridge, and more. IC at horizons [1,5,10,50,100] with regime gating.
     nat algorithm evaluate     IC/drift evaluation (--algorithm, --all, --symbol)
@@ -4414,6 +4419,23 @@ def cmd_help(args=None):
     nat discovery status       Current state
     nat discovery stop         Stop orchestrator
 
+  {BOLD}Signal Lifecycle{W}
+    Promotion state machine: DISCOVERED -> VALIDATED -> PAPER -> LIVE -> RETIRED.
+    nat lifecycle status       Lifecycle state of all signals
+    nat lifecycle list         List signals (--state filter)
+    nat lifecycle history      Provenance-stamped transition history
+    nat lifecycle approve      Human gate: APPROVAL_PENDING -> LIVE
+    nat lifecycle reject       Reject a pending signal
+    nat lifecycle seed         Idempotently load deployable winners
+
+  {BOLD}Risk, Promotion & Ops Daemons{W}
+    Production safety, promotion automation, ingestion ops.
+    nat risk status/resume     Kill-switch daemon + halt control (T16)
+    nat gap status/watchdog    Data-gap alert daemon (Telegram page on stall)
+    nat promotion status/once  Signal promotion daemon (lifecycle automation, T14)
+    nat bridge status/once     Signal bridge — executes LIVE signals under risk gating
+    nat deploy status/rollback Deploy ingestor to remote host
+
   {BOLD}Audit{W}
     Backtest result aggregation and systematic parameter sweeps.
     nat audit aggregate <dir>  Aggregate walk-forward backtest JSONs
@@ -4480,6 +4502,15 @@ def cmd_help(args=None):
     nat trade viz --date D     Specific date snapshot (YYYY-MM-DD)
     nat trade viz --symbol all All symbols for a date
 
+  {BOLD}Visualization{W}
+    Terminal-first inspection (viz) and the static PNG suite (visualize).
+    nat viz features           Live feature table (--symbol, --hours, --live)
+    nat viz algorithm <name>   Algorithm signal + decision trace
+    nat viz paper              Paper-trade P&L + fill analysis
+    nat viz portfolio          Portfolio P&L / exposure / correlation / risk (--tab)
+    nat viz render             Render latest features (--last <duration>)
+    nat visualize <kind>       Static plots: scan|cluster|profile|hierarchy|skeptical|data|all
+
   {BOLD}ALG1 (MF 3-Feature Liquidity Signal){W}
     3f composite: zscore(spread_bps + depth_5_std + vwap_deviation_std) / 3.
     100min horizon, walk-forward z-score params, maker-only execution.
@@ -4516,7 +4547,7 @@ def cmd_help(args=None):
     nat tournament report      Generate markdown report
 
   {BOLD}AI Agent Integration{W}
-    nat commands               List all 177 commands (--json for structured catalog)
+    nat commands               List all commands (--json for structured catalog)
     nat --json <any command>   JSON output for any command that supports it
     Exit codes: 0=success, 1=error, 130=interrupted
 
