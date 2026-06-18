@@ -418,7 +418,9 @@ def compute_deflated_sharpe(
     Returns
     -------
     float
-        Probability that observed Sharpe is a false positive
+        Deflated Sharpe Ratio (DSR): the probability the observed Sharpe reflects
+        a real edge after adjusting for n_trials. HIGHER is better; the G4 gate is
+        DSR >= 0.95 (equivalently, false-positive probability < 0.05).
     """
     from scipy import stats
 
@@ -433,11 +435,10 @@ def compute_deflated_sharpe(
         np.pi / np.sqrt(6) * stats.norm.ppf(1 - 1 / n_trials)
     )
 
-    # Deflated Sharpe
+    # Deflated Sharpe Ratio (HIGHER = more confident the edge is real)
     if std_max_sharpe > 0:
         deflated = (observed_sharpe - e_max_sharpe) / std_max_sharpe
-        # Probability of false positive
-        prob_false_positive = stats.norm.cdf(deflated)
-        return prob_false_positive
+        dsr = stats.norm.cdf(deflated)
+        return dsr
     else:
         return 0.5

@@ -86,7 +86,7 @@ g3_min_holding_hours = 2.0         # Mean holding time
 # G4: Walk-forward validation (6 sub-gates)
 g4_min_oos_sharpe = 0.5
 g4_min_oos_is_ratio = 0.7         # OOS/IS Sharpe ratio
-g4_max_deflated_sharpe_p = 0.05   # Multiple-testing correction
+g4_min_deflated_sharpe = 0.95   # Multiple-testing: DSR >= 0.95 (false-positive prob < 0.05)
 g4_max_drawdown_pct = 5.0
 g4_min_trades = 30
 g4_min_profit_factor = 1.2

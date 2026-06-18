@@ -480,10 +480,15 @@ def deflated_sharpe(
 ) -> float:
     """Bailey & Lopez de Prado (2014) deflated Sharpe ratio.
 
-    Adjusts observed Sharpe for multiple testing bias — the more configs
+    Adjusts observed Sharpe for multiple-testing bias — the more configs
     tried, the more likely a high Sharpe is due to chance.
 
-    Returns p-value in [0, 1]. DSR < 0.95 -> Sharpe likely noise.
+    Returns the DSR in [0, 1]: the probability the edge is real after the
+    adjustment. HIGHER is better; DSR < 0.95 -> Sharpe likely noise.
+
+    NOTE: not currently wired into the objective/guard rails — exercised only
+    by tests. Parallel to scripts/backtest/walk_forward.compute_deflated_sharpe
+    (the implementation gated at G4).
     """
     from scipy.stats import norm
 

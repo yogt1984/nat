@@ -562,7 +562,7 @@ def run_pipeline(
             sub_pass = sum([
                 best.oos_sharpe >= gates_cfg["g4_min_oos_sharpe"],
                 best.oos_is_ratio >= gates_cfg["g4_min_oos_is_ratio"],
-                best.deflated_sharpe_p <= gates_cfg["g4_max_deflated_sharpe_p"],
+                best.deflated_sharpe_dsr >= gates_cfg["g4_min_deflated_sharpe"],
                 best.max_drawdown_pct <= gates_cfg["g4_max_drawdown_pct"],
                 best.total_oos_trades >= gates_cfg["g4_min_trades"],
                 best.profit_factor >= gates_cfg["g4_min_profit_factor"],
@@ -572,7 +572,7 @@ def run_pipeline(
                 metrics={
                     "oos_sharpe": best.oos_sharpe,
                     "oos_is_ratio": best.oos_is_ratio,
-                    "deflated_sharpe_p": best.deflated_sharpe_p,
+                    "deflated_sharpe_dsr": best.deflated_sharpe_dsr,
                     "max_drawdown_pct": best.max_drawdown_pct,
                     "total_oos_trades": best.total_oos_trades,
                     "profit_factor": best.profit_factor,

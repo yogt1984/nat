@@ -416,6 +416,18 @@ class TestDeflatedSharpe:
             "More trials should reduce confidence"
         )
 
+    def test_gate_direction_strong_passes_marginal_fails(self):
+        """Regression: the G4 deflated gate is DSR >= 0.95 (high = good).
+
+        A strong edge clears the gate; a marginal one does not. Guards against
+        re-introducing the inverted `< 0.05` comparison that passed noise and
+        rejected genuine edges.
+        """
+        strong = compute_deflated_sharpe(observed_sharpe=8.0, n_trials=100)
+        marginal = compute_deflated_sharpe(observed_sharpe=1.0, n_trials=100)
+        assert strong >= 0.95, "a strong Sharpe should clear DSR >= 0.95"
+        assert marginal < 0.95, "a marginal Sharpe should not clear DSR >= 0.95"
+
     def test_higher_sharpe_more_confident(self):
         """Higher observed Sharpe should give more confidence."""
         prob_low = compute_deflated_sharpe(
