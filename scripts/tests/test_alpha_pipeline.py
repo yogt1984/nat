@@ -116,7 +116,7 @@ def sample_config(tmp_path):
             "g3_min_holding_hours": 2.0,
             "g4_min_oos_sharpe": 0.5,
             "g4_min_oos_is_ratio": 0.7,
-            "g4_max_deflated_sharpe_p": 0.05,
+            "g4_min_deflated_sharpe": 0.95,
             "g4_max_drawdown_pct": 5.0,
             "g4_min_trades": 30,
             "g4_min_profit_factor": 1.2,
@@ -174,7 +174,7 @@ def _mock_validation_result(
     max_drawdown_pct=3.0,
     total_oos_trades=100,
     profit_factor=1.5,
-    deflated_sharpe_p=0.01,
+    deflated_sharpe_dsr=0.99,
     direction="long",
 ):
     m = MagicMock()
@@ -184,7 +184,7 @@ def _mock_validation_result(
     m.max_drawdown_pct = max_drawdown_pct
     m.total_oos_trades = total_oos_trades
     m.profit_factor = profit_factor
-    m.deflated_sharpe_p = deflated_sharpe_p
+    m.deflated_sharpe_dsr = deflated_sharpe_dsr
     m.direction = direction
     return m
 
@@ -1052,7 +1052,7 @@ class TestGateEvaluationDetails:
         vr = _mock_validation_result(
             oos_sharpe=1.2,      # > 0.5 → pass
             oos_is_ratio=0.8,    # > 0.7 → pass
-            deflated_sharpe_p=0.01,  # < 0.05 → pass
+            deflated_sharpe_dsr=0.99,  # >= 0.95 → pass
             max_drawdown_pct=3.0,    # < 5.0 → pass
             total_oos_trades=100,    # > 30 → pass
             profit_factor=1.5,       # > 1.2 → pass
@@ -1060,7 +1060,7 @@ class TestGateEvaluationDetails:
         sub_pass = sum([
             vr.oos_sharpe >= 0.5,
             vr.oos_is_ratio >= 0.7,
-            vr.deflated_sharpe_p <= 0.05,
+            vr.deflated_sharpe_dsr >= 0.95,
             vr.max_drawdown_pct <= 5.0,
             vr.total_oos_trades >= 30,
             vr.profit_factor >= 1.2,
@@ -1072,7 +1072,7 @@ class TestGateEvaluationDetails:
         vr = _mock_validation_result(
             oos_sharpe=0.3,      # < 0.5 → fail
             oos_is_ratio=0.5,    # < 0.7 → fail
-            deflated_sharpe_p=0.1,   # > 0.05 → fail
+            deflated_sharpe_dsr=0.9,   # < 0.95 → fail
             max_drawdown_pct=3.0,    # < 5.0 → pass
             total_oos_trades=100,    # > 30 → pass
             profit_factor=1.5,       # > 1.2 → pass
@@ -1080,7 +1080,7 @@ class TestGateEvaluationDetails:
         sub_pass = sum([
             vr.oos_sharpe >= 0.5,
             vr.oos_is_ratio >= 0.7,
-            vr.deflated_sharpe_p <= 0.05,
+            vr.deflated_sharpe_dsr >= 0.95,
             vr.max_drawdown_pct <= 5.0,
             vr.total_oos_trades >= 30,
             vr.profit_factor >= 1.2,

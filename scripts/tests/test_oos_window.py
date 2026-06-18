@@ -82,8 +82,8 @@ def test_deflated_sharpe_decreases_with_more_trials():
 
 def test_strategy_stats_reports_deflated():
     st = ow.strategy_stats(np.array([2.0, 1.0] * 15), n_trials=15)
-    assert "deflated_sharpe_prob" in st
-    assert st["deflated_sharpe_prob"] is None or 0.0 <= st["deflated_sharpe_prob"] <= 1.0
+    assert "deflated_sharpe_dsr" in st
+    assert st["deflated_sharpe_dsr"] is None or 0.0 <= st["deflated_sharpe_dsr"] <= 1.0
 
 
 # ── daily-P&L matrix loader: windowing + dedup ───────────────────────────────

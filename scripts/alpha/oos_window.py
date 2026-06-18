@@ -95,10 +95,10 @@ def strategy_stats(daily_pnl, n_trials: int = 1, train_frac: float = 0.67) -> di
     # searched n_trials strategies. HIGHER = more robust. Reported, not gated.
     try:
         from backtest.walk_forward import compute_deflated_sharpe
-        stats["deflated_sharpe_prob"] = float(compute_deflated_sharpe(
+        stats["deflated_sharpe_dsr"] = float(compute_deflated_sharpe(
             observed_sharpe=wf["oos_sharpe"], n_trials=max(3, int(n_trials))))
     except Exception as exc:  # pragma: no cover - defensive
-        stats["deflated_sharpe_prob"] = None
+        stats["deflated_sharpe_dsr"] = None
         stats["deflated_error"] = str(exc)
     return stats
 
@@ -180,7 +180,7 @@ def build_report(window_days, symbols, algos, reports_dir, train_frac) -> dict:
         "results": results,
         "complementarity": pairwise_correlations(portfolio_series),
         "note": ("Metrics only; G4 pass/fail lives in the alpha pipeline. "
-                 "deflated_sharpe_prob is Bailey-LdP: higher = more robust to "
+                 "deflated_sharpe_dsr is Bailey-LdP: higher = more robust to "
                  "the n_trials strategies searched."),
     }
 
@@ -213,14 +213,14 @@ def print_human(report: dict) -> None:
     print(f"  n_trials (multiple-testing breadth) = {report['n_trials']}; "
           f"walk-forward train_frac = {report['train_frac']}\n")
     header = (f"  {'algo':<18}{'sym':<5}{'days':>5}{'totBps':>9}"
-              f"{'Sharpe':>8}{'OOS/IS':>8}{'maxDD':>8}{'win%':>7}{'DSRp':>7}")
+              f"{'Sharpe':>8}{'OOS/IS':>8}{'maxDD':>8}{'win%':>7}{'DSR':>7}")
     print(header)
     print("  " + "-" * (len(header) - 2))
     for a in report["algos"]:
         for s in report["symbols"]:
             st = report["results"][a][s]
             wf = st["walk_forward"]
-            dsr = st.get("deflated_sharpe_prob")
+            dsr = st.get("deflated_sharpe_dsr")
             dsr_s = "  n/a" if dsr is None else f"{dsr:.2f}"
             print(f"  {a:<18}{s:<5}{st['days']:>5}{st['total_bps']:>9.1f}"
                   f"{st['sharpe']:>8.2f}{_fmt_ratio(wf['oos_is_ratio']):>8}"

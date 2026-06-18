@@ -157,14 +157,14 @@ class ValidationResult:
     max_drawdown_pct: float
     total_oos_trades: int
     profit_factor: float
-    deflated_sharpe_p: float
+    deflated_sharpe_dsr: float
     n_trials: int
     # Parameter stability
     stability: ParameterStability | None = None
     # Gates
     gate_oos_sharpe_pass: bool = False       # > 0.5
     gate_oos_is_ratio_pass: bool = False     # > 0.7
-    gate_deflated_sharpe_pass: bool = False  # p < 0.05
+    gate_deflated_sharpe_pass: bool = False  # DSR >= 0.95
     gate_max_dd_pass: bool = False           # < 5%
     gate_min_trades_pass: bool = False       # >= 30
     gate_profit_factor_pass: bool = False    # > 1.2
@@ -274,7 +274,7 @@ def run_validation(
 
         # Deflated Sharpe
         print(f"  Computing deflated Sharpe (n_trials={n_trials})...")
-        deflated_p = compute_deflated_sharpe(
+        deflated_dsr = compute_deflated_sharpe(
             observed_sharpe=oos_sharpe,
             n_trials=n_trials,
         )
@@ -285,7 +285,7 @@ def run_validation(
         # Quality gates
         g_sharpe = oos_sharpe > 0.5
         g_ratio = oos_is_ratio > 0.7
-        g_deflated = deflated_p < 0.05
+        g_deflated = deflated_dsr >= 0.95
         g_dd = max_dd < 5.0
         g_trades = total_oos_trades >= 30
         g_pf = profit_factor > 1.2
@@ -299,7 +299,7 @@ def run_validation(
             max_drawdown_pct=max_dd,
             total_oos_trades=total_oos_trades,
             profit_factor=profit_factor,
-            deflated_sharpe_p=deflated_p,
+            deflated_sharpe_dsr=deflated_dsr,
             n_trials=n_trials,
             stability=stability,
             gate_oos_sharpe_pass=g_sharpe,
@@ -319,7 +319,7 @@ def run_validation(
         print(f"\n  Gate G4 [{direction}]:")
         print(f"    OOS Sharpe:       {oos_sharpe:.3f} vs 0.5  [{_g(g_sharpe)}]")
         print(f"    OOS/IS ratio:     {oos_is_ratio:.3f} vs 0.7  [{_g(g_ratio)}]")
-        print(f"    Deflated Sharpe:  p={deflated_p:.4f} vs 0.05  [{_g(g_deflated)}]")
+        print(f"    Deflated Sharpe:  DSR={deflated_dsr:.4f} vs 0.95  [{_g(g_deflated)}]")
         print(f"    Max drawdown:     {max_dd:.2f}% vs 5%  [{_g(g_dd)}]")
         print(f"    OOS trades:       {total_oos_trades} vs 30  [{_g(g_trades)}]")
         print(f"    Profit factor:    {profit_factor:.2f} vs 1.2  [{_g(g_pf)}]")

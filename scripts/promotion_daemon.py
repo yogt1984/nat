@@ -90,7 +90,7 @@ def load_gates() -> dict:
     """Imported gate thresholds from config/alpha.toml [gates] — never invented."""
     gates = {
         "g4_min_oos_sharpe": 0.5, "g4_min_oos_is_ratio": 0.7,
-        "g4_max_deflated_sharpe_p": 0.05, "g4_max_drawdown_pct": 5.0,
+        "g4_min_deflated_sharpe": 0.95, "g4_max_drawdown_pct": 5.0,
         "g4_min_trades": 30, "g4_min_profit_factor": 1.2,
         "g8_min_sharpe_ratio": 0.5, "g8_max_daily_loss_pct": 2.0,
         "g8_max_ic_decay_pct": 50.0, "g8_min_days": 14,
