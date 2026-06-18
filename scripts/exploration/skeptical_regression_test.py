@@ -18,14 +18,15 @@ Tests:
   T10: Walk-forward with full embargo        — train/test leakage
 
 Usage:
-    python scripts/skeptical_regression_test.py --symbol BTC --horizon 18000
-    python scripts/skeptical_regression_test.py --symbol BTC --horizon 18000 --json-report /tmp/skeptical.json
+    python scripts/exploration/skeptical_regression_test.py --symbol BTC --horizon 18000
+    python scripts/exploration/skeptical_regression_test.py --symbol BTC --horizon 18000 --json-report /tmp/skeptical.json
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -36,7 +37,8 @@ import polars as pl
 import lightgbm as lgb
 from scipy import stats
 
-
+# scripts/ (the parent of this exploration/ dir) holds phase1_signal_test
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from phase1_signal_test import load_all_data, create_target, get_feature_columns
 
 

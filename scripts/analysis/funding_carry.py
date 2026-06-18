@@ -21,6 +21,7 @@ Funding mechanics (Hyperliquid):
 import glob
 import os
 import sys
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
@@ -581,7 +582,7 @@ def multi_symbol_carry(fee_bps: float = 7.0):
 
 
 if __name__ == "__main__":
-    os.chdir("/home/onat/nat")
+    os.chdir(Path(__file__).resolve().parents[2])
 
     print("Loading BTC data...")
     df = load_symbol("BTC")

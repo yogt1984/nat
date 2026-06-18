@@ -1259,7 +1259,7 @@ def cmd_cluster_hmm(args):
 def cmd_validate_skeptical(args):
     _banner("Running skeptical validation suite")
     output = getattr(args, 'output', 'reports/skeptical_validation')
-    _py(f"scripts/skeptical_validation.py --data {_data(args)} --output {output}")
+    _py(f"scripts/exploration/skeptical_validation.py --data {_data(args)} --output {output}")
 
 
 # ── Alpha pipeline orchestrator ─────────────────────────────────────────────
@@ -1344,7 +1344,7 @@ def cmd_kalman_drift(args):
 
 def cmd_validate_regression(args):
     _banner(f"Skeptical Regression Test: {_sym(args)}")
-    cmd = (f"scripts/skeptical_regression_test.py --data-dir {_data(args)} "
+    cmd = (f"scripts/exploration/skeptical_regression_test.py --data-dir {_data(args)} "
            f"--symbol {_sym(args)} --horizon {getattr(args, 'horizon', 18000)}")
     report = getattr(args, 'json_report', None)
     if report:
