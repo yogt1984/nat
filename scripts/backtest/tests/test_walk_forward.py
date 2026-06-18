@@ -428,6 +428,27 @@ class TestDeflatedSharpe:
         assert strong >= 0.95, "a strong Sharpe should clear DSR >= 0.95"
         assert marginal < 0.95, "a marginal Sharpe should not clear DSR >= 0.95"
 
+    def test_variance_of_trials_uses_sqrt_scaling(self):
+        """Regression: variance_of_trials (V) enters as sqrt(V) — the cross-trial
+        std — per Bailey & Lopez de Prado, not as a flat multiplier.
+
+        Scaling both the observed Sharpe and sqrt(V) by the same factor leaves the
+        deflated z-score (hence the DSR) invariant. That scale-invariance holds
+        ONLY for sqrt(V); a flat-V multiplier breaks it. Guards the latent bug
+        that was masked while every caller used the default V=1.0.
+        """
+        k = 3.0
+        base = compute_deflated_sharpe(
+            observed_sharpe=2.0, n_trials=50, variance_of_trials=1.0,
+        )
+        scaled = compute_deflated_sharpe(
+            observed_sharpe=2.0 * k, n_trials=50, variance_of_trials=k ** 2,
+        )
+        assert abs(base - scaled) < 1e-9, (
+            "sqrt(V) scaling: (k*S, k^2*V) must match (S, V); a flat-V "
+            "multiplier would diverge here"
+        )
+
     def test_higher_sharpe_more_confident(self):
         """Higher observed Sharpe should give more confidence."""
         prob_low = compute_deflated_sharpe(

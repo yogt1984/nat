@@ -409,7 +409,8 @@ def compute_deflated_sharpe(
     n_trials : int
         Number of strategy variants tested
     variance_of_trials : float
-        Estimated variance of Sharpe across trials
+        Estimated variance of Sharpe across the n_trials (V). Enters as
+        sqrt(V), the cross-trial std; default 1.0 (standardized).
     skewness : float
         Skewness of returns
     kurtosis : float
@@ -424,14 +425,15 @@ def compute_deflated_sharpe(
     """
     from scipy import stats
 
-    # Expected maximum Sharpe under null hypothesis
-    e_max_sharpe = variance_of_trials * (
+    # Expected maximum Sharpe under the null. Scales with sqrt(variance_of_trials)
+    # — the cross-trial std (Bailey & Lopez de Prado 2014) — not the variance itself.
+    e_max_sharpe = np.sqrt(variance_of_trials) * (
         (1 - np.euler_gamma) * stats.norm.ppf(1 - 1 / n_trials)
         + np.euler_gamma * stats.norm.ppf(1 - 1 / (n_trials * np.e))
     )
 
-    # Standard deviation of maximum
-    std_max_sharpe = variance_of_trials * (
+    # Standard deviation of that maximum (same sqrt(V) scaling).
+    std_max_sharpe = np.sqrt(variance_of_trials) * (
         np.pi / np.sqrt(6) * stats.norm.ppf(1 - 1 / n_trials)
     )
 
