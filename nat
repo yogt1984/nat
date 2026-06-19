@@ -1015,11 +1015,12 @@ def cmd_test(args):
 
 
 def cmd_test_capture(args):
-    """nat test {1m,5m,15m} — capture N minutes locally, then visualize the slice.
+    """nat test {1m,5m,15m} — capture N minutes locally, then visualize.
 
     Requires the persistent ingestor to be stopped (it owns the WebSocket and the
-    same data dir). Runs a time-boxed `ing`, then opens the freshest parquet via
-    the slice viewer."""
+    same data dir). Runs a time-boxed `ing`, then renders via the same
+    `15m_visualize.py` pipeline as `nat viz render --tf` (resampled bars, curated
+    panels, per-symbol) so the output matches the established viz path exactly."""
     minutes = getattr(args, 'minutes')
     secs = int(minutes * 60)
 
@@ -1060,21 +1061,20 @@ def cmd_test_capture(args):
     newest = target[0]
     _p("+", G, f"Captured: {newest}")
 
-    sys.path.insert(0, str(ROOT / "scripts"))
-    from viz import slice_viewer
-    try:
-        slice_viewer.view(
-            newest,
-            slice_expr="all",
-            symbol=getattr(args, 'symbol', None),
-            max_features=getattr(args, 'max_features', 12),
-            delete=True,
-            prompt=not _json_mode(args),
-        )
-    except Exception as e:
-        _p("x", R, f"Visualization failed: {e}")
-        return 1
-    return 0
+    # Render through the SAME path as `nat viz render --tf` so the image matches
+    # the established viz output: resampled bars at the matching timeframe, curated
+    # panels, scoped to the just-captured window via --last, per-symbol.
+    tf = {1: '1m', 5: '5m', 15: '15m'}.get(int(minutes), '5m')
+    overview_tf = _TF_MAP[tf][0]
+    sym = getattr(args, 'symbol', None) or 'BTC'
+    out = str(ROOT / "reports" / "figures" / "snapshots")
+    cmd = (f"scripts/15m_visualize.py --data-dir {_data(args)} --last {int(minutes)}m "
+           f"--symbol {sym} --output {out} --page all --timeframe {overview_tf} "
+           f"--max-features {getattr(args, 'max_features', 16)}")
+    if not _json_mode(args):
+        cmd += " --open"
+    cmd += " -v"
+    return _py(cmd).returncode
 
 
 def cmd_test_verbose(args):
@@ -5592,11 +5592,12 @@ def build_parser():
     tsub.add_parser('unit', help='Rust unit tests').set_defaults(func=cmd_test)
     tsub.add_parser('verbose', help='Tests with --nocapture').set_defaults(func=cmd_test_verbose)
     # Capture-and-visualize: ingest N minutes locally (ingestor must be stopped),
-    # then open the freshest parquet slice as PNGs.
+    # then render via the same 15m_visualize.py path as `nat viz render --tf`.
     for _label, _mins in (('1m', 1), ('5m', 5), ('15m', 15)):
         _tcap = tsub.add_parser(_label, help=f'Capture {_label} of live data then visualize')
-        _tcap.add_argument('--symbol', '-s', default=None, help='Filter viz to one symbol')
-        _tcap.add_argument('--max-features', type=int, default=12, help='Max features per page')
+        _tcap.add_argument('--symbol', '-s', default='BTC',
+                           help="Symbol or 'all' (default: BTC)")
+        _tcap.add_argument('--max-features', type=int, default=16, help='Max features per page')
         _tcap.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
         _tcap.set_defaults(func=cmd_test_capture, minutes=_mins)
     tsub.add_parser('hypotheses', help='Hypothesis tests').set_defaults(func=cmd_test_hypotheses)
