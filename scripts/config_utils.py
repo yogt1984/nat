@@ -31,6 +31,37 @@ _AGENT_TOML_PATH = nat_paths.config_dir() / "agent.toml"
 _symbols_cache: list[str] | None = None
 
 
+def load_dotenv(path: str | Path | None = None) -> bool:
+    """Load KEY=VALUE pairs from a .env into os.environ (without overriding real env).
+
+    Looks (in order) at the given path, then ``<install_root>/.env`` and
+    ``<config_dir>/.env`` so secrets like TELEGRAM_* reach daemons launched by
+    cron/tmux that don't inherit an interactive shell's environment. Returns True
+    if a file was found. Best-effort and silent on malformed lines.
+    """
+    candidates = [Path(path)] if path else [
+        nat_paths.install_root() / ".env",
+        nat_paths.config_dir() / ".env",
+    ]
+    for c in candidates:
+        if not c or not c.exists():
+            continue
+        try:
+            for line in c.read_text().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if k:
+                    os.environ.setdefault(k, v)   # real env wins
+            return True
+        except OSError:
+            return False
+    return False
+
+
 def load_symbols(path: str | Path | None = None) -> list[str]:
     """Load the canonical symbol list from config/symbols.toml.
 

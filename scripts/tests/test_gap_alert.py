@@ -19,6 +19,7 @@ from ops.gap_alert import (
     GapState,
     latest_data_age_s,
     is_gap,
+    is_paused,
     read_gap_state,
     write_gap_state,
     healthy,
@@ -104,14 +105,16 @@ class TestGapStatePersistence:
 # ---------------------------------------------------------------------------
 
 
-def _alerter(tmp_path, data_dir, clock):
+def _alerter(tmp_path, data_dir, clock, notify=False):
     return GapAlerter(
-        config={"gap_threshold_s": 300, "poll_interval_s": 30,
-                "data_dirs": [str(data_dir)]},
+        config={"gap_threshold_s": 300, "row_threshold_s": 600, "poll_interval_s": 30,
+                "data_dirs": [str(data_dir)],
+                "alert_log": str(tmp_path / "alerts.log"),
+                "pause_file": str(tmp_path / "ingestion_paused")},
         state_path=tmp_path / "gap_state.json",
         heartbeat_path=tmp_path / "hb",
         pid_file=tmp_path / "pid",
-        clock=clock, notify=False,
+        clock=clock, notify=notify,
     )
 
 
@@ -156,6 +159,86 @@ class TestAlerterTransitions:
         st = a.check()
         assert not st.gapping
         assert any("RECOVER" in m.upper() for m in alerts)
+
+
+# ---------------------------------------------------------------------------
+# Pause marker (T2): intentional `nat stop` suppresses pages but keeps monitoring
+# ---------------------------------------------------------------------------
+
+
+class TestPause:
+    def test_is_paused_helper(self, tmp_path):
+        marker = tmp_path / "ingestion_paused"
+        assert is_paused(marker) is False
+        marker.write_text("2026-06-19T00:00:00+00:00")
+        assert is_paused(marker) is True
+
+    def test_paused_suppresses_gap_alert(self, tmp_path):
+        now = 2_000_000.0
+        data = tmp_path / "features"
+        _touch(data / "2026-06-15" / "stale.parquet.tmp", age_s=900, now=now)  # would gap
+        a = _alerter(tmp_path, data, clock=lambda: now)
+        (tmp_path / "ingestion_paused").write_text("paused")        # but we paused
+        alerts = []
+        a._send = lambda msg: alerts.append(msg)
+        st = a.check()
+        assert st.paused is True
+        assert st.gapping is False
+        assert alerts == []                                         # no page while paused
+
+    def test_unpaused_after_marker_removed_pages(self, tmp_path):
+        now = 2_000_000.0
+        data = tmp_path / "features"
+        _touch(data / "2026-06-15" / "stale.parquet.tmp", age_s=900, now=now)
+        a = _alerter(tmp_path, data, clock=lambda: now)
+        alerts = []
+        a._send = lambda msg: alerts.append(msg)
+        a.check()                                                   # not paused → gap opens
+        assert sum("GAP" in m.upper() for m in alerts) == 1
+
+
+# ---------------------------------------------------------------------------
+# Local fallback (T1): a gap is logged to alert_log even with no Telegram
+# ---------------------------------------------------------------------------
+
+
+class TestLocalFallback:
+    def test_gap_written_to_alert_log(self, tmp_path):
+        now = 2_000_000.0
+        data = tmp_path / "features"
+        _touch(data / "2026-06-15" / "stale.parquet.tmp", age_s=900, now=now)
+        a = _alerter(tmp_path, data, clock=lambda: now, notify=True)  # real _send path
+        a.check()
+        alert_log = tmp_path / "alerts.log"
+        assert alert_log.exists()
+        assert "DATA GAP" in alert_log.read_text()
+
+
+# ---------------------------------------------------------------------------
+# Row-timestamp freshness (T4): stalled buffer (fresh mtime, old rows) = gap
+# ---------------------------------------------------------------------------
+
+
+class TestRowAge:
+    def test_stalled_rows_with_fresh_mtime_is_gap(self, tmp_path):
+        pq = pytest.importorskip("pyarrow")
+        import pyarrow.parquet as pqw
+        import pyarrow as pa
+        now = 2_000_000.0
+        data = tmp_path / "features" / "2026-06-15"
+        data.mkdir(parents=True)
+        f = data / "rows.parquet"
+        # newest row is 5000s old, but the file's mtime is fresh (10s) — mtime
+        # alone would say "OK"; row-age (threshold 600) must flag the gap.
+        old_ns = int((now - 5000) * 1e9)
+        pqw.write_table(pa.table({"timestamp_ns": [old_ns], "symbol": ["BTC"]}), f)
+        os.utime(f, (now - 10, now - 10))
+        a = _alerter(tmp_path, tmp_path / "features", clock=lambda: now)
+        alerts = []
+        a._send = lambda msg: alerts.append(msg)
+        st = a.check()
+        assert st.gapping is True
+        assert st.row_age_s == pytest.approx(5000, abs=2)
 
 
 # ---------------------------------------------------------------------------

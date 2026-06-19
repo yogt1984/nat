@@ -96,6 +96,64 @@ def is_gap(age_s: float | None, threshold_s: float) -> bool:
     return age_s is not None and age_s > threshold_s
 
 
+def latest_row_age_s(
+    data_dirs: Sequence[Path | str], now: float | None = None
+) -> float | None:
+    """T4: seconds since the newest *readable row* (max timestamp_ns) — a signal
+    mtime can't fake. A stalled/zero-row buffer keeps a file's mtime fresh while
+    no new rows land; this reads the newest closed parquet's column statistics
+    (footer only, no full scan). Best-effort: None if unreadable / no pyarrow.
+    """
+    try:
+        import pyarrow.parquet as pq
+    except Exception:
+        return None
+    newest_file: Path | None = None
+    newest_mt = -1.0
+    for d in data_dirs:
+        base = Path(d)
+        if not base.exists():
+            continue
+        for f in base.rglob("*.parquet"):          # closed files only (stats present)
+            try:
+                mt = f.stat().st_mtime
+            except OSError:
+                continue
+            if mt > newest_mt:
+                newest_mt, newest_file = mt, f
+    if newest_file is None:
+        return None
+    try:
+        md = pq.read_metadata(newest_file)
+        max_ns = None
+        for rg in range(md.num_row_groups):
+            col = None
+            schema = md.schema.to_arrow_schema()
+            if "timestamp_ns" not in schema.names:
+                return None
+            idx = schema.names.index("timestamp_ns")
+            col = md.row_group(rg).column(idx)
+            if col.statistics is not None and col.statistics.has_min_max:
+                m = col.statistics.max
+                if max_ns is None or m > max_ns:
+                    max_ns = m
+        if max_ns is None:
+            return None
+        now = now if now is not None else time.time()
+        return now - (max_ns / 1e9)
+    except Exception:
+        return None
+
+
+def is_paused(pause_file: Path | str) -> bool:
+    """Intentional-pause marker present → suppress gap pages (but keep monitoring)."""
+    return Path(pause_file).exists()
+
+
+def telegram_configured() -> bool:
+    return bool(os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"))
+
+
 # ───────────────────────────────────────────────────────────────────────────
 # State
 # ───────────────────────────────────────────────────────────────────────────
@@ -104,7 +162,9 @@ def is_gap(age_s: float | None, threshold_s: float) -> bool:
 @dataclass
 class GapState:
     gapping: bool = False
+    paused: bool = False
     age_s: float | None = None
+    row_age_s: float | None = None
     gap_started_at: str | None = None
     last_alert_at: str | None = None
     last_check_at: str | None = None
@@ -154,11 +214,14 @@ def load_config(path: Path | str | None = None) -> dict:
         # default 300s ("<5 min page"); comfortably above the writer's flush
         # cadence, so normal buffering never false-alarms. Tune per deploy.
         "gap_threshold_s": 300,
+        "row_threshold_s": 600,
         "poll_interval_s": 30,
         "data_dirs": [str(ROOT / "data" / "features")],
         "state_path": str(ROOT / "data" / "ops" / "gap_state.json"),
         "heartbeat_path": str(ROOT / "data" / "ops" / "gap_alert.heartbeat"),
         "pid_file": str(ROOT / "data" / "ops" / "gap_alert.pid"),
+        "alert_log": str(ROOT / "data" / "ops" / "alerts.log"),
+        "pause_file": str(ROOT / "data" / "ops" / "ingestion_paused"),
     }
     cfg_path = Path(path) if path else ROOT / "config" / "ops.toml"
     if cfg_path.exists():
@@ -193,13 +256,18 @@ class GapAlerter:
         self.state_path = Path(state_path or self.config["state_path"])
         self.heartbeat_path = Path(heartbeat_path or self.config["heartbeat_path"])
         self.pid_file = Path(pid_file or self.config["pid_file"])
+
+        def _resolve(p: str | Path) -> Path:
+            p = Path(p)
+            return p if p.is_absolute() else ROOT / p
+
         # Resolve relative data dirs against the repo root so freshness checks
         # work regardless of the daemon's CWD.
-        self.data_dirs = [
-            Path(d) if Path(d).is_absolute() else ROOT / d
-            for d in self.config["data_dirs"]
-        ]
+        self.data_dirs = [_resolve(d) for d in self.config["data_dirs"]]
+        self.alert_log = _resolve(self.config.get("alert_log", "data/ops/alerts.log"))
+        self.pause_file = _resolve(self.config.get("pause_file", "data/ops/ingestion_paused"))
         self.threshold = float(self.config["gap_threshold_s"])
+        self.row_threshold = float(self.config.get("row_threshold_s", 600))
         # clock returns epoch seconds (matches file mtimes)
         self._clock = clock or time.time
         self.notify = notify
@@ -213,10 +281,28 @@ class GapAlerter:
         return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
 
     def _send(self, message: str) -> None:
-        """Page (best-effort). Always logged; Telegram only when notify=True."""
+        """Page on every available channel (best-effort). Local channels always
+        fire so a gap is never invisible; Telegram is push-on-top when configured."""
         log.warning(message)
         if not self.notify:
             return
+        # Local fallback 1: durable, timestamped alert log (always works).
+        try:
+            self.alert_log.parent.mkdir(parents=True, exist_ok=True)
+            with self.alert_log.open("a") as fh:
+                fh.write(f"{self._iso(self._now())}  {message}\n")
+        except OSError as e:  # pragma: no cover
+            log.debug("alert_log write failed: %s", e)
+        # Local fallback 2: desktop notification, if a display is available.
+        try:
+            import shutil as _sh
+            if _sh.which("notify-send"):
+                import subprocess as _sp
+                _sp.run(["notify-send", "-u", "critical", "nat: data gap", message],
+                        check=False, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+        except Exception:  # pragma: no cover
+            pass
+        # Push: Telegram (no-op without creds — caller already warned loudly).
         try:
             from tournament.report import send_telegram
 
@@ -228,25 +314,35 @@ class GapAlerter:
         """One evaluation cycle: detect gap, alert on transitions, persist state."""
         now = now if now is not None else self._now()
         age = latest_data_age_s(self.data_dirs, now)
-        gap = is_gap(age, self.threshold)
+        row_age = latest_row_age_s(self.data_dirs, now)
         prev = read_gap_state(self.state_path)
         now_iso = self._iso(now)
 
+        # Gap by mtime OR by stalled rows (T4); row-age only tightens, never loosens.
+        gap = is_gap(age, self.threshold) or is_gap(row_age, self.row_threshold)
+
+        # Intentional pause (nat stop): keep running + recording, but never page.
+        if is_paused(self.pause_file):
+            st = GapState(gapping=False, paused=True, age_s=age, row_age_s=row_age,
+                          last_check_at=now_iso)
+            write_gap_state(self.state_path, st)
+            return st
+
         if gap and not prev.gapping:
-            # gap opens — page once
-            msg = (
-                f"⚠️ DATA GAP — no new feature data for {age:.0f}s "
-                f"(threshold {self.threshold:.0f}s) as of {now_iso}"
-            )
-            self._send(msg)
+            # gap opens — page once. Report whichever signal is available.
+            detail = (f"no new file write for {age:.0f}s (threshold {self.threshold:.0f}s)"
+                      if age is not None else
+                      f"newest row is {row_age:.0f}s old (threshold {self.row_threshold:.0f}s)")
+            self._send(f"⚠️ DATA GAP — {detail} as of {now_iso}")
             st = GapState(
-                gapping=True, age_s=age, gap_started_at=now_iso,
+                gapping=True, age_s=age, row_age_s=row_age, gap_started_at=now_iso,
                 last_alert_at=now_iso, last_check_at=now_iso,
             )
         elif gap and prev.gapping:
             # still gapping — no new page
             st = GapState(
-                gapping=True, age_s=age, gap_started_at=prev.gap_started_at,
+                gapping=True, age_s=age, row_age_s=row_age,
+                gap_started_at=prev.gap_started_at,
                 last_alert_at=prev.last_alert_at, last_check_at=now_iso,
             )
         elif (not gap) and prev.gapping:
@@ -259,10 +355,10 @@ class GapAlerter:
                 except ValueError:
                     pass
             self._send(f"✅ DATA RECOVERED — feature ingestion flowing again{dur} ({now_iso})")
-            st = GapState(gapping=False, age_s=age, last_check_at=now_iso)
+            st = GapState(gapping=False, age_s=age, row_age_s=row_age, last_check_at=now_iso)
         else:
             # steady-state OK
-            st = GapState(gapping=False, age_s=age, last_check_at=now_iso)
+            st = GapState(gapping=False, age_s=age, row_age_s=row_age, last_check_at=now_iso)
 
         write_gap_state(self.state_path, st)
         return st
@@ -271,6 +367,9 @@ class GapAlerter:
         st = read_gap_state(self.state_path)
         d = st.to_dict()
         d["threshold_s"] = self.threshold
+        d["row_threshold_s"] = self.row_threshold
+        d["paused"] = is_paused(self.pause_file)
+        d["daemon_healthy"] = healthy(self.config)
         d["data_dirs"] = [str(p) for p in self.data_dirs]
         return d
 
@@ -284,6 +383,12 @@ class GapAlerter:
             "Gap-alert daemon started (PID %d, poll %ds, threshold %.0fs, dirs=%s)",
             os.getpid(), poll, self.threshold, [str(p) for p in self.data_dirs],
         )
+        if not telegram_configured():
+            log.warning(
+                "Telegram NOT configured — gap alerts are LOCAL-ONLY (%s + notify-send + "
+                "`nat status`). Add TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID to .env for push alerts.",
+                self.alert_log,
+            )
         try:
             while not self._shutdown:
                 try:
@@ -314,6 +419,13 @@ class GapAlerter:
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     cmd = argv[0] if argv else "start"
+    # Pull TELEGRAM_* (and any secrets) from .env — cron/tmux children don't
+    # inherit an interactive shell's environment.
+    try:
+        from config_utils import load_dotenv
+        load_dotenv()
+    except Exception:  # pragma: no cover
+        pass
     a = GapAlerter()
     if cmd == "start":
         a.run()
