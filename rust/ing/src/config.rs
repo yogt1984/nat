@@ -167,6 +167,8 @@ pub struct TradeOutputConfig {
     pub buffer_size: usize,
     #[serde(default = "default_compression")]
     pub compression: String,
+    #[serde(default = "default_rotate_interval")]
+    pub rotate_interval: String,
 }
 
 impl Default for TradeOutputConfig {
@@ -176,6 +178,7 @@ impl Default for TradeOutputConfig {
             data_dir: None,
             buffer_size: default_trade_buffer_size(),
             compression: default_compression(),
+            rotate_interval: default_rotate_interval(),
         }
     }
 }
@@ -233,6 +236,29 @@ fn default_compression() -> String {
 fn default_rotate_interval() -> String {
     "1h".to_string()
 }
+
+/// Parse a file-rotation interval like "30s", "5m", "10m", "1h", "1d" into a
+/// `Duration`. Unrecognized, zero, or unit-less values fall back to 1 hour (the
+/// historical hourly-rotation behavior) so a typo never disables rotation.
+pub fn parse_rotate_interval(s: &str) -> std::time::Duration {
+    let s = s.trim();
+    let split = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    let (num, unit) = s.split_at(split);
+    let n: u64 = num.parse().unwrap_or(0);
+    let secs = match unit.trim().to_ascii_lowercase().as_str() {
+        "s" => n,
+        "m" => n * 60,
+        "h" => n * 3600,
+        "d" => n * 86400,
+        _ => 0,
+    };
+    if secs == 0 {
+        std::time::Duration::from_secs(3600)
+    } else {
+        std::time::Duration::from_secs(secs)
+    }
+}
+
 fn default_dashboard_addr() -> String {
     "0.0.0.0:8080".to_string()
 }
@@ -347,6 +373,33 @@ impl Default for Config {
             algorithms: AlgorithmsConfig::default(),
             trade_output: TradeOutputConfig::default(),
             position_tracker: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_rotate_interval;
+    use std::time::Duration;
+
+    #[test]
+    fn parse_rotate_interval_units() {
+        assert_eq!(parse_rotate_interval("30s"), Duration::from_secs(30));
+        assert_eq!(parse_rotate_interval("5m"), Duration::from_secs(300));
+        assert_eq!(parse_rotate_interval("10m"), Duration::from_secs(600));
+        assert_eq!(parse_rotate_interval("1h"), Duration::from_secs(3600));
+        assert_eq!(parse_rotate_interval("2d"), Duration::from_secs(172_800));
+        assert_eq!(parse_rotate_interval(" 5M "), Duration::from_secs(300)); // trim + case
+    }
+
+    #[test]
+    fn parse_rotate_interval_falls_back_to_1h() {
+        for bad in ["garbage", "0m", "", "5x", "h", "100"] {
+            assert_eq!(
+                parse_rotate_interval(bad),
+                Duration::from_secs(3600),
+                "input {bad:?} should fall back to 1h"
+            );
         }
     }
 }

@@ -152,6 +152,8 @@ pub struct TradeParquetWriter {
     current_tmp_path: Option<PathBuf>,
     current_hour: Option<u32>,
     rows_written: usize,
+    file_opened_at: Option<std::time::Instant>,
+    rotate_interval: std::time::Duration,
 }
 
 impl TradeParquetWriter {
@@ -173,6 +175,8 @@ impl TradeParquetWriter {
             current_tmp_path: None,
             current_hour: None,
             rows_written: 0,
+            file_opened_at: None,
+            rotate_interval: crate::config::parse_rotate_interval(&config.rotate_interval),
         })
     }
 
@@ -180,8 +184,9 @@ impl TradeParquetWriter {
     pub fn write(&mut self, rec: &TradeRecord) -> Result<()> {
         let now: DateTime<Utc> = DateTime::from_timestamp_nanos(rec.timestamp_ns);
         let hour = now.hour();
+        let file_age = self.file_opened_at.map(|t| t.elapsed());
 
-        if self.current_hour != Some(hour) {
+        if super::writer::should_rotate(self.current_hour, hour, file_age, self.rotate_interval) {
             self.rotate_file(&now)?;
             self.current_hour = Some(hour);
         }
@@ -265,6 +270,7 @@ impl TradeParquetWriter {
         self.current_file_path = Some(file_path);
         self.current_tmp_path = Some(tmp_path);
         self.rows_written = 0;
+        self.file_opened_at = Some(std::time::Instant::now());
 
         Ok(())
     }

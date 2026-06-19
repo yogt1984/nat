@@ -64,8 +64,11 @@ row_group_size = 10000
 # Compression: zstd, snappy, gzip, or none
 compression = "zstd"
 
-# File rotation interval: 1h, 1d
-rotate_interval = "1h"
+# File rotation interval (max age of an open file: 5m, 10m, 1h, ...).
+# Smaller = less data orphaned in an unrenamed .tmp on an unclean stop/restart
+# (the open file is only finalized to a readable .parquet on rotation/close),
+# at the cost of more files per day. Capped at 1h by hour-boundary rotation.
+rotate_interval = "10m"
 
 [trade_output]
 # Raw trade persistence (individual trades to Parquet)
