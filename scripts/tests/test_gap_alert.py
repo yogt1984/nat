@@ -244,6 +244,162 @@ class TestRowAge:
 
 
 # ---------------------------------------------------------------------------
+# Stalled-buffer detection + guarded auto-restart (zombie ingestor)
+# ---------------------------------------------------------------------------
+
+
+def _tmp(path: Path, size: int, now: float, mtime_age: float = 5.0):
+    """Write a .parquet.tmp of `size` bytes with a fresh mtime (writer is alive)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"x" * size)
+    mt = now - mtime_age
+    os.utime(path, (mt, mt))
+
+
+def _stall_alerter(tmp_path, data_dir, clock, restarts, managed=True):
+    return GapAlerter(
+        config={
+            "gap_threshold_s": 300, "row_threshold_s": 600, "poll_interval_s": 30,
+            "stall_threshold_s": 900, "auto_restart": True,
+            "restart_unit": "nat-ingestor.service", "restart_cooldown_s": 600,
+            "max_consecutive_restarts": 3,
+            "data_dirs": [str(data_dir)],
+            "alert_log": str(tmp_path / "alerts.log"),
+            "pause_file": str(tmp_path / "ingestion_paused"),
+        },
+        state_path=tmp_path / "gap_state.json",
+        heartbeat_path=tmp_path / "hb", pid_file=tmp_path / "pid",
+        clock=clock, notify=False,
+        restart_fn=lambda unit: restarts.append((clock(), unit)),
+        unit_managed_fn=lambda unit: managed,
+    )
+
+
+class TestStallDetection:
+    def test_growing_tmp_not_stalled(self, tmp_path):
+        clk = {"now": 3_000_000.0}
+        data = tmp_path / "features"
+        f = data / "2026-06-15" / "live.parquet.tmp"
+        restarts = []
+        a = _stall_alerter(tmp_path, data, lambda: clk["now"], restarts)
+        _tmp(f, 100, clk["now"]); a.check()
+        clk["now"] += 1000
+        _tmp(f, 200, clk["now"])               # grew
+        st = a.check()
+        assert st.stalled is False and st.gapping is False
+        assert restarts == []
+
+    def test_flat_below_threshold_not_stalled(self, tmp_path):
+        clk = {"now": 3_000_000.0}
+        data = tmp_path / "features"
+        f = data / "2026-06-15" / "live.parquet.tmp"
+        a = _stall_alerter(tmp_path, data, lambda: clk["now"], [])
+        _tmp(f, 100, clk["now"]); a.check()
+        clk["now"] += 300                      # < 900 with fresh mtime
+        _tmp(f, 100, clk["now"])
+        st = a.check()
+        assert st.stalled is False
+
+    def test_flat_over_threshold_stalls_and_restarts(self, tmp_path):
+        clk = {"now": 3_000_000.0}
+        data = tmp_path / "features"
+        f = data / "2026-06-15" / "live.parquet.tmp"
+        restarts = []
+        alerts = []
+        a = _stall_alerter(tmp_path, data, lambda: clk["now"], restarts)
+        a._send = lambda m: alerts.append(m)
+        _tmp(f, 100, clk["now"]); a.check()
+        clk["now"] += 1000                     # > 900, mtime still fresh → zombie
+        _tmp(f, 100, clk["now"])
+        st = a.check()
+        assert st.stalled is True and st.gapping is True
+        assert any("STALL" in m.upper() for m in alerts)
+        assert len(restarts) == 1 and restarts[0][1] == "nat-ingestor.service"
+
+    def test_rotation_resets_growth_timer(self, tmp_path):
+        clk = {"now": 3_000_000.0}
+        data = tmp_path / "features" / "2026-06-15"
+        restarts = []
+        a = _stall_alerter(tmp_path, tmp_path / "features", lambda: clk["now"], restarts)
+        _tmp(data / "a.parquet.tmp", 100, clk["now"]); a.check()
+        clk["now"] += 1000
+        (data / "a.parquet.tmp").rename(data / "a.parquet")   # rotated/closed
+        _tmp(data / "b.parquet.tmp", 50, clk["now"])          # new active tmp
+        st = a.check()
+        assert st.stalled is False and restarts == []
+
+    def test_not_stalled_when_mtime_also_stale(self, tmp_path):
+        # mtime stale = plain gap (dead process → systemd's job), not a "stall"
+        clk = {"now": 3_000_000.0}
+        data = tmp_path / "features"
+        f = data / "2026-06-15" / "live.parquet.tmp"
+        restarts = []
+        a = _stall_alerter(tmp_path, data, lambda: clk["now"], restarts)
+        _tmp(f, 100, clk["now"]); a.check()
+        clk["now"] += 1000
+        _tmp(f, 100, clk["now"], mtime_age=1000)   # mtime old too → mtime gap
+        st = a.check()
+        assert st.gapping is True            # it's a gap…
+        assert st.stalled is False           # …but not a stall
+        assert restarts == []                # no auto-restart on a dead process
+
+
+class TestAutoRestartGuards:
+    def _drive_stall(self, a, f, clk, jump):
+        clk["now"] += jump
+        _tmp(f, 100, clk["now"])             # flat size, fresh mtime
+        return a.check()
+
+    def test_cooldown_blocks_rapid_restart(self, tmp_path):
+        clk = {"now": 3_000_000.0}
+        data = tmp_path / "features"
+        f = data / "2026-06-15" / "live.parquet.tmp"
+        restarts = []
+        a = _stall_alerter(tmp_path, data, lambda: clk["now"], restarts)
+        _tmp(f, 100, clk["now"]); a.check()
+        self._drive_stall(a, f, clk, 1000)       # stall → restart #1
+        self._drive_stall(a, f, clk, 100)        # +100s < 600 cooldown → no restart
+        assert len(restarts) == 1
+        self._drive_stall(a, f, clk, 700)        # past cooldown, still stalled → restart #2
+        assert len(restarts) == 2
+
+    def test_max_consecutive_cap(self, tmp_path):
+        clk = {"now": 3_000_000.0}
+        data = tmp_path / "features"
+        f = data / "2026-06-15" / "live.parquet.tmp"
+        restarts = []
+        a = _stall_alerter(tmp_path, data, lambda: clk["now"], restarts)
+        _tmp(f, 100, clk["now"]); a.check()
+        for _ in range(6):
+            self._drive_stall(a, f, clk, 1000)   # each past cooldown
+        assert len(restarts) == 3                # capped at max_consecutive_restarts
+
+    def test_recovery_resets_count(self, tmp_path):
+        clk = {"now": 3_000_000.0}
+        data = tmp_path / "features"
+        f = data / "2026-06-15" / "live.parquet.tmp"
+        restarts = []
+        a = _stall_alerter(tmp_path, data, lambda: clk["now"], restarts)
+        _tmp(f, 100, clk["now"]); a.check()
+        self._drive_stall(a, f, clk, 1000)       # restart #1
+        clk["now"] += 1000; _tmp(f, 500, clk["now"]); a.check()   # grew → recovery
+        for _ in range(2):
+            self._drive_stall(a, f, clk, 1000)   # stalls again → restarts allowed afresh
+        assert len(restarts) == 3                # 1 + 2 (count was reset)
+
+    def test_no_restart_when_unit_not_managed(self, tmp_path):
+        clk = {"now": 3_000_000.0}
+        data = tmp_path / "features"
+        f = data / "2026-06-15" / "live.parquet.tmp"
+        restarts = []
+        a = _stall_alerter(tmp_path, data, lambda: clk["now"], restarts, managed=False)
+        _tmp(f, 100, clk["now"]); a.check()
+        st = self._drive_stall(a, f, clk, 1000)
+        assert st.stalled is True            # still detected + alerted
+        assert restarts == []                # but not auto-restarted (no systemd unit)
+
+
+# ---------------------------------------------------------------------------
 # Healthcheck heartbeat
 # ---------------------------------------------------------------------------
 

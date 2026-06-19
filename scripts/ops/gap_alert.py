@@ -145,6 +145,36 @@ def latest_row_age_s(
         return None
 
 
+def newest_tmp(data_dirs: Sequence[Path | str]) -> tuple[Path, int, float] | None:
+    """The freshest active ``*.parquet.tmp`` and its (path, size_bytes, mtime).
+
+    The writer keeps one active ``.tmp`` whose size grows as row groups flush;
+    a fresh mtime with a *non-growing* size over time is the zombie-ingestor
+    (stalled-buffer) signal. None when no ``.tmp`` exists (between rotations)."""
+    best: tuple[Path, int, float] | None = None
+    for d in data_dirs:
+        base = Path(d)
+        if not base.exists():
+            continue
+        for f in base.rglob("*.parquet.tmp"):
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            if best is None or st.st_mtime > best[2]:
+                best = (f, st.st_size, st.st_mtime)
+    return best
+
+
+def _parse_iso(s: str | None) -> float | None:
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s).timestamp()
+    except ValueError:
+        return None
+
+
 def is_paused(pause_file: Path | str) -> bool:
     """Intentional-pause marker present → suppress gap pages (but keep monitoring)."""
     return Path(pause_file).exists()
@@ -163,11 +193,19 @@ def telegram_configured() -> bool:
 class GapState:
     gapping: bool = False
     paused: bool = False
+    stalled: bool = False
     age_s: float | None = None
     row_age_s: float | None = None
     gap_started_at: str | None = None
     last_alert_at: str | None = None
     last_check_at: str | None = None
+    # .parquet.tmp growth tracker (stalled-buffer detection)
+    tmp_path: str | None = None
+    tmp_size: int | None = None
+    tmp_grew_at: str | None = None
+    # auto-restart bookkeeping
+    last_restart_at: str | None = None
+    restart_count: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -222,6 +260,12 @@ def load_config(path: Path | str | None = None) -> dict:
         "pid_file": str(ROOT / "data" / "ops" / "gap_alert.pid"),
         "alert_log": str(ROOT / "data" / "ops" / "alerts.log"),
         "pause_file": str(ROOT / "data" / "ops" / "ingestion_paused"),
+        # Stalled-buffer detection (.tmp size flat while mtime fresh) + remediation.
+        "stall_threshold_s": 900,
+        "auto_restart": True,
+        "restart_unit": "nat-ingestor.service",
+        "restart_cooldown_s": 600,
+        "max_consecutive_restarts": 3,
     }
     cfg_path = Path(path) if path else ROOT / "config" / "ops.toml"
     if cfg_path.exists():
@@ -241,6 +285,18 @@ def load_config(path: Path | str | None = None) -> dict:
 # ───────────────────────────────────────────────────────────────────────────
 
 
+def _unit_is_managed(unit: str) -> bool:
+    """True if a systemd --user unit file exists (so restarting it is meaningful)."""
+    xdg = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return (Path(xdg) / "systemd" / "user" / unit).exists()
+
+
+def _systemctl_restart(unit: str) -> None:
+    import subprocess
+    subprocess.run(["systemctl", "--user", "restart", unit], check=False,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 class GapAlerter:
     def __init__(
         self,
@@ -251,6 +307,8 @@ class GapAlerter:
         pid_file: Path | str | None = None,
         clock: Callable[[], float] | None = None,
         notify: bool = True,
+        restart_fn: Callable[[str], None] | None = None,
+        unit_managed_fn: Callable[[str], bool] | None = None,
     ):
         self.config = config or load_config()
         self.state_path = Path(state_path or self.config["state_path"])
@@ -268,6 +326,14 @@ class GapAlerter:
         self.pause_file = _resolve(self.config.get("pause_file", "data/ops/ingestion_paused"))
         self.threshold = float(self.config["gap_threshold_s"])
         self.row_threshold = float(self.config.get("row_threshold_s", 600))
+        self.stall_threshold = float(self.config.get("stall_threshold_s", 900))
+        self.auto_restart = bool(self.config.get("auto_restart", True))
+        self.restart_unit = self.config.get("restart_unit", "nat-ingestor.service")
+        self.restart_cooldown = float(self.config.get("restart_cooldown_s", 600))
+        self.max_restarts = int(self.config.get("max_consecutive_restarts", 3))
+        # Injectable for tests; real impls touch systemd only.
+        self._restart_fn = restart_fn or _systemctl_restart
+        self._unit_managed_fn = unit_managed_fn or _unit_is_managed
         # clock returns epoch seconds (matches file mtimes)
         self._clock = clock or time.time
         self.notify = notify
@@ -310,60 +376,94 @@ class GapAlerter:
         except Exception as e:  # pragma: no cover
             log.debug("Telegram send skipped: %s", e)
 
+    def _track_tmp(self, prev: GapState, now_iso: str) -> tuple[str | None, int | None, str | None, float | None]:
+        """Returns (tmp_path, tmp_size, tmp_grew_at, stall_age) for this cycle."""
+        cur = newest_tmp(self.data_dirs)
+        if cur is None:
+            # no active .tmp (between rotations) — can't judge a stall
+            return prev.tmp_path, prev.tmp_size, prev.tmp_grew_at, None
+        path, size, _mtime = cur
+        path = str(path)
+        grew = (prev.tmp_path != path or prev.tmp_size is None or size > prev.tmp_size)
+        if grew:
+            return path, size, now_iso, 0.0
+        grew_at = prev.tmp_grew_at or now_iso
+        started = _parse_iso(grew_at)
+        stall_age = (self._now() - started) if started is not None else 0.0
+        return path, size, grew_at, stall_age
+
+    def _maybe_remediate(self, now: float, now_iso: str, prev: GapState) -> tuple[str | None, int]:
+        """Auto-restart the ingestor on a confirmed stall. systemd-only, guarded by
+        a cooldown and a max-consecutive cap. Returns (last_restart_at, restart_count)."""
+        last, count = prev.last_restart_at, (prev.restart_count or 0)
+        if not self.auto_restart or not self._unit_managed_fn(self.restart_unit):
+            return last, count
+        last_ts = _parse_iso(last)
+        if last_ts is not None and (now - last_ts) < self.restart_cooldown:
+            return last, count                      # cooldown
+        if count >= self.max_restarts:
+            return last, count                      # give up auto-restarting
+        self._restart_fn(self.restart_unit)
+        self._send(f"🔧 STALL REMEDIATION — restarted {self.restart_unit} "
+                   f"(attempt {count + 1}/{self.max_restarts}) at {now_iso}")
+        return now_iso, count + 1
+
     def check(self, now: float | None = None) -> GapState:
-        """One evaluation cycle: detect gap, alert on transitions, persist state."""
+        """One evaluation cycle: detect gap/stall, alert on transitions, remediate, persist."""
         now = now if now is not None else self._now()
         age = latest_data_age_s(self.data_dirs, now)        # incl live .parquet.tmp
         row_age = latest_row_age_s(self.data_dirs, now)     # closed files only (diagnostic)
         prev = read_gap_state(self.state_path)
         now_iso = self._iso(now)
 
-        # Gap trigger is the mtime of the freshest file (the live .parquet.tmp IS
-        # the liveness signal). row_age_s is recorded for visibility but does NOT
-        # solo-trigger: closed-file row stats lag by up to a full hourly rotation,
-        # so triggering on them false-alarms right after every rotation/restart.
-        # (Detecting a truly stalled buffer — fresh mtime, no new rows — needs
-        # .tmp size-delta tracking; tracked as a follow-up.)
-        gap = is_gap(age, self.threshold)
+        tmp_path, tmp_size, tmp_grew_at, stall_age = self._track_tmp(prev, now_iso)
 
-        # Intentional pause (nat stop): keep running + recording, but never page.
+        # mtime gap = no file writes at all (dead process → systemd's job).
+        # stall = mtime fresh but the .tmp isn't growing (zombie: alive, not writing).
+        mtime_gap = is_gap(age, self.threshold)
+        stalled = (not mtime_gap) and stall_age is not None and stall_age > self.stall_threshold
+        gap = mtime_gap or stalled
+
+        common = dict(age_s=age, row_age_s=row_age, last_check_at=now_iso, stalled=stalled,
+                      tmp_path=tmp_path, tmp_size=tmp_size, tmp_grew_at=tmp_grew_at)
+
+        # Intentional pause (nat stop): keep running + recording, but never page/restart.
         if is_paused(self.pause_file):
-            st = GapState(gapping=False, paused=True, age_s=age, row_age_s=row_age,
-                          last_check_at=now_iso)
+            st = GapState(gapping=False, paused=True,
+                          last_restart_at=prev.last_restart_at, restart_count=0, **common)
+            st.stalled = False
             write_gap_state(self.state_path, st)
             return st
 
-        if gap and not prev.gapping:
-            # gap opens — page once. Report whichever signal is available.
-            detail = (f"no new file write for {age:.0f}s (threshold {self.threshold:.0f}s)"
-                      if age is not None else
-                      f"newest row is {row_age:.0f}s old (threshold {self.row_threshold:.0f}s)")
-            self._send(f"⚠️ DATA GAP — {detail} as of {now_iso}")
-            st = GapState(
-                gapping=True, age_s=age, row_age_s=row_age, gap_started_at=now_iso,
-                last_alert_at=now_iso, last_check_at=now_iso,
-            )
-        elif gap and prev.gapping:
-            # still gapping — no new page
-            st = GapState(
-                gapping=True, age_s=age, row_age_s=row_age,
-                gap_started_at=prev.gap_started_at,
-                last_alert_at=prev.last_alert_at, last_check_at=now_iso,
-            )
-        elif (not gap) and prev.gapping:
-            # recovery — page once
-            dur = ""
-            if prev.gap_started_at:
-                try:
-                    started = datetime.fromisoformat(prev.gap_started_at).timestamp()
-                    dur = f" after {now - started:.0f}s"
-                except ValueError:
-                    pass
-            self._send(f"✅ DATA RECOVERED — feature ingestion flowing again{dur} ({now_iso})")
-            st = GapState(gapping=False, age_s=age, row_age_s=row_age, last_check_at=now_iso)
+        # Guarded auto-remediation runs every stalled cycle (subject to cooldown/cap).
+        if stalled:
+            restart_last, restart_count = self._maybe_remediate(now, now_iso, prev)
         else:
-            # steady-state OK
-            st = GapState(gapping=False, age_s=age, row_age_s=row_age, last_check_at=now_iso)
+            restart_last, restart_count = prev.last_restart_at, 0
+
+        if gap and not prev.gapping:
+            if stalled:
+                msg = (f"⚠️ STALLED — ingestor alive but .tmp not growing for "
+                       f"{stall_age:.0f}s (threshold {self.stall_threshold:.0f}s) as of {now_iso}")
+            else:
+                msg = (f"⚠️ DATA GAP — no new file write for {age:.0f}s "
+                       f"(threshold {self.threshold:.0f}s) as of {now_iso}")
+            self._send(msg)
+            st = GapState(gapping=True, gap_started_at=now_iso, last_alert_at=now_iso,
+                          last_restart_at=restart_last, restart_count=restart_count, **common)
+        elif gap and prev.gapping:
+            st = GapState(gapping=True, gap_started_at=prev.gap_started_at,
+                          last_alert_at=prev.last_alert_at,
+                          last_restart_at=restart_last, restart_count=restart_count, **common)
+        elif (not gap) and prev.gapping:
+            dur = ""
+            started = _parse_iso(prev.gap_started_at)
+            if started is not None:
+                dur = f" after {now - started:.0f}s"
+            self._send(f"✅ DATA RECOVERED — feature ingestion flowing again{dur} ({now_iso})")
+            st = GapState(gapping=False, last_restart_at=restart_last, restart_count=0, **common)
+        else:
+            st = GapState(gapping=False, last_restart_at=restart_last, restart_count=0, **common)
 
         write_gap_state(self.state_path, st)
         return st
@@ -375,6 +475,8 @@ class GapAlerter:
         d["row_threshold_s"] = self.row_threshold
         d["paused"] = is_paused(self.pause_file)
         d["daemon_healthy"] = healthy(self.config)
+        d["stall_threshold_s"] = self.stall_threshold
+        d["auto_restart"] = self.auto_restart
         d["data_dirs"] = [str(p) for p in self.data_dirs]
         return d
 
