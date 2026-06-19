@@ -11,7 +11,22 @@ poll_interval_s = 30
 # Dirs watched for freshness (newest *.parquet OR *.parquet.tmp mtime wins).
 data_dirs = ["data/features"]
 
+# T4: secondary row-timestamp freshness. mtime alone can be fooled by a stalled
+# or zero-row buffer whose file keeps getting touched; if the newest *readable
+# row* is older than this, treat it as a gap too. Best-effort (skipped if the
+# newest parquet can't be read). Set comfortably above the rotation cadence.
+row_threshold_s = 600
+
 # State + liveness files.
 state_path     = "data/ops/gap_state.json"
 heartbeat_path = "data/ops/gap_alert.heartbeat"
 pid_file       = "data/ops/gap_alert.pid"
+
+# Local fallback alert sink — always written even without Telegram, so a gap is
+# never invisible. `nat status` reads gap_state.json; this is the durable log.
+alert_log      = "data/ops/alerts.log"
+
+# Intentional-pause marker. `nat stop` writes it (expected shutdown → no page);
+# `nat start` clears it. The gap daemon keeps RUNNING either way, so an
+# *unexpected* ingestor death (no marker) still alerts.
+pause_file     = "data/ops/ingestion_paused"

@@ -196,6 +196,7 @@ def cmd_start(args):
     pid = _pid()
     if pid:
         _p("*", G, f"Already running (PID {pid})")
+        _set_ingestion_paused(False)
         _ensure_gap_alert()  # still ensure the data-gap monitor is up
         return
 
@@ -232,6 +233,7 @@ def cmd_start(args):
 
     cmd_dashboard(args)
     _install_watchdog()
+    _set_ingestion_paused(False)  # ingestion resumed → re-arm gap alerting
     _ensure_gap_alert()
 
     r = _sh("hostname -I")
@@ -281,17 +283,16 @@ def cmd_stop(args):
     else:
         _p("-", W, "Ingestor was not running")
 
-    # Stop the gap-alert daemon first so an intentional shutdown does not
-    # trigger a false data-gap page.
-    _remove_gap_watchdog()
-    if _gap_running():
-        try:
-            os.kill(int(GAP_PIDFILE.read_text().strip()), sig.SIGTERM)
-        except (ValueError, ProcessLookupError, FileNotFoundError):
-            pass
+    # Mark the stop as INTENTIONAL so the gap daemon suppresses a page — but keep
+    # the daemon (and its watchdog) RUNNING, so an *unexpected* ingestor death
+    # later is still detected. (Previously `nat stop` tore down all monitoring,
+    # which is exactly how a 3.4h outage went unnoticed.) `nat gap stop` fully
+    # stops the monitor when that's truly intended.
+    _set_ingestion_paused(True)
 
-    for s in ["ingestor", "nat-monitor", "nat-dashboard", GAP_TMUX]:
+    for s in ["ingestor", "nat-monitor", "nat-dashboard"]:
         subprocess.run(f"tmux kill-session -t {s} 2>/dev/null", shell=True)
+    _ensure_gap_alert()  # keep the data-gap monitor up across the stop
 
     _remove_watchdog()
     _p("-", W, "All cleaned up")
@@ -318,13 +319,17 @@ def cmd_status(args):
             data_info["last_write_s"] = round(time.time() - max(s.st_mtime for _, s in stats), 1)
 
     watchdog_active = "pgrep -x ing" in (_sh("crontab -l 2>/dev/null").stdout or "")
+    cron_ok = _cron_daemon_running()
     dashboard_running = _sh("tmux has-session -t nat-dashboard 2>/dev/null").returncode == 0
+    monitor = _gap_monitor_state()
 
     if _json_mode(args):
         _output({
             "ingestor": {"running": pid is not None, "pid": pid},
             "data": data_info,
             "watchdog": watchdog_active,
+            "cron_daemon": cron_ok,
+            "gap_monitor": monitor,
             "dashboard": dashboard_running,
         }, args)
         return
@@ -350,10 +355,24 @@ def cmd_status(args):
     else:
         _p("+", R, "Data: no data directory")
 
-    if watchdog_active:
+    if watchdog_active and cron_ok:
         _p("~", G, "Watchdog: active")
+    elif watchdog_active and not cron_ok:
+        _p("~", R, "Watchdog: crontab set but CRON DAEMON NOT RUNNING — restarts won't fire")
     else:
         _p("~", Y, "Watchdog: not installed (run: nat start)")
+
+    # Data-gap monitor (the thing that should have caught the outage).
+    if monitor["paused"]:
+        _p("@", Y, "Data monitor: PAUSED (intentional stop) — alerts suppressed")
+    elif not monitor["daemon_running"]:
+        _p("@", R, "Data monitor: DAEMON DOWN — gaps undetected (run: nat gap start)")
+    elif monitor["gapping"]:
+        age = monitor.get("age_s")
+        det = f" ({age:.0f}s since last write)" if isinstance(age, (int, float)) else ""
+        _p("@", R, f"Data monitor: GAPPING{det} — check ingestor")
+    else:
+        _p("@", G, "Data monitor: OK (gap daemon live)")
 
     if dashboard_running:
         _p("o", G, "Dashboard: running")
@@ -4498,8 +4517,49 @@ def _remove_watchdog():
 
 # ── Gap-alert daemon (T0b) ─────────────────────────────────────────────────
 GAP_TMUX = "nat-gap-alert"
-GAP_PIDFILE = ROOT / "data" / "ops" / "gap_alert.pid"
+_OPS_DIR = nat_paths.state_dir("ops")
+GAP_PIDFILE = _OPS_DIR / "gap_alert.pid"
+GAP_STATE_FILE = _OPS_DIR / "gap_state.json"
+PAUSE_FILE = _OPS_DIR / "ingestion_paused"
 GAP_WATCHDOG_MARKER = "# nat-gap-watchdog"
+
+
+def _set_ingestion_paused(paused: bool):
+    """Write/clear the intentional-pause marker the gap daemon reads.
+
+    Paused = an expected `nat stop`, so no page; cleared on `nat start`."""
+    try:
+        if paused:
+            PAUSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            PAUSE_FILE.write_text(datetime.now(timezone.utc).isoformat())
+        else:
+            PAUSE_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _cron_daemon_running():
+    """True if a cron daemon is actually running (the crontab text means nothing
+    if cron isn't up — a silent way watchdogs become no-ops)."""
+    return _sh("pgrep -x cron >/dev/null 2>&1 || pgrep -x crond >/dev/null 2>&1").returncode == 0
+
+
+def _gap_monitor_state():
+    """Gap-alert daemon + state summary for `nat status` (read-only)."""
+    state = {}
+    try:
+        if GAP_STATE_FILE.exists():
+            state = _json.loads(GAP_STATE_FILE.read_text())
+    except Exception:
+        state = {}
+    return {
+        "daemon_running": _gap_running(),
+        "paused": PAUSE_FILE.exists(),
+        "gapping": bool(state.get("gapping")),
+        "age_s": state.get("age_s"),
+        "row_age_s": state.get("row_age_s"),
+        "last_check_at": state.get("last_check_at"),
+    }
 
 
 def _gap_running():
