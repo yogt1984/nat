@@ -1,0 +1,16 @@
+#!/bin/sh
+# postinst — finalize the nat install.
+set -e
+
+# Symlink the CLI onto PATH (the script resolves its repo root relative to itself,
+# so the real file stays under /usr/lib/nat).
+ln -sf /usr/lib/nat/nat /usr/bin/nat
+chmod +x /usr/lib/nat/nat 2>/dev/null || true
+chmod +x /usr/lib/nat/rust/target/release/* 2>/dev/null || true
+
+# Writable runtime data dir (configs default to /usr/lib/nat/data via ../data).
+mkdir -p /var/lib/nat/features
+ln -sfn /var/lib/nat /usr/lib/nat/data 2>/dev/null || true
+
+echo "nat installed. Run 'nat help' to get started."
+exit 0
