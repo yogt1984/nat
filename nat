@@ -368,6 +368,28 @@ def cmd_log(args):
         pass
 
 
+# ── ing — ingestor noun-group (delegates to the top-level verbs) ───────────────
+
+def cmd_ing_start(args):
+    """nat ing start — start the local ingestor (alias of `nat start`)."""
+    return cmd_start(args)
+
+
+def cmd_ing_stop(args):
+    """nat ing stop — stop the ingestor and daemons (alias of `nat stop`)."""
+    return cmd_stop(args)
+
+
+def cmd_ing_status(args):
+    """nat ing status — ingestor + data health (alias of `nat status`)."""
+    return cmd_status(args)
+
+
+def cmd_ing_log(args):
+    """nat ing log — tail the latest ingestor log (alias of `nat log`)."""
+    return cmd_log(args)
+
+
 def cmd_profile(args):
     """Run regime profiling on current data."""
     _p("...", B, "Running profiling pipeline...")
@@ -831,6 +853,75 @@ def cmd_data(args):
     print(f"\n  ~{total_size // 300:.0f} rows (estimated)\n")
 
 
+def cmd_data_ls(args):
+    """List individual parquet files (path, date, size, rows, mtime)."""
+    dd = Path(_data(args))
+    if not dd.exists():
+        if _json_mode(args):
+            _output({"error": "No data directory", "path": str(dd)}, args)
+        else:
+            _p("x", R, "No data directory")
+        return 1
+
+    import pyarrow.parquet as _pq
+    want_date = getattr(args, 'date', None)
+    want_sym = getattr(args, 'symbol', None)
+    limit = getattr(args, 'limit', None)
+
+    files = sorted(dd.rglob("*.parquet"), key=os.path.getmtime, reverse=True)
+    rows = []
+    for f in files:
+        if want_date and f.parent.name != want_date:
+            continue
+        st = f.stat()
+        if st.st_size == 0:
+            continue
+        nrows = None
+        try:
+            nrows = _pq.read_metadata(f).num_rows  # cheap: footer only, no full read
+        except Exception:
+            pass
+        rows.append({
+            "path": str(f),
+            "date": f.parent.name,
+            "size_mb": round(st.st_size / 1e6, 2),
+            "rows": nrows,
+            "mtime": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+        })
+
+    # --symbol filter requires peeking the file; keep it best-effort and last so
+    # the cheap path stays fast when no symbol filter is requested.
+    if want_sym:
+        keep = []
+        for r in rows:
+            try:
+                tbl = _pq.read_table(r["path"], columns=["symbol"])
+                if want_sym in set(tbl.column("symbol").to_pylist()):
+                    keep.append(r)
+            except Exception:
+                keep.append(r)
+        rows = keep
+
+    if limit:
+        rows = rows[:limit]
+
+    def _human(_data):
+        files_ = _data["files"]
+        if not files_:
+            _p("x", Y, "No parquet files match")
+            return
+        print(f"\n  {BOLD}Parquet files{W}  ({len(files_)} shown)\n")
+        print(f"  {'DATE':<12} {'SIZE':>9} {'ROWS':>10}  {'MTIME':<19}  FILE")
+        for r in files_:
+            rws = f"{r['rows']:,}" if r['rows'] is not None else "?"
+            print(f"  {r['date']:<12} {r['size_mb']:>7.2f}MB {rws:>10}  "
+                  f"{r['mtime']:<19}  {Path(r['path']).name}")
+        print()
+
+    _output({"path": str(dd), "files": rows, "count": len(rows)}, args, _human)
+    return 0
+
+
 def cmd_data_validate(args):
     path = getattr(args, 'path', None)
     target = path or _data(args)
@@ -867,6 +958,69 @@ def cmd_data_schema(args):
 def cmd_test(args):
     _banner("Running all Rust unit tests")
     _cargo("test --package ing")
+
+
+def cmd_test_capture(args):
+    """nat test {1m,5m,15m} — capture N minutes locally, then visualize the slice.
+
+    Requires the persistent ingestor to be stopped (it owns the WebSocket and the
+    same data dir). Runs a time-boxed `ing`, then opens the freshest parquet via
+    the slice viewer."""
+    minutes = getattr(args, 'minutes')
+    secs = int(minutes * 60)
+
+    if _pid():
+        _p("x", R, "Ingestor is RUNNING — stop it first: nat ing stop")
+        return 1
+    _ensure_release()
+
+    dd = Path(_data(args))
+    before = {f: f.stat().st_mtime for f in dd.rglob("*.parquet")} if dd.exists() else {}
+
+    _banner(f"nat test {minutes:g}m — capturing {minutes:g} min of live data")
+    _p("...", B, f"Running ingestor for {secs}s (graceful SIGTERM, then flush)...")
+    sys.stdout.flush()
+    # timeout sends SIGTERM at the deadline so the ingestor flushes Parquet on
+    # shutdown; --kill-after is a hard backstop if the flush hangs.
+    rc = _exec(
+        f"timeout --signal=TERM --kill-after=20 {secs} "
+        f"./target/release/ing ../config/ing.toml",
+        cwd=RUST,
+    ).returncode
+    # timeout exits 124 when it has to terminate the child — that's the expected
+    # path here (we *want* it to stop at the deadline), so don't treat it as error.
+    if rc not in (0, 124, 143):
+        _p("x", R, f"Ingestor exited with code {rc} — see output above")
+        return 1
+
+    time.sleep(1)
+    after = sorted(
+        (f for f in dd.rglob("*.parquet") if f.stat().st_size > 0),
+        key=os.path.getmtime, reverse=True,
+    )
+    fresh = [f for f in after if before.get(f) != f.stat().st_mtime]
+    target = (fresh or after)
+    if not target:
+        _p("x", R, "No parquet data was written during the capture window")
+        return 1
+    newest = target[0]
+    _p("+", G, f"Captured: {newest}")
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from viz import slice_viewer
+    try:
+        slice_viewer.view(
+            newest,
+            slice_expr="all",
+            symbol=getattr(args, 'symbol', None),
+            max_features=getattr(args, 'max_features', 12),
+            delete=True,
+            prompt=not _json_mode(args),
+        )
+    except Exception as e:
+        _p("x", R, f"Visualization failed: {e}")
+        return 1
+    return 0
 
 
 def cmd_test_verbose(args):
@@ -2936,6 +3090,46 @@ def cmd_viz_render(args):
     return _py(cmd).returncode
 
 
+def cmd_viz_file(args):
+    """nat viz <file> — interactive slice of one parquet → PNGs → show → delete."""
+    f = Path(getattr(args, 'file'))
+    if not f.exists():
+        # Allow a bare filename resolved against the data dir.
+        cand = sorted(Path(_data(args)).rglob(f.name))
+        if cand:
+            f = cand[0]
+        else:
+            _p("x", R, f"File not found: {args.file}")
+            return 1
+
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from viz import slice_viewer
+
+    cols = getattr(args, 'cols', None)
+    cols = cols.split(",") if cols else None
+    delete = not getattr(args, 'no_delete', False)
+    as_json = _json_mode(args)
+    try:
+        manifest = slice_viewer.view(
+            f,
+            slice_expr=getattr(args, 'slice', None),
+            cols=cols,
+            symbol=getattr(args, 'symbol', None),
+            max_features=getattr(args, 'max_features', 12),
+            delete=delete and not as_json,
+            prompt=not as_json,
+        )
+    except Exception as e:
+        if as_json:
+            _output({"error": str(e), "file": str(f)}, args)
+        else:
+            _p("x", R, str(e))
+        return 1
+    if as_json:
+        _output(manifest, args)
+    return 0
+
+
 def cmd_viz3d(args):
     """nat viz3d / nat mesh — interactive 3D feature-surface-over-time (Plotly HTML)."""
     tf = getattr(args, 'tf', '15m')
@@ -4850,6 +5044,18 @@ def build_parser():
     log_sub = log_p.add_subparsers(dest='subcmd')
     log_sub.add_parser('agent', help='Tail agent daemon log').set_defaults(func=cmd_log_agent)
     log_sub.add_parser('list', help='List all log files with sizes and dates').set_defaults(func=cmd_log_list)
+
+    # ── ing — ingestor noun-group (start/stop/status/log) ──
+    ing_p = sub.add_parser('ing', help='Ingestor control (start/stop/status/log)')
+    ing_p.set_defaults(func=lambda a: ing_p.print_help())
+    ingsub = ing_p.add_subparsers(dest='subcmd')
+    ingsub.add_parser('start', help='Start ingestor locally').set_defaults(func=cmd_ing_start)
+    ingsub.add_parser('stop', help='Stop ingestor + daemons').set_defaults(func=cmd_ing_stop)
+    ing_st = ingsub.add_parser('status', help='Ingestor + data health')
+    ing_st.add_argument('--json', action='store_true', help='JSON output')
+    ing_st.set_defaults(func=cmd_ing_status)
+    ingsub.add_parser('log', help='Tail the latest ingestor log').set_defaults(func=cmd_ing_log)
+
     prof_p = sub.add_parser('profile', help='Profiling',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
@@ -5124,6 +5330,12 @@ def build_parser():
     dv.set_defaults(func=cmd_data_validate)
     dsub.add_parser('explore', help='Launch Jupyter').set_defaults(func=cmd_data_explore)
     dsub.add_parser('schema', help='Scan parquet schema').set_defaults(func=cmd_data_schema)
+    dls = dsub.add_parser('ls', help='List individual parquet files (path/size/rows/mtime)')
+    dls.add_argument('--symbol', '-s', default=None, help='Filter to files containing this symbol')
+    dls.add_argument('--date', default=None, help='Filter to one day YYYY-MM-DD')
+    dls.add_argument('--limit', type=int, default=None, help='Show only the newest N files')
+    dls.add_argument('--json', action='store_true', help='JSON output')
+    dls.set_defaults(func=cmd_data_ls)
 
     # ── test ──
     test_p = sub.add_parser('test', help='Testing (default: all Rust unit tests)')
@@ -5131,6 +5343,14 @@ def build_parser():
     tsub = test_p.add_subparsers(dest='subcmd')
     tsub.add_parser('unit', help='Rust unit tests').set_defaults(func=cmd_test)
     tsub.add_parser('verbose', help='Tests with --nocapture').set_defaults(func=cmd_test_verbose)
+    # Capture-and-visualize: ingest N minutes locally (ingestor must be stopped),
+    # then open the freshest parquet slice as PNGs.
+    for _label, _mins in (('1m', 1), ('5m', 5), ('15m', 15)):
+        _tcap = tsub.add_parser(_label, help=f'Capture {_label} of live data then visualize')
+        _tcap.add_argument('--symbol', '-s', default=None, help='Filter viz to one symbol')
+        _tcap.add_argument('--max-features', type=int, default=12, help='Max features per page')
+        _tcap.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+        _tcap.set_defaults(func=cmd_test_capture, minutes=_mins)
     tsub.add_parser('hypotheses', help='Hypothesis tests').set_defaults(func=cmd_test_hypotheses)
     tv = tsub.add_parser('validate', help='Live API validations')
     tv.add_argument('target', nargs='?', choices=['api', 'positions', 'whales', 'entropy'],
@@ -5704,6 +5924,16 @@ def build_parser():
     # ── viz (terminal-first per-unit visualization, T7/NAT3) ──
     viz_p = sub.add_parser('viz', help='Terminal-first visualization (features/algorithm/paper)')
     vizsub = viz_p.add_subparsers(dest='subcmd')
+    vzfile = vizsub.add_parser('file', help='Slice one parquet file → PNGs → show → delete')
+    vzfile.add_argument('file', help='Parquet file (full path or bare name resolved in data dir)')
+    vzfile.add_argument('--slice', default=None, help="Rows: 0:500, a count like 200, or 'all'")
+    vzfile.add_argument('--cols', default=None, help='Comma-separated columns (default: top-variance)')
+    vzfile.add_argument('--symbol', '-s', default=None, help='Filter to one symbol')
+    vzfile.add_argument('--max-features', type=int, default=12, help='Max features per page')
+    vzfile.add_argument('--data', default=str(DATA_DEFAULT), help='Data dir for bare-name lookup')
+    vzfile.add_argument('--no-delete', action='store_true', help='Keep the rendered PNGs')
+    vzfile.add_argument('--json', action='store_true', help='Emit manifest instead of opening')
+    vzfile.set_defaults(func=cmd_viz_file)
     vzf = vizsub.add_parser('features', help='Per-feature overview (value/z/NaN%/IC/sparkline)')
     vzf.add_argument('--symbol', '-s', default='BTC')
     vzf.add_argument('--hours', type=float, default=None, help='Last N hours only')
@@ -6627,6 +6857,14 @@ def build_parser():
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
+    # Convenience: `nat viz <something.parquet>` → `nat viz file <something.parquet>`
+    # so a bare parquet path doesn't get mis-parsed as a viz subcommand.
+    _av = sys.argv[1:]
+    if len(_av) >= 2 and _av[0] == 'viz' and _av[1] not in (
+        'file', 'features', 'algorithm', 'paper', 'portfolio', 'render', '-h', '--help'
+    ) and (_av[1].endswith('.parquet') or Path(_av[1]).suffix == '.parquet'):
+        sys.argv.insert(2, 'file')
+
     parser = build_parser()
     args = parser.parse_args()
 
