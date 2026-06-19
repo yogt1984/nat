@@ -191,8 +191,25 @@ def cmd_doctor(args):
 
 # ── Top-level commands ───────────────────────────────────────────────────────
 
+def _start_via_systemd(args):
+    """`nat start` when systemd units are installed (idempotent)."""
+    _set_ingestion_paused(False)
+    _systemctl("start", INGESTOR_UNIT, GAP_UNIT)
+    time.sleep(2)
+    cmd_dashboard(args)
+    if _svc_active(INGESTOR_UNIT):
+        _p("*", G, f"Ingestor: active under systemd (PID {_pid()})")
+        _p("~", G, "systemd supervises restart + boot-start (Restart=always, linger)")
+        _p(" ", W, "Logs: journalctl --user -u nat-ingestor -f")
+    else:
+        _p("x", R, f"Ingestor unit did not start — journalctl --user -u {INGESTOR_UNIT}")
+    return 0
+
+
 def cmd_start(args):
     """Start ingestor with auto-restart watchdog + dashboard."""
+    if _service_installed():
+        return _start_via_systemd(args)
     pid = _pid()
     if pid:
         _p("*", G, f"Already running (PID {pid})")
@@ -252,6 +269,15 @@ def cmd_start(args):
 
 def cmd_stop(args):
     """Stop ingestor and remove watchdog."""
+    if _service_installed():
+        # Intentional stop: mark paused (no false page) + stop the ingestor unit,
+        # but LEAVE the gap-alert unit running so an unexpected death still alerts.
+        _set_ingestion_paused(True)
+        _systemctl("stop", INGESTOR_UNIT)
+        subprocess.run("tmux kill-session -t nat-dashboard 2>/dev/null", shell=True)
+        _p("-", Y, "Ingestor unit stopped (gap monitor still running, alerts paused)")
+        _p(" ", W, "Re-arm: nat start   ·   Fully remove systemd: nat service uninstall")
+        return 0
     pid = _pid()
     if pid:
         # The ingestor may be Docker-managed (a container process owned by root):
@@ -318,15 +344,18 @@ def cmd_status(args):
         if stats:
             data_info["last_write_s"] = round(time.time() - max(s.st_mtime for _, s in stats), 1)
 
+    svc = _service_installed()
     watchdog_active = "pgrep -x ing" in (_sh("crontab -l 2>/dev/null").stdout or "")
     cron_ok = _cron_daemon_running()
     dashboard_running = _sh("tmux has-session -t nat-dashboard 2>/dev/null").returncode == 0
     monitor = _gap_monitor_state()
+    supervisor = "systemd" if svc else "tmux+cron"
 
     if _json_mode(args):
         _output({
             "ingestor": {"running": pid is not None, "pid": pid},
             "data": data_info,
+            "supervisor": supervisor,
             "watchdog": watchdog_active,
             "cron_daemon": cron_ok,
             "gap_monitor": monitor,
@@ -355,12 +384,17 @@ def cmd_status(args):
     else:
         _p("+", R, "Data: no data directory")
 
-    if watchdog_active and cron_ok:
-        _p("~", G, "Watchdog: active")
+    if svc:
+        ing_active = _svc_active(INGESTOR_UNIT)
+        _p("~", G if ing_active else R,
+           f"Supervisor: systemd ({INGESTOR_UNIT} "
+           f"{'active' if ing_active else 'INACTIVE'}, Restart=always, boot-start)")
+    elif watchdog_active and cron_ok:
+        _p("~", G, "Watchdog: active (tmux+cron)")
     elif watchdog_active and not cron_ok:
         _p("~", R, "Watchdog: crontab set but CRON DAEMON NOT RUNNING — restarts won't fire")
     else:
-        _p("~", Y, "Watchdog: not installed (run: nat start)")
+        _p("~", Y, "Watchdog: not installed (run: nat start, or nat service install)")
 
     # Data-gap monitor (the thing that should have caught the outage).
     if monitor["paused"]:
@@ -381,7 +415,15 @@ def cmd_status(args):
 
 
 def cmd_log(args):
-    """Tail the latest ingestor log."""
+    """Tail the latest ingestor log (journald when systemd-managed, else logfile)."""
+    if _service_installed() and _svc_active(INGESTOR_UNIT):
+        _p(">", B, "Following journalctl --user -u nat-ingestor (Ctrl+C to stop)")
+        print()
+        try:
+            os.execvp("journalctl",
+                      ["journalctl", "--user", "-u", INGESTOR_UNIT, "-f", "-n", "50"])
+        except (KeyboardInterrupt, FileNotFoundError):
+            return
     if not LOG_DIR.exists():
         _p("x", R, "No logs directory")
         return
@@ -4626,6 +4668,139 @@ def _ensure_gap_alert():
     _install_gap_watchdog()
 
 
+# ── systemd --user service supervision (T3) ────────────────────────────────
+INGESTOR_UNIT = "nat-ingestor.service"
+GAP_UNIT = "nat-gap-alert.service"
+
+
+def _user_unit_dir():
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from ops.systemd_units import unit_dir
+    return unit_dir()
+
+
+def _service_installed():
+    """True once the ingestor unit file exists (systemd is the supervisor)."""
+    return (_user_unit_dir() / INGESTOR_UNIT).exists()
+
+
+def _systemctl(*args, check=False):
+    return _sh("systemctl --user " + " ".join(args))
+
+
+def _svc_active(unit):
+    return _systemctl("is-active", unit).stdout.strip() == "active"
+
+
+def _svc_enabled(unit):
+    return _systemctl("is-enabled", unit).stdout.strip() == "enabled"
+
+
+def cmd_service_install(args):
+    """Install + enable systemd --user units for the ingestor and gap daemon.
+
+    Replaces the tmux+cron self-healing with systemd (Restart=always + boot
+    persistence via linger). Hands the running ingestor over with a brief restart;
+    the window is marked paused so the gap daemon doesn't false-page."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from ops.systemd_units import render_units, unit_dir
+
+    if _sh("which systemctl").returncode != 0:
+        _p("x", R, "systemctl not found — this host has no systemd")
+        return 1
+
+    _banner("Installing nat systemd --user services")
+    # Boot persistence without an active login.
+    _sh(f"loginctl enable-linger {getpass.getuser()}")
+
+    udir = unit_dir()
+    udir.mkdir(parents=True, exist_ok=True)
+    for name, text in render_units(python=PY).items():
+        (udir / name).write_text(text)
+        _p("+", G, f"Wrote {udir / name}")
+    _systemctl("daemon-reload")
+
+    # Handover: pause (no false page), tear down the tmux+cron supervisor so it
+    # can't double-run the ingestor, then let systemd take over.
+    _set_ingestion_paused(True)
+    _remove_watchdog()
+    _remove_gap_watchdog()
+    for s in ["ingestor", GAP_TMUX]:
+        subprocess.run(f"tmux kill-session -t {s} 2>/dev/null", shell=True)
+    if _gap_running():
+        try:
+            os.kill(int(GAP_PIDFILE.read_text().strip()), sig.SIGTERM)
+        except (ValueError, ProcessLookupError, FileNotFoundError):
+            pass
+    time.sleep(2)
+
+    _systemctl("enable", "--now", INGESTOR_UNIT, GAP_UNIT)
+    time.sleep(3)
+    _set_ingestion_paused(False)
+
+    ok = _svc_active(INGESTOR_UNIT)
+    _p("*" if ok else "x", G if ok else R,
+       f"{INGESTOR_UNIT}: {'active' if ok else 'NOT active — journalctl --user -u ' + INGESTOR_UNIT}")
+    _p("~", G if _svc_active(GAP_UNIT) else Y, f"{GAP_UNIT}: {_systemctl('is-active', GAP_UNIT).stdout.strip()}")
+    _p(" ", W, "systemd now supervises both (Restart=always, starts on boot via linger).")
+    _p(" ", W, "Logs: journalctl --user -u nat-ingestor -f   ·   Undo: nat service uninstall")
+    return 0 if ok else 1
+
+
+def cmd_service_uninstall(args):
+    """Disable + remove the systemd units and restore the tmux+cron path."""
+    _banner("Removing nat systemd --user services")
+    _systemctl("disable", "--now", INGESTOR_UNIT, GAP_UNIT)
+    udir = _user_unit_dir()
+    for name in (INGESTOR_UNIT, GAP_UNIT):
+        p = udir / name
+        if p.exists():
+            p.unlink()
+            _p("-", Y, f"Removed {p}")
+    _systemctl("daemon-reload")
+    _p(" ", W, "systemd units removed. `nat start` again uses the tmux+cron path.")
+    return 0
+
+
+def cmd_service_status(args):
+    """Show systemd unit state (active/enabled) + linger."""
+    installed = _service_installed()
+    linger = "yes" in _sh(f"loginctl show-user {getpass.getuser()} -p Linger 2>/dev/null").stdout.lower()
+    data = {
+        "installed": installed,
+        "linger": linger,
+        "units": {u: {"active": _svc_active(u), "enabled": _svc_enabled(u)}
+                  for u in (INGESTOR_UNIT, GAP_UNIT)} if installed else {},
+    }
+
+    def _human(d):
+        if not d["installed"]:
+            _p("o", W, "systemd services: not installed (using tmux+cron). Install: nat service install")
+            return
+        _p("*", G, f"systemd services installed (boot persistence/linger: {'on' if d['linger'] else 'OFF'})")
+        for u, s in d["units"].items():
+            col = G if s["active"] else R
+            _p("~", col, f"{u}: {'active' if s['active'] else 'inactive'}, "
+                         f"{'enabled' if s['enabled'] else 'disabled'}")
+
+    _output(data, args, _human)
+    return 0
+
+
+def cmd_service_restart(args):
+    """Restart a unit (ingestor|gap|all)."""
+    if not _service_installed():
+        _p("x", R, "systemd services not installed (nat service install)")
+        return 1
+    which = getattr(args, "target", "all")
+    units = {"ingestor": [INGESTOR_UNIT], "gap": [GAP_UNIT],
+             "all": [INGESTOR_UNIT, GAP_UNIT]}.get(which, [INGESTOR_UNIT, GAP_UNIT])
+    _systemctl("restart", *units)
+    for u in units:
+        _p("~", G if _svc_active(u) else R, f"{u}: {_systemctl('is-active', u).stdout.strip()}")
+    return 0
+
+
 # ── Help ─────────────────────────────────────────────────────────────────────
 
 def _walk_commands(parser_obj, commands, prefix=""):
@@ -6335,6 +6510,22 @@ def build_parser():
     gpwd = gapsub.add_parser('watchdog', help='Install cron watchdog (auto-restart every 5 min)')
     gpwd.add_argument('--remove', action='store_true', help='Remove the watchdog cron')
     gpwd.set_defaults(func=cmd_gap_watchdog)
+
+    # ── service (systemd --user supervision, T3) ──
+    svc_p = sub.add_parser('service',
+                           help='systemd --user supervision: reboot-proof ingestor + gap daemon')
+    svc_p.set_defaults(func=lambda a: svc_p.print_help())
+    svcsub = svc_p.add_subparsers(dest='subcmd')
+    svcsub.add_parser('install',
+                      help='Install + enable units (replaces tmux+cron; brief ingestor restart)'
+                      ).set_defaults(func=cmd_service_install)
+    svcsub.add_parser('uninstall', help='Remove units, restore the tmux+cron path').set_defaults(func=cmd_service_uninstall)
+    svcst = svcsub.add_parser('status', help='Unit active/enabled + linger state')
+    svcst.add_argument('--json', action='store_true', help='JSON output')
+    svcst.set_defaults(func=cmd_service_status)
+    svcr = svcsub.add_parser('restart', help='Restart a unit')
+    svcr.add_argument('target', nargs='?', default='all', choices=['ingestor', 'gap', 'all'])
+    svcr.set_defaults(func=cmd_service_restart)
 
     # ── promotion daemon (T14) ──
     prom_p = sub.add_parser('promotion', help='Signal promotion daemon (lifecycle automation, T14)')

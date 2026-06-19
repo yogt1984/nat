@@ -42,6 +42,27 @@ Installed layout:
   `/etc/environment`) to keep data out of a user's home.
 - **Dev checkout:** everything stays under the repo, byte-identical to before.
 
+### Reboot-proof self-healing (`nat service`, systemd `--user`)
+
+By default the ingestor + gap-alert daemon run in tmux kept alive by 5-min cron
+watchdogs — which **die on reboot/terminal-close**. For durable supervision,
+install systemd `--user` units (auto-restart on crash *and* start on boot):
+
+```bash
+nat service install      # writes ~/.config/systemd/user/nat-{ingestor,gap-alert}.service,
+                         # enables linger, hands the running ingestor over to systemd
+nat service status       # active/enabled + linger state
+nat service uninstall    # remove units, restore the tmux+cron path
+```
+
+Once installed, `nat start/stop/status` and `nat log` transparently use systemd
+(`nat log` follows `journalctl --user -u nat-ingestor`). `install` does a brief
+(~seconds) ingestor restart, marked paused so the gap daemon doesn't false-page.
+The gap-alert unit is **independent** of the ingestor (keeps monitoring while the
+ingestor is down). Note: the gap unit pins the Python interpreter `nat` runs under
+(it must have the analysis deps, e.g. pyarrow). Reboot survival needs
+`loginctl enable-linger` (done by `install`).
+
 ## 2. Sign + publish to a private apt repo
 
 One-time: create a dedicated signing key.
