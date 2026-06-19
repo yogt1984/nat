@@ -34,6 +34,10 @@ pub struct ParquetWriter {
     alg_feature_names: Vec<&'static str>,
     /// Counter for disk-full flush skips
     disk_full_skips: AtomicU64,
+    /// Max wall-clock age of an open file before rotation (parsed from
+    /// `config.rotate_interval`). Bounds the data orphaned in a `.tmp` if the
+    /// process dies before `close()`. Effective cap is ~1h via the hour trigger.
+    rotate_interval: std::time::Duration,
 }
 
 /// Buffer for accumulating features before writing
@@ -126,6 +130,18 @@ impl FeatureBuffer {
     }
 }
 
+/// Decide whether to rotate the open Parquet file: on an hour change (preserves
+/// the per-hour file layout) OR once the file has been open for `interval`
+/// (bounds the data orphaned in a `.tmp` if the process dies before `close()`).
+pub(crate) fn should_rotate(
+    current_hour: Option<u32>,
+    now_hour: u32,
+    file_age: Option<std::time::Duration>,
+    interval: std::time::Duration,
+) -> bool {
+    current_hour != Some(now_hour) || file_age.is_some_and(|age| age >= interval)
+}
+
 impl ParquetWriter {
     /// Create a new Parquet writer
     pub fn new(config: &OutputConfig, general_data_dir: &str) -> Result<Self> {
@@ -155,16 +171,19 @@ impl ParquetWriter {
             last_progress_pct: 0,
             alg_feature_names,
             disk_full_skips: AtomicU64::new(0),
+            rotate_interval: crate::config::parse_rotate_interval(&config.rotate_interval),
         })
     }
 
     /// Write a feature vector
     pub fn write(&mut self, fv: &FeatureVector) -> Result<()> {
-        // Check if we need to rotate files
+        // Rotate on hour change, or once the file has been open for rotate_interval
+        // (bounds data lost in an orphaned .tmp on an unclean stop).
         let now: DateTime<Utc> = DateTime::from_timestamp_nanos(fv.timestamp_ns);
         let hour = now.hour();
+        let file_age = self.file_opened_at.map(|t| t.elapsed());
 
-        if self.current_hour != Some(hour) {
+        if should_rotate(self.current_hour, hour, file_age, self.rotate_interval) {
             self.rotate_file(&now)?;
             self.current_hour = Some(hour);
         }
@@ -242,9 +261,10 @@ impl ParquetWriter {
             writer.flush()?;
             self.rows_written += batch.num_rows();
 
-            // Log flush with file size
-            if let Some(ref path) = self.current_file_path {
-                let file_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            // Log flush with the size of the file actually being written (the
+            // .tmp; the final .parquet does not exist until the rename at close).
+            if let Some(ref tmp_path) = self.current_tmp_path {
+                let file_size = fs::metadata(tmp_path).map(|m| m.len()).unwrap_or(0);
                 let elapsed = self
                     .file_opened_at
                     .map(|t| format!("{:.0}s", t.elapsed().as_secs_f64()))
@@ -254,7 +274,7 @@ impl ParquetWriter {
                     rows_in_file = self.rows_written,
                     file_size_bytes = file_size,
                     elapsed,
-                    path = ?path,
+                    path = ?self.current_file_path,
                     "Buffer flushed to disk"
                 );
             }
@@ -346,5 +366,107 @@ impl Drop for ParquetWriter {
         if let Err(e) = self.close_current_file() {
             tracing::error!(?e, "Error closing Parquet file in drop");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_rotate, ParquetWriter};
+    use std::time::Duration;
+
+    const TEN_MIN: Duration = Duration::from_secs(600);
+
+    #[test]
+    fn rotates_on_first_write() {
+        // No file open yet (current_hour None) -> open one regardless of age.
+        assert!(should_rotate(None, 13, None, TEN_MIN));
+    }
+
+    #[test]
+    fn rotates_on_hour_change() {
+        assert!(should_rotate(Some(13), 14, Some(Duration::from_secs(5)), TEN_MIN));
+    }
+
+    #[test]
+    fn rotates_when_interval_elapsed() {
+        assert!(should_rotate(Some(13), 13, Some(Duration::from_secs(600)), TEN_MIN));
+        assert!(should_rotate(Some(13), 13, Some(Duration::from_secs(900)), TEN_MIN));
+    }
+
+    #[test]
+    fn holds_within_same_hour_and_interval() {
+        assert!(!should_rotate(Some(13), 13, Some(Duration::from_secs(599)), TEN_MIN));
+        assert!(!should_rotate(Some(13), 13, Some(Duration::ZERO), TEN_MIN));
+    }
+
+    /// Real-parquet smoke: a sub-hourly `rotate_interval` must finalize the open
+    /// file (footer + atomic rename to `*.parquet`) on the elapsed trigger, not
+    /// only on the hour boundary — so an unclean stop can orphan at most ~interval.
+    /// Writes through the real ParquetWriter and reads the results back.
+    #[test]
+    fn subhourly_rotation_writes_readable_parquet() {
+        use parquet::file::reader::FileReader;
+        use std::fs::File;
+
+        let dir = std::env::temp_dir().join(format!("ing_rot_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cfg = crate::config::OutputConfig {
+            format: "parquet".to_string(),
+            row_group_size: 10,
+            compression: "zstd".to_string(),
+            rotate_interval: "1s".to_string(),
+            data_dir: Some(dir.to_string_lossy().into_owned()),
+        };
+        let mk = |ts: i64| crate::FeatureVector {
+            timestamp_ns: ts,
+            symbol: "BTC".to_string(),
+            sequence_id: 0,
+            features: ing_features::Features::default(),
+            alg_values: Vec::new(),
+        };
+        let base: i64 = 1_767_225_600_000_000_000; // 2026-01-01T00:00:00Z, one hour
+        {
+            let mut w = ParquetWriter::new(&cfg, dir.to_str().unwrap()).unwrap();
+            for i in 0..12 {
+                w.write(&mk(base + i)).unwrap(); // fills buffer -> flush to file1.tmp
+            }
+            std::thread::sleep(Duration::from_millis(1100));
+            // Advance data-time by 2s so the rotated file's %H%M%S name differs
+            // from file1's (real ingestion timestamps always advance; only this
+            // synthetic same-instant test would otherwise collide the names).
+            let later = base + 2_000_000_000;
+            w.write(&mk(later)).unwrap(); // elapsed >= 1s -> rotate: file1 -> .parquet
+            for i in 0..12 {
+                w.write(&mk(later + i)).unwrap();
+            }
+            w.flush().unwrap(); // close file2 -> .parquet
+        }
+
+        let mut parquets = Vec::new();
+        for date_dir in std::fs::read_dir(&dir).unwrap().flatten() {
+            if date_dir.path().is_dir() {
+                for f in std::fs::read_dir(date_dir.path()).unwrap().flatten() {
+                    let p = f.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("parquet") {
+                        parquets.push(p);
+                    }
+                }
+            }
+        }
+        assert!(
+            parquets.len() >= 2,
+            "elapsed-trigger should have rotated mid-hour; got {} .parquet files",
+            parquets.len()
+        );
+        let mut total_rows = 0i64;
+        for p in &parquets {
+            // SerializedFileReader reads the footer -> fails on a footer-less .tmp,
+            // so this asserts each rotated file is a complete, readable parquet.
+            let rdr = parquet::file::reader::SerializedFileReader::new(File::open(p).unwrap())
+                .expect("rotated file must be a complete, readable parquet");
+            total_rows += rdr.metadata().file_metadata().num_rows();
+        }
+        assert_eq!(total_rows, 25, "all written rows should be recoverable");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
