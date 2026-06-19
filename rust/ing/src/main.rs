@@ -36,7 +36,18 @@ async fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("config/ing.toml"));
 
-    let config = Config::load(&config_path)?;
+    let mut config = Config::load(&config_path)?;
+
+    // Relocatable data dirs: NAT_DATA_DIR / NAT_TRADE_DIR (set by the `nat` CLI)
+    // override the config so the ingestor writes to the resolved location
+    // regardless of CWD. Mirrors the NAT_*_DIR pattern in the `api` crate.
+    if let Ok(d) = std::env::var("NAT_DATA_DIR") {
+        config.general.data_dir = d.clone();
+        config.output.data_dir = Some(d);
+    }
+    if let Ok(t) = std::env::var("NAT_TRADE_DIR") {
+        config.trade_output.data_dir = Some(t);
+    }
 
     // Initialize dashboard state (needed for log broadcast layer)
     let dashboard_state = Arc::new(DashboardState::new());

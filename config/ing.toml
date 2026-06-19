@@ -13,8 +13,10 @@ ping_interval_ms = 30000
 
 [symbols]
 # Canonical symbol list — loaded from symbols_file at startup.
-# Inline 'assets' is used as fallback if symbols_file is missing.
-symbols_file = "../config/symbols.toml"
+# Resolved relative to THIS config file's directory (so it works whether the
+# config lives in <repo>/config or an installed /etc/nat). Inline 'assets' below
+# is the fallback if symbols_file is missing.
+symbols_file = "symbols.toml"
 assets = ["BTC", "ETH", "SOL"]
 
 [features]

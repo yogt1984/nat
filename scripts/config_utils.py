@@ -17,11 +17,15 @@ except ImportError:
 
 log = logging.getLogger(__name__)
 
-# Project root: two levels up from scripts/config_utils.py
-_ROOT = Path(__file__).resolve().parent.parent
+try:
+    import nat_paths
+except ImportError:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import nat_paths
 
-_SYMBOLS_PATH = _ROOT / "config" / "symbols.toml"
-_AGENT_TOML_PATH = _ROOT / "config" / "agent.toml"
+_SYMBOLS_PATH = nat_paths.config_dir() / "symbols.toml"
+_AGENT_TOML_PATH = nat_paths.config_dir() / "agent.toml"
 
 # Cache after first load (immutable at runtime)
 _symbols_cache: list[str] | None = None

@@ -22,7 +22,14 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "features"
+try:
+    import nat_paths
+except ImportError:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import nat_paths
+
+DATA_DIR = nat_paths.features_dir()
 
 # Required columns always included in output regardless of `columns` parameter
 _ALWAYS_INCLUDE = {"timestamp_ns", "symbol"}

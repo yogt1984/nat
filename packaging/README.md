@@ -26,9 +26,21 @@ Installed layout:
 | `/usr/lib/nat/nat` | the CLI script (real file) |
 | `/usr/lib/nat/scripts/` | Python analysis stack |
 | `/usr/lib/nat/rust/target/release/` | `ing`, `api`, `natviz3d`, validators |
-| `/etc/nat/*.toml` | configuration (symlinked back as `/usr/lib/nat/config`) |
+| `/etc/nat/*.toml` | configuration (resolved directly by `nat_paths`) |
 | `/usr/bin/nat` | symlink → `/usr/lib/nat/nat` (created in `postinst`) |
-| `/var/lib/nat/` | writable runtime data (symlinked as `/usr/lib/nat/data`) |
+
+### Paths & relocation (`nat_paths`)
+
+`nat` resolves data/config/logs/reports at runtime via `scripts/nat_paths.py`
+(precedence: `NAT_HOME`/`NAT_*` env → source-checkout → installed XDG). Run
+`nat config paths` to see the resolved locations and which rule was applied.
+
+- **Installed** (no `.git` / `rust/Cargo.toml` in the tree): config from `/etc/nat`,
+  data under `$NAT_HOME` or `~/.local/share/nat`, the ingestor honors
+  `NAT_DATA_DIR`/`NAT_TRADE_DIR` (the `nat` CLI sets these automatically).
+- **System-wide data:** set `NAT_HOME=/var/lib/nat` (e.g. in the service unit or
+  `/etc/environment`) to keep data out of a user's home.
+- **Dev checkout:** everything stays under the repo, byte-identical to before.
 
 ## 2. Sign + publish to a private apt repo
 

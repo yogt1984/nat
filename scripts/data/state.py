@@ -1022,8 +1022,13 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    root = Path(__file__).resolve().parent.parent.parent
-    db = Path(args.db) if args.db else root / "data" / "nat.db"
+    try:
+        import nat_paths
+    except ImportError:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import nat_paths
+    db = Path(args.db) if args.db else nat_paths.db_path()
 
     if args.command == "status":
         _cli_status(db)
