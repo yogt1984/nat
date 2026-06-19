@@ -1,9 +1,15 @@
 """Load trading costs from config/costs.toml (single source of truth)."""
 
+import sys
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_COSTS_PATH = _PROJECT_ROOT / "config" / "costs.toml"
+try:
+    import nat_paths
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import nat_paths
+
+_COSTS_PATH = nat_paths.config_dir() / "costs.toml"
 
 
 def _load_toml(path: Path) -> dict:

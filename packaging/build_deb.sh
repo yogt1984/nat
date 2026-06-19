@@ -50,9 +50,9 @@ for b in $BINS; do
     fi
 done
 
-# Config → /etc/nat ; symlink /usr/lib/nat/config so ROOT-relative lookups work.
+# Config → /etc/nat. nat_paths resolves config from /etc/nat directly in
+# installed mode (no symlink needed); symbols.toml ships alongside it.
 cp config/*.toml "$STAGE/etc/nat/" 2>/dev/null || true
-ln -sfn /etc/nat "$STAGE/usr/lib/nat/config"
 
 # Control + maintainer scripts.
 sed "s/@VERSION@/${VERSION}/" packaging/deb/control.in > "$STAGE/DEBIAN/control"

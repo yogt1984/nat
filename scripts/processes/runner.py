@@ -40,8 +40,14 @@ from processes import persistence  # noqa: E402
 log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-CONFIG_PATH = ROOT / "config" / "processes.toml"
-DEFAULT_DATA_DIR = ROOT / "data" / "features"
+try:
+    import nat_paths
+except ImportError:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    import nat_paths
+CONFIG_PATH = nat_paths.config_dir() / "processes.toml"
+DEFAULT_DATA_DIR = nat_paths.features_dir()
 
 # Same defaults as the alpha screener
 DEFAULT_HORIZONS = {

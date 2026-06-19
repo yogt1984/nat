@@ -22,14 +22,22 @@ from pathlib import Path
 # ── Constants ────────────────────────────────────────────────────────────────
 
 ROOT = Path(__file__).resolve().parent
-RUST = ROOT / "rust"
-DATA_DEFAULT = ROOT / "data" / "features"
-LOG_DIR = ROOT / "logs"
+RUST = ROOT / "rust"                      # program/binaries — install-relative, never XDG
 BIN_ING = RUST / "target" / "release" / "ing"
-ING_CFG = ROOT / "config" / "ing.toml"
+
+# Relocatable data/config/log/report locations (env → source-checkout → XDG).
+# In a dev checkout these resolve to the repo layout exactly as before.
+sys.path.insert(0, str(ROOT / "scripts"))
+import nat_paths  # noqa: E402
+
+CONFIG_DIR = nat_paths.config_dir()
+DATA_DEFAULT = nat_paths.features_dir()
+REPORTS_DIR = nat_paths.reports_dir()
+LOG_DIR = nat_paths.log_dir()
+ING_CFG = CONFIG_DIR / "ing.toml"
+PIPE_CFG = CONFIG_DIR / "pipeline.toml"
 DEPLOY_HOST = os.environ.get("NAT_DEPLOY_HOST", "su-35")
 DEPLOY_DIR = os.environ.get("NAT_DEPLOY_DIR", "~/nat")
-PIPE_CFG = ROOT / "config" / "pipeline.toml"
 PY = sys.executable
 
 G, R, Y, B, W, BOLD = "\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[0m", "\033[1m"
@@ -50,7 +58,9 @@ def _exec(cmd, cwd=None, env=None):
     # and our banner lands last — making a successful command look broken.
     sys.stdout.flush()
     sys.stderr.flush()
-    e = {**os.environ, **(env or {})}
+    # Propagate the resolved NAT_* locations so child scripts / the Rust ingestor
+    # resolve the same data/config dirs regardless of their CWD.
+    e = {**os.environ, **nat_paths.as_env(), **(env or {})}
     return subprocess.run(cmd, shell=True, cwd=str(cwd) if cwd else None, env=e)
 
 
@@ -208,7 +218,7 @@ def cmd_start(args):
 
     subprocess.run(
         f"tmux new-session -d -s ingestor "
-        f"'cd {RUST} && ./target/release/ing ../config/ing.toml 2>&1 | tee {logfile}'",
+        f"'cd {RUST} && ./target/release/ing {ING_CFG} 2>&1 | tee {logfile}'",
         shell=True,
     )
     time.sleep(3)
@@ -426,7 +436,7 @@ def cmd_report(args):
 
 def cmd_report_ls(args):
     """List experiment-outcome artifacts under reports/ and docs/reports/."""
-    roots = [ROOT / "reports", ROOT / "docs" / "reports"]
+    roots = [REPORTS_DIR, ROOT / "docs" / "reports"]
     want_ext = getattr(args, 'ext', None)
     limit = getattr(args, 'limit', None)
     items = []
@@ -833,7 +843,7 @@ def cmd_run(args):
     _banner("Running ingestor (foreground)")
     _sh("pkill -f 'target/.*ing.*config/ing.toml' 2>/dev/null")
     time.sleep(1)
-    _exec("./target/release/ing ../config/ing.toml", cwd=RUST)
+    _exec(f"./target/release/ing {ING_CFG}", cwd=RUST)
 
 
 def cmd_run_serve(args):
@@ -841,7 +851,7 @@ def cmd_run_serve(args):
     _ensure_release()
     _banner("Running ingestor + dashboard")
     print(f"  Dashboard: http://localhost:8080\n")
-    _exec("./target/release/ing ../config/ing.toml", cwd=RUST,
+    _exec(f"./target/release/ing {ING_CFG}", cwd=RUST,
           env={"ING_DASHBOARD_ENABLED": "true"})
 
 
@@ -1041,7 +1051,7 @@ def cmd_test_capture(args):
     # shutdown; --kill-after is a hard backstop if the flush hangs. Quiet the
     # ingestor's tracing to a logfile (RUST_LOG=warn) unless --verbose.
     ing_cmd = (f"timeout --signal=TERM --kill-after=20 {secs} "
-               f"./target/release/ing ../config/ing.toml")
+               f"./target/release/ing {ING_CFG}")
     if verbose:
         rc = _exec(ing_cmd, cwd=RUST).returncode
     else:
@@ -1084,7 +1094,7 @@ def cmd_test_capture(args):
     tf = {1: '1m', 5: '5m', 15: '15m'}.get(int(minutes), '5m')
     overview_tf = _TF_MAP[tf][0]
     sym = getattr(args, 'symbol', None) or 'BTC'
-    out = str(ROOT / "reports" / "figures" / "snapshots")
+    out = str(REPORTS_DIR / "figures" / "snapshots")
     cmd = (f"scripts/15m_visualize.py --data-dir {_data(args)} --last {int(minutes)}m "
            f"--symbol {sym} --output {out} --page all --timeframe {overview_tf} "
            f"--max-features {getattr(args, 'max_features', 16)}")
@@ -1953,7 +1963,7 @@ def cmd_api_serve_all(args):
     _banner("Starting full NAT stack in tmux")
     _exec("tmux kill-session -t nat 2>/dev/null || true")
     _exec(f"tmux new-session -d -s nat -n ingestor "
-          f"'cd {RUST} && ./target/release/ing ../config/ing.toml; read'")
+          f"'cd {RUST} && ./target/release/ing {ING_CFG}; read'")
     _exec(f"tmux new-window -t nat -n api 'cd {RUST} && ./target/release/nat-api; read'")
     _exec(f"tmux new-window -t nat -n alerts 'cd {RUST} && ./target/release/alert-service; read'")
     _exec("tmux attach -t nat")
@@ -2052,7 +2062,7 @@ def _print_15m_window(label="Analyzed window"):
     data-flush window analyze the *same* slice (the ingestor buffers a row group
     and rotates hourly, so freshly-ingested ticks aren't readable yet), which is
     why repeated runs can produce identical graphs."""
-    ref = ROOT / "reports" / "smoke_test" / "latest" / "data_ref.json"
+    ref = REPORTS_DIR / "smoke_test" / "latest" / "data_ref.json"
     if not ref.exists():
         return
     try:
@@ -2282,7 +2292,7 @@ def _algorithm_perf():
         pass
 
     # IC from reports/algorithms/<SYM>_eval.json (list of per-algo result dicts).
-    eval_dir = ROOT / "reports" / "algorithms"
+    eval_dir = REPORTS_DIR / "algorithms"
     if eval_dir.exists():
         for ef in sorted(eval_dir.glob("*_eval.json")):
             sym = ef.name.split("_", 1)[0]
@@ -2341,7 +2351,7 @@ def cmd_algorithm_list(args):
 
 def cmd_algorithm_config(args):
     """Show algorithm configuration from TOML."""
-    config_path = ROOT / "config" / "algorithms.toml"
+    config_path = CONFIG_DIR / "algorithms.toml"
     if not config_path.exists():
         print(f"  {R}Not found:{W} {config_path}")
         return 1
@@ -3182,7 +3192,7 @@ def cmd_viz_render(args):
     # --last: freshest-readable tail view (data/features root; bypass day/INDEX/--tf)
     last = getattr(args, 'last', None)
     if last:
-        out = getattr(args, 'output', None) or str(ROOT / "reports" / "figures" / "snapshots")
+        out = getattr(args, 'output', None) or str(REPORTS_DIR / "figures" / "snapshots")
         _banner(f"viz render — {sym} last {last} (freshest readable)")
         sys.stdout.flush()
         cmd = (f"scripts/15m_visualize.py --data-dir {_data(args)} --last {last} "
@@ -3204,7 +3214,7 @@ def cmd_viz_render(args):
         _p("x", R, f"No data for {date}: {data_dir}")
         return 1
 
-    out = getattr(args, 'output', None) or str(ROOT / "reports" / "figures" / "snapshots")
+    out = getattr(args, 'output', None) or str(REPORTS_DIR / "figures" / "snapshots")
     mode = "overview" if index is None else f"page {index}"
     _banner(f"viz render — {sym} {tf} {mode} ({date})")
     sys.stdout.flush()
@@ -3344,7 +3354,7 @@ def cmd_viz3d(args):
             _p("x", R, f"No non-empty parquet in {data_dir}")
             return 1
         target = files[0]
-        out_dir = Path(getattr(args, 'output', None) or (ROOT / "reports" / "figures" / "mesh"))
+        out_dir = Path(getattr(args, 'output', None) or (REPORTS_DIR / "figures" / "mesh"))
         out_dir.mkdir(parents=True, exist_ok=True)
         out_png = out_dir / f"{sym}_{date}_mesh.png"
         cmd = [str(bin_v3), str(target), "--out", str(out_png),
@@ -3362,7 +3372,7 @@ def cmd_viz3d(args):
             _p("x", R, f"natviz3d failed (exit {rc})")
         return rc
 
-    out = getattr(args, 'output', None) or str(ROOT / "reports" / "figures" / "mesh")
+    out = getattr(args, 'output', None) or str(REPORTS_DIR / "figures" / "mesh")
     mode = "overview" if index is None else f"page {index}"
     _banner(f"viz3d — {sym} {tf} {mode} ({date})")
     sys.stdout.flush()
@@ -3782,7 +3792,7 @@ def cmd_health(args):
 
 def cmd_config_show(args):
     """Show full merged configuration."""
-    config_dir = ROOT / "config"
+    config_dir = CONFIG_DIR
     try:
         import tomllib
     except ImportError:
@@ -3829,7 +3839,7 @@ def cmd_config_get(args):
         print(f"  {R}Error:{W} Use file.section.key format, e.g. 'agent.agent.ic_threshold'")
         return 1
 
-    config_file = ROOT / "config" / f"{key_parts[0]}.toml"
+    config_file = CONFIG_DIR / f"{key_parts[0]}.toml"
     if not config_file.exists():
         print(f"  {R}Error:{W} Config file not found: {config_file}")
         return 1
@@ -3851,6 +3861,22 @@ def cmd_config_get(args):
         print(f"  {args.key} = {val}")
 
 
+def cmd_config_paths(args):
+    """Show the resolved data/config/log/report locations (and how each was chosen)."""
+    info = nat_paths.describe()
+
+    def _human(d):
+        print(f"\n  {BOLD}Resolved paths{W}  (source: {d['source']})\n")
+        order = ["install_root", "home", "data_root", "features_dir", "trades_dir",
+                 "config_dir", "reports_dir", "log_dir", "db_path"]
+        for k in order:
+            print(f"    {k:<14} {d[k]}")
+        print(f"\n  Override with NAT_HOME (master) or NAT_DATA/NAT_CONFIG/NAT_REPORTS/NAT_LOG.\n")
+
+    _output(info, args, _human)
+    return 0
+
+
 def cmd_config_validate(args):
     """Validate all TOML config files for syntax errors."""
     try:
@@ -3858,7 +3884,7 @@ def cmd_config_validate(args):
     except ImportError:
         import tomli as tomllib
 
-    config_dir = ROOT / "config"
+    config_dir = CONFIG_DIR
     results = []
     for toml_file in sorted(config_dir.glob("*.toml")):
         try:
@@ -3881,7 +3907,7 @@ def cmd_config_validate(args):
 
 def cmd_reports(args):
     """List all reports."""
-    reports_dir = ROOT / "reports"
+    reports_dir = REPORTS_DIR
     if not reports_dir.exists():
         if _json_mode(args):
             _output({"reports": []}, args)
@@ -3914,7 +3940,7 @@ def cmd_reports(args):
 
 def cmd_reports_latest(args):
     """Show most recent report per category."""
-    reports_dir = ROOT / "reports"
+    reports_dir = REPORTS_DIR
     if not reports_dir.exists():
         if _json_mode(args):
             _output({"latest": {}}, args)
@@ -4446,7 +4472,7 @@ def _install_watchdog():
         return
     cron_line = (
         f"*/5 * * * * pgrep -x ing || "
-        f"(cd {ROOT} && cd rust && ./target/release/ing ../config/ing.toml "
+        f"(cd {ROOT} && cd rust && ./target/release/ing {ING_CFG} "
         f">> {LOG_DIR}/cron_restart.log 2>&1 &)"
     )
     new_cron = existing.rstrip() + "\n" + cron_line + "\n"
@@ -6706,6 +6732,9 @@ def build_parser():
     cfg_get.add_argument('key', help='Config key in dot notation (e.g., agent.agent.ic_threshold)')
     cfg_get.set_defaults(func=cmd_config_get)
     cfgsub.add_parser('validate', help='Check all config files for syntax errors').set_defaults(func=cmd_config_validate)
+    cfg_paths = cfgsub.add_parser('paths', help='Show resolved data/config/log/report locations')
+    cfg_paths.add_argument('--json', action='store_true', help='JSON output')
+    cfg_paths.set_defaults(func=cmd_config_paths)
 
     # ── reports ──
     rpt_p = sub.add_parser('reports', help='Report management')

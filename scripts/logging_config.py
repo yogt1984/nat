@@ -28,8 +28,14 @@ from typing import Optional
 # Thread-local context for correlation IDs
 _context = threading.local()
 
-# Default log directory (relative to project root)
-_DEFAULT_LOG_DIR = Path(__file__).resolve().parent.parent / "data" / "logs"
+# Default log directory (relocatable: env → repo → XDG, via nat_paths)
+try:
+    import nat_paths
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import nat_paths
+
+_DEFAULT_LOG_DIR = nat_paths.data_root() / "logs"
 
 
 def set_context(**kwargs) -> None:
