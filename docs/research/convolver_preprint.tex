@@ -93,7 +93,7 @@ candidates after FDR correction ($q = 0.05$). Turtle-soup and trap event
 types produce the strongest signals ($|\text{IC}| \in [0.20, 0.36]$), while
 breakout patterns show no predictive power after multiple testing
 correction. Rolling SVD stability analysis confirms that the discovered
-shapes are temporally persistent ($\bar{\rho} > 0.85$ for the strongest
+shapes are temporally persistent ($\bar{\rho} > 0.90$ for the strongest
 kernels), supporting their use as real-time features via cosine similarity
 scoring.
 \end{abstract}
@@ -168,7 +168,7 @@ The critical anti-overfitting property is the ordering of operations:
 \end{enumerate}
 We are not fitting shapes to returns. We are asking whether naturally
 occurring shape variation---variation the market itself exhibits around
-analytically-defined events---is predictive. This ordering ensures that the
+analytically defined events---is predictive. This ordering ensures that the
 discovered kernels are interpretable geometric objects, not overfit
 regression artefacts.
 
@@ -210,8 +210,9 @@ on hand-designed templates, which our approach replaces with data-driven
 discovery.
 
 \paragraph{PCA and random matrix theory in finance.}
-The application of eigenvalue decomposition to financial correlation
-matrices is well established (Laloux \emph{et al.}, 1999; Plerou \emph{et
+The application of principal component analysis (Jolliffe, 2002) and
+eigenvalue decomposition to financial correlation matrices is well
+established (Laloux \emph{et al.}, 1999; Plerou \emph{et
 al.}, 2002; Bouchaud and Potters, 2003). These works decompose
 cross-sectional return covariance to separate signal from noise. Our
 application differs fundamentally: we apply SVD to \emph{time-domain}
@@ -565,7 +566,8 @@ The columns $\bvec{v}_k = \Vmat_{:,k} \in \R^W$ are the \emph{discovered
 basis functions} (shapes), ordered from dominant to residual. The columns
 $\bvec{u}_k = \Umat_{:,k} \in \R^{n_e}$ give the \emph{per-event loading}
 on shape $k$: the scalar $u_{ik}$ measures how strongly event $i$ projects
-onto shape $k$.
+onto shape $k$. The decomposition is computed using standard numerical SVD
+algorithms (Golub and Van Loan, 2013).
 
 \subsection{Interpretive Quantities}
 
@@ -603,7 +605,7 @@ variance first exceeds $\rho^* = 0.80$:
     \label{eq:truncation}
 \end{equation}
 
-By the Eckart--Young--Mirsky theorem (Eckart and Young, 1936), the retained
+By the Eckart--Young theorem (Eckart and Young, 1936), the retained
 components provide the best rank-$K$ approximation to $\Xmat$ in Frobenius
 norm, with relative reconstruction error
 $\epsilon_K = \sqrt{1 - \sum_{k=1}^{K} \mathrm{EVR}_k}$.
@@ -862,7 +864,7 @@ SVD.
 Table~\ref{tab:stereotypy} reports the stereotypy index $\mathrm{SI} =
 \sigma_1/\sigma_2$ across all (event, channel) pairs.
 
-\begin{table}[h]
+\begin{table}[ht]
 \begin{center}
 \begin{tabular}{lrrrr}
 \hline
@@ -889,7 +891,7 @@ Trap bull volume ($\mathrm{SI} = 2.74$) is the highest across all pairs.}
 From 158 candidates passing $|\mathrm{IC}| > 0.03$, BH-FDR correction at
 $q = 0.05$ retains \textbf{6 kernels} (Table~\ref{tab:survivors}).
 
-\begin{table}[h]
+\begin{table}[ht]
 \begin{center}
 \small
 \begin{tabular}{clllrrr}
@@ -921,8 +923,8 @@ Three findings merit emphasis:
       forward returns after FDR correction. The market may have already
       incorporated breakout information by the time the pattern completes.
 
-\item \textbf{Multi-channel contribution.} The 6 survivors span three
-      channels (body, lower wick, upper wick, volume), confirming that the
+\item \textbf{Multi-channel contribution.} The 6 survivors span all four
+      channels (body, upper wick, lower wick, volume), confirming that the
       multi-channel decomposition captures information absent from the body
       channel alone.
 
@@ -1089,10 +1091,6 @@ multiple assets and longer time horizons.
     \item Allen, B.\ \emph{et al.}\ (2012). FINDCHIRP: An algorithm for
           detection of gravitational waves from inspiraling compact binaries.
           \textit{Physical Review D}, 85(12), 122006.
-
-    \item Bandt, C.\ \& Pompe, B.\ (2002). Permutation entropy: a natural
-          complexity measure for time series. \textit{Physical Review
-          Letters}, 88(17), 174102.
 
     \item Benjamini, Y.\ \& Hochberg, Y.\ (1995). Controlling the false
           discovery rate: a practical and powerful approach to multiple
