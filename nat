@@ -401,6 +401,10 @@ def cmd_status(args):
         _p("@", Y, "Data monitor: PAUSED (intentional stop) — alerts suppressed")
     elif not monitor["daemon_running"]:
         _p("@", R, "Data monitor: DAEMON DOWN — gaps undetected (run: nat gap start)")
+    elif monitor.get("stalled"):
+        rc = monitor.get("restart_count", 0)
+        _p("@", R, f"Data monitor: STALLED — ingestor alive but not writing"
+                   f"{f' (auto-restart x{rc})' if rc else ''}")
     elif monitor["gapping"]:
         age = monitor.get("age_s")
         det = f" ({age:.0f}s since last write)" if isinstance(age, (int, float)) else ""
@@ -4598,6 +4602,8 @@ def _gap_monitor_state():
         "daemon_running": _gap_running(),
         "paused": PAUSE_FILE.exists(),
         "gapping": bool(state.get("gapping")),
+        "stalled": bool(state.get("stalled")),
+        "restart_count": state.get("restart_count", 0),
         "age_s": state.get("age_s"),
         "row_age_s": state.get("row_age_s"),
         "last_check_at": state.get("last_check_at"),

@@ -32,3 +32,15 @@ alert_log      = "data/ops/alerts.log"
 # `nat start` clears it. The gap daemon keeps RUNNING either way, so an
 # *unexpected* ingestor death (no marker) still alerts.
 pause_file     = "data/ops/ingestion_paused"
+
+# Stalled-buffer (zombie ingestor) detection + remediation. systemd's
+# Restart=always can't catch a process that's alive but not writing; this watches
+# the active .parquet.tmp's size. If mtime stays fresh but size doesn't grow for
+# longer than stall_threshold_s (~3 row-group flush cycles), it's a stall.
+stall_threshold_s = 900
+# On a stall, restart the ingestor — but ONLY when systemd-managed (the unit file
+# exists), with a cooldown and a max-consecutive cap so it can't restart-loop.
+auto_restart            = true
+restart_unit            = "nat-ingestor.service"
+restart_cooldown_s      = 600
+max_consecutive_restarts = 3
