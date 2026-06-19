@@ -313,13 +313,18 @@ class GapAlerter:
     def check(self, now: float | None = None) -> GapState:
         """One evaluation cycle: detect gap, alert on transitions, persist state."""
         now = now if now is not None else self._now()
-        age = latest_data_age_s(self.data_dirs, now)
-        row_age = latest_row_age_s(self.data_dirs, now)
+        age = latest_data_age_s(self.data_dirs, now)        # incl live .parquet.tmp
+        row_age = latest_row_age_s(self.data_dirs, now)     # closed files only (diagnostic)
         prev = read_gap_state(self.state_path)
         now_iso = self._iso(now)
 
-        # Gap by mtime OR by stalled rows (T4); row-age only tightens, never loosens.
-        gap = is_gap(age, self.threshold) or is_gap(row_age, self.row_threshold)
+        # Gap trigger is the mtime of the freshest file (the live .parquet.tmp IS
+        # the liveness signal). row_age_s is recorded for visibility but does NOT
+        # solo-trigger: closed-file row stats lag by up to a full hourly rotation,
+        # so triggering on them false-alarms right after every rotation/restart.
+        # (Detecting a truly stalled buffer — fresh mtime, no new rows — needs
+        # .tmp size-delta tracking; tracked as a follow-up.)
+        gap = is_gap(age, self.threshold)
 
         # Intentional pause (nat stop): keep running + recording, but never page.
         if is_paused(self.pause_file):

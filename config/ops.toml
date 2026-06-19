@@ -11,10 +11,12 @@ poll_interval_s = 30
 # Dirs watched for freshness (newest *.parquet OR *.parquet.tmp mtime wins).
 data_dirs = ["data/features"]
 
-# T4: secondary row-timestamp freshness. mtime alone can be fooled by a stalled
-# or zero-row buffer whose file keeps getting touched; if the newest *readable
-# row* is older than this, treat it as a gap too. Best-effort (skipped if the
-# newest parquet can't be read). Set comfortably above the rotation cadence.
+# T4: row-timestamp freshness, surfaced in gap state / `nat status` as a
+# diagnostic (newest readable row's age from closed-file footer stats). NOT a
+# standalone trigger: closed-file stats lag up to a full hourly rotation, so they
+# would false-alarm right after every rotation/restart. The gap trigger stays on
+# the freshest-file mtime (which includes the live .parquet.tmp). Reserved for a
+# future .tmp size-delta stalled-buffer check.
 row_threshold_s = 600
 
 # State + liveness files.

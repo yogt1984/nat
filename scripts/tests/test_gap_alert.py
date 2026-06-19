@@ -220,25 +220,27 @@ class TestLocalFallback:
 
 
 class TestRowAge:
-    def test_stalled_rows_with_fresh_mtime_is_gap(self, tmp_path):
-        pq = pytest.importorskip("pyarrow")
+    def test_row_age_is_reported_but_does_not_false_trigger(self, tmp_path):
+        """Closed-file row stats lag up to a full rotation, so a fresh mtime with
+        old closed-file rows (normal mid-rotation / just after restart) must NOT
+        be a gap. row_age_s is recorded for visibility only."""
+        pytest.importorskip("pyarrow")
         import pyarrow.parquet as pqw
         import pyarrow as pa
         now = 2_000_000.0
         data = tmp_path / "features" / "2026-06-15"
         data.mkdir(parents=True)
         f = data / "rows.parquet"
-        # newest row is 5000s old, but the file's mtime is fresh (10s) — mtime
-        # alone would say "OK"; row-age (threshold 600) must flag the gap.
-        old_ns = int((now - 5000) * 1e9)
+        old_ns = int((now - 5000) * 1e9)          # rows 5000s old
         pqw.write_table(pa.table({"timestamp_ns": [old_ns], "symbol": ["BTC"]}), f)
-        os.utime(f, (now - 10, now - 10))
+        os.utime(f, (now - 10, now - 10))         # but file written 10s ago (fresh mtime)
         a = _alerter(tmp_path, tmp_path / "features", clock=lambda: now)
         alerts = []
         a._send = lambda msg: alerts.append(msg)
         st = a.check()
-        assert st.gapping is True
-        assert st.row_age_s == pytest.approx(5000, abs=2)
+        assert st.gapping is False                # fresh mtime → not a gap
+        assert st.row_age_s == pytest.approx(5000, abs=2)   # still surfaced
+        assert alerts == []
 
 
 # ---------------------------------------------------------------------------
