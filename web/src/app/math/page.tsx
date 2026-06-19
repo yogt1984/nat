@@ -13,6 +13,7 @@ interface MathSection {
   category: "features" | "gates" | "sizing" | "methods";
   description: string;
   latex: string;
+  paper?: { label: string; href: string };
 }
 
 const SECTIONS: MathSection[] = [
@@ -288,6 +289,10 @@ K(x, x') = \exp\!\left(-\frac{\|x - x'\|^2}{2\ell^2}\right)
 P(\text{cascade} \mid \mathbf{x}) = \hat{y} > \tau \quad (\tau = 0.03)
 
 \text{Validation: AUC} \geq 0.65,\; \text{lift} \geq 2.0,\; \text{net IC} \geq 0.02`,
+    paper: {
+      label: "Related preprint — Event-Aligned SVD for Pattern Kernel Discovery (PDF)",
+      href: "/convolver_preprint.pdf",
+    },
   },
   {
     id: "risk-parity",
@@ -345,6 +350,16 @@ function CollapsibleSection({
       {isOpen && (
         <div className="px-4 py-3 border-t border-zinc-800">
           <MathPanel latex={section.latex} />
+          {section.paper && (
+            <a
+              href={section.paper.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block mt-3 text-xs text-blue-400 hover:text-blue-300 underline"
+            >
+              {section.paper.label} ↗
+            </a>
+          )}
         </div>
       )}
     </div>
