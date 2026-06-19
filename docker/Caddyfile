@@ -23,6 +23,11 @@ prometheus.{$DOMAIN:localhost}:443 {
 	reverse_proxy prometheus:9090
 }
 
+# Research site — Next.js web app (Math Lab, heatmap/network/signals) + preprint
+research.{$DOMAIN:localhost}:443 {
+	reverse_proxy web:3000
+}
+
 # Local dev: plain HTTP on port 80
 :80 {
 	redir https://{host}{uri} permanent

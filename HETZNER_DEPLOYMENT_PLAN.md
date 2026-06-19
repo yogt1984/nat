@@ -65,7 +65,8 @@ Cloud deployment is the next P0 action. One bring-up does three things at once:
    - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` — run `scripts/setup_telegram.sh` for
      interactive setup (powers gap-alert + kill-switch pages).
 2. DNS A-records → the box IP: the apex `DOMAIN` (→ Grafana) plus `api.`,
-   `dashboard.`, `prometheus.` subdomains (see `docker/Caddyfile`). Caddy issues TLS
+   `dashboard.`, `prometheus.`, and `research.` (→ the Next.js web app + the
+   preprint at `/convolver_preprint.pdf`) subdomains (see `docker/Caddyfile`). Caddy issues TLS
    automatically on first request.
 
 ## Phase 2 — Build & bring up (named services, in order)
