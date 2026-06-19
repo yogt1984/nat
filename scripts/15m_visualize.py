@@ -1110,6 +1110,12 @@ def main():
     if args.output is None:
         args.output = DEFAULT_OUTPUT
 
+    # Single-file mode: --data-dir may point at one parquet file (powers
+    # `nat viz <file>`); read it directly instead of globbing a directory.
+    if data_file is None and args.data_dir is not None and args.data_dir.is_file():
+        data_file = args.data_dir
+        args.data_dir = None
+
     if data_file is not None:
         log.info("Loading 15m data from %s", data_file)
         df = pd.read_parquet(data_file)

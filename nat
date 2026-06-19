@@ -3225,7 +3225,11 @@ def cmd_viz_render(args):
 
 
 def cmd_viz_file(args):
-    """nat viz <file> — interactive slice of one parquet → PNGs → show → delete."""
+    """nat viz <file> — curated microstructure snapshot of one parquet → show → delete.
+
+    Default renders the SAME curated panels as `nat viz render` / `nat 15m` via
+    15m_visualize.py (resampled bars, per-symbol), into a temp dir, opens them, then
+    deletes. `--raw` falls back to the raw-tick top-variance quick-look."""
     f = Path(getattr(args, 'file'))
     if not f.exists():
         # Allow a bare filename resolved against the data dir.
@@ -3238,29 +3242,73 @@ def cmd_viz_file(args):
 
     sys.path.insert(0, str(ROOT / "scripts"))
     from viz import slice_viewer
-
-    cols = getattr(args, 'cols', None)
-    cols = cols.split(",") if cols else None
     delete = not getattr(args, 'no_delete', False)
     as_json = _json_mode(args)
-    try:
-        manifest = slice_viewer.view(
-            f,
-            slice_expr=getattr(args, 'slice', None),
-            cols=cols,
-            symbol=getattr(args, 'symbol', None),
-            max_features=getattr(args, 'max_features', 12),
-            delete=delete and not as_json,
-            prompt=not as_json,
-        )
-    except Exception as e:
+
+    # ── raw-tick path (the old slice_viewer quick-look) ──
+    if getattr(args, 'raw', False):
+        import contextlib
+        import io
+        cols = getattr(args, 'cols', None)
+        cols = cols.split(",") if cols else None
+        # In JSON mode, mute slice_viewer's own prints so stdout stays parseable.
+        stdout_ctx = contextlib.redirect_stdout(io.StringIO()) if as_json else contextlib.nullcontext()
+        try:
+            with stdout_ctx:
+                manifest = slice_viewer.view(
+                    f,
+                    slice_expr=getattr(args, 'slice', None),
+                    cols=cols,
+                    symbol=getattr(args, 'symbol', None),
+                    max_features=getattr(args, 'max_features', 16),
+                    delete=delete and not as_json,
+                    prompt=not as_json,
+                )
+        except Exception as e:
+            if as_json:
+                _output({"error": str(e), "file": str(f)}, args)
+            else:
+                _p("x", R, str(e))
+            return 1
         if as_json:
-            _output({"error": str(e), "file": str(f)}, args)
+            _output(manifest, args)
+        return 0
+
+    # ── default: curated panels via 15m_visualize.py (single-file mode) ──
+    import shutil
+    import tempfile
+    tf = getattr(args, 'tf', '1m')
+    overview_tf = _TF_MAP[tf][0]
+    sym = getattr(args, 'symbol', None) or 'BTC'
+    out_dir = Path(tempfile.mkdtemp(prefix="nat_viz_"))
+    cmd = (f"scripts/15m_visualize.py --data-dir {f} --symbol {sym} "
+           f"--timeframe {overview_tf} --page all --output {out_dir} "
+           f"--max-features {getattr(args, 'max_features', 16)} --quiet")
+    r = _sh(f"{PY} {cmd}", cwd=str(ROOT))
+    pages = [Path(ln.split("Saved:", 1)[1].strip())
+             for ln in (r.stdout or "").splitlines() if "Saved:" in ln]
+    if r.returncode != 0 or not pages:
+        msg = (r.stderr or r.stdout or "render produced no pages").strip().splitlines()
+        if as_json:
+            _output({"error": (msg[-1] if msg else "render failed"), "file": str(f)}, args)
         else:
-            _p("x", R, str(e))
-        return 1
+            _p("x", R, "Render failed:")
+            for line in msg[-8:]:
+                print(f"    {line}")
+        shutil.rmtree(out_dir, ignore_errors=True)
+        return r.returncode or 1
+
+    manifest = {"file": str(f), "symbol": sym, "timeframe": overview_tf,
+                "pages": [str(p) for p in pages], "out_dir": str(out_dir)}
     if as_json:
         _output(manifest, args)
+        return 0
+    if delete:
+        slice_viewer.show_and_delete(pages, wait=True)
+    else:
+        _p("+", G, f"Rendered {len(pages)} page(s) → {out_dir} (kept, --no-delete)")
+        for p in pages:
+            print(f"      {p.name}")
     return 0
 
 
@@ -6237,12 +6285,19 @@ def build_parser():
     # ── viz (terminal-first per-unit visualization, T7/NAT3) ──
     viz_p = sub.add_parser('viz', help='Terminal-first visualization (features/algorithm/paper)')
     vizsub = viz_p.add_subparsers(dest='subcmd')
-    vzfile = vizsub.add_parser('file', help='Slice one parquet file → PNGs → show → delete')
+    vzfile = vizsub.add_parser('file',
+                               help='Curated snapshot of one parquet file → show → delete')
     vzfile.add_argument('file', help='Parquet file (full path or bare name resolved in data dir)')
-    vzfile.add_argument('--slice', default=None, help="Rows: 0:500, a count like 200, or 'all'")
-    vzfile.add_argument('--cols', default=None, help='Comma-separated columns (default: top-variance)')
-    vzfile.add_argument('--symbol', '-s', default=None, help='Filter to one symbol')
-    vzfile.add_argument('--max-features', type=int, default=12, help='Max features per page')
+    vzfile.add_argument('--tf', default='1m', choices=['1m', '5m', '15m'],
+                        help='Bar timeframe for the curated panels (default: 1m)')
+    vzfile.add_argument('--symbol', '-s', default='BTC', help="Symbol (default: BTC)")
+    vzfile.add_argument('--max-features', type=int, default=16, help='Max features per page')
+    vzfile.add_argument('--raw', action='store_true',
+                        help='Raw-tick top-variance quick-look (old slice_viewer) instead of curated panels')
+    vzfile.add_argument('--slice', default=None,
+                        help="(--raw only) Rows: 0:500, a count like 200, or 'all'")
+    vzfile.add_argument('--cols', default=None,
+                        help='(--raw only) Comma-separated columns (default: top-variance)')
     vzfile.add_argument('--data', default=str(DATA_DEFAULT), help='Data dir for bare-name lookup')
     vzfile.add_argument('--no-delete', action='store_true', help='Keep the rendered PNGs')
     vzfile.add_argument('--json', action='store_true', help='Emit manifest instead of opening')
