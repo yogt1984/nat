@@ -1032,20 +1032,32 @@ def cmd_test_capture(args):
     dd = Path(_data(args))
     before = {f: f.stat().st_mtime for f in dd.rglob("*.parquet")} if dd.exists() else {}
 
-    _banner(f"nat test {minutes:g}m — capturing {minutes:g} min of live data")
-    _p("...", B, f"Running ingestor for {secs}s (graceful SIGTERM, then flush)...")
+    verbose = getattr(args, 'verbose', False)
+    _banner(f"nat test {minutes:g}m — capture & visualize")
+    _p("...", B, f"Capturing {secs}s of live data...")
     sys.stdout.flush()
+
     # timeout sends SIGTERM at the deadline so the ingestor flushes Parquet on
-    # shutdown; --kill-after is a hard backstop if the flush hangs.
-    rc = _exec(
-        f"timeout --signal=TERM --kill-after=20 {secs} "
-        f"./target/release/ing ../config/ing.toml",
-        cwd=RUST,
-    ).returncode
+    # shutdown; --kill-after is a hard backstop if the flush hangs. Quiet the
+    # ingestor's tracing to a logfile (RUST_LOG=warn) unless --verbose.
+    ing_cmd = (f"timeout --signal=TERM --kill-after=20 {secs} "
+               f"./target/release/ing ../config/ing.toml")
+    if verbose:
+        rc = _exec(ing_cmd, cwd=RUST).returncode
+    else:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        logfile = LOG_DIR / f"test_capture_{datetime.now():%Y%m%d_%H%M%S}.log"
+        with open(logfile, "w") as lf:
+            rc = subprocess.run(
+                ing_cmd, shell=True, cwd=str(RUST),
+                env={**os.environ, "RUST_LOG": "warn"},
+                stdout=lf, stderr=subprocess.STDOUT,
+            ).returncode
     # timeout exits 124 when it has to terminate the child — that's the expected
     # path here (we *want* it to stop at the deadline), so don't treat it as error.
     if rc not in (0, 124, 143):
-        _p("x", R, f"Ingestor exited with code {rc} — see output above")
+        hint = "see output above" if verbose else f"see {logfile}"
+        _p("x", R, f"Ingestor exited with code {rc} — {hint}")
         return 1
 
     time.sleep(1)
@@ -1059,7 +1071,12 @@ def cmd_test_capture(args):
         _p("x", R, "No parquet data was written during the capture window")
         return 1
     newest = target[0]
-    _p("+", G, f"Captured: {newest}")
+    try:
+        import pyarrow.parquet as _pq
+        nrows = _pq.read_metadata(newest).num_rows
+        _p("+", G, f"Captured {nrows:,} rows → {newest.name}")
+    except Exception:
+        _p("+", G, f"Captured → {newest.name}")
 
     # Render through the SAME path as `nat viz render --tf` so the image matches
     # the established viz output: resampled bars at the matching timeframe, curated
@@ -1073,8 +1090,27 @@ def cmd_test_capture(args):
            f"--max-features {getattr(args, 'max_features', 16)}")
     if not _json_mode(args):
         cmd += " --open"
-    cmd += " -v"
-    return _py(cmd).returncode
+
+    if verbose:
+        return _py(cmd + " -v").returncode
+
+    # Quiet render: capture output, surface only the window + saved pages.
+    r = _sh(f"{PY} {cmd}", cwd=str(ROOT))
+    if r.returncode != 0:
+        _p("x", R, "Render failed:")
+        for line in (r.stderr or r.stdout or "").strip().splitlines()[-8:]:
+            print(f"    {line}")
+        return r.returncode
+    saved = [ln.split("Saved:", 1)[1].strip()
+             for ln in r.stdout.splitlines() if "Saved:" in ln]
+    window = next((ln.split("→", 1)[1].strip()
+                   for ln in r.stdout.splitlines() if "Last " in ln and "→" in ln), None)
+    if window:
+        _p("+", G, f"Window: {window}")
+    _p("+", G, f"Rendered {len(saved)} page(s) → {Path(out).relative_to(ROOT)}/")
+    for p in saved:
+        print(f"      {Path(p).name}")
+    return 0
 
 
 def cmd_test_verbose(args):
@@ -5599,6 +5635,8 @@ def build_parser():
                            help="Symbol or 'all' (default: BTC)")
         _tcap.add_argument('--max-features', type=int, default=16, help='Max features per page')
         _tcap.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
+        _tcap.add_argument('--verbose', '-v', action='store_true',
+                           help='Stream full ingestor + render logs (default: clean summary)')
         _tcap.set_defaults(func=cmd_test_capture, minutes=_mins)
     tsub.add_parser('hypotheses', help='Hypothesis tests').set_defaults(func=cmd_test_hypotheses)
     tv = tsub.add_parser('validate', help='Live API validations')
