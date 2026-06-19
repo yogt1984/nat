@@ -54,6 +54,19 @@ def max_drawdown_bps(daily_pnl: np.ndarray) -> float:
     return float(np.max(peak - cum))
 
 
+def _skew_kurt(x) -> tuple:
+    """Sample skewness and non-excess kurtosis (normal -> 3.0). Returns the
+    normal defaults (0.0, 3.0) when undefined (n < 4 or zero dispersion)."""
+    arr = np.asarray(x, dtype=float)
+    if arr.size < 4:
+        return 0.0, 3.0
+    sd = arr.std()
+    if sd <= 1e-12:
+        return 0.0, 3.0
+    z = (arr - arr.mean()) / sd
+    return float(np.mean(z ** 3)), float(np.mean(z ** 4))
+
+
 def walk_forward_holdout(daily_pnl, train_frac: float = 0.67) -> dict:
     """Single chronological holdout over daily P&L.
 
@@ -64,7 +77,8 @@ def walk_forward_holdout(daily_pnl, train_frac: float = 0.67) -> dict:
     arr = np.asarray(daily_pnl, dtype=float)
     n = arr.size
     out = {"n_train": 0, "n_test": 0, "is_sharpe": 0.0,
-           "oos_sharpe": 0.0, "oos_is_ratio": float("nan")}
+           "oos_sharpe": 0.0, "oos_is_ratio": float("nan"),
+           "oos_skew": 0.0, "oos_kurt": 3.0}
     if n < 4:
         return out
     k = int(round(n * train_frac))
@@ -73,9 +87,39 @@ def walk_forward_holdout(daily_pnl, train_frac: float = 0.67) -> dict:
     is_s = float(sharpe_daily(train))
     oos_s = float(sharpe_daily(test))
     ratio = (oos_s / is_s) if abs(is_s) > 1e-9 else float("nan")
+    sk, ku = _skew_kurt(test)
     out.update(n_train=int(train.size), n_test=int(test.size),
-               is_sharpe=is_s, oos_sharpe=oos_s, oos_is_ratio=ratio)
+               is_sharpe=is_s, oos_sharpe=oos_s, oos_is_ratio=ratio,
+               oos_skew=sk, oos_kurt=ku)
     return out
+
+
+def days_to_significant_dsr(observed_sharpe: float, n_trials: int,
+                            target: float = 0.95, skewness: float = 0.0,
+                            kurtosis: float = 3.0):
+    """Smallest OOS sample length T at which the (per-period) Sharpe would reach
+    DSR = ``target``.
+
+    Reporting convention V = 1/(T-1) (trial Sharpes treated as null sampling
+    draws) gives SR0 = E[max_N]/sqrt(T-1), so the DSR test statistic reduces to
+    (SR*sqrt(T-1) - E[max_N]) / sqrt(se_var) and inverts in closed form. Assumes
+    the Sharpe and return moments hold as T grows -- a projection, not a promise.
+    Returns None when observed_sharpe <= 0 (a non-positive edge never gets there)
+    or the variance term is degenerate.
+    """
+    from scipy import stats
+    sr = float(observed_sharpe)
+    if sr <= 0:
+        return None
+    se_var = 1.0 - skewness * sr + (kurtosis - 1.0) / 4.0 * sr ** 2
+    if se_var <= 0:
+        return None
+    N = max(2, int(n_trials))
+    emax = ((1 - np.euler_gamma) * stats.norm.ppf(1 - 1 / N)
+            + np.euler_gamma * stats.norm.ppf(1 - 1 / (N * np.e)))
+    z = stats.norm.ppf(target)
+    t_minus_1 = ((emax + z * math.sqrt(se_var)) / sr) ** 2
+    return int(math.ceil(1.0 + t_minus_1))
 
 
 def strategy_stats(daily_pnl, n_trials: int = 1, train_frac: float = 0.67) -> dict:
@@ -90,15 +134,28 @@ def strategy_stats(daily_pnl, n_trials: int = 1, train_frac: float = 0.67) -> di
         "max_dd_bps": max_drawdown_bps(arr),
         "walk_forward": wf,
     }
-    # Deflated Sharpe (lazy import keeps the pure-stat functions dependency-light).
-    # Bailey & Lopez de Prado (2014): probability the OOS Sharpe survives having
-    # searched n_trials strategies. HIGHER = more robust. Reported, not gated.
+    # Full Deflated Sharpe Ratio (Bailey & Lopez de Prado 2014) on the OOS holdout
+    # -- folds in sample length (T) and non-normality (skew/kurt), so it answers
+    # "is this edge statistically real, and if not, how many more clean days?".
+    # Reporting only; the G4 promotion gate uses its own (unchanged) statistic.
+    # Per-period (daily) convention: de-annualise the Sharpe (/sqrt(252)), T = OOS
+    # days, V = 1/(T-1) (trial Sharpes as null draws). Lazy import keeps the
+    # pure-stat functions dependency-light.
     try:
-        from backtest.walk_forward import compute_deflated_sharpe
-        stats["deflated_sharpe_dsr"] = float(compute_deflated_sharpe(
-            observed_sharpe=wf["oos_sharpe"], n_trials=max(3, int(n_trials))))
+        from backtest.walk_forward import compute_deflated_sharpe_full
+        N = max(3, int(n_trials))
+        n_oos = int(wf["n_test"])
+        sr_daily = wf["oos_sharpe"] / math.sqrt(252.0)
+        sk, ku = wf.get("oos_skew", 0.0), wf.get("oos_kurt", 3.0)
+        stats["deflated_sharpe_dsr"] = float(compute_deflated_sharpe_full(
+            observed_sharpe=sr_daily, n_trials=N, n_observations=n_oos,
+            variance_of_trials=(1.0 / (n_oos - 1)) if n_oos > 1 else 1.0,
+            skewness=sk, kurtosis=ku))
+        stats["dsr_days_to_sig"] = days_to_significant_dsr(
+            observed_sharpe=sr_daily, n_trials=N, skewness=sk, kurtosis=ku)
     except Exception as exc:  # pragma: no cover - defensive
         stats["deflated_sharpe_dsr"] = None
+        stats["dsr_days_to_sig"] = None
         stats["deflated_error"] = str(exc)
     return stats
 
@@ -180,8 +237,10 @@ def build_report(window_days, symbols, algos, reports_dir, train_frac) -> dict:
         "results": results,
         "complementarity": pairwise_correlations(portfolio_series),
         "note": ("Metrics only; G4 pass/fail lives in the alpha pipeline. "
-                 "deflated_sharpe_dsr is Bailey-LdP: higher = more robust to "
-                 "the n_trials strategies searched."),
+                 "deflated_sharpe_dsr is the full Bailey-LdP DSR (sample-length + "
+                 "skew/kurtosis adjusted): P(edge real), higher = better, 0.95 = "
+                 "significant. dsr_days_to_sig projects the OOS days needed to reach "
+                 "0.95 at the current Sharpe (trial Sharpes assumed null draws)."),
     }
 
 
@@ -213,7 +272,7 @@ def print_human(report: dict) -> None:
     print(f"  n_trials (multiple-testing breadth) = {report['n_trials']}; "
           f"walk-forward train_frac = {report['train_frac']}\n")
     header = (f"  {'algo':<18}{'sym':<5}{'days':>5}{'totBps':>9}"
-              f"{'Sharpe':>8}{'OOS/IS':>8}{'maxDD':>8}{'win%':>7}{'DSR':>7}")
+              f"{'Sharpe':>8}{'OOS/IS':>8}{'maxDD':>8}{'win%':>7}{'DSR':>7}{'d→.95':>8}")
     print(header)
     print("  " + "-" * (len(header) - 2))
     for a in report["algos"]:
@@ -222,9 +281,11 @@ def print_human(report: dict) -> None:
             wf = st["walk_forward"]
             dsr = st.get("deflated_sharpe_dsr")
             dsr_s = "  n/a" if dsr is None else f"{dsr:.2f}"
+            dts = st.get("dsr_days_to_sig")
+            dts_s = "never" if dts is None else f"~{dts}"
             print(f"  {a:<18}{s:<5}{st['days']:>5}{st['total_bps']:>9.1f}"
                   f"{st['sharpe']:>8.2f}{_fmt_ratio(wf['oos_is_ratio']):>8}"
-                  f"{st['max_dd_bps']:>8.1f}{st['win_pct']:>7.0f}{dsr_s:>7}")
+                  f"{st['max_dd_bps']:>8.1f}{st['win_pct']:>7.0f}{dsr_s:>7}{dts_s:>8}")
     comp = report["complementarity"]
     if comp:
         print(f"\n  Complementarity (per-algo daily-P&L correlation; "

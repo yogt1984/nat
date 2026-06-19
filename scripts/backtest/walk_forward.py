@@ -444,3 +444,57 @@ def compute_deflated_sharpe(
         return dsr
     else:
         return 0.5
+
+
+def compute_deflated_sharpe_full(
+    observed_sharpe: float,
+    n_trials: int,
+    n_observations: int,
+    variance_of_trials: float = 1.0,
+    skewness: float = 0.0,
+    kurtosis: float = 3.0,
+) -> float:
+    """Canonical Deflated Sharpe Ratio (Bailey & Lopez de Prado 2014).
+
+    Unlike :func:`compute_deflated_sharpe` (the shipped G4-gate statistic, which
+    divides the selection-bias gap by the std of the maximum), this is the full
+    DSR: it standardises the gap by the Sharpe estimator's own standard error,
+    folding in the finite sample length ``n_observations`` (T) and the return
+    non-normality (``skewness``, ``kurtosis``)::
+
+        DSR = Phi[ (SR - SR0) * sqrt(T - 1)
+                   / sqrt(1 - g3 * SR + (g4 - 1) / 4 * SR**2) ]
+
+    where ``SR0`` is the expected maximum Sharpe across ``n_trials`` under the
+    null (False Strategy Theorem, scaling with sqrt of the cross-trial variance),
+    ``g3`` = skewness and ``g4`` = kurtosis (3 = normal).
+
+    Units: ``observed_sharpe`` MUST be a per-period (non-annualised) Sharpe at the
+    same sampling frequency as ``n_observations`` and ``variance_of_trials``; the
+    sqrt(T-1) term assumes a per-observation Sharpe. Returns the probability the
+    edge is real (HIGHER = better); a neutral 0.5 when it cannot be computed
+    (T <= 1, or a non-positive variance estimate from extreme skew/kurtosis).
+    """
+    from scipy import stats
+
+    if n_observations <= 1:
+        return 0.5
+
+    # Selection-bias benchmark: expected maximum Sharpe across n_trials under the
+    # null (scales with sqrt(variance_of_trials) = the cross-trial std).
+    sr0 = np.sqrt(variance_of_trials) * (
+        (1 - np.euler_gamma) * stats.norm.ppf(1 - 1 / n_trials)
+        + np.euler_gamma * stats.norm.ppf(1 - 1 / (n_trials * np.e))
+    )
+
+    # Variance of the Sharpe estimator (Lo 2002; Mertens), adjusted for
+    # non-normality. Normal iid returns (skew=0, kurt=3) collapse this to 1.
+    se_var = (
+        1.0 - skewness * observed_sharpe
+        + (kurtosis - 1.0) / 4.0 * observed_sharpe ** 2
+    )
+    if se_var <= 0:
+        return 0.5
+
+    statistic = (observed_sharpe - sr0) * np.sqrt(n_observations - 1) / np.sqrt(se_var)
+    return float(stats.norm.cdf(statistic))
