@@ -1,0 +1,10 @@
+#!/bin/sh
+# prerm — undo what postinst created.
+set -e
+
+if [ -L /usr/bin/nat ]; then
+    rm -f /usr/bin/nat
+fi
+# Leave /var/lib/nat data in place on remove; purge is the user's call.
+rm -f /usr/lib/nat/data 2>/dev/null || true
+exit 0

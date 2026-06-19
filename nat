@@ -424,6 +424,60 @@ def cmd_report(args):
     _py(f"{ROOT / 'scripts' / 'generate_report.py'}")
 
 
+def cmd_report_ls(args):
+    """List experiment-outcome artifacts under reports/ and docs/reports/."""
+    roots = [ROOT / "reports", ROOT / "docs" / "reports"]
+    want_ext = getattr(args, 'ext', None)
+    limit = getattr(args, 'limit', None)
+    items = []
+    for base in roots:
+        if not base.exists():
+            continue
+        for f in base.rglob("*"):
+            if not f.is_file():
+                continue
+            if f.suffix.lower() not in (".json", ".md", ".html", ".csv"):
+                continue
+            if want_ext and f.suffix.lower() != f".{want_ext.lstrip('.')}":
+                continue
+            st = f.stat()
+            items.append({
+                "name": str(f.relative_to(ROOT)),
+                "type": f.suffix.lstrip("."),
+                "size_kb": round(st.st_size / 1024, 1),
+                "mtime": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+            })
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    if limit:
+        items = items[:limit]
+
+    def _human(_d):
+        rows = _d["reports"]
+        if not rows:
+            _p("x", Y, "No report artifacts found")
+            return
+        print(f"\n  {BOLD}Experiment reports{W}  ({len(rows)} shown)\n")
+        print(f"  {'TYPE':<5} {'SIZE':>9}  {'MTIME':<19}  NAME")
+        for r in rows:
+            print(f"  {r['type']:<5} {r['size_kb']:>7.1f}KB  {r['mtime']:<19}  {r['name']}")
+        print()
+
+    _output({"reports": items, "count": len(items)}, args, _human)
+    return 0
+
+
+def cmd_package_deb(args):
+    """Build the .deb package via packaging/build_deb.sh."""
+    script = ROOT / "packaging" / "build_deb.sh"
+    if not script.exists():
+        _p("x", R, f"Missing {script}")
+        return 1
+    extra = " --no-build" if getattr(args, 'no_build', False) else ""
+    _banner("Building nat .deb")
+    sys.stdout.flush()
+    return _exec(f"bash {script}{extra}").returncode
+
+
 def cmd_dashboard(args):
     """Start or show dashboard."""
     r = _sh("tmux has-session -t nat-dashboard 2>/dev/null")
@@ -2173,35 +2227,79 @@ def cmd_algorithm_evaluate(args):
     _py(cmd)
 
 
-def cmd_algorithm_list(args):
-    """List registered algorithms."""
-    sys.path.insert(0, str(ROOT / "scripts"))
-    from algorithms.autodiscover import discover_all
-    discover_all()
-    from algorithms.registry import list_algorithms
-    from algorithms import get_algorithm
-    algs = list_algorithms()
+def _algorithm_perf():
+    """Best-effort per-algorithm metrics: lifecycle state + IC from eval reports.
 
-    if _json_mode(args):
+    Returns {alg_name: {"state": str|None, "ic": {symbol: float}}}. Both sources
+    are optional — missing files/DB degrade gracefully to empty entries."""
+    perf: dict = {}
+
+    # Lifecycle state (matched by signal name).
+    try:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from signal_lifecycle import SignalLifecycle
+        for row in SignalLifecycle().list_signals():
+            nm = row.get("name") or row.get("signal_id")
+            if nm:
+                perf.setdefault(nm, {}).setdefault("state", row.get("state"))
+    except Exception:
+        pass
+
+    # IC from reports/algorithms/<SYM>_eval.json (list of per-algo result dicts).
+    eval_dir = ROOT / "reports" / "algorithms"
+    if eval_dir.exists():
+        for ef in sorted(eval_dir.glob("*_eval.json")):
+            sym = ef.name.split("_", 1)[0]
+            try:
+                results = _json.loads(ef.read_text()).get("results", [])
+            except Exception:
+                continue
+            for r in results:
+                nm = r.get("algorithm")
+                ic = r.get("ic")
+                if nm is not None and ic is not None:
+                    perf.setdefault(nm, {}).setdefault("ic", {})[sym] = ic
+    return perf
+
+
+def cmd_algorithm_list(args):
+    """List registered algorithms with lifecycle state + IC metrics."""
+    import contextlib
+    import io
+    sys.path.insert(0, str(ROOT / "scripts"))
+    # Algorithm/model imports print banners on load; mute them so --json stays
+    # machine-parseable (and human output stays clean).
+    with contextlib.redirect_stdout(io.StringIO()):
+        from algorithms.autodiscover import discover_all
+        discover_all()
+        from algorithms.registry import list_algorithms
+        from algorithms import get_algorithm
+        perf = _algorithm_perf()
         result = []
-        for name in algs:
-            alg = get_algorithm(name)
+        for name in list_algorithms():
+            alg = get_algorithm(name)  # may print model banners — suppressed here
             feats = alg.alg_features()
+            p = perf.get(name, {})
             result.append({
                 "name": name,
+                "state": p.get("state"),
+                "ic": p.get("ic", {}),
                 "features": [{"name": f.name, "warmup": f.warmup, "description": f.description} for f in feats],
                 "required_columns": alg.required_columns(),
             })
+
+    if _json_mode(args):
         _output({"algorithms": result}, args)
         return
 
-    print(f"\n  Registered algorithms ({len(algs)}):\n")
-    for name in algs:
-        alg = get_algorithm(name)
-        feats = alg.alg_features()
-        print(f"    {BOLD}{name}{W}  ({len(feats)} features)")
-        for f in feats:
-            print(f"      - {f.name}  (warmup={f.warmup})  {f.description}")
+    print(f"\n  Registered algorithms ({len(result)}):\n")
+    for a in result:
+        state, ic = a["state"], a["ic"]
+        tag = f"  [{state}]" if state else ""
+        ic_str = ("   IC: " + " ".join(f"{s}={v:+.3f}" for s, v in sorted(ic.items()))) if ic else ""
+        print(f"    {BOLD}{a['name']}{W}  ({len(a['features'])} features){tag}{ic_str}")
+        for f in a["features"]:
+            print(f"      - {f['name']}  (warmup={f['warmup']})  {f['description']}")
     print()
 
 
@@ -3131,7 +3229,10 @@ def cmd_viz_file(args):
 
 
 def cmd_viz3d(args):
-    """nat viz3d / nat mesh — interactive 3D feature-surface-over-time (Plotly HTML)."""
+    """nat viz3d / nat mesh — 3D feature-surface-over-time.
+
+    Default: interactive Plotly HTML. With --png: static PNG via the native
+    `natviz3d` Rust binary (no Plotly/kaleido needed) over the freshest parquet."""
     tf = getattr(args, 'tf', '15m')
     index = getattr(args, 'index', None)
     sym = _sym(args)
@@ -3144,6 +3245,38 @@ def cmd_viz3d(args):
     if not Path(data_dir).exists():
         _p("x", R, f"No data for {date}: {data_dir}")
         return 1
+
+    # ── Static-PNG path: native natviz3d binary over a single parquet file ──
+    if getattr(args, 'png', False):
+        bin_v3 = RUST / "target" / "release" / "natviz3d"
+        if not bin_v3.exists():
+            _p("...", Y, "natviz3d binary missing — building...")
+            if _cargo("build --release -p natviz3d").returncode != 0:
+                _p("x", R, "Failed to build natviz3d (need `nat build`?)")
+                return 1
+        files = sorted(Path(data_dir).glob("*.parquet"), key=os.path.getmtime, reverse=True)
+        files = [f for f in files if f.stat().st_size > 0]
+        if not files:
+            _p("x", R, f"No non-empty parquet in {data_dir}")
+            return 1
+        target = files[0]
+        out_dir = Path(getattr(args, 'output', None) or (ROOT / "reports" / "figures" / "mesh"))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_png = out_dir / f"{sym}_{date}_mesh.png"
+        cmd = [str(bin_v3), str(target), "--out", str(out_png),
+               "--max-features", str(getattr(args, 'max_features', 40))]
+        _banner(f"viz3d (PNG) — {sym} {date}  [{target.name}]")
+        sys.stdout.flush()
+        rc = subprocess.run(cmd).returncode
+        if rc == 0:
+            _p("+", G, f"Wrote {out_png}")
+            if getattr(args, 'open_after', False):
+                sys.path.insert(0, str(ROOT / "scripts"))
+                from viz.open_helper import open_path
+                open_path(out_png)
+        else:
+            _p("x", R, f"natviz3d failed (exit {rc})")
+        return rc
 
     out = getattr(args, 'output', None) or str(ROOT / "reports" / "figures" / "mesh")
     mode = "overview" if index is None else f"page {index}"
@@ -5028,6 +5161,113 @@ def cmd_math(args=None):
     """))
 
 
+# ── metrics registry (the catalogue behind `nat metrics ls/show`) ──────────────
+# Curated, structured index of every metric NAT uses. `formula` is plain text;
+# `show` prints it plus, for IT estimators, the live docstring from
+# scripts/it_engine/estimators.py so the catalogue can't drift from the code.
+
+METRICS = [
+    {"name": "ic", "category": "core", "estimator": None,
+     "formula": "IC = Spearman ρ(signal_t, fwd_return[t→t+k])",
+     "definition": "Rank correlation of a signal with forward return (predictive power).",
+     "used_by": "signal test, profile scalp, algorithm evaluate, mf/macro-agent"},
+    {"name": "dic", "category": "core", "estimator": None,
+     "formula": "dIC = IC_gated − IC_ungated",
+     "definition": "IC improvement from a regime gate (conditioning lift).",
+     "used_by": "agent discovery gate, regime conditioning"},
+    {"name": "sharpe", "category": "core", "estimator": None,
+     "formula": "Sharpe = mean(r) / std(r) · √(periods_per_year)",
+     "definition": "Risk-adjusted return of a strategy's P&L series.",
+     "used_by": "backtest, oos, swarm fitness, evolve"},
+    {"name": "deflated_sharpe", "category": "core", "estimator": None,
+     "formula": "DSR = Φ( (SR − SR0)·√(n−1) / √(1 − γ3·SR + (γ4−1)/4·SR²) )",
+     "definition": "Sharpe deflated for multiple-testing / non-normality (Bailey & López de Prado 2014).",
+     "used_by": "backtest gate G4, oos --window, evolve guard rails"},
+    {"name": "ksg_mi", "category": "information-theory", "estimator": "ksg_mi",
+     "formula": "I(X;Y) via KSG Algorithm 1 (k-NN, Chebyshev ε-ball), bits",
+     "definition": "Mutual information — total (linear+nonlinear) dependence between X and Y.",
+     "used_by": "process mi_ksg, it-engine greedy selection"},
+    {"name": "cmi", "category": "information-theory", "estimator": "cmi",
+     "formula": "I(X;Y|Z) = H(X,Z)+H(Y,Z)−H(X,Y,Z)−H(Z)",
+     "definition": "Conditional MI — X↔Y dependence after removing what Z explains.",
+     "used_by": "it-engine feature_selector (greedy CMI-gain), interaction info"},
+    {"name": "interaction_info", "category": "information-theory", "estimator": "interaction_info",
+     "formula": "II(X;Y;Z) = I(X;Y|Z) − I(X;Y)",
+     "definition": "Synergy (>0) vs redundancy (<0) among three variables.",
+     "used_by": "it-engine, feature-interaction discovery"},
+    {"name": "transfer_entropy", "category": "information-theory", "estimator": "ksg_te",
+     "formula": "TE(X→Y) = I(X_past; Y_present | Y_past)",
+     "definition": "Directed information flow from source to target (lead-lag causality).",
+     "used_by": "process transfer_entropy, it-engine daemon"},
+    {"name": "linear_te", "category": "information-theory", "estimator": "linear_te",
+     "formula": "TE = ½·log( var(ε_reduced) / var(ε_full) )",
+     "definition": "Gaussian/AR approximation of transfer entropy (fast linear proxy).",
+     "used_by": "it-engine (cheap TE pre-screen)"},
+    {"name": "min_info_bits", "category": "information-theory", "estimator": "min_info_bits",
+     "formula": "I_min = −½·log₂(1 − (fee_RT/σ_r)²) · (κ/3)",
+     "definition": "Cost gate: minimum MI (bits) a signal needs to beat transaction costs.",
+     "used_by": "it-engine greedy stop criterion, cost gate"},
+]
+
+
+def _estimator_doc(estimator_name):
+    try:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from it_engine import estimators as _est
+        fn = getattr(_est, estimator_name, None)
+        return (fn.__doc__ or "").strip() if fn else None
+    except Exception:
+        return None
+
+
+def cmd_metrics_list(args):
+    """List the metrics catalogue (name, category, definition, where-used)."""
+    cat = getattr(args, 'category', None)
+    rows = [m for m in METRICS if not cat or m["category"] == cat]
+
+    def _human(_d):
+        items = _d["metrics"]
+        print(f"\n  {BOLD}Metrics catalogue{W}  ({len(items)})\n")
+        print(f"  {'NAME':<18} {'CATEGORY':<20} DEFINITION")
+        for m in items:
+            print(f"  {m['name']:<18} {m['category']:<20} {m['definition']}")
+        print(f"\n  Detail: nat metrics show <name>   ·   full glossary: nat --math\n")
+
+    _output({"metrics": rows, "count": len(rows)}, args, _human)
+    return 0
+
+
+def cmd_metrics_show(args):
+    """Show one metric: formula, definition, where-used, + live estimator docstring."""
+    name = getattr(args, 'name')
+    m = next((x for x in METRICS if x["name"] == name), None)
+    if not m:
+        if _json_mode(args):
+            _output({"error": f"unknown metric '{name}'",
+                     "known": [x["name"] for x in METRICS]}, args)
+        else:
+            _p("x", R, f"Unknown metric '{name}'. Try: nat metrics ls")
+        return 1
+    doc = _estimator_doc(m["estimator"]) if m["estimator"] else None
+    payload = {**m, "estimator_doc": doc}
+
+    def _human(_m):
+        print(f"\n  {BOLD}{_m['name']}{W}  ({_m['category']})\n")
+        print(f"  Definition: {_m['definition']}")
+        print(f"  Formula:    {_m['formula']}")
+        print(f"  Used by:    {_m['used_by']}")
+        if _m.get("estimator"):
+            print(f"  Estimator:  scripts/it_engine/estimators.py:{_m['estimator']}()")
+        if _m.get("estimator_doc"):
+            print(f"\n  {BOLD}Implementation notes{W}\n")
+            for line in _m["estimator_doc"].splitlines():
+                print(f"    {line}")
+        print()
+
+    _output(payload, args, _human)
+    return 0
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog='nat', description='NAT research terminal', add_help=False)
     p.add_argument('--json', action='store_true', help='Output as JSON (for programmatic use)')
@@ -5083,7 +5323,15 @@ def build_parser():
     ps.add_argument('--forward-test', action='store_true', help='Run forward test')
     ps.add_argument('--timeframe', default=None, help='Bar timeframe (e.g. 5min, 15min)')
     ps.set_defaults(func=cmd_profile_scalp)
-    sub.add_parser('report', help='Generate experiment report').set_defaults(func=cmd_report)
+    report_p = sub.add_parser('report', help='Experiment reports (generate / ls)')
+    report_p.set_defaults(func=cmd_report)  # bare `nat report` keeps generating
+    repsub = report_p.add_subparsers(dest='subcmd')
+    repsub.add_parser('generate', help='Generate the full experiment report').set_defaults(func=cmd_report)
+    repls = repsub.add_parser('ls', aliases=['list'], help='List experiment-outcome artifacts')
+    repls.add_argument('--ext', default=None, help='Filter by extension (json|md|html|csv)')
+    repls.add_argument('--limit', type=int, default=None, help='Show only the newest N')
+    repls.add_argument('--json', action='store_true', help='JSON output')
+    repls.set_defaults(func=cmd_report_ls)
     sub.add_parser('dashboard', help='Start dashboard').set_defaults(func=cmd_dashboard)
     monitor_p = sub.add_parser('monitor', help='Live feature probe: stream computed features (no ingestion)')
     monitor_p.add_argument('--symbol', '-s', default='BTC', help='Symbol (default: BTC)')
@@ -5746,8 +5994,8 @@ def build_parser():
     xsub.add_parser('dashboard', help='Show dashboard URL').set_defaults(func=cmd_exp_dashboard)
     xsub.add_parser('tunnel', help='Cloudflare tunnel').set_defaults(func=cmd_exp_tunnel)
 
-    # ── algorithm ──
-    alg_p = sub.add_parser('algorithm', help='Microstructure algorithm evaluation')
+    # ── algorithm (alias: alg) ──
+    alg_p = sub.add_parser('algorithm', aliases=['alg'], help='Microstructure algorithm evaluation')
     alg_p.set_defaults(func=lambda a: alg_p.print_help())
     algsub = alg_p.add_subparsers(dest='subcmd')
     alge = algsub.add_parser('evaluate', help='Run IC/drift evaluation',
@@ -5775,10 +6023,36 @@ def build_parser():
     alge.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
     alge.add_argument('--json-report', default=None, help='Output JSON report path')
     alge.set_defaults(func=cmd_algorithm_evaluate)
-    algsub.add_parser('list', help='List registered algorithms and features').set_defaults(func=cmd_algorithm_list)
+    alglist = algsub.add_parser('list', aliases=['ls'],
+                                help='List registered algorithms + lifecycle state + IC')
+    alglist.add_argument('--json', action='store_true', help='JSON output')
+    alglist.set_defaults(func=cmd_algorithm_list)
     algc = algsub.add_parser('config', help='Show algorithm configuration (from algorithms.toml)')
     algc.add_argument('section', nargs='?', default=None, help='Specific algorithm section')
     algc.set_defaults(func=cmd_algorithm_config)
+
+    # ── package (build distributables) ──
+    pkg_p = sub.add_parser('package', help='Build distributables (.deb)')
+    pkg_p.set_defaults(func=lambda a: pkg_p.print_help())
+    pkgsub = pkg_p.add_subparsers(dest='subcmd')
+    pkgdeb = pkgsub.add_parser('deb', help='Build the nat .deb (packaging/build_deb.sh)')
+    pkgdeb.add_argument('--no-build', action='store_true',
+                        help='Skip the release Rust build (use existing binaries)')
+    pkgdeb.set_defaults(func=cmd_package_deb)
+
+    # ── metrics (catalogue of IC / IT / stats metrics) ──
+    met_p = sub.add_parser('metrics', help='Metric catalogue (IC, MI, TE, Sharpe, …)')
+    met_p.set_defaults(func=lambda a: met_p.print_help())
+    metsub = met_p.add_subparsers(dest='subcmd')
+    metls = metsub.add_parser('ls', aliases=['list'], help='List all metrics (name/category/definition)')
+    metls.add_argument('--category', default=None,
+                       help='Filter: core | information-theory')
+    metls.add_argument('--json', action='store_true', help='JSON output')
+    metls.set_defaults(func=cmd_metrics_list)
+    metshow = metsub.add_parser('show', help='Show one metric (formula + estimator docstring)')
+    metshow.add_argument('name', help='Metric name (see nat metrics ls)')
+    metshow.add_argument('--json', action='store_true', help='JSON output')
+    metshow.set_defaults(func=cmd_metrics_show)
 
     # ── process (analytical processes) ──
     proc_p = sub.add_parser('process',
@@ -5995,8 +6269,10 @@ def build_parser():
                     help='Per-feature normalization (default: zscore)')
     v3.add_argument('--max-features', type=int, default=40,
                     help='Cap y-axis to top-N features by variance (default: 40)')
+    v3.add_argument('--png', action='store_true',
+                    help='Static PNG via the native natviz3d binary (no Plotly/kaleido)')
     v3.add_argument('--open', dest='open_after', action='store_true',
-                    help='Open the produced HTML in the browser')
+                    help='Open the produced HTML/PNG with the default viewer')
     v3.add_argument('--output', default=None, help='Output directory (default: reports/figures/mesh)')
     v3.set_defaults(func=cmd_viz3d)
 

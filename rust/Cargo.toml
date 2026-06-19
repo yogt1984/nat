@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["ing-types", "ing-features", "ing", "api"]
+members = ["ing-types", "ing-features", "ing", "api", "natviz3d"]
 
 [workspace.package]
 version = "0.1.0"

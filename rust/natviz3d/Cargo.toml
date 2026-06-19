@@ -1,0 +1,22 @@
+[package]
+name = "natviz3d"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "natviz3d"
+path = "src/main.rs"
+
+[dependencies]
+arrow.workspace = true
+parquet.workspace = true
+anyhow.workspace = true
+# default-features off to drop the `ttf`/font-kit backend (needs system
+# fontconfig); `ab_glyph` is a pure-Rust bundled-font renderer so the binary has
+# no system library dependencies and ships cleanly in the .deb.
+plotters = { version = "0.3", default-features = false, features = [
+    "bitmap_backend", "bitmap_encoder", "ab_glyph",
+    "all_series", "all_elements", "full_palette", "colormaps",
+] }

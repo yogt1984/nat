@@ -1,0 +1,13 @@
+Package: nat
+Version: @VERSION@
+Section: science
+Priority: optional
+Architecture: amd64
+Depends: python3 (>= 3.10), python3-numpy, python3-pandas, python3-pyarrow, python3-matplotlib
+Recommends: tmux, xdg-utils
+Maintainer: NAT Team <nat@diamondapps.ch>
+Description: NAT quantitative research terminal
+ NAT is a quantitative research platform for extracting alpha signals from
+ Hyperliquid perpetual futures. This package ships the `nat` CLI, the Python
+ analysis stack, the release Rust binaries (ingestor, API, natviz3d), and the
+ default configuration under /etc/nat.
