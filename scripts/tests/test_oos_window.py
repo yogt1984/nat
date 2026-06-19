@@ -84,6 +84,24 @@ def test_strategy_stats_reports_deflated():
     st = ow.strategy_stats(np.array([2.0, 1.0] * 15), n_trials=15)
     assert "deflated_sharpe_dsr" in st
     assert st["deflated_sharpe_dsr"] is None or 0.0 <= st["deflated_sharpe_dsr"] <= 1.0
+    # full DSR also projects the OOS days needed to reach significance
+    assert "dsr_days_to_sig" in st
+    assert st["dsr_days_to_sig"] is None or st["dsr_days_to_sig"] >= 2
+
+
+def test_days_to_significant_dsr_directions():
+    # A stronger per-period Sharpe needs FEWER days to clear 0.95.
+    strong = ow.days_to_significant_dsr(observed_sharpe=0.5, n_trials=20)
+    weak = ow.days_to_significant_dsr(observed_sharpe=0.2, n_trials=20)
+    assert strong is not None and weak is not None
+    assert strong < weak
+    # More trials searched -> higher bar -> MORE days needed.
+    few = ow.days_to_significant_dsr(observed_sharpe=0.3, n_trials=5)
+    many = ow.days_to_significant_dsr(observed_sharpe=0.3, n_trials=500)
+    assert many > few
+    # A non-positive edge never reaches the target.
+    assert ow.days_to_significant_dsr(observed_sharpe=0.0, n_trials=20) is None
+    assert ow.days_to_significant_dsr(observed_sharpe=-0.5, n_trials=20) is None
 
 
 # ── daily-P&L matrix loader: windowing + dedup ───────────────────────────────

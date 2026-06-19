@@ -18,6 +18,7 @@ from backtest.walk_forward import (
     FoldResult,
     combinatorial_purged_cv,
     compute_deflated_sharpe,
+    compute_deflated_sharpe_full,
 )
 from backtest.strategy import Strategy
 from backtest.costs import CostModel, zero_cost
@@ -464,6 +465,81 @@ class TestDeflatedSharpe:
         assert prob_high >= prob_low, (
             "Higher Sharpe should be more confident"
         )
+
+
+class TestDeflatedSharpeFull:
+    """Canonical Bailey & Lopez de Prado (2014) DSR with sample length + non-normality.
+
+    DSR = Phi[ (SR - SR0) * sqrt(T-1) / sqrt(1 - g3*SR + (g4-1)/4 * SR^2) ]
+    with SR0 = sqrt(V) * [(1-gamma)*Z^-1(1-1/N) + gamma*Z^-1(1-1/(N*e))].
+    SR is the PER-PERIOD Sharpe; T = n_observations; g3/g4 = skew/kurtosis.
+    Separate from compute_deflated_sharpe (the shipped G4-gate statistic), which
+    must stay untouched.
+    """
+
+    @staticmethod
+    def _benchmark(n_trials, variance_of_trials=1.0):
+        # Independent re-derivation of SR0 (expected max under the null).
+        from scipy import stats
+        g = np.euler_gamma
+        return np.sqrt(variance_of_trials) * (
+            (1 - g) * stats.norm.ppf(1 - 1 / n_trials)
+            + g * stats.norm.ppf(1 - 1 / (n_trials * np.e))
+        )
+
+    def test_at_benchmark_is_half(self):
+        """Observed Sharpe exactly at the deflation benchmark -> DSR = 0.5 for any
+        T (the test-statistic numerator is centered at zero)."""
+        sr0 = self._benchmark(n_trials=20)
+        for T in (10, 100, 500):
+            dsr = compute_deflated_sharpe_full(
+                observed_sharpe=sr0, n_trials=20, n_observations=T)
+            assert abs(dsr - 0.5) < 1e-9
+
+    def test_monotonic_in_observations(self):
+        """More observations -> more confidence, when SR beats the benchmark."""
+        sr = self._benchmark(n_trials=20) + 0.3
+        short = compute_deflated_sharpe_full(
+            observed_sharpe=sr, n_trials=20, n_observations=20)
+        long = compute_deflated_sharpe_full(
+            observed_sharpe=sr, n_trials=20, n_observations=500)
+        assert long > short > 0.5
+
+    def test_more_trials_lower(self):
+        """More trials -> higher benchmark -> lower DSR for the same Sharpe."""
+        few = compute_deflated_sharpe_full(
+            observed_sharpe=1.0, n_trials=5, n_observations=100)
+        many = compute_deflated_sharpe_full(
+            observed_sharpe=1.0, n_trials=500, n_observations=100)
+        assert many < few
+
+    def test_excess_kurtosis_lowers(self):
+        """Fat tails widen the Sharpe error bar -> lower DSR (when SR > benchmark)."""
+        normal = compute_deflated_sharpe_full(
+            observed_sharpe=3.0, n_trials=20, n_observations=30, kurtosis=3.0)
+        fat = compute_deflated_sharpe_full(
+            observed_sharpe=3.0, n_trials=20, n_observations=30, kurtosis=9.0)
+        assert fat < normal
+
+    def test_negative_skew_lowers(self):
+        """Negative skew inflates the Sharpe variance (-g3*SR > 0) -> lower DSR."""
+        sym = compute_deflated_sharpe_full(
+            observed_sharpe=3.0, n_trials=20, n_observations=30, skewness=0.0)
+        left = compute_deflated_sharpe_full(
+            observed_sharpe=3.0, n_trials=20, n_observations=30, skewness=-1.5)
+        assert left < sym
+
+    def test_range_and_degenerate_inputs(self):
+        """Always a probability; degenerate inputs return the neutral 0.5."""
+        assert 0.0 <= compute_deflated_sharpe_full(
+            observed_sharpe=2.0, n_trials=50, n_observations=200) <= 1.0
+        # T <= 1: no sample-length information
+        assert compute_deflated_sharpe_full(
+            observed_sharpe=2.0, n_trials=50, n_observations=1) == 0.5
+        # se_var <= 0 (pathological skew vs SR): neutral, no NaN
+        assert compute_deflated_sharpe_full(
+            observed_sharpe=5.0, n_trials=50, n_observations=200,
+            skewness=10.0) == 0.5
 
 
 # =============================================================================
