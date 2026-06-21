@@ -1,0 +1,1157 @@
+"""cli.app — assembles the `nat` CLI.
+
+Imports every command-group module from scripts/cli/, builds the argparse tree
+(`build_parser`), and runs dispatch (`main`). Also hosts the help machinery
+(`cmd_help`/`cmd_math`/`GROUP_HELP`) and the `nat commands` reflection. The `nat`
+entry script is a thin shim over this module.
+"""
+
+from __future__ import annotations
+
+import argparse
+import getpass
+import json as _json
+import os
+import signal as sig
+import subprocess
+import sys
+import textwrap
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # scripts/ on path
+import nat_paths  # noqa: E402  (several handlers reference nat_paths directly)
+from cli.common import *  # noqa: E402,F401,F403  (constants + _sh/_output/_p/colors/…)
+from cli import metrics as cli_metrics  # noqa: E402
+from cli.metrics import *  # noqa: E402,F401,F403  (re-export cmd_metrics_* for test_nat_cli)
+from cli import config as cli_config  # noqa: E402
+from cli.config import *  # noqa: E402,F401,F403
+from cli import data as cli_data  # noqa: E402
+from cli.data import *  # noqa: E402,F401,F403
+from cli import reports as cli_reports  # noqa: E402
+from cli.reports import *  # noqa: E402,F401,F403
+from cli import package as cli_package  # noqa: E402
+from cli.package import *  # noqa: E402,F401,F403
+from cli import process as cli_process  # noqa: E402
+from cli.process import *  # noqa: E402,F401,F403
+from cli import algorithm as cli_algorithm  # noqa: E402
+from cli.algorithm import *  # noqa: E402,F401,F403
+from cli import swarm as cli_swarm  # noqa: E402
+from cli.swarm import *  # noqa: E402,F401,F403
+from cli import evolve as cli_evolve  # noqa: E402
+from cli.evolve import *  # noqa: E402,F401,F403
+from cli import gauntlet as cli_gauntlet  # noqa: E402
+from cli.gauntlet import *  # noqa: E402,F401,F403
+from cli import nightly as cli_nightly  # noqa: E402
+from cli.nightly import *  # noqa: E402,F401,F403
+from cli import tournament as cli_tournament  # noqa: E402
+from cli.tournament import *  # noqa: E402,F401,F403
+from cli import kalman as cli_kalman  # noqa: E402
+from cli.kalman import *  # noqa: E402,F401,F403
+from cli import audit as cli_audit  # noqa: E402
+from cli.audit import *  # noqa: E402,F401,F403
+from cli import fetch as cli_fetch  # noqa: E402
+from cli.fetch import *  # noqa: E402,F401,F403
+from cli import discovery as cli_discovery  # noqa: E402
+from cli.discovery import *  # noqa: E402,F401,F403
+from cli import macro as cli_macro  # noqa: E402
+from cli.macro import *  # noqa: E402,F401,F403
+from cli import profile as cli_profile  # noqa: E402
+from cli.profile import *  # noqa: E402,F401,F403
+from cli import screen as cli_screen  # noqa: E402
+from cli.screen import *  # noqa: E402,F401,F403
+from cli import scan as cli_scan  # noqa: E402
+from cli.scan import *  # noqa: E402,F401,F403
+from cli import deploy as cli_deploy  # noqa: E402
+from cli.deploy import *  # noqa: E402,F401,F403
+from cli import docker as cli_docker  # noqa: E402
+from cli.docker import *  # noqa: E402,F401,F403
+from cli import api as cli_api  # noqa: E402
+from cli.api import *  # noqa: E402,F401,F403
+from cli import pipeline as cli_pipeline  # noqa: E402
+from cli.pipeline import *  # noqa: E402,F401,F403
+from cli import validate as cli_validate  # noqa: E402
+from cli.validate import *  # noqa: E402,F401,F403
+from cli import signal as cli_signal  # noqa: E402
+from cli.signal import *  # noqa: E402,F401,F403
+from cli import eamm as cli_eamm  # noqa: E402
+from cli.eamm import *  # noqa: E402,F401,F403
+from cli import experiment as cli_experiment  # noqa: E402
+from cli.experiment import *  # noqa: E402,F401,F403
+from cli import exp as cli_exp  # noqa: E402
+from cli.exp import *  # noqa: E402,F401,F403
+from cli import cluster as cli_cluster  # noqa: E402
+from cli.cluster import *  # noqa: E402,F401,F403
+from cli import model as cli_model  # noqa: E402
+from cli.model import *  # noqa: E402,F401,F403
+from cli import spannung as cli_spannung  # noqa: E402
+from cli.spannung import *  # noqa: E402,F401,F403
+from cli import trade as cli_trade  # noqa: E402
+from cli.trade import *  # noqa: E402,F401,F403
+from cli import agent as cli_agent  # noqa: E402
+from cli.agent import *  # noqa: E402,F401,F403
+from cli import alpha as cli_alpha  # noqa: E402
+from cli.alpha import *  # noqa: E402,F401,F403
+from cli import backtest as cli_backtest  # noqa: E402
+from cli.backtest import *  # noqa: E402,F401,F403
+from cli import report as cli_report  # noqa: E402
+from cli.report import *  # noqa: E402,F401,F403
+from cli import lifecycle as cli_lifecycle  # noqa: E402
+from cli.lifecycle import *  # noqa: E402,F401,F403
+from cli import visualize as cli_visualize  # noqa: E402
+from cli.visualize import *  # noqa: E402,F401,F403
+from cli import viz as cli_viz  # noqa: E402
+from cli.viz import *  # noqa: E402,F401,F403
+from cli import ops as cli_ops  # noqa: E402
+from cli.ops import *  # noqa: E402,F401,F403
+from cli import health as cli_health  # noqa: E402
+from cli.health import *  # noqa: E402,F401,F403
+from cli import oos as cli_oos  # noqa: E402
+from cli.oos import *  # noqa: E402,F401,F403
+from cli import alg1 as cli_alg1  # noqa: E402
+from cli.alg1 import *  # noqa: E402,F401,F403
+from cli import test as cli_test  # noqa: E402
+from cli.test import *  # noqa: E402,F401,F403
+from cli import control as cli_control  # noqa: E402
+from cli.control import *  # noqa: E402,F401,F403  (cmd_start/stop/status/doctor/build/run/15m/monitor/log/ing — process lifecycle)
+
+
+def cmd_commands(args):
+    """List all commands with descriptions (for AI agent discovery)."""
+    parser = build_parser()
+    commands = []
+
+    def _walk(parser_obj, prefix=""):
+        for action in parser_obj._actions:
+            if not isinstance(action, argparse._SubParsersAction):
+                continue
+            # Build help lookup from _choices_actions
+            help_map = {}
+            for ca in action._choices_actions:
+                help_map[ca.dest] = ca.help or ""
+            for name, subparser in action.choices.items():
+                full_name = f"{prefix} {name}".strip() if prefix else name
+                help_text = help_map.get(name, "")
+
+                cmd_args = []
+                for a in subparser._actions:
+                    if isinstance(a, argparse._SubParsersAction):
+                        continue
+                    if a.option_strings:
+                        entry = {
+                            "name": a.option_strings[0],
+                            "help": a.help or "",
+                        }
+                        if a.default is not None and a.default != argparse.SUPPRESS:
+                            entry["default"] = str(a.default)
+                        if getattr(a, 'required', False):
+                            entry["required"] = True
+                        if a.type:
+                            entry["type"] = a.type.__name__
+                        cmd_args.append(entry)
+                    elif a.dest not in ('subcmd', 'command', 'spn_subcmd'):
+                        cmd_args.append({
+                            "name": a.dest,
+                            "help": a.help or "",
+                            "positional": True,
+                        })
+
+                commands.append({
+                    "name": full_name,
+                    "help": help_text,
+                    "args": cmd_args if cmd_args else None,
+                })
+                _walk(subparser, full_name)
+
+    _walk(parser)
+
+    if _json_mode(args):
+        _output({"commands": commands, "count": len(commands)}, args)
+    else:
+        print(f"\n  {BOLD}Available Commands ({len(commands)}){W}\n")
+        for cmd in commands:
+            print(f"    {BOLD}nat {cmd['name']}{W}")
+            if cmd['help']:
+                print(f"      {cmd['help']}")
+        print()
+
+
+# ── Docker commands ──────────────────────────────────────────────────────────
+
+# ── Help ─────────────────────────────────────────────────────────────────────
+
+def _walk_commands(parser_obj, commands, prefix=""):
+    """Flatten the parser tree into [{name, help}] (used by `nat help --grep`)."""
+    for action in parser_obj._actions:
+        if not isinstance(action, argparse._SubParsersAction):
+            continue
+        help_map = {ca.dest: (ca.help or "") for ca in action._choices_actions}
+        for name, subparser in action.choices.items():
+            full = f"{prefix} {name}".strip() if prefix else name
+            commands.append({"name": full, "help": help_map.get(name, "")})
+            _walk_commands(subparser, commands, full)
+
+
+# NAT2: one-line blurb + optional "start with" hint per group. Subcommands are
+# listed automatically from the parser tree, so this never drifts when commands change.
+GROUP_HELP = {
+    "alpha": ("9-step systematic alpha discovery (quality gates G1-G8)", "nat alpha pipeline-status"),
+    "agent": ("autonomous microstructure research agent (5-gate protocol)", "nat agent status"),
+    "mf-agent": ("medium-frequency research agent, 1min-1h (4-gate)", "nat mf-agent status"),
+    "macro-agent": ("macro research agent, 1h-24h (4-gate)", "nat macro-agent status"),
+    "meta-agent": ("cross-agent budget, correlation, portfolio", "nat meta-agent status"),
+    "backtest": ("event-driven / walk-forward / ML backtests", "nat backtest -h"),
+    "model": ("ML models — ElasticNet, LightGBM, GMM, hierarchical", "nat model -h"),
+    "cluster": ("regime clustering (GMM/HDBSCAN) + Q1-Q3 quality gates", "nat cluster -h"),
+    "algorithm": ("microstructure algorithm library — IC evaluation", "nat algorithm list"),
+    "process": ("analytical processes — where information lives", "nat process list"),
+    "lifecycle": ("signal promotion lifecycle (DISCOVERED->LIVE->RETIRED)", "nat lifecycle status"),
+    "docker": ("Docker stack — build, deploy, observe", "nat docker ps"),
+    "swarm": ("config swarm — ~35D parameter sweep", "nat swarm status"),
+    "evolve": ("Optuna evolutionary optimization (CMA-ES/TPE/NSGA-II)", "nat evolve status"),
+    "experiment": ("experiment tracking, comparison, snapshots", "nat experiment list"),
+    "pipeline": ("ingestion->analysis state machine (IDLE->DONE)", "nat pipeline status"),
+    "discovery": ("continuous alpha discovery daemon", "nat discovery status"),
+    "data": ("parquet inspection + validation", "nat data validate -h"),
+    "config": ("TOML config inspection + validation", "nat config show"),
+    "spannung": ("signal grid search + spectral analysis", "nat spannung -h"),
+    "gauntlet": ("multi-day OOS algorithm sweep", "nat gauntlet report"),
+    "tournament": ("continuous algorithm ranking", "nat tournament -h"),
+    "test": ("test suites (Rust, Python, process)", "nat test -h"),
+    "validate": ("validation suites", "nat validate -h"),
+    "visualize": ("static analysis plots (PNG)", "nat visualize -h"),
+    "eamm": ("EAMM market-making simulation", "nat eamm -h"),
+    "viz": ("terminal-first visualization — features / algorithm / paper", "nat viz features -s BTC"),
+}
+
+
+def _group_help(group_name, group_parser):
+    """Return a handler printing scoped, parser-derived help for a group (NAT2)."""
+    def handler(args=None):
+        blurb, start = GROUP_HELP.get(
+            group_name, (group_parser.description or f"nat {group_name}", None))
+        print(f"\n  {BOLD}nat {group_name}{W} — {blurb}\n")
+        for action in group_parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                help_map = {ca.dest: (ca.help or "") for ca in action._choices_actions}
+                for name in action.choices:
+                    print(f"    nat {group_name} {name:<20} {help_map.get(name, '')}")
+        if start:
+            print(f"\n  Start with: {BOLD}{start}{W}")
+        print(f"  Details:    nat {group_name} <subcommand> -h\n")
+    return handler
+
+
+def cmd_help(args=None):
+    grep = getattr(args, 'grep', None) if args else None
+    if grep:
+        commands = []
+        _walk_commands(build_parser(), commands)
+        term = grep.lower()
+        matches = [c for c in commands
+                   if term in c['name'].lower() or term in c['help'].lower()]
+        if matches:
+            print(f"\n  {BOLD}Commands matching '{grep}' ({len(matches)}){W}\n")
+            for m in matches:
+                print(f"    nat {m['name']:<34} {m['help']}")
+        else:
+            print(f"\n  No commands matching '{grep}'")
+        print()
+        return
+    print(f"""
+  {BOLD}nat{W} -- unified NAT research terminal
+  Quantitative research platform for Hyperliquid perpetual futures.
+  Rust ingestor (real-time microstructure features, 100ms) + Python analysis/ML/backtesting.
+
+  Global: nat --json <command>   Machine-readable JSON output (for AI agents)
+
+  {BOLD}System & Monitoring{W}
+    Ingestor lifecycle, system health, and log access.
+    nat start                  Start ingestor + watchdog + dashboard
+    nat stop                   Stop everything
+    nat status                 Health check (--json for structured output)
+    nat health                 Comprehensive health: ingestor + data + agent + pipeline + Redis
+    nat log                    Tail ingestor log (live)
+    nat log agent              Tail agent daemon log
+    nat log list               List all log files with sizes and dates
+    nat dashboard              Start analysis dashboard (:8050)
+    nat monitor                Live feature probe — stream computed features (no ingest)
+    nat doctor                 Ingestion preflight (data-dir ownership, binary, disk)
+    nat api start              API + alert services (also: serve-all, alerts)
+
+  {BOLD}Configuration{W}
+    Inspect and validate TOML configuration files.
+    nat config                 Show all configs merged
+    nat config get <key>       Get value (e.g., agent.agent.cycle_interval_s)
+    nat config validate        Syntax-check all TOML files
+
+  {BOLD}Data{W}
+    Feature data inspection and validation (Parquet files at data/features/).
+    nat data                   Summary: files, days, size, est. rows
+    nat data validate          Schema + value validation (--hours N)
+    nat data explore           Launch Jupyter notebook
+    nat data schema            Parquet schema & vector coverage
+    nat fetch candles          Fetch historical candles from exchanges
+
+  {BOLD}Signal Testing{W}
+    IC = Spearman rho(feature, forward_return). Tests feature predictiveness.
+    nat signal test            Per-feature IC at horizon h (--symbol, --horizon, --spread-bps)
+    nat signal test-all        Full sweep: all symbols x feature sets
+    nat screen                 Alpha feature screening
+
+  {BOLD}Analysis{W}
+    Regime profiling, signal scanning, macro indicators.
+    nat profile                Regime profiling (permutation entropy, Parkinson vol)
+    nat profile scalp          Scalping feature profiler (--symbol, --top)
+    nat spannung               Signal grid search over (feature x horizon) pairs
+    nat spannung backtest      Cost-aware backtest + regime gating on top signals
+    nat spannung horizon       Longer-horizon sweep (30s-15min bars)
+    nat spannung spectral      PSD, coherence, ACF, frequency-band IC
+    nat spannung regime        Systematic quintile x Pareto regime screener
+    nat scan                   Scalp edge scanner: P(edge > cost | regime)
+    nat macro                  Daily MA crossover signals (7/21, 50/200, MACD, RSI)
+    nat report                 Generate full experiment report
+
+  {BOLD}Alpha Pipeline{W}
+    9-step pipeline: screen -> combine -> size -> validate -> regime ->
+    multi-freq -> portfolio -> paper -> deploy. Quality gates between each.
+    nat alpha combine          Correlation-dedup + IC-weighted combination
+    nat alpha size             Kelly criterion position sizing (f* = IC/sigma)
+    nat alpha validate         Walk-forward CV + deflated Sharpe p-value
+    nat alpha regime           Quintile regime conditioning (IC_ratio analysis)
+    nat alpha multi-freq       Multi-frequency signal integration
+    nat alpha portfolio        Multi-symbol portfolio assembly
+    nat alpha paper            Paper trading simulation
+    nat alpha deploy           Deployment readiness check
+    nat alpha pipeline-start   Run full 9-step pipeline (orchestrated with gates)
+    nat alpha pipeline-resume  Resume from last phase (--force-gate to skip failures)
+    nat alpha pipeline-status  Show pipeline state and gate verdicts
+    nat alpha pipeline-gates   Detailed gate metrics report
+    nat alpha pipeline-step N  Run single step (1-9)
+
+  {BOLD}Algorithm Research{W}
+    A library of microstructure algorithms: OFI, Hawkes, jump detection, VPIN regime,
+    spread decomposition, entropy-gated momentum, switching OU, SPRT entry,
+    online ridge, and more. IC at horizons [1,5,10,50,100] with regime gating.
+    nat algorithm evaluate     IC/drift evaluation (--algorithm, --all, --symbol)
+    nat algorithm list         Registered algorithms and their alg_features
+    nat algorithm config       Show algorithm configuration (TOML parameters)
+
+  {BOLD}Analytical Processes{W}
+    Third first-class citizen: statistical / signal-processing / ML
+    descriptions of whether a feature carries price-action information.
+    Evaluation: ic_horizon, mi_ksg, transfer_entropy, spectral, ml_importance.
+    Transforms: triple_barrier, pca_combo (chain via --score-with ic_horizon).
+    nat process                Group help and process catalog
+    nat process list           Registered processes (+ --kind, --json)
+    nat process run NAME       Run on feature data (--symbol, --start-date, --param)
+    nat process results        Past runs from the nat.db index
+    nat process show RUN_ID    Full findings of one run
+
+  {BOLD}Kalman Research{W}
+    OU Kalman filter analysis: dx = theta(mu - x)dt + sigma dW.
+    nat kalman analysis        Phase 1: Kalman filter IC at multiple horizons
+    nat kalman drift           Phase 2: Signal drift + latency cost analysis
+
+  {BOLD}Backtest{W}
+    Event-driven backtesting. Sharpe=(mu/sigma)*sqrt(252), MaxDD, profit factor.
+    nat backtest               Strategy backtest (--strategy, --symbol)
+    nat backtest validate      Walk-forward validation
+    nat backtest ml            ML predictions backtest (--predictions, --entry)
+    nat backtest ml-validate   ML walk-forward
+    nat backtest ml-quantile   Quantile thresholds (--entry-q, --exit-q)
+    nat backtest ml-tracked    ML + experiment tracking
+    nat backtest list          Available strategies
+    nat backtest funding       Funding rate reversion backtest
+    nat backtest algorithm     Backtest algorithm features as signals (--algorithm)
+
+  {BOLD}Model{W}
+    ElasticNet (L1+L2 regularization) and LightGBM (gradient boosted trees).
+    nat model train            Train baseline (--snapshot, --type elasticnet|lightgbm)
+    nat model train-gmm       Train GMM regime classifier (--auto BIC selection)
+    nat model train-hier      Train hierarchical signal combiner (--symbol, --horizon, --dry-run)
+    nat model list             List saved models
+    nat model score            Score data + evaluate (--model, --save)
+    nat model serve            REST API for model serving (--port, --best)
+
+  {BOLD}Cluster{W}
+    GMM/HMM regime classification. Baum-Welch EM with forward-backward.
+    nat cluster analyze        Cluster quality analysis (--symbol, --hours)
+    nat cluster gmm            Analyze with trained GMM model
+    nat cluster all            Analyze BTC, ETH, SOL
+    nat cluster quality        Q3 predictive quality test
+    nat cluster explore        PCA/UMAP/t-SNE visualization (--subset, --method)
+    nat cluster hmm-fit        Fit HMM via Baum-Welch (--n-states, --covariance)
+
+  {BOLD}Validation{W}
+    Statistical tests to guard against overfitting before capital deployment.
+    nat validate skeptical     20+ tests: runs, variance ratio, Ljung-Box, BDS, Hurst
+    nat validate regression    10-test regression signal battery (--horizon, --n-permutations)
+
+  {BOLD}EAMM (Market Making){W}
+    Avellaneda-Stoikov framework with entropy-aware spread and inventory penalty.
+    nat eamm run               Full pipeline (--symbol, --horizon, --mode)
+    nat eamm regime            Regime analysis
+    nat eamm backtest          Stateful backtest (--gamma risk aversion, --q-max)
+
+  {BOLD}Agent (Autonomous Research){W}
+    4-agent system: microstructure (tick), medium-freq (1min-1h), macro (1h-24h),
+    meta-agent (cross-agent coordination). 5-gate protocol per hypothesis.
+    nat agent start/stop/once  Daemon lifecycle (start, stop, single cycle)
+    nat agent status           Phase + generator stats (--json for state file)
+    nat agent queue            Queued hypotheses by priority
+    nat agent registry         Validated signals (passed all gates)
+    nat agent graveyard        Failed hypotheses with gate failure reasons
+    nat agent report           Full report (registry + graveyard + generators)
+    nat agent dashboard        Web dashboard on :8060
+    nat mf-agent <cmd>         Medium-frequency agent (same subcommands)
+    nat macro-agent <cmd>      Macro agent (same subcommands)
+    nat meta-agent <cmd>       Meta-agent: portfolio, correlation, budget
+    nat it-engine <cmd>        IT alpha discovery (MI, CMI, TE, greedy selection)
+
+  {BOLD}Discovery{W}
+    Continuous sweep of (symbol, horizon) combos, pipelines winners through
+    train -> backtest -> validate. Config: config/discovery.toml.
+    nat discovery start        Launch orchestrator daemon
+    nat discovery once         Single sweep cycle
+    nat discovery status       Current state
+    nat discovery stop         Stop orchestrator
+
+  {BOLD}Signal Lifecycle{W}
+    Promotion state machine: DISCOVERED -> VALIDATED -> PAPER -> LIVE -> RETIRED.
+    nat lifecycle status       Lifecycle state of all signals
+    nat lifecycle list         List signals (--state filter)
+    nat lifecycle history      Provenance-stamped transition history
+    nat lifecycle approve      Human gate: APPROVAL_PENDING -> LIVE
+    nat lifecycle reject       Reject a pending signal
+    nat lifecycle seed         Idempotently load deployable winners
+
+  {BOLD}Risk, Promotion & Ops Daemons{W}
+    Production safety, promotion automation, ingestion ops.
+    nat risk status/resume     Kill-switch daemon + halt control (T16)
+    nat gap status/watchdog    Data-gap alert daemon (Telegram page on stall)
+    nat promotion status/once  Signal promotion daemon (lifecycle automation, T14)
+    nat bridge status/once     Signal bridge — executes LIVE signals under risk gating
+    nat deploy status/rollback Deploy ingestor to remote host
+
+  {BOLD}Audit{W}
+    Backtest result aggregation and systematic parameter sweeps.
+    nat audit aggregate <dir>  Aggregate walk-forward backtest JSONs
+    nat audit sweep            Parameter sweep across symbols/timeframes
+
+  {BOLD}Experiment Tracking{W}
+    nat experiment list        List experiments (--stage filter)
+    nat experiment get         Details (--id)
+    nat experiment compare     Side-by-side (--ids)
+    nat experiment best        Best by metric (--metric sharpe_ratio)
+    nat experiment workflow    Full train -> score -> backtest pipeline
+    nat experiment snapshot    Create dataset snapshot (--name)
+
+  {BOLD}Pipeline (State Machine){W}
+    IDLE -> BUILDING -> INGESTING -> COLLECTING -> ANALYZING -> DONE
+    nat pipeline start/resume/analyze/stop/status/dashboard
+
+  {BOLD}Reports{W}
+    nat reports                List all reports (date, type, size)
+    nat reports latest         Most recent per category
+    nat reports show <path>    Print report content
+
+  {BOLD}Build & Dev{W}
+    nat build [debug|api|clean|fmt|lint|check]
+
+  {BOLD}Run (foreground){W}
+    nat run [serve|show|tunnel]
+
+  {BOLD}Test{W}
+    nat test [unit|verbose|hypotheses|validate|api|redis|integration|
+              backtest|cluster|pipeline|pipeline-runner|dashboard|
+              serving|eamm|scan|viz]
+
+  {BOLD}Docker{W}
+    nat docker build [-v] [svc...]  Build images (--verbose for full output)
+    nat docker up [svc...]          Start services
+    nat docker down                 Stop all services
+    nat docker ps                   Show running services
+    nat docker logs [svc...]        Tail service logs
+    nat docker stack [--no-build]   Build + start + verify full stack
+    nat docker smoke                Quick health check of running stack
+
+  {BOLD}Swarm (Parameter Sweep){W}
+    nat swarm run [--instances N]   Generate N configs, evaluate in parallel
+    nat swarm status                Show swarm run status (trials, best Sharpe)
+    nat swarm results [--top N]     Show top configs ranked by Sharpe
+    nat swarm best [--export PATH]  Export best config as TOML
+    nat swarm generate [--count N]  Generate configs only (no evaluation)
+
+  {BOLD}Evolve (Optuna Optimization){W}
+    nat evolve start [--trials N]  Start evolutionary optimization (CMA-ES/TPE/NSGA-II)
+    nat evolve status              Show study status (trials, best Sharpe, overfit)
+    nat evolve best [--top N]      Show top configs from optimization
+    nat evolve pareto              Pareto front (NSGA-II multi-objective)
+    nat evolve export [--output P] Export best config as usable TOML
+
+  {BOLD}15-Minute Experiment{W}
+    nat 15m [--duration SEC]   Ingest -> validate -> profile -> cluster -> report
+    nat 15m offline [--data]   Analyze existing data (no ingestion)
+    nat 15m viz [--page 0|1]   Visualize latest experiment
+
+  {BOLD}Trade Visualization{W}
+    nat trade viz              Visualize latest paper trades (--symbol, --date)
+    nat trade viz --date D     Specific date snapshot (YYYY-MM-DD)
+    nat trade viz --symbol all All symbols for a date
+
+  {BOLD}Visualization{W}
+    Terminal-first inspection (viz) and the static PNG suite (visualize).
+    nat viz features           Live feature table (--symbol, --hours, --live)
+    nat viz algorithm <name>   Algorithm signal + decision trace
+    nat viz paper              Paper-trade P&L + fill analysis
+    nat viz portfolio          Portfolio P&L / exposure / correlation / risk (--tab)
+    nat viz render             Render latest features (--last <duration>)
+    nat visualize <kind>       Static plots: scan|cluster|profile|hierarchy|skeptical|data|all
+
+  {BOLD}ALG1 (MF 3-Feature Liquidity Signal){W}
+    3f composite: zscore(spread_bps + depth_5_std + vwap_deviation_std) / 3.
+    100min horizon, walk-forward z-score params, maker-only execution.
+    nat alg1                   Backtest + dry-run signal bridge (--cycle SEC)
+    nat alg1 paper             Paper trader batch replay + watch (--symbol, --poll)
+    nat alg1 live              LIVE orders on Hyperliquid (requires HL_PRIVATE_KEY)
+
+  {BOLD}OOS Validation{W}
+    Walk-forward paper trading with z-score calibration and cost modeling.
+    nat daily                  Single-date OOS snapshot (latest or --date)
+    nat oos30                  30-day batch OOS for 5 winners (--symbols, --data-dir)
+    nat oos --window 30d       Longitudinal verdict over accumulated gauntlet P&L (walk-forward + deflated Sharpe)
+    nat gauntlet run           Multi-day sweep, all 19 algos (--last N, --from, --to)
+    nat gauntlet stop          Kill running gauntlet, print partial results
+    nat gauntlet report        Print latest gauntlet report
+    nat gauntlet report_all    Merge all gauntlet runs into combined summary
+
+  {BOLD}Nightly Report{W}
+    One-shot overnight pass: data health, feature stats, NaN-wiring
+    diagnostics, gauntlet OOS sweep, embedded plots -> self-contained HTML.
+    nat nightly                Full pass (~30-60 min) -> reports/nightly/DATE.html
+    nat nightly --full-gauntlet  Include cascade_probability (~70 min/date extra)
+    nat nightly report         Print latest nightly summary
+    nat nightly open           Open latest nightly HTML in browser
+
+  {BOLD}Tournament{W}
+    Continuous algorithm testing with performance tracking and lifecycle management.
+    nat tournament run         Single evaluation cycle (new dates only)
+    nat tournament start       Start background daemon
+    nat tournament stop        Stop daemon
+    nat tournament status      Daemon state + DB stats + top 10
+    nat tournament rankings    Current leaderboard
+    nat tournament history <a> Per-day history for algorithm <a> (--days N)
+    nat tournament compare a b Head-to-head comparison of two algorithms
+    nat tournament report      Generate markdown report
+
+  {BOLD}AI Agent Integration{W}
+    nat commands               List all commands (--json for structured catalog)
+    nat --json <any command>   JSON output for any command that supports it
+    Exit codes: 0=success, 1=error, 130=interrupted
+
+  {BOLD}Dashboards{W}
+    :8080  Rust real-time features (ING_DASHBOARD_ENABLED=true)
+    :8050  Python analysis (Dash/Plotly)
+    :8060  Agent research (IC heatmap)
+
+  Use --json before any command for machine-readable output.
+  Use nat <command> --help for detailed docs (includes math where applicable).
+""")
+
+
+# ── Argument Parser ──────────────────────────────────────────────────────────
+
+def cmd_math(args=None):
+    """Print mathematical glossary for all metrics used across NAT."""
+    print(textwrap.dedent(f"""\
+    {BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{W}
+    {BOLD}NAT MATHEMATICAL REFERENCE{W}
+    {BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{W}
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}CORE METRICS{W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+    {BOLD}IC (Information Coefficient){W}
+
+      Definition:
+        IC = ρ_Spearman( signal[t],  fwd_return[t → t+k] )
+
+      where:
+        fwd_return[t → t+k] = ( midprice[t+k] − midprice[t] ) / midprice[t]
+
+      Spearman (rank) correlation is used instead of Pearson because:
+        • Robust to outliers (extreme price moves don't dominate)
+        • Captures monotonic nonlinear relationships
+        • Makes no distributional assumptions on signal or returns
+
+      Interpretation:
+        IC ∈ [−1, +1].  Sign indicates direction of predictive relationship.
+        |IC| = 0.02–0.05   Weak but possibly tradeable at long horizons
+        |IC| = 0.05–0.10   Moderate (typical microstructure signals)
+        |IC| = 0.10–0.25   Strong (lead-lag, MF liquidity signals)
+        |IC| > 0.30        Suspiciously high — check for autocorrelation
+                           artifacts, lookahead bias, or level effects
+
+      Used by: nat signal test, nat profile scalp, nat algorithm evaluate,
+               nat mf-agent, nat macro-agent, nat spannung
+
+    {BOLD}dIC (Delta IC — Regime Gate Improvement){W}
+
+      Definition:
+        dIC = IC_gated − IC_ungated
+
+      where IC_gated is the Spearman IC computed only on observations where
+      a regime condition holds (e.g., ent_tick_1m < P30), and IC_ungated
+      is the IC on the full sample.
+
+      Purpose: verifies that the regime gate adds predictive value beyond
+      what the raw signal already provides.
+
+      Gate threshold: dIC ≥ 0.03 (default). If dIC < 0.03, the gate is
+      cosmetic — the signal is strong everywhere, not just in the regime.
+
+      Used by: nat mf-agent (Gate 0), nat macro-agent (Gate 0)
+
+    {BOLD}IC p-value{W}
+
+      Under H₀ (no predictive power):
+        IC ~ N(0, 1/√n)    where n = number of observations
+
+      Test statistic:
+        z = |IC| × √n
+
+      P-value (two-sided):
+        p = erfc( z / √2 )
+
+      Example:
+        n=200 bars, IC=0.08:  z = 0.08 × √200 = 1.13,  p ≈ 0.26   (weak)
+        n=3000 bars, IC=0.08: z = 0.08 × √3000 = 4.38, p ≈ 1e-5   (strong)
+
+      Same IC can be significant or not — sample size is critical.
+
+      Used by: FDR control in nat mf-agent, nat macro-agent, nat agent
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}SIGNAL QUALITY METRICS{W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+    {BOLD}Quintile Spread (bps){W}
+
+      Procedure:
+        1. Sort all bars by signal value into 5 equal-sized buckets Q1–Q5
+        2. Compute mean forward return per quintile
+        3. Q5−Q1 = mean(fwd_return | Q5) − mean(fwd_return | Q1)
+
+      Interpretation:
+        Q5−Q1 > 0 means high signal → higher returns (long signal)
+        Q5−Q1 < 0 means high signal → lower returns (short signal)
+        Units: basis points (1 bps = 0.01%)
+
+      Quintile monotonicity: if Q1 < Q2 < Q3 < Q4 < Q5 (or reverse),
+      the signal has a clean linear relationship with returns.
+      Non-monotonic quintiles suggest a nonlinear or unstable signal.
+
+      Used by: nat profile scalp, nat spannung regime
+
+    {BOLD}Gross Edge (bps){W}
+
+      Definition:
+        gross_edge = |quintile_spread| / 2
+
+      Approximate per-trade edge assuming you take positions only in the
+      extreme quintile (long Q5 or short Q1). The division by 2 accounts
+      for the midpoint baseline.
+
+    {BOLD}Net Edge (bps){W}
+
+      Definition:
+        net_edge = gross_edge − fee_round_trip
+
+      What remains after paying exchange fees to enter and exit.
+        net_edge > 0  →  strategy is profitable at this venue
+        net_edge < 0  →  fees exceed the signal's edge
+
+      Reference fee schedules:
+        Hyperliquid taker:   7.0 bps round-trip
+        Binance VIP0:        3.5 bps round-trip
+        Binance VIP9:        1.61 bps round-trip
+
+    {BOLD}IC×σ Product{W}
+
+      Definition:
+        IC×σ = IC(h) × σ_return(h)
+
+      where h is the forward horizon, IC(h) is the Spearman correlation
+      at that horizon, and σ_return(h) is the standard deviation of
+      h-bar forward returns in basis points.
+
+      This product measures the achievable directional edge in bps.
+      If IC decays as 1/√h and σ grows as √h, the product is constant
+      — meaning the market is informationally efficient at that timescale.
+
+      NAT finding: IC×σ ≈ 0.8 bps at microstructure frequencies (100ms–10min)
+      regardless of signal, horizon, or conditioning. The MF liquidity signal
+      breaks this ceiling: IC×σ ≈ 4.7 bps at 50min bars.
+
+      Used by: analysis in TASKS_19_05_26.md (Phase 3)
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}PORTFOLIO & BACKTEST METRICS{W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+    {BOLD}Sharpe Ratio (annualized){W}
+
+      Definition:
+        daily_pnl[d] = mean( per_trade_return − 2 × fee_one_way )
+                        for all trades on day d
+        Sharpe = ( mean(daily_pnl) / std(daily_pnl) ) × √252
+
+      Interpretation:
+        Sharpe < 0.5   Not worth trading
+        Sharpe 0.5–1.0 Marginal
+        Sharpe 1.0–2.0 Good
+        Sharpe 2.0–3.0 Very good
+        Sharpe > 3.0   Excellent (verify not overfitted)
+
+      Caveat: Sharpe estimated from N < 30 days is unreliable.
+      Bootstrap confidence intervals are essential for small samples.
+
+      Used by: nat backtest, nat alpha validate, walk-forward analysis
+
+    {BOLD}Information Ratio (IR){W}
+
+      Definition:
+        IR = mean(IC across dates) / std(IC across dates)
+
+      Measures IC consistency over time. A high IC that fluctuates wildly
+      between positive and negative is worse than a moderate IC that is
+      always positive.
+
+      Annualized: IR_ann = IR × √(observations_per_year)
+
+      Used by: nat profile scalp (ic_ir field)
+
+    {BOLD}Daily Win Rate (DWR){W}
+
+      Definition:
+        DWR = count(days with net_pnl > 0) / count(all trading days)
+
+      A DWR > 50% provides psychological sustainability for live trading.
+      High Sharpe with low DWR means large wins offset many small losses
+      — correct but harder to execute with discipline.
+
+    {BOLD}Hit Rate (trade-level win rate){W}
+
+      Definition:
+        HR = count(trades with return > fee) / count(all trades)
+
+      Can be well below 50% and still profitable if winning trades are
+      larger than losing trades (positive skew / fat right tail).
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}STATISTICAL CONTROLS{W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+    {BOLD}FDR Control (Benjamini-Hochberg){W}
+
+      Problem: testing m hypotheses simultaneously inflates false positives.
+      At α=0.05 with m=91 hypotheses, expect ~4.5 false discoveries by chance.
+
+      Procedure:
+        1. Collect p-values from IC gates: p₁, p₂, ..., pₘ
+        2. Sort ascending: p₍₁₎ ≤ p₍₂₎ ≤ ... ≤ p₍ₘ₎
+        3. Find largest k such that  p₍ₖ₎ ≤ (k/m) × q    where q = 0.05
+        4. Reject all hypotheses with p > p₍ₖ₎
+
+      Guarantee: E[FDP] ≤ q, where FDP = false discoveries / total discoveries.
+
+      Applied after each agent cycle to retract signals that passed gates
+      but don't survive multiple-testing correction.
+
+      Used by: nat agent, nat mf-agent, nat macro-agent
+
+    {BOLD}Bootstrap Confidence Intervals{W}
+
+      Procedure:
+        1. From N observed daily PnLs, draw N samples with replacement
+        2. Compute statistic (Sharpe, mean PnL) on the resample
+        3. Repeat 10,000 times
+        4. Report percentiles [5%, 50%, 95%] as the 90% CI
+
+      If 5th percentile of bootstrapped Sharpe > 0, the strategy is
+      profitable with 95% confidence. If P(Sharpe > 2) > 90%, the
+      strategy is reliably good, not a fluke.
+
+      Used by: robustness analysis (reports/best__mf_liquidity_signal.md)
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}AGENT-SPECIFIC METRICS{W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+    {BOLD}max_corr (Correlation Dedup Gate){W}
+
+      Definition:
+        corr = ρ_Spearman( signal_candidate[t],  signal_existing[t] )
+
+      Computed on regime-gated values (only where the gate condition holds).
+      If |corr| > max_corr (default: 0.70), the candidate is redundant
+      with an existing registered signal and gets rejected.
+
+      Purpose: prevents the registry from filling with N variants of the
+      same underlying signal (e.g., 10 imbalance features that are all
+      r > 0.9 with each other).
+
+      Used by: Gate 3 in all agents
+
+    {BOLD}IC Decay Monitoring{W}
+
+      For each registered signal, each agent cycle computes:
+        rolling_IC = Spearman(signal, fwd_return) on latest 2 dates
+
+      Decay detection rule:
+        threshold = expected_ic × ic_decay_ratio         (default: 0.5)
+
+        If rolling_IC < threshold for consecutive_days_limit
+        consecutive cycles (default: 14) → status = "retired"
+
+        If rolling_IC recovers above threshold at any point →
+        decay counter resets to 0
+
+      IC history: last 30 observations retained per signal for trending.
+
+      Used by: MONITOR phase in nat mf-agent, nat macro-agent, nat agent
+
+    {BOLD}Adaptive IC Threshold{W}
+
+      Definition:
+        adaptive_min_ic = max( floor_ic,  median(registry_ICs) × 0.8 )
+
+      As the registry accumulates stronger signals, the bar rises for new
+      candidates. A signal with IC=0.09 might pass when the registry is
+      empty, but gets rejected when the median registered IC is 0.15
+      (adaptive threshold = 0.12).
+
+      floor_ic = 0.08 (MF agent), 0.07 (macro agent), 0.10 (micro agent)
+
+      Used by: pre_execute() hook in all agents
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}FEATURE CATEGORIES (209 base features at 100ms){W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+      raw_*         (10)   Midprice, spread, depth, order counts
+      imbalance_*   (8)    Qty/orders/notional at L1/L5/L10
+      flow_*        (12)   Trade count, volume, aggressor ratio (1s/5s/30s)
+      vol_*         (9)    Returns vol, Parkinson, spread std, z-score
+      ent_*         (24)   Permutation, tick, volume-weighted entropy
+      ctx_*         (12)   Funding rate, OI, premium, volume_24h
+      trend_*       (15)   Momentum, R², Hurst, MA crossover
+      illiq_*       (12)   Kyle lambda, Amihud, Hasbrouck, Roll
+      toxic_*       (10)   VPIN, adverse selection, realized spread
+      derived_*     (15)   Regime interactions, composite indicators
+      micro_*       (var)  Queue position, trade-through, Kalman
+      whale_*       (var)  Net flow, concentration (optional)
+      liquidation_* (var)  Cascade risk (optional)
+
+      At 5min bar aggregation: ~602 columns (mean/std/last/slope per feature)
+      After variance filtering: ~429 usable features
+
+      See FEATURES.md for the complete manifest with formulas and references.
+
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+    {BOLD}NOTATION CONVENTIONS{W}
+    {BOLD}──────────────────────────────────────────────────────────────────────{W}
+
+      bps       Basis points. 1 bps = 0.01% = 1e-4
+      RT        Round-trip (entry + exit fee combined)
+      P30       30th percentile of the empirical distribution
+      OOS       Out-of-sample
+      IC@10t    IC at 10-tick forward horizon (= 1 second at 100ms)
+      IC@50min  IC at 50-minute forward horizon (= 10 bars at 5min)
+      fwd_ret_k Forward return over k bars
+      Q5−Q1     Quintile spread (top minus bottom quintile)
+      H₀        Null hypothesis (signal has no predictive power)
+      ρ         Spearman rank correlation coefficient
+      σ         Standard deviation
+      FDP       False discovery proportion
+      FDR       False discovery rate (E[FDP])
+      BH        Benjamini-Hochberg procedure
+      DWR       Daily win rate
+      TW        Training window (number of lookback dates)
+    """))
+
+
+# ── metrics registry (the catalogue behind `nat metrics ls/show`) ──────────────
+# Curated, structured index of every metric NAT uses. `formula` is plain text;
+# `show` prints it plus, for IT estimators, the live docstring from
+# scripts/it_engine/estimators.py so the catalogue can't drift from the code.
+
+def build_parser():
+    p = argparse.ArgumentParser(prog='nat', description='NAT research terminal', add_help=False)
+    p.add_argument('--json', action='store_true', help='Output as JSON (for programmatic use)')
+    p.add_argument('--math', action='store_true', help='Print mathematical glossary for all metrics')
+    sub = p.add_subparsers(dest='command')
+
+    # ── Top-level commands ──
+    sub.add_parser('start', help='Start ingestor + watchdog + dashboard').set_defaults(func=cmd_start)
+    sub.add_parser('stop', help='Stop everything').set_defaults(func=cmd_stop)
+    sub.add_parser('status', help='Health check').set_defaults(func=cmd_status)
+    sub.add_parser('doctor', help='Ingestion preflight (data-dir ownership, binary, disk)').set_defaults(func=cmd_doctor)
+    log_p = sub.add_parser('log', help='Tail ingestor log')
+    log_p.set_defaults(func=cmd_log)
+    log_sub = log_p.add_subparsers(dest='subcmd')
+    log_sub.add_parser('agent', help='Tail agent daemon log').set_defaults(func=cmd_log_agent)
+    log_sub.add_parser('list', help='List all log files with sizes and dates').set_defaults(func=cmd_log_list)
+
+    # ── ing — ingestor noun-group (start/stop/status/log) ──
+    ing_p = sub.add_parser('ing', help='Ingestor control (start/stop/status/log)')
+    ing_p.set_defaults(func=lambda a: ing_p.print_help())
+    ingsub = ing_p.add_subparsers(dest='subcmd')
+    ingsub.add_parser('start', help='Start ingestor locally').set_defaults(func=cmd_ing_start)
+    ingsub.add_parser('stop', help='Stop ingestor + daemons').set_defaults(func=cmd_ing_stop)
+    ing_st = ingsub.add_parser('status', help='Ingestor + data health')
+    ing_st.add_argument('--json', action='store_true', help='JSON output')
+    ing_st.set_defaults(func=cmd_ing_status)
+    ingsub.add_parser('log', help='Tail the latest ingestor log').set_defaults(func=cmd_ing_log)
+
+    cli_profile.register(sub)  # profile group -> scripts/cli/profile.py
+    cli_report.register(sub)  # report group -> scripts/cli/report.py
+    sub.add_parser('dashboard', help='Start dashboard').set_defaults(func=cmd_dashboard)
+    monitor_p = sub.add_parser('monitor', help='Live feature probe: stream computed features (no ingestion)')
+    monitor_p.add_argument('--symbol', '-s', default='BTC', help='Symbol (default: BTC)')
+    monitor_p.add_argument('--hz', type=int, default=10, help='Update frequency in Hz (default: 10, max 50)')
+    monitor_p.set_defaults(func=cmd_monitor)
+    monsub = monitor_p.add_subparsers(dest='subcmd')
+    montui = monsub.add_parser('tui', help='Legacy rich dashboard (Redis health/agent/features tabs)')
+    montui.add_argument('--tab', type=int, default=1, choices=[1, 2, 3],
+                        help='Initial tab: 1=Health, 2=Agent, 3=Features')
+    montui.set_defaults(func=cmd_monitor_tui)
+    cli_macro.register(sub)  # macro group -> scripts/cli/macro.py
+    help_p = sub.add_parser('help', help='Show full help')
+    help_p.add_argument('--grep', default=None, help='Search commands/help by keyword')
+    help_p.set_defaults(func=cmd_help)
+
+    cli_screen.register(sub)  # screen group -> scripts/cli/screen.py
+
+    cli_scan.register(sub)  # scan group -> scripts/cli/scan.py
+
+    # ── alpha ──
+    cli_alpha.register(sub)  # alpha group -> scripts/cli/alpha.py
+
+    cli_visualize.register(sub)  # visualize group -> scripts/cli/visualize.py
+
+    # ── build ──
+    build_p = sub.add_parser('build', help='Build & dev tools (default: release)')
+    build_p.set_defaults(func=cmd_build)
+    bsub = build_p.add_subparsers(dest='subcmd')
+    bsub.add_parser('debug', help='Debug binary').set_defaults(func=cmd_build_debug)
+    bsub.add_parser('api', help='API server').set_defaults(func=cmd_build_api)
+    bsub.add_parser('clean', help='Remove artifacts').set_defaults(func=cmd_build_clean)
+    bsub.add_parser('fmt', help='Format code').set_defaults(func=cmd_build_fmt)
+    bsub.add_parser('lint', help='Run clippy').set_defaults(func=cmd_build_lint)
+    bsub.add_parser('check', help='Check code').set_defaults(func=cmd_build_check)
+
+    # ── run ──
+    run_p = sub.add_parser('run', help='Run in foreground (default: ingestor)')
+    run_p.set_defaults(func=cmd_run)
+    rsub = run_p.add_subparsers(dest='subcmd')
+    rsub.add_parser('serve', help='Ingestor + dashboard').set_defaults(func=cmd_run_serve)
+    show_p = rsub.add_parser('show', help='Real-time features')
+    show_p.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
+    show_p.add_argument('--freq', type=int, default=1, help='Frequency in Hz')
+    show_p.set_defaults(func=cmd_run_show)
+    rsub.add_parser('tunnel', help='Cloudflare tunnel').set_defaults(func=cmd_run_tunnel)
+
+    # ── data ──
+    cli_data.register(sub)  # data group → scripts/cli/data.py
+
+    cli_test.register(sub)  # test group -> scripts/cli/test.py
+
+    cli_backtest.register(sub)  # backtest group -> scripts/cli/backtest.py
+
+    # ── model ──
+    cli_model.register(sub)  # model group -> scripts/cli/model.py
+
+    # ── cluster ──
+    cli_cluster.register(sub)  # cluster group -> scripts/cli/cluster.py
+
+    # ── validate ──
+    cli_validate.register(sub)  # validate group -> scripts/cli/validate.py
+
+    # ── experiment ──
+    cli_experiment.register(sub)  # experiment group -> scripts/cli/experiment.py
+
+    # ── pipeline ──
+    cli_pipeline.register(sub)  # pipeline group -> scripts/cli/pipeline.py
+
+    # ── signal ──
+    cli_signal.register(sub)  # signal group -> scripts/cli/signal.py
+
+    # ── eamm ──
+    cli_eamm.register(sub)  # eamm group -> scripts/cli/eamm.py
+
+    # ── api ──
+    cli_api.register(sub)  # api group -> scripts/cli/api.py
+
+    # ── exp ──
+    cli_exp.register(sub)  # exp group -> scripts/cli/exp.py
+
+    # ── algorithm (alias: alg) ──
+    cli_algorithm.register(sub)  # algorithm/alg group → scripts/cli/algorithm.py
+
+    # ── package (build distributables) ──
+    cli_package.register(sub)  # package group → scripts/cli/package.py
+
+    cli_metrics.register(sub)  # metrics group → scripts/cli/metrics.py
+
+    # ── process (analytical processes) ──
+    cli_process.register(sub)  # process group → scripts/cli/process.py
+
+    cli_lifecycle.register(sub)  # lifecycle group -> scripts/cli/lifecycle.py
+
+    cli_ops.register(sub)  # risk/gap/service/promotion/bridge groups -> scripts/cli/ops.py
+
+    cli_viz.register(sub)  # viz + viz3d/mesh groups -> scripts/cli/viz.py
+
+    cli_alg1.register(sub)  # alg1 group -> scripts/cli/alg1.py
+
+    cli_oos.register(sub)  # oos30 + oos + daily groups -> scripts/cli/oos.py
+
+    # ── gauntlet (multi-day OOS sweep) ──
+    cli_gauntlet.register(sub)  # gauntlet group -> scripts/cli/gauntlet.py
+
+    # ── nightly (overnight stats + performance report) ──
+    cli_nightly.register(sub)  # nightly group -> scripts/cli/nightly.py
+
+    # ── tournament (continuous algorithm testing) ──
+    cli_tournament.register(sub)  # tournament group -> scripts/cli/tournament.py
+
+    # ── kalman ──
+    cli_kalman.register(sub)  # kalman group -> scripts/cli/kalman.py
+
+    # ── audit ──
+    cli_audit.register(sub)  # audit group -> scripts/cli/audit.py
+
+    # ── discovery ──
+    # ── fetch ──
+    cli_fetch.register(sub)  # fetch group -> scripts/cli/fetch.py
+
+    cli_discovery.register(sub)  # discovery group -> scripts/cli/discovery.py
+
+    cli_health.register(sub)  # health group -> scripts/cli/health.py
+
+    # ── config ──
+    cli_config.register(sub)  # config group → scripts/cli/config.py
+
+    # ── reports ──
+    cli_reports.register(sub)  # reports group → scripts/cli/reports.py
+
+    # ── commands (for AI agent discovery) ──
+    sub.add_parser('commands', help='List all commands with descriptions').set_defaults(func=cmd_commands)
+
+    # ── deploy ──
+    cli_deploy.register(sub)  # deploy group -> scripts/cli/deploy.py
+
+    # ── docker ──
+    cli_docker.register(sub)  # docker group -> scripts/cli/docker.py
+
+    # ── swarm ──
+    cli_swarm.register(sub)  # swarm group -> scripts/cli/swarm.py
+
+    # ── evolve (Optuna) ──
+    cli_evolve.register(sub)  # evolve group -> scripts/cli/evolve.py
+
+    # ── 15m experiment ──
+    sm_p = sub.add_parser('15m', help='15-minute experiment (ingest → analyze → report)')
+    sm_p.add_argument('--duration', type=int, default=FIFTEEN_MIN, help='Collection seconds (default: 900)')
+    sm_p.add_argument('--skip-cluster', action='store_true', help='Skip clustering phase')
+    sm_p.set_defaults(func=cmd_15m)
+    smsub = sm_p.add_subparsers(dest='subcmd')
+    smo = smsub.add_parser('offline', help='Analyze existing data (no ingestion)')
+    smo.add_argument('--data', type=str, default=None, help='Data directory')
+    smo.add_argument('--skip-cluster', action='store_true', help='Skip clustering phase')
+    smo.set_defaults(func=cmd_15m_offline)
+    smv = smsub.add_parser('viz', help='Visualize latest experiment')
+    smv.add_argument('--data', type=str, default=None, help='Data directory (default: latest)')
+    smv.add_argument('--symbol', type=str, default='BTC', help='Symbol or "all"')
+    smv.add_argument('--window', type=int, default=None, help='Window size in minutes')
+    smv.add_argument('--page', type=str, default='all', choices=['0', '1', 'all'],
+                     help='Page: 0=basic, 1=advanced, all=both')
+    smv.add_argument('--no-open', dest='open_after', action='store_false',
+                     help='Do not auto-open the PNG (default: open)')
+    smv.set_defaults(func=cmd_15m_viz, open_after=True)
+    smsub.add_parser('test', help='Run unit tests').set_defaults(func=cmd_15m_test)
+
+    # ── Trade visualization ──────────────────────────────────────────────────
+    cli_trade.register(sub)  # trade group -> scripts/cli/trade.py
+
+    # ── Spannung ──────────────────────────────────────────────────────────────
+    cli_spannung.register(sub)  # spannung group -> scripts/cli/spannung.py
+
+    cli_agent.register(sub)  # agent-cluster (agent/mf-agent/macro-agent/meta-agent/it-engine) -> scripts/cli/agent.py
+
+    # NAT2: scoped group-level help. Override the bare-group handler (argparse-usage
+    # lambda, or a daemon entry that errors without a subcommand) with a parser-derived
+    # listing — for the blessed groups in GROUP_HELP, preserving the bespoke ones.
+    _CURATED_GROUP_HELP = {"process", "lifecycle"}
+    for _action in p._actions:
+        if not isinstance(_action, argparse._SubParsersAction):
+            continue
+        for _gname, _gp in _action.choices.items():
+            if _gname not in GROUP_HELP or _gname in _CURATED_GROUP_HELP:
+                continue
+            if any(isinstance(a, argparse._SubParsersAction) for a in _gp._actions):
+                _gp.set_defaults(func=_group_help(_gname, _gp))
+
+    return p
+
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+def main():
+    # Convenience: `nat viz <something.parquet>` → `nat viz file <something.parquet>`
+    # so a bare parquet path doesn't get mis-parsed as a viz subcommand.
+    _av = sys.argv[1:]
+    if len(_av) >= 2 and _av[0] == 'viz' and _av[1] not in (
+        'file', 'features', 'algorithm', 'paper', 'portfolio', 'render', '-h', '--help'
+    ) and (_av[1].endswith('.parquet') or Path(_av[1]).suffix == '.parquet'):
+        sys.argv.insert(2, 'file')
+
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if getattr(args, 'math', False):
+        cmd_math()
+        sys.exit(0)
+
+    if args.command is None or args.command == 'help':
+        cmd_help(args)
+        sys.exit(0)
+
+    if hasattr(args, 'func'):
+        try:
+            if not _json_mode(args):
+                print()
+            result = args.func(args)
+            if not _json_mode(args):
+                print()
+            sys.exit(result if isinstance(result, int) else 0)
+        except KeyboardInterrupt:
+            sys.exit(130)
+        except Exception as e:
+            if _json_mode(args):
+                print(_json.dumps({"error": str(e)}))
+            else:
+                print(f"\n  {R}Error:{W} {e}")
+            sys.exit(1)
+    else:
+        parser.print_help()
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
+
