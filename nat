@@ -56,6 +56,40 @@ from cli import fetch as cli_fetch  # noqa: E402
 from cli.fetch import *  # noqa: E402,F401,F403
 from cli import discovery as cli_discovery  # noqa: E402
 from cli.discovery import *  # noqa: E402,F401,F403
+from cli import macro as cli_macro  # noqa: E402
+from cli.macro import *  # noqa: E402,F401,F403
+from cli import profile as cli_profile  # noqa: E402
+from cli.profile import *  # noqa: E402,F401,F403
+from cli import screen as cli_screen  # noqa: E402
+from cli.screen import *  # noqa: E402,F401,F403
+from cli import scan as cli_scan  # noqa: E402
+from cli.scan import *  # noqa: E402,F401,F403
+from cli import deploy as cli_deploy  # noqa: E402
+from cli.deploy import *  # noqa: E402,F401,F403
+from cli import docker as cli_docker  # noqa: E402
+from cli.docker import *  # noqa: E402,F401,F403
+from cli import api as cli_api  # noqa: E402
+from cli.api import *  # noqa: E402,F401,F403
+from cli import pipeline as cli_pipeline  # noqa: E402
+from cli.pipeline import *  # noqa: E402,F401,F403
+from cli import validate as cli_validate  # noqa: E402
+from cli.validate import *  # noqa: E402,F401,F403
+from cli import signal as cli_signal  # noqa: E402
+from cli.signal import *  # noqa: E402,F401,F403
+from cli import eamm as cli_eamm  # noqa: E402
+from cli.eamm import *  # noqa: E402,F401,F403
+from cli import experiment as cli_experiment  # noqa: E402
+from cli.experiment import *  # noqa: E402,F401,F403
+from cli import exp as cli_exp  # noqa: E402
+from cli.exp import *  # noqa: E402,F401,F403
+from cli import cluster as cli_cluster  # noqa: E402
+from cli.cluster import *  # noqa: E402,F401,F403
+from cli import model as cli_model  # noqa: E402
+from cli.model import *  # noqa: E402,F401,F403
+from cli import spannung as cli_spannung  # noqa: E402
+from cli.spannung import *  # noqa: E402,F401,F403
+from cli import trade as cli_trade  # noqa: E402
+from cli.trade import *  # noqa: E402,F401,F403
 
 
 def cmd_doctor(args):
@@ -373,34 +407,6 @@ def cmd_ing_log(args):
     return cmd_log(args)
 
 
-def cmd_profile(args):
-    """Run regime profiling on current data."""
-    _p("...", B, "Running profiling pipeline...")
-    print()
-    r = _py("-m scripts.experiment.profiler")
-    if r.returncode != 0:
-        sys.path.insert(0, str(ROOT / "scripts"))
-        from experiment.profiler import quick_profile
-        from dataclasses import asdict
-        import json
-        print(json.dumps(asdict(quick_profile()), indent=2))
-
-
-def cmd_profile_scalp(args):
-    """Run scalping feature profiler."""
-    _banner(f"Scalping profiler: {_sym(args)}")
-    cmd = f"scripts/scalping_profiler.py profile --symbol {_sym(args)} --data-dir {_data(args)}"
-    top = getattr(args, 'top', None)
-    if top:
-        cmd += f" --top {top}"
-    if getattr(args, 'forward_test', False):
-        cmd += " --forward-test"
-    tf = getattr(args, 'timeframe', None)
-    if tf:
-        cmd += f" --timeframe {tf}"
-    _py(cmd)
-
-
 def cmd_report(args):
     """Generate full experiment report."""
     _p("...", B, "Generating report...")
@@ -489,57 +495,6 @@ def cmd_monitor_tui(args):
     if hasattr(args, "tab") and args.tab:
         cmd += ["--tab", str(args.tab)]
     subprocess.run(cmd, cwd=str(ROOT))
-
-
-def cmd_macro(args):
-    """Show macro signals for all symbols."""
-    sys.path.insert(0, str(ROOT / "scripts"))
-    from data.macro import fetch_candles, add_indicators
-
-    symbols = ["BTC", "ETH", "SOL"]
-    print(f"\n  {BOLD}Macro Signals (Daily){W}\n")
-    for sym in symbols:
-        try:
-            df = fetch_candles(sym, interval="1d", days=365)
-            df = add_indicators(df)
-            row = df.iloc[-1]
-            cross_7_21 = "UP" if row.get("cross_7_21", 0) > 0 else "DN"
-            cross_50_200 = "UP" if row.get("cross_50_200", 0) > 0 else "DN"
-            rsi = row.get("rsi_14", 0)
-            macd = "BUY" if row.get("macd_cross", 0) > 0 else "SELL"
-            price = row.get("close", 0)
-            c7 = G if cross_7_21 == "UP" else R
-            c50 = G if cross_50_200 == "UP" else R
-            print(f"  {BOLD}{sym}{W}  ${price:,.2f}")
-            print(f"    SMA 7/21:  {c7}{cross_7_21}{W}   SMA 50/200: {c50}{cross_50_200}{W}   MACD: {macd}   RSI: {rsi:.0f}")
-            print(f"    SMA7: {row.sma_7:,.2f}  SMA21: {row.sma_21:,.2f}  SMA50: {row.sma_50:,.2f}  SMA200: {row.sma_200:,.2f}")
-            if "support_20" in df.columns:
-                print(f"    Support: ${row.support_20:,.2f}  Resist: ${row.resist_20:,.2f}")
-            print()
-        except Exception as e:
-            _p("x", R, f"{sym}: {e}")
-    print(f"  {BOLD}Legend{W}: 7/21 = short-term trend, 50/200 = macro trend (golden/death cross)\n")
-
-
-def cmd_screen(args):
-    """Run alpha screening on collected data."""
-    _p("...", B, "Running alpha screener...")
-    print()
-    extra = getattr(args, 'screen_args', None) or []
-    subprocess.run([PY, "-m", "scripts.alpha.screener"] + extra, cwd=str(ROOT))
-
-
-def cmd_scan(args):
-    """Run scalp edge scanner on collected data."""
-    _banner("Scalp Edge Scanner")
-    symbol = getattr(args, 'symbol', 'BTC')
-    data_dir = getattr(args, 'data', str(DATA_DEFAULT))
-    tail = getattr(args, 'tail', None)
-    cmd_parts = [PY, str(ROOT / "scripts" / "scalp_edge_scanner.py"),
-                 "--symbol", symbol, "--data-dir", data_dir]
-    if tail is not None:
-        cmd_parts += ["--tail", str(tail)]
-    subprocess.run(cmd_parts, cwd=str(ROOT))
 
 
 # ── Alpha pipeline commands ──────────────────────────────────────────────────
@@ -1111,226 +1066,6 @@ def cmd_backtest_list(args):
     _py("scripts/run_backtest.py --list-strategies")
 
 
-# ── Model commands ───────────────────────────────────────────────────────────
-
-def cmd_model_train(args):
-    snapshot = getattr(args, 'snapshot', 'baseline_30d')
-    model_type = getattr(args, 'type', 'elasticnet')
-    output_dir = getattr(args, 'output_dir', './models')
-    _banner(f"Training baseline model: {model_type}")
-    os.makedirs(output_dir, exist_ok=True)
-    _py(f"scripts/train_baseline.py --snapshot {snapshot} --model {model_type} --output-dir {output_dir}")
-
-
-def cmd_model_train_gmm(args):
-    auto = getattr(args, 'auto', False)
-    _banner("Training GMM regime classifier")
-    os.makedirs("models", exist_ok=True)
-    cmd = f"scripts/train_regime_gmm.py --data-dir {_data(args)} --output-dir models"
-    if auto:
-        cmd += " --auto-select"
-    _py(cmd)
-
-
-def cmd_model_train_hier(args):
-    symbol = _sym(args)
-    horizon = getattr(args, 'horizon', 60)
-    dry_run = getattr(args, 'dry_run', False)
-    start = getattr(args, 'start_date', None)
-    l1_thresh = getattr(args, 'l1_threshold', 0.5)
-    ablation = getattr(args, 'ablation', False)
-    val_mode = getattr(args, 'validation_mode', 'walk_forward')
-    _banner(f"Training Hierarchical Signal Combiner: {symbol}")
-    os.makedirs("models/hierarchical_combiner", exist_ok=True)
-    cmd = (f"scripts/train_hierarchical.py --symbol {symbol} "
-           f"--data-dir {_data(args)} --horizon {horizon} "
-           f"--l1-threshold {l1_thresh} --validation-mode {val_mode}")
-    if dry_run:
-        cmd += " --dry-run"
-    if ablation:
-        cmd += " --ablation"
-    if start:
-        cmd += f" --start-date {start}"
-    _py(cmd)
-
-
-def cmd_model_list(args):
-    model_dir = getattr(args, 'model_dir', './models')
-    _py(f"scripts/list_models.py --model-dir {model_dir}")
-
-
-def cmd_model_score(args):
-    model = getattr(args, 'model', 'models/latest.pkl')
-    save = getattr(args, 'save', False)
-    output = getattr(args, 'output', './predictions.parquet')
-    cmd = f"scripts/score_data.py --model {model} --data {_data(args)} --evaluate"
-    if save:
-        cmd += f" --output {output}"
-    _py(cmd)
-
-
-def cmd_model_serve(args):
-    try:
-        import fastapi, uvicorn, pydantic  # noqa: F401
-    except ImportError:
-        _p("x", R, "Missing serving dependencies. Install with:")
-        _p(" ", W, "pip install -r scripts/requirements-serving.txt")
-        sys.exit(1)
-
-    port = getattr(args, 'port', 8000)
-    host = getattr(args, 'host', '0.0.0.0')
-    cache = getattr(args, 'cache_size', 5)
-    dev = getattr(args, 'dev', False)
-    best = getattr(args, 'best', False)
-    metric = getattr(args, 'metric', 'sharpe_ratio')
-
-    if dev:
-        _banner("Model serving API (dev mode)")
-        _exec(f"uvicorn scripts.model_serving:app --reload --host {host} --port {port}")
-    elif best:
-        _banner(f"Serving best model by {metric}")
-        _py(f"scripts/model_serving.py --host {host} --port {port} --serve-best "
-            f"--metric {metric} --cache-size {cache}")
-    else:
-        _banner("Model serving API")
-        _py(f"scripts/model_serving.py --host {host} --port {port} --cache-size {cache}")
-
-
-# ── Cluster commands ─────────────────────────────────────────────────────────
-
-def cmd_cluster_analyze(args):
-    hours = getattr(args, 'hours', 24)
-    _banner(f"Analyzing cluster quality: {_sym(args)}")
-    _py(f"scripts/analyze_clusters.py --data-dir {_data(args)} --symbol {_sym(args)} --hours {hours}")
-
-
-def cmd_cluster_gmm(args):
-    _banner(f"Analyzing with GMM model: {_sym(args)}")
-    _py(
-        f"scripts/analyze_clusters.py --data-dir {_data(args)} --symbol {_sym(args)} "
-        f"--model models/regime_gmm.json"
-    )
-
-
-def cmd_cluster_all(args):
-    _banner("Analyzing all symbols")
-    for sym in ["BTC", "ETH", "SOL"]:
-        print(f"\n  {BOLD}{sym}{W}\n")
-        _py(f"scripts/analyze_clusters.py --data-dir {_data(args)} --symbol {sym} "
-            f"--output reports/cluster_{sym}.txt")
-
-
-def cmd_cluster_quality(args):
-    _banner("Q3 predictive quality test")
-    _py("scripts/q3_predictive_quality.py")
-
-
-def cmd_cluster_explore(args):
-    _banner(f"Exploring clusters: {_sym(args)}")
-    cmd = f"scripts/explore_clusters.py --data-dir {_data(args)} --symbol {_sym(args)}"
-    subset = getattr(args, 'subset', None)
-    if subset:
-        cmd += f" --subset {subset}"
-    method = getattr(args, 'method', 'gmm')
-    cmd += f" --cluster-method {method}"
-    _py(cmd)
-
-
-def cmd_cluster_hmm(args):
-    _banner(f"HMM fitting: {_sym(args)}")
-    n_states = getattr(args, 'n_states', 3)
-    n_iter = getattr(args, 'n_iter', 100)
-    cov = getattr(args, 'covariance', 'full')
-    timeframe = getattr(args, 'timeframe', '15min')
-    output = getattr(args, 'output', 'reports/hmm_fit.json')
-
-    sys.path.insert(0, str(ROOT / "scripts"))
-    from cluster_pipeline.loader import load_parquet
-    from cluster_pipeline.preprocess import aggregate_bars
-    from cluster_pipeline.transitions import fit_hmm, compare_hmm_gmm, empirical_transitions
-    from sklearn.decomposition import PCA
-    from sklearn.mixture import GaussianMixture
-    import json, numpy as np, polars as pl
-
-    print(f"  Loading data from {_data(args)}...")
-    df = load_parquet(str(_data(args)))
-    df = df.filter(pl.col("symbol") == _sym(args))
-    df = aggregate_bars(df, timeframe=timeframe)
-    print(f"  {len(df)} bars after {timeframe} aggregation")
-
-    # Select numeric feature columns
-    meta = {"bar_start", "bar_end", "symbol", "tick_count", "bar_index"}
-    feat_cols = [c for c in df.columns if c not in meta and df[c].dtype in (pl.Float64, pl.Float32)]
-    X = df.select(feat_cols).to_numpy()
-    # Fill NaN with column median
-    for i in range(X.shape[1]):
-        col = X[:, i]
-        mask = ~np.isfinite(col)
-        if mask.any():
-            X[mask, i] = np.nanmedian(col)
-
-    # PCA reduce
-    n_components = min(10, X.shape[1], X.shape[0])
-    pca = PCA(n_components=n_components, random_state=42)
-    X_pca = pca.fit_transform(X)
-    print(f"  PCA: {X.shape[1]} features → {n_components} components "
-          f"({pca.explained_variance_ratio_.sum():.1%} variance)")
-
-    # GMM baseline
-    gmm = GaussianMixture(n_components=n_states, random_state=42, n_init=3).fit(X_pca)
-    gmm_labels = gmm.predict(X_pca)
-    emp = empirical_transitions(gmm_labels)
-
-    # HMM fit with GMM initialization
-    result = fit_hmm(
-        X_pca, n_states=n_states, n_iter=n_iter,
-        covariance_type=cov,
-        init_transmat=emp.matrix, init_means=gmm.means_,
-    )
-    if result is None:
-        _p("x", R, "HMM fitting failed or insufficient data")
-        return
-
-    # Compare
-    comparison = compare_hmm_gmm(result.smoothed_labels, gmm_labels)
-
-    _g = lambda p: f"\033[32mPASS\033[0m" if p else f"\033[31mFAIL\033[0m"
-    print(f"\n  HMM Results ({n_states} states):")
-    print(f"    Converged:           {result.convergence}")
-    print(f"    Log-likelihood:      {result.log_likelihood:.4f}")
-    print(f"    BIC:                 {result.bic:.1f}")
-    print(f"    ARI vs GMM:          {comparison['ari']:.4f}  [{_g(comparison['ari'] > 0.5)}]")
-    print(f"    Smoothness ratio:    {comparison['smoothness_ratio']:.3f} "
-          f"(HMM={comparison['hmm_transitions']}, GMM={comparison['gmm_transitions']})")
-    print(f"    Stationary dist:     {np.array2string(result.stationary_distribution, precision=3)}")
-
-    # Diagonal dominance check
-    diag_ok = all(result.transition_matrix[i, i] > 0.5 for i in range(n_states))
-    print(f"    Diagonal dominant:   [{_g(diag_ok)}]")
-
-    # Save
-    out = {
-        "symbol": _sym(args), "n_states": n_states, "timeframe": timeframe,
-        "n_bars": len(df), "converged": result.convergence,
-        "log_likelihood": result.log_likelihood, "bic": result.bic,
-        "transition_matrix": result.transition_matrix.tolist(),
-        "stationary_distribution": result.stationary_distribution.tolist(),
-        "comparison": comparison,
-    }
-    Path(output).parent.mkdir(parents=True, exist_ok=True)
-    with open(output, "w") as f:
-        json.dump(out, f, indent=2)
-    _p("+", G, f"Saved to {output}")
-
-
-# ── Validation commands ─────────────────────────────────────────────────────
-
-def cmd_validate_skeptical(args):
-    _banner("Running skeptical validation suite")
-    output = getattr(args, 'output', 'reports/skeptical_validation')
-    _py(f"scripts/exploration/skeptical_validation.py --data {_data(args)} --output {output}")
-
-
 # ── Alpha pipeline orchestrator ─────────────────────────────────────────────
 
 def cmd_alpha_pipeline_start(args):
@@ -1362,127 +1097,6 @@ def cmd_backtest_funding(args):
     _banner("Backtest: Funding Rate Reversion")
     _py("scripts/backtest_funding_reversion.py")
 
-
-# ── Skeptical regression test ──────────────────────────────────────────────
-
-def cmd_validate_regression(args):
-    _banner(f"Skeptical Regression Test: {_sym(args)}")
-    cmd = (f"scripts/exploration/skeptical_regression_test.py --data-dir {_data(args)} "
-           f"--symbol {_sym(args)} --horizon {getattr(args, 'horizon', 18000)}")
-    report = getattr(args, 'json_report', None)
-    if report:
-        cmd += f" --json-report {report}"
-    start = getattr(args, 'start_date', None)
-    if start:
-        cmd += f" --start-date {start}"
-    end = getattr(args, 'end_date', None)
-    if end:
-        cmd += f" --end-date {end}"
-    n_perm = getattr(args, 'n_permutations', None)
-    if n_perm:
-        cmd += f" --n-permutations {n_perm}"
-    _py(cmd)
-
-
-# ── Experiment tracking commands ─────────────────────────────────────────────
-
-def cmd_experiment_list(args):
-    stage = getattr(args, 'stage', None)
-    cmd = "scripts/experiment_tracking.py list"
-    if stage:
-        cmd += f" --stage {stage}"
-    _py(cmd)
-
-
-def cmd_experiment_get(args):
-    _py(f"scripts/experiment_tracking.py get {args.id}")
-
-
-def cmd_experiment_compare(args):
-    _py(f"scripts/experiment_tracking.py compare {args.ids}")
-
-
-def cmd_experiment_best(args):
-    metric = getattr(args, 'metric', 'sharpe_ratio')
-    _py(f"scripts/experiment_tracking.py best --metric {metric}")
-
-
-def cmd_experiment_workflow(args):
-    snapshot = getattr(args, 'snapshot', 'baseline_30d')
-    model_type = getattr(args, 'type', 'elasticnet')
-    entry = getattr(args, 'entry', 0.001)
-    exit_ = getattr(args, 'exit', 0.0)
-    predictions = getattr(args, 'predictions', './predictions.parquet')
-    output = getattr(args, 'output', './backtest_results.json')
-
-    _banner("Complete ML workflow with tracking")
-    print("  Step 1: Training model...")
-    os.makedirs("models", exist_ok=True)
-    _py(f"scripts/train_baseline.py --snapshot {snapshot} --model {model_type} --output-dir models")
-    print("\n  Step 2: Scoring...")
-    _py(f"scripts/score_data.py --model models/{model_type}_*.* --data {_data(args)} "
-        f"--output {predictions} --evaluate")
-    print("\n  Step 3: Backtest with tracking...")
-    _py(f"scripts/run_backtest_tracked.py --ml-predictions {predictions} "
-        f"--ml-entry-threshold {entry} --ml-exit-threshold {exit_} --walk-forward --output {output}")
-
-
-def cmd_experiment_snapshot(args):
-    name = args.name
-    cmd = f"scripts/experiment_governance.py snapshot --data-dir {_data(args)} --name {name}"
-    desc = getattr(args, 'description', None)
-    if desc:
-        cmd += f" --description \"{desc}\""
-    _banner(f"Creating snapshot: {name}")
-    _py(cmd)
-
-
-# ── Pipeline commands ────────────────────────────────────────────────────────
-
-def _pipe_cfg(args):
-    return getattr(args, 'config', None) or str(PIPE_CFG)
-
-
-def cmd_pipeline_start(args):
-    _banner("Starting automated pipeline")
-    _py(f"scripts/pipeline_runner.py --config {_pipe_cfg(args)} start")
-
-
-def cmd_pipeline_resume(args):
-    _py(f"scripts/pipeline_runner.py --config {_pipe_cfg(args)} resume")
-
-
-def cmd_pipeline_analyze(args):
-    _banner("Analyzing existing data")
-    _py(f"scripts/pipeline_runner.py --config {_pipe_cfg(args)} analyze")
-
-
-def cmd_pipeline_stop(args):
-    _py(f"scripts/pipeline_runner.py --config {_pipe_cfg(args)} stop")
-
-
-def cmd_pipeline_status(args):
-    if _json_mode(args):
-        p = ROOT / "data" / "pipeline_state.json"
-        if p.exists():
-            print(p.read_text())
-        else:
-            _output({"error": "No pipeline state file", "state": "UNKNOWN"}, args)
-        return
-    _py(f"scripts/pipeline_runner.py --config {_pipe_cfg(args)} status")
-
-
-def cmd_pipeline_dashboard(args):
-    try:
-        import dash  # noqa: F401
-    except ImportError:
-        _p("x", R, "Missing dash dependency. Install with:")
-        _p(" ", W, "pip install dash>=2.14.0")
-        sys.exit(1)
-
-    port = getattr(args, 'port', 8050)
-    _banner("Pipeline dashboard")
-    _py(f"scripts/dashboard.py --config {_pipe_cfg(args)} --port {port}")
 
 
 # ── Agent commands ───────────────────────────────────────────────────────────
@@ -1654,125 +1268,7 @@ def cmd_it_engine_status(args):
     _py(f"-m scripts.it_engine.daemon status --symbol {sym} --top {top}")
 
 
-# ── Signal commands ──────────────────────────────────────────────────────────
-
-def cmd_signal_test(args):
-    symbol = _sym(args)
-    horizon = getattr(args, 'horizon', 3000)
-    spread = getattr(args, 'spread_bps', 1.0)
-    remove_leaky = getattr(args, 'remove_leaky', False)
-    _banner(f"Signal existence test: {symbol}")
-    cmd = f"scripts/phase1_signal_test.py --symbol {symbol} --horizon {horizon} --spread-bps {spread}"
-    if remove_leaky:
-        cmd += " --remove-leaky"
-    _py(cmd)
-
-
-def cmd_signal_test_all(args):
-    horizon = getattr(args, 'horizon', 3000)
-    spread = getattr(args, 'spread_bps', 1.0)
-    _banner("Full signal sweep: all symbols + feature sets")
-    for sym in ["BTC", "ETH", "SOL"]:
-        for leaky in ([False, True] if sym == "BTC" else [False]):
-            tag = f"{sym} -- {'leaky removed' if leaky else 'all features'}"
-            print(f"\n  === {tag} ===\n")
-            cmd = (f"scripts/phase1_signal_test.py --symbol {sym} "
-                   f"--horizon {horizon} --spread-bps {spread}")
-            if leaky:
-                cmd += " --remove-leaky"
-            _py(cmd)
-
-
-# ── EAMM commands ────────────────────────────────────────────────────────────
-
-def cmd_eamm_run(args):
-    symbol = _sym(args)
-    horizon = getattr(args, 'horizon', 3000)
-    mode = getattr(args, 'mode', 'regression')
-    _exec(f"{PY} -m eamm.cli run --symbol {symbol} --horizon {horizon} --mode {mode}",
-          cwd=ROOT / "scripts")
-
-
-def cmd_eamm_regime(args):
-    _exec(f"{PY} -m eamm.cli regime --symbol {_sym(args)} "
-          f"--horizon {getattr(args, 'horizon', 3000)}",
-          cwd=ROOT / "scripts")
-
-
-def cmd_eamm_backtest(args):
-    gamma = getattr(args, 'gamma', 0.1)
-    q_max = getattr(args, 'q_max', 1.0)
-    _exec(
-        f"{PY} -m eamm.cli backtest --symbol {_sym(args)} "
-        f"--horizon {getattr(args, 'horizon', 3000)} --gamma {gamma} --q-max {q_max}",
-        cwd=ROOT / "scripts",
-    )
-
-
 # ── API commands ─────────────────────────────────────────────────────────────
-
-def cmd_api_start(args):
-    _ensure_release()
-    _cargo("build --locked --release --bin nat-api")
-    _banner("NAT API server")
-    print("  REST: http://localhost:3000")
-    print("  WebSocket: ws://localhost:3000/ws/stream/:symbol\n")
-    _exec("./target/release/nat-api", cwd=RUST)
-
-
-def cmd_api_alerts(args):
-    _cargo("build --locked --release --bin nat-api")
-    _banner("Telegram alert service")
-    _exec("./target/release/alert-service", cwd=RUST)
-
-
-def cmd_api_serve_all(args):
-    _ensure_release()
-    _cargo("build --locked --release --bin nat-api")
-    _banner("Starting full NAT stack in tmux")
-    _exec("tmux kill-session -t nat 2>/dev/null || true")
-    _exec(f"tmux new-session -d -s nat -n ingestor "
-          f"'cd {RUST} && ./target/release/ing {ING_CFG}; read'")
-    _exec(f"tmux new-window -t nat -n api 'cd {RUST} && ./target/release/nat-api; read'")
-    _exec(f"tmux new-window -t nat -n alerts 'cd {RUST} && ./target/release/alert-service; read'")
-    _exec("tmux attach -t nat")
-
-
-# ── Exp commands (week-long experiment runner) ───────────────────────────────
-
-def cmd_exp_start(args):
-    _ensure_release()
-    _py("scripts/run_experiment.py start")
-
-
-def cmd_exp_stop(args):
-    _py("scripts/run_experiment.py stop")
-
-
-def cmd_exp_status(args):
-    _py("scripts/run_experiment.py status")
-
-
-def cmd_exp_check(args):
-    hours = getattr(args, 'hours', 24)
-    _py(f"scripts/run_experiment.py check --hours {hours}")
-
-
-def cmd_exp_midweek(args):
-    _py("scripts/run_experiment.py midweek")
-
-
-def cmd_exp_analyze(args):
-    _py("scripts/run_experiment.py analyze")
-
-
-def cmd_exp_dashboard(args):
-    _py("scripts/run_experiment.py dashboard")
-
-
-def cmd_exp_tunnel(args):
-    _exec("cloudflared tunnel --url http://localhost:8050")
-
 
 # ── 15-Minute Experiment ─────────────────────────────────────────────────────
 
@@ -1939,89 +1435,6 @@ def cmd_15m_viz(args):
 def cmd_15m_test(args):
     """Run 15m unit tests."""
     _exec(f"cd {ROOT / 'scripts'} && {PY} -m pytest tests/test_15m_test.py -v")
-
-
-def cmd_trade_viz(args):
-    """Visualize paper trades — snapshot PNG per symbol per day."""
-    _banner("PAPER TRADE VISUALIZATION")
-    sys.stdout.flush()
-    sym = _sym(args)
-    date = getattr(args, 'date', None)
-    date_range = getattr(args, 'date_range', None)
-    extra = ""
-    if date:
-        extra += f" --date {date}"
-    elif date_range:
-        extra += f" --date-range {date_range[0]} {date_range[1]}"
-    else:
-        extra += " --latest"
-    _py(f"scripts/trade_visualize.py{extra} --symbol {sym} -v")
-
-
-# ── Spannung ──────────────────────────────────────────────────────────────────
-
-def cmd_spannung(args):
-    """Run Spannung offline grid search."""
-    _banner("Spannung Grid Search")
-    data = _data(args)
-    sym = getattr(args, 'symbol', 'all')
-    top = getattr(args, 'top', 20)
-    cmd = f"scripts/spannung_grid.py --data-dir {data} --symbol {sym} --top {top}"
-    horizons = getattr(args, 'horizons', None)
-    if horizons:
-        cmd += " --horizons " + " ".join(str(h) for h in horizons)
-    output = getattr(args, 'output', None)
-    if output:
-        cmd += f" --output {output}"
-    _py(cmd)
-
-
-def cmd_spannung_backtest(args):
-    """Run Spannung cost-aware backtest + regime gating."""
-    _banner("Spannung Backtest + Regime Gating")
-    data = _data(args)
-    sym = getattr(args, 'symbol', 'all')
-    cmd = f"scripts/spannung_backtest.py --data-dir {data} --symbol {sym}"
-    horizon = getattr(args, 'horizon', None)
-    if horizon:
-        cmd += f" --horizon {horizon}"
-    _py(cmd)
-
-
-def cmd_spannung_horizon(args):
-    """Run Spannung longer-horizon sweep (30s–15min bars)."""
-    _banner("Spannung Horizon Sweep")
-    data = _data(args)
-    sym = getattr(args, 'symbol', 'all')
-    cmd = f"scripts/spannung_horizon_sweep.py --data-dir {data} --symbol {sym}"
-    output = getattr(args, 'output', None)
-    if output:
-        cmd += f" --output {output}"
-    _py(cmd)
-
-
-def cmd_spannung_spectral(args):
-    """Run Spannung spectral analysis (PSD, coherence, ACF, band IC)."""
-    _banner("Spannung Spectral Analysis")
-    data = _data(args)
-    sym = getattr(args, 'symbol', 'all')
-    cmd = f"scripts/spannung_spectral.py --data-dir {data} --symbol {sym}"
-    output = getattr(args, 'output', None)
-    if output:
-        cmd += f" --output {output}"
-    _py(cmd)
-
-
-def cmd_spannung_regime(args):
-    """Run Spannung regime screener (systematic condition search)."""
-    _banner("Spannung Regime Screener")
-    data = _data(args)
-    sym = getattr(args, 'symbol', 'all')
-    cmd = f"scripts/spannung_regime_screener.py --data-dir {data} --symbol {sym}"
-    output = getattr(args, 'output', None)
-    if output:
-        cmd += f" --output {output}"
-    _py(cmd)
 
 
 # ── Algorithm commands ───────────────────────────────────────────────────────
@@ -3271,252 +2684,6 @@ def cmd_commands(args):
 
 # ── Docker commands ──────────────────────────────────────────────────────────
 
-def cmd_docker_build(args):
-    services = " ".join(getattr(args, 'services', None) or [])
-    verbose = "--progress=plain" if getattr(args, 'verbose', False) else ""
-    _exec(f"docker compose build {verbose} {services}".strip())
-
-
-def cmd_docker_up(args):
-    services = " ".join(getattr(args, 'services', None) or [])
-    _exec(f"docker compose up -d {services}".strip())
-    print("\n  Ingestor:   http://localhost:8080")
-    print("  API:        http://localhost:3010")
-    print("  Grafana:    http://localhost:3002")
-    print("  Prometheus: http://localhost:9090")
-    print("  Redis:      localhost:6379\n")
-
-
-def cmd_docker_down(args):
-    _exec("docker compose down")
-
-
-def cmd_docker_logs(args):
-    services = " ".join(getattr(args, 'services', None) or [])
-    _exec(f"docker compose logs -f {services}".strip())
-
-
-def cmd_docker_ps(args):
-    _exec("docker compose ps")
-
-
-def cmd_docker_stack(args):
-    """Build, start, and verify the full Docker stack."""
-    services = " ".join(getattr(args, 'services', None) or [])
-    verbose = "--progress=plain" if getattr(args, 'verbose', False) else ""
-    skip_build = getattr(args, 'no_build', False)
-    only_build = getattr(args, 'build_only', False)
-
-    _banner("NAT Docker Stack")
-
-    # Step 1: Build
-    if not skip_build:
-        targets = services or "ingestor api alerts"
-        _p("1", B, f"Building images: {targets}")
-        r = _exec(f"docker compose build {verbose} {targets}".strip())
-        if r.returncode != 0:
-            _p("x", R, "Build failed")
-            sys.exit(1)
-        _p("*", G, "Build complete")
-    else:
-        _p("-", Y, "Skipping build (--no-build)")
-
-    if only_build:
-        _p("*", G, "Build-only mode — done")
-        return
-
-    # Step 2: Start (core services only if no specific services requested)
-    core = services or "redis ingestor api alerts prometheus grafana"
-    _p("2", B, f"Starting services: {core}")
-    r = _exec(f"docker compose up -d {core}".strip())
-    if r.returncode != 0:
-        _p("!", Y, "Some services failed to start — checking endpoints...")
-    else:
-        _p("*", G, "Services started")
-
-    # Step 3: Wait + verify
-    _p("3", B, "Waiting for startup (15s)...")
-    time.sleep(15)
-
-    endpoints = [
-        ("Ingestor",   "http://localhost:8080",            8080),
-        ("API",        "http://localhost:3010/health",      3010),
-        ("Prometheus", "http://localhost:9090/api/v1/targets", 9090),
-        ("Grafana",    "http://localhost:3002/api/health",  3002),
-    ]
-    all_ok = True
-    for name, url, port in endpoints:
-        try:
-            r = subprocess.run(["curl", "-sf", "-o", "/dev/null", "-w", "%{http_code}", url],
-                               capture_output=True, text=True, timeout=5)
-            code = r.stdout.strip()
-            if code == "200":
-                _p("*", G, f"{name:12s} :{port}  OK")
-            else:
-                _p("x", R, f"{name:12s} :{port}  HTTP {code}")
-                all_ok = False
-        except Exception:
-            _p("x", R, f"{name:12s} :{port}  unreachable")
-            all_ok = False
-
-    # Step 4: Metrics check
-    try:
-        r = subprocess.run(
-            ["curl", "-sf", "http://localhost:9090/api/v1/query",
-             "--data-urlencode", "query=ing_features_emitted_total"],
-            capture_output=True, text=True, timeout=5)
-        import json
-        data = json.loads(r.stdout)
-        n = len(data.get("data", {}).get("result", []))
-        if n > 0:
-            _p("*", G, f"Metrics       Prometheus scraping {n} series")
-        else:
-            _p("!", Y, "Metrics       no data yet (wait a few minutes)")
-    except Exception:
-        _p("!", Y, "Metrics       could not query Prometheus")
-
-    print()
-    if all_ok:
-        _p("*", G, "Stack is healthy")
-        print(f"\n  {BOLD}Endpoints:{W}")
-        print(f"    Ingestor:   http://localhost:8080")
-        print(f"    API:        http://localhost:3010")
-        print(f"    Grafana:    http://localhost:3002")
-        print(f"    Prometheus: http://localhost:9090\n")
-    else:
-        _p("!", Y, "Some services failed — check docker compose logs")
-
-
-def cmd_docker_smoke(args):
-    """Quick smoke test of running Docker stack."""
-    _banner("Docker Smoke Test")
-    endpoints = {
-        "Ingestor":   "http://localhost:8080",
-        "API":        "http://localhost:3010/health",
-        "Prometheus": "http://localhost:9090/api/v1/targets",
-        "Grafana":    "http://localhost:3002/api/health",
-    }
-    ok = 0
-    total = len(endpoints) + 2  # +2 for postgres and caddy
-    for name, url in endpoints.items():
-        try:
-            r = subprocess.run(["curl", "-sf", "-o", "/dev/null", "-w", "%{http_code}", url],
-                               capture_output=True, text=True, timeout=5)
-            if r.stdout.strip() == "200":
-                _p("*", G, f"{name:12s} OK")
-                ok += 1
-            else:
-                _p("x", R, f"{name:12s} HTTP {r.stdout.strip()}")
-        except Exception:
-            _p("x", R, f"{name:12s} unreachable")
-    # PostgreSQL check
-    try:
-        r = subprocess.run(["docker", "compose", "exec", "-T", "postgres", "pg_isready", "-U", "nat"],
-                           capture_output=True, text=True, timeout=5)
-        if r.returncode == 0:
-            _p("*", G, f"{'PostgreSQL':12s} OK")
-            ok += 1
-        else:
-            _p("x", R, f"{'PostgreSQL':12s} not ready")
-    except Exception:
-        _p("x", R, f"{'PostgreSQL':12s} unreachable")
-    # Caddy check
-    try:
-        r = subprocess.run(["curl", "-sf", "-o", "/dev/null", "-w", "%{http_code}", "http://localhost:80"],
-                           capture_output=True, text=True, timeout=5)
-        if r.stdout.strip() in ("200", "301", "308"):
-            _p("*", G, f"{'Caddy':12s} OK")
-            ok += 1
-        else:
-            _p("x", R, f"{'Caddy':12s} HTTP {r.stdout.strip()}")
-    except Exception:
-        _p("x", R, f"{'Caddy':12s} unreachable")
-    print()
-    _p("*" if ok == total else "!", G if ok == total else Y,
-       f"{ok}/{total} services healthy")
-
-
-# ── Swarm commands ──────────────────────────────────────────────────────────
-
-# ── Deploy commands ──────────────────────────────────────────────────────────
-
-def cmd_deploy(args):
-    """Deploy ingestor to remote host (build, sync, restart)."""
-    host = getattr(args, 'host', None) or DEPLOY_HOST
-    rdir = getattr(args, 'dir', None) or DEPLOY_DIR
-
-    _banner(f"Deploying ingestor to {host}")
-
-    # Step 1: build
-    _p("1", B, "Building release binary...")
-    r = _cargo("build --locked --release --bin ing")
-    if r.returncode != 0:
-        _p("x", R, "Build failed")
-        sys.exit(1)
-
-    # Step 2: backup
-    _p("2", B, f"Backing up current binary on {host}...")
-    _sh(f"ssh {host} 'cp {rdir}/rust/target/release/ing {rdir}/rust/target/release/ing.bak 2>/dev/null || true'")
-
-    # Step 3: sync
-    _p("3", B, "Syncing binary + config...")
-    r1 = _exec(f"rsync -az {RUST}/target/release/ing {host}:{rdir}/rust/target/release/ing")
-    r2 = _exec(f"rsync -az {ROOT}/config/ {host}:{rdir}/config/")
-    if r1.returncode != 0 or r2.returncode != 0:
-        _p("x", R, "rsync failed")
-        sys.exit(1)
-
-    # Step 4: restart
-    _p("4", B, "Restarting ingestor...")
-    _exec(f"ssh {host} 'cd {rdir} && ./nat stop && sleep 3 && ./nat start'")
-
-    # Step 5: health check
-    _p("5", B, "Health check (waiting 10s)...")
-    time.sleep(10)
-    r = _sh(f"ssh {host} 'cd {rdir} && ./nat status'")
-    print(r.stdout)
-    if r.returncode == 0:
-        _p("*", G, "Deploy complete")
-    else:
-        _p("!", Y, "Deploy finished but health check returned non-zero — verify manually")
-
-
-def cmd_deploy_status(args):
-    """Check remote ingestor status."""
-    host = getattr(args, 'host', None) or DEPLOY_HOST
-    rdir = getattr(args, 'dir', None) or DEPLOY_DIR
-    _exec(f"ssh {host} 'cd {rdir} && ./nat status'")
-
-
-def cmd_deploy_rollback(args):
-    """Rollback remote ingestor to previous binary."""
-    host = getattr(args, 'host', None) or DEPLOY_HOST
-    rdir = getattr(args, 'dir', None) or DEPLOY_DIR
-
-    _banner(f"Rolling back ingestor on {host}")
-
-    # Check backup exists
-    r = _sh(f"ssh {host} 'test -f {rdir}/rust/target/release/ing.bak'")
-    if r.returncode != 0:
-        _p("x", R, "No backup binary found on remote — cannot rollback")
-        sys.exit(1)
-
-    _p("1", B, "Stopping ingestor...")
-    _exec(f"ssh {host} 'cd {rdir} && ./nat stop'")
-
-    _p("2", B, "Restoring backup binary...")
-    _exec(f"ssh {host} 'cp {rdir}/rust/target/release/ing.bak {rdir}/rust/target/release/ing'")
-
-    _p("3", B, "Starting ingestor...")
-    _exec(f"ssh {host} 'cd {rdir} && sleep 2 && ./nat start'")
-
-    _p("4", B, "Health check (waiting 10s)...")
-    time.sleep(10)
-    r = _sh(f"ssh {host} 'cd {rdir} && ./nat status'")
-    print(r.stdout)
-    _p("*", G, "Rollback complete")
-
-
 # ── Watchdog ─────────────────────────────────────────────────────────────────
 
 def _install_watchdog():
@@ -4535,33 +3702,7 @@ def build_parser():
     ing_st.set_defaults(func=cmd_ing_status)
     ingsub.add_parser('log', help='Tail the latest ingestor log').set_defaults(func=cmd_ing_log)
 
-    prof_p = sub.add_parser('profile', help='Profiling',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
-        Regime profiling of microstructure features using entropy and volatility
-        measures to characterize market states.
-
-        Key metrics:
-          Permutation entropy:  H = -Σ pᵢ·ln(pᵢ) / ln(m!)
-            where pᵢ = frequency of ordinal pattern i, m = embedding dimension
-          Parkinson volatility: σ = ln(H/L) / (4·ln(2))^0.5 ≈ ln(H/L) / 1.663
-          Book imbalance:       I = (bid_qty - ask_qty) / (bid_qty + ask_qty)
-
-        Output: per-symbol regime statistics and feature distributions.
-
-        Example:
-          nat profile                    # full profiling
-          nat profile scalp --symbol BTC # scalping features
-        """))
-    prof_p.set_defaults(func=cmd_profile)
-    prof_sub = prof_p.add_subparsers(dest='subcmd')
-    ps = prof_sub.add_parser('scalp', help='Scalping feature profiler (--symbol, --top, --forward-test)')
-    ps.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
-    ps.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    ps.add_argument('--top', type=int, default=None, help='Show top N features')
-    ps.add_argument('--forward-test', action='store_true', help='Run forward test')
-    ps.add_argument('--timeframe', default=None, help='Bar timeframe (e.g. 5min, 15min)')
-    ps.set_defaults(func=cmd_profile_scalp)
+    cli_profile.register(sub)  # profile group -> scripts/cli/profile.py
     report_p = sub.add_parser('report', help='Experiment reports (generate / ls)')
     report_p.set_defaults(func=cmd_report)  # bare `nat report` keeps generating
     repsub = report_p.add_subparsers(dest='subcmd')
@@ -4581,35 +3722,14 @@ def build_parser():
     montui.add_argument('--tab', type=int, default=1, choices=[1, 2, 3],
                         help='Initial tab: 1=Health, 2=Agent, 3=Features')
     montui.set_defaults(func=cmd_monitor_tui)
-    sub.add_parser('macro', help='Daily macro signals').set_defaults(func=cmd_macro)
+    cli_macro.register(sub)  # macro group -> scripts/cli/macro.py
     help_p = sub.add_parser('help', help='Show full help')
     help_p.add_argument('--grep', default=None, help='Search commands/help by keyword')
     help_p.set_defaults(func=cmd_help)
 
-    screen_p = sub.add_parser('screen', help='Alpha screening')
-    screen_p.add_argument('screen_args', nargs=argparse.REMAINDER)
-    screen_p.set_defaults(func=cmd_screen)
+    cli_screen.register(sub)  # screen group -> scripts/cli/screen.py
 
-    scan_p = sub.add_parser('scan', help='Scalp edge scanner',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
-        Scans for scalping edges by analyzing bid/ask asymmetry and tail
-        percentile behavior under different regime conditions.
-
-        Mathematics:
-          Edge = P(mid_price moves in predicted direction within horizon)
-          Tail analysis:  P(edge > threshold | regime_quintile)
-          Conditional IC: IC(feature, return | ent_book_shape ∈ Q_k)
-
-        Output: ranked list of (feature, regime, horizon) combos with edge > cost.
-
-        Example:
-          nat scan --symbol BTC --tail 95
-        """))
-    scan_p.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
-    scan_p.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    scan_p.add_argument('--tail', type=int, default=None, help='Tail percentile threshold')
-    scan_p.set_defaults(func=cmd_scan)
+    cli_scan.register(sub)  # scan group -> scripts/cli/scan.py
 
     # ── alpha ──
     alpha_p = sub.add_parser('alpha', help='Alpha research pipeline (Steps 2-9)')
@@ -4937,288 +4057,31 @@ def build_parser():
     balg.set_defaults(func=cmd_backtest_algorithm)
 
     # ── model ──
-    model_p = sub.add_parser('model', help='Model training & serving')
-    model_p.set_defaults(func=lambda a: model_p.print_help())
-    msub = model_p.add_subparsers(dest='subcmd')
-    mt = msub.add_parser('train', help='Train baseline model',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
-        Trains a supervised model to predict forward returns from features.
-
-        Models:
-          ElasticNet:  min (1/2n)·‖y - Xβ‖² + λ₁·‖β‖₁ + λ₂·‖β‖²₂
-                       (L1 for sparsity + L2 for stability, α and l1_ratio via CV)
-          LightGBM:    gradient boosted decision trees with leaf-wise growth
-                       (handles non-linearity, feature interactions, missing values)
-
-        Data: reads from dataset snapshots (pre-split train/val/test).
-        Output: serialized model + feature importance + CV metrics.
-
-        Example:
-          nat model train --snapshot baseline_30d --type elasticnet
-          nat model train --type lightgbm --output-dir models/
-        """))
-    mt.add_argument('--snapshot', default='baseline_30d', help='Dataset snapshot name')
-    mt.add_argument('--type', default='elasticnet', help='Model type (elasticnet/lightgbm)')
-    mt.add_argument('--output-dir', default='./models', help='Model output directory')
-    mt.set_defaults(func=cmd_model_train)
-    mg = msub.add_parser('train-gmm', help='Train GMM classifier')
-    mg.add_argument('--auto', action='store_true', help='Auto BIC selection')
-    mg.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    mg.set_defaults(func=cmd_model_train_gmm)
-    mh = msub.add_parser('train-hier', help='Train hierarchical signal combiner')
-    mh.add_argument('--symbol', default='BTC', help='Symbol (default: BTC)')
-    mh.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    mh.add_argument('--horizon', type=int, default=60, help='Forward return horizon in bars (default: 60 = 5h)')
-    mh.add_argument('--l1-threshold', type=float, default=0.5, help='L1 z-score gate threshold')
-    mh.add_argument('--start-date', default=None, help='Earliest date (YYYY-MM-DD)')
-    mh.add_argument('--dry-run', action='store_true', help='Evaluate only, no save')
-    mh.add_argument('--ablation', action='store_true', help='Run layer ablation analysis (auto with --dry-run)')
-    mh.add_argument('--validation-mode', choices=['walk_forward', 'purged_kfold'], default='walk_forward',
-                    help='Validation method (default: walk_forward)')
-    mh.set_defaults(func=cmd_model_train_hier)
-    ml = msub.add_parser('list', help='List models')
-    ml.add_argument('--model-dir', default='./models', help='Model directory')
-    ml.set_defaults(func=cmd_model_list)
-    ms = msub.add_parser('score', help='Score data')
-    ms.add_argument('--model', default='models/latest.pkl', help='Model file path')
-    ms.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    ms.add_argument('--save', action='store_true', help='Save predictions to file')
-    ms.add_argument('--output', default='./predictions.parquet', help='Predictions output path')
-    ms.set_defaults(func=cmd_model_score)
-    mv = msub.add_parser('serve', help='Model serving API')
-    mv.add_argument('--port', type=int, default=8000, help='Server port (default: 8000)')
-    mv.add_argument('--host', default='0.0.0.0', help='Server host (default: 0.0.0.0)')
-    mv.add_argument('--cache-size', type=int, default=5, help='Model cache size')
-    mv.add_argument('--dev', action='store_true', help='Hot-reload mode')
-    mv.add_argument('--best', action='store_true', help='Serve best model')
-    mv.add_argument('--metric', default='sharpe_ratio', help='Metric to select best model')
-    mv.set_defaults(func=cmd_model_serve)
+    cli_model.register(sub)  # model group -> scripts/cli/model.py
 
     # ── cluster ──
-    cl_p = sub.add_parser('cluster', help='Cluster analysis')
-    cl_p.set_defaults(func=lambda a: cl_p.print_help())
-    csub = cl_p.add_subparsers(dest='subcmd')
-    ca = csub.add_parser('analyze', help='Analyze cluster quality')
-    ca.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
-    ca.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    ca.add_argument('--hours', type=int, default=24, help='Hours of data to analyze')
-    ca.set_defaults(func=cmd_cluster_analyze)
-    cg = csub.add_parser('gmm', help='Analyze with GMM')
-    cg.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
-    cg.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    cg.set_defaults(func=cmd_cluster_gmm)
-    call = csub.add_parser('all', help='Analyze all symbols')
-    call.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    call.set_defaults(func=cmd_cluster_all)
-    csub.add_parser('quality', help='Q3 predictive quality test').set_defaults(func=cmd_cluster_quality)
-    ce = csub.add_parser('explore', help='Exploratory clustering (PCA/UMAP/t-SNE)')
-    ce.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
-    ce.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    ce.add_argument('--subset', default=None, help='Feature subset (entropy, orderflow, etc.)')
-    ce.add_argument('--method', default='gmm', choices=['gmm', 'kmeans', 'hdbscan', 'dbscan'], help='Clustering algorithm')
-    ce.set_defaults(func=cmd_cluster_explore)
-    ch = csub.add_parser('hmm-fit', help='Fit HMM on feature data (Baum-Welch)',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
-        Fits a Hidden Markov Model to PCA-reduced feature data using Baum-Welch EM,
-        initialized from GMM cluster assignments.
-
-        Mathematics:
-          E-step (forward-backward):
-            α_t(i) = P(o_1..o_t, s_t=i)     forward probabilities
-            β_t(i) = P(o_{t+1}..o_T | s_t=i) backward probabilities
-            γ_t(i) = P(s_t=i | O, λ)         state posteriors
-          M-step:
-            A_ij = Σ ξ_t(i,j) / Σ γ_t(i)    transition matrix update
-            μ_i = Σ γ_t(i)·o_t / Σ γ_t(i)   mean update
-          Model selection:
-            BIC = -2·ln(L) + k·ln(n)         Bayesian Information Criterion
-          Comparison:
-            ARI (Adjusted Rand Index) vs GMM labels
-            Smoothness ratio: HMM transitions / GMM transitions
-
-        Example:
-          nat cluster hmm-fit --symbol BTC --n-states 3 --timeframe 15min
-        """))
-    ch.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
-    ch.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    ch.add_argument('--n-states', type=int, default=3, help='Number of hidden states')
-    ch.add_argument('--n-iter', type=int, default=100, help='Max EM iterations')
-    ch.add_argument('--covariance', default='full', choices=['full', 'diag', 'spherical', 'tied'], help='Covariance type')
-    ch.add_argument('--timeframe', default='15min', help='Bar aggregation timeframe')
-    ch.add_argument('--output', default='reports/hmm_fit.json', help='Output JSON path')
-    ch.set_defaults(func=cmd_cluster_hmm)
+    cli_cluster.register(sub)  # cluster group -> scripts/cli/cluster.py
 
     # ── validate ──
-    val_p = sub.add_parser('validate', help='Validation suites')
-    val_p.set_defaults(func=lambda a: val_p.print_help())
-    vsub = val_p.add_subparsers(dest='subcmd')
-    vs = vsub.add_parser('skeptical', help='20+ statistical tests before investment',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
-        Comprehensive statistical validation suite (20+ tests) designed to catch
-        overfitting, data-snooping, and spurious signals before capital deployment.
-
-        Tests include:
-          Runs test:       H0: sequence is random (Wald-Wolfowitz)
-          Variance ratio:  VR(k) = Var(r_k) / (k·Var(r_1)),  H0: VR=1 (random walk)
-          Ljung-Box:       Q = n(n+2) Σ (ρ_k²/(n-k)),  H0: no autocorrelation
-          BDS test:        nonlinear dependence in residuals
-          Hurst exponent:  H via R/S analysis,  H>0.5 = trending, H<0.5 = mean-reverting
-          Deflated Sharpe: p-value adjusted for number of strategies tried
-          Permutation:     empirical p-value from n_trials random shuffles
-
-        Example:
-          nat validate skeptical --data data/features --output reports/skeptical
-        """))
-    vs.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    vs.add_argument('--output', default='reports/skeptical_validation', help='Output directory')
-    vs.set_defaults(func=cmd_validate_skeptical)
-    vr = vsub.add_parser('regression', help='Skeptical regression signal test battery (10 tests)')
-    vr.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    vr.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
-    vr.add_argument('--horizon', type=int, default=18000, help='Forward horizon in ticks (default: 18000)')
-    vr.add_argument('--json-report', default=None, help='Output JSON report path')
-    vr.add_argument('--start-date', default=None, help='Start date filter (YYYY-MM-DD)')
-    vr.add_argument('--end-date', default=None, help='End date filter (YYYY-MM-DD)')
-    vr.add_argument('--n-permutations', type=int, default=200, help='Permutation test iterations')
-    vr.set_defaults(func=cmd_validate_regression)
+    cli_validate.register(sub)  # validate group -> scripts/cli/validate.py
 
     # ── experiment ──
-    exp_p = sub.add_parser('experiment', help='Experiment tracking')
-    exp_p.set_defaults(func=lambda a: exp_p.print_help())
-    esub = exp_p.add_subparsers(dest='subcmd')
-    el = esub.add_parser('list', help='List experiments')
-    el.add_argument('--stage', help='Filter by stage')
-    el.set_defaults(func=cmd_experiment_list)
-    eg = esub.add_parser('get', help='Get experiment details')
-    eg.add_argument('--id', required=True, help='Experiment ID')
-    eg.set_defaults(func=cmd_experiment_get)
-    ec = esub.add_parser('compare', help='Compare experiments')
-    ec.add_argument('--ids', required=True, help='Space-separated experiment IDs')
-    ec.set_defaults(func=cmd_experiment_compare)
-    eb = esub.add_parser('best', help='Find best')
-    eb.add_argument('--metric', default='sharpe_ratio', help='Metric to rank by')
-    eb.set_defaults(func=cmd_experiment_best)
-    ew = esub.add_parser('workflow', help='Full ML workflow')
-    ew.add_argument('--snapshot', default='baseline_30d', help='Dataset snapshot name')
-    ew.add_argument('--type', default='elasticnet', help='Model type (elasticnet/lightgbm)')
-    ew.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    ew.add_argument('--entry', type=float, default=0.001, help='Entry signal threshold')
-    ew.add_argument('--exit', type=float, default=0.0, help='Exit signal threshold')
-    ew.add_argument('--predictions', default='./predictions.parquet', help='Predictions parquet path')
-    ew.add_argument('--output', default='./backtest_results.json', help='Output results JSON')
-    ew.set_defaults(func=cmd_experiment_workflow)
-    esn = esub.add_parser('snapshot', help='Create dataset snapshot')
-    esn.add_argument('--name', required=True, help='Snapshot name')
-    esn.add_argument('--description', help='Snapshot description')
-    esn.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    esn.set_defaults(func=cmd_experiment_snapshot)
+    cli_experiment.register(sub)  # experiment group -> scripts/cli/experiment.py
 
     # ── pipeline ──
-    pipe_p = sub.add_parser('pipeline', help='Automated pipeline')
-    pipe_p.add_argument('--config', default=str(PIPE_CFG), help='Pipeline config TOML')
-    pipe_p.set_defaults(func=lambda a: pipe_p.print_help())
-    psub = pipe_p.add_subparsers(dest='subcmd')
-    psub.add_parser('start', help='Start pipeline').set_defaults(func=cmd_pipeline_start)
-    psub.add_parser('resume', help='Resume from saved state').set_defaults(func=cmd_pipeline_resume)
-    psub.add_parser('analyze', help='Analyze existing data').set_defaults(func=cmd_pipeline_analyze)
-    psub.add_parser('stop', help='Stop pipeline').set_defaults(func=cmd_pipeline_stop)
-    psub.add_parser('status', help='Show state').set_defaults(func=cmd_pipeline_status)
-    pd = psub.add_parser('dashboard', help='Pipeline dashboard')
-    pd.add_argument('--port', type=int, default=8050, help='Dashboard port (default: 8050)')
-    pd.set_defaults(func=cmd_pipeline_dashboard)
+    cli_pipeline.register(sub)  # pipeline group -> scripts/cli/pipeline.py
 
     # ── signal ──
-    sig_p = sub.add_parser('signal', help='Signal testing')
-    sig_p.set_defaults(func=lambda a: sig_p.print_help())
-    ssub = sig_p.add_subparsers(dest='subcmd')
-    st = ssub.add_parser('test', help='Signal existence test',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
-        Tests whether individual features carry predictive information about
-        future returns using Information Coefficient (IC) analysis.
-
-        Mathematics:
-          Forward return:  r_t(h) = (mid_{t+h} - mid_t) / mid_t
-          IC:              Spearman rank correlation ρ(feature, r_t(h))
-          Significance:    z = IC · √n,  p < 0.05 ⟹ |z| > 1.96
-          Cost filter:     |IC| > spread_bps / (10000 · σ_r)
-
-        Output: per-feature IC at the specified horizon, sorted by |IC|.
-        Features passing both significance and cost filters are flagged.
-
-        Example:
-          nat signal test --symbol BTC --horizon 3000 --spread-bps 1.0
-        """))
-    st.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
-    st.add_argument('--horizon', type=int, default=3000, help='Forward horizon in ticks (1 tick=100ms)')
-    st.add_argument('--spread-bps', type=float, default=1.0, help='Spread cost in basis points')
-    st.add_argument('--remove-leaky', action='store_true', help='Remove forward-looking features')
-    st.set_defaults(func=cmd_signal_test)
-    sta = ssub.add_parser('test-all', help='Full symbol sweep')
-    sta.add_argument('--horizon', type=int, default=3000, help='Forward horizon in ticks (1 tick=100ms)')
-    sta.add_argument('--spread-bps', type=float, default=1.0, help='Spread cost in basis points')
-    sta.set_defaults(func=cmd_signal_test_all)
+    cli_signal.register(sub)  # signal group -> scripts/cli/signal.py
 
     # ── eamm ──
-    eamm_p = sub.add_parser('eamm', help='EAMM market making')
-    eamm_p.set_defaults(func=lambda a: eamm_p.print_help())
-    easub = eamm_p.add_subparsers(dest='subcmd')
-    er = easub.add_parser('run', help='Full EAMM pipeline')
-    er.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
-    er.add_argument('--horizon', type=int, default=3000, help='Forward horizon in ticks')
-    er.add_argument('--mode', default='regression', help='Pipeline mode (default: regression)')
-    er.set_defaults(func=cmd_eamm_run)
-    erg = easub.add_parser('regime', help='Regime analysis')
-    erg.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
-    erg.add_argument('--horizon', type=int, default=3000, help='Forward horizon in ticks')
-    erg.set_defaults(func=cmd_eamm_regime)
-    ebt = easub.add_parser('backtest', help='Stateful backtest',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
-        Avellaneda-Stoikov entropy-aware market making backtest with
-        inventory penalty and regime-dependent spread adjustment.
-
-        Mathematics:
-          Optimal spread:  δ = γ·σ² + (2/γ)·ln(1 + γ/κ)
-          Inventory penalty: P&L_adj = P&L_raw - γ·q²
-          Reservation price: r = s - q·γ·σ²
-          Where: γ = risk aversion, σ² = mid-price variance,
-                 κ = order arrival intensity, q = inventory
-
-        Example:
-          nat eamm backtest --symbol BTC --gamma 0.1 --q-max 1.0
-        """))
-    ebt.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
-    ebt.add_argument('--horizon', type=int, default=3000, help='Forward horizon in ticks')
-    ebt.add_argument('--gamma', type=float, default=0.1, help='Risk aversion parameter')
-    ebt.add_argument('--q-max', type=float, default=1.0, help='Maximum inventory')
-    ebt.set_defaults(func=cmd_eamm_backtest)
+    cli_eamm.register(sub)  # eamm group -> scripts/cli/eamm.py
 
     # ── api ──
-    api_p = sub.add_parser('api', help='API & alert services')
-    api_p.set_defaults(func=lambda a: api_p.print_help())
-    asub = api_p.add_subparsers(dest='subcmd')
-    asub.add_parser('start', help='Start API server').set_defaults(func=cmd_api_start)
-    asub.add_parser('alerts', help='Telegram alerts').set_defaults(func=cmd_api_alerts)
-    asub.add_parser('serve-all', help='Full stack in tmux').set_defaults(func=cmd_api_serve_all)
+    cli_api.register(sub)  # api group -> scripts/cli/api.py
 
     # ── exp ──
-    xp_p = sub.add_parser('exp', help='Experiment runner')
-    xp_p.set_defaults(func=lambda a: xp_p.print_help())
-    xsub = xp_p.add_subparsers(dest='subcmd')
-    xsub.add_parser('start', help='Start ingestor in tmux').set_defaults(func=cmd_exp_start)
-    xsub.add_parser('stop', help='Stop ingestor').set_defaults(func=cmd_exp_stop)
-    xsub.add_parser('status', help='Health + data stats').set_defaults(func=cmd_exp_status)
-    xc = xsub.add_parser('check', help='Daily validation')
-    xc.add_argument('--hours', type=int, default=24, help='Hours of data to validate')
-    xc.set_defaults(func=cmd_exp_check)
-    xsub.add_parser('midweek', help='Full validation').set_defaults(func=cmd_exp_midweek)
-    xsub.add_parser('analyze', help='End-of-experiment').set_defaults(func=cmd_exp_analyze)
-    xsub.add_parser('dashboard', help='Show dashboard URL').set_defaults(func=cmd_exp_dashboard)
-    xsub.add_parser('tunnel', help='Cloudflare tunnel').set_defaults(func=cmd_exp_tunnel)
+    cli_exp.register(sub)  # exp group -> scripts/cli/exp.py
 
     # ── algorithm (alias: alg) ──
     cli_algorithm.register(sub)  # algorithm/alg group → scripts/cli/algorithm.py
@@ -5569,43 +4432,10 @@ def build_parser():
     sub.add_parser('commands', help='List all commands with descriptions').set_defaults(func=cmd_commands)
 
     # ── deploy ──
-    dep_p = sub.add_parser('deploy', help='Deploy ingestor to remote host')
-    dep_p.add_argument('--host', type=str, default=None, help=f'Remote host (default: {DEPLOY_HOST}, env: NAT_DEPLOY_HOST)')
-    dep_p.add_argument('--dir', type=str, default=None, help=f'Remote dir (default: {DEPLOY_DIR}, env: NAT_DEPLOY_DIR)')
-    dep_p.set_defaults(func=cmd_deploy)
-    depsub = dep_p.add_subparsers(dest='subcmd')
-    dep_s = depsub.add_parser('status', help='Check remote ingestor status')
-    dep_s.add_argument('--host', type=str, default=None)
-    dep_s.add_argument('--dir', type=str, default=None)
-    dep_s.set_defaults(func=cmd_deploy_status)
-    dep_r = depsub.add_parser('rollback', help='Rollback to previous binary')
-    dep_r.add_argument('--host', type=str, default=None)
-    dep_r.add_argument('--dir', type=str, default=None)
-    dep_r.set_defaults(func=cmd_deploy_rollback)
+    cli_deploy.register(sub)  # deploy group -> scripts/cli/deploy.py
 
     # ── docker ──
-    dk_p = sub.add_parser('docker', help='Docker operations')
-    dk_p.set_defaults(func=lambda a: dk_p.print_help())
-    dksub = dk_p.add_subparsers(dest='subcmd')
-    dk_build = dksub.add_parser('build', help='Build images (nat docker build [--verbose] [services...])')
-    dk_build.add_argument('--verbose', '-v', action='store_true', help='Show full build output')
-    dk_build.add_argument('services', nargs='*', default=None, help='Services to build (default: all)')
-    dk_build.set_defaults(func=cmd_docker_build)
-    dk_up = dksub.add_parser('up', help='Start services (nat docker up [services...])')
-    dk_up.add_argument('services', nargs='*', default=None, help='Services to start (default: all)')
-    dk_up.set_defaults(func=cmd_docker_up)
-    dksub.add_parser('down', help='Stop services').set_defaults(func=cmd_docker_down)
-    dksub.add_parser('ps', help='Show running services').set_defaults(func=cmd_docker_ps)
-    dk_logs = dksub.add_parser('logs', help='View logs (nat docker logs [services...])')
-    dk_logs.add_argument('services', nargs='*', default=None, help='Services to tail (default: all)')
-    dk_logs.set_defaults(func=cmd_docker_logs)
-    dk_stack = dksub.add_parser('stack', help='Build + start + verify full stack')
-    dk_stack.add_argument('--verbose', '-v', action='store_true', help='Verbose build output')
-    dk_stack.add_argument('--no-build', action='store_true', help='Skip build, start only')
-    dk_stack.add_argument('--build-only', action='store_true', help='Build only, do not start')
-    dk_stack.add_argument('services', nargs='*', default=None, help='Services (default: all)')
-    dk_stack.set_defaults(func=cmd_docker_stack)
-    dksub.add_parser('smoke', help='Quick health check of running stack').set_defaults(func=cmd_docker_smoke)
+    cli_docker.register(sub)  # docker group -> scripts/cli/docker.py
 
     # ── swarm ──
     cli_swarm.register(sub)  # swarm group -> scripts/cli/swarm.py
@@ -5635,66 +4465,10 @@ def build_parser():
     smsub.add_parser('test', help='Run unit tests').set_defaults(func=cmd_15m_test)
 
     # ── Trade visualization ──────────────────────────────────────────────────
-    tv_p = sub.add_parser('trade', help='Paper trade visualization')
-    tv_p.set_defaults(func=cmd_trade_viz)
-    tvsub = tv_p.add_subparsers(dest='subcmd')
-    tvv = tvsub.add_parser('viz', help='Visualize paper trades (snapshot PNG)')
-    tvv.add_argument('--date', type=str, default=None, help='Date (YYYY-MM-DD)')
-    tvv.add_argument('--date-range', nargs=2, metavar=('START', 'END'),
-                     help='Date range (inclusive)')
-    tvv.add_argument('--symbol', type=str, default='BTC', help='Symbol or "all"')
-    tvv.set_defaults(func=cmd_trade_viz)
+    cli_trade.register(sub)  # trade group -> scripts/cli/trade.py
 
     # ── Spannung ──────────────────────────────────────────────────────────────
-    spn_p = sub.add_parser('spannung', help='Spannung signal grid search',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
-        Exhaustive grid search over (feature × horizon) pairs computing IC, t-stat,
-        and cost-adjusted edge for scalping signal discovery.
-
-        Mathematics:
-          IC grid:       IC(f, h) = Spearman ρ(f_t, r_t(h))  for all (f, h) pairs
-          t-statistic:   t = IC · √n
-          Edge:          edge = |IC| × σ_r × √(h / dt)
-          Cost filter:   edge > spread_bps / 10000
-
-        Subcommands:
-          backtest    Cost-aware backtest with regime gating on top signals
-          horizon     Longer-horizon sweep (30s to 15min aggregated bars)
-          spectral    PSD, cross-coherence, ACF, and frequency-band IC
-          regime      Systematic regime condition search (quintile × Pareto)
-
-        Example:
-          nat spannung --symbol BTC --top 20 --horizons 10 50 100 300
-        """))
-    spn_p.add_argument('--data', type=str, default=None, help='Data dir (auto-detects latest)')
-    spn_p.add_argument('--symbol', type=str, default='all', help='Symbol or "all" (default: all)')
-    spn_p.add_argument('--horizons', type=int, nargs='+', default=None,
-                       help='Forward horizons in ticks (1 tick=100ms, default: 10 50 100 300 600)')
-    spn_p.add_argument('--top', type=int, default=20, help='Top N results to display')
-    spn_p.add_argument('--output', type=str, default=None, help='Output directory')
-    spn_p.set_defaults(func=cmd_spannung)
-    spn_sub = spn_p.add_subparsers(dest='spn_subcmd')
-    spn_bt = spn_sub.add_parser('backtest', help='Cost-aware backtest + regime gating')
-    spn_bt.add_argument('--data', type=str, default=None, help='Data dir')
-    spn_bt.add_argument('--symbol', type=str, default='all', help='Symbol or "all"')
-    spn_bt.add_argument('--horizon', type=int, default=None, help='Horizon in ticks')
-    spn_bt.set_defaults(func=cmd_spannung_backtest)
-    spn_hz = spn_sub.add_parser('horizon', help='Longer-horizon sweep (30s–15min bars)')
-    spn_hz.add_argument('--data', type=str, default=None, help='Data dir')
-    spn_hz.add_argument('--symbol', type=str, default='all', help='Symbol or "all"')
-    spn_hz.add_argument('--output', type=str, default=None, help='Output directory')
-    spn_hz.set_defaults(func=cmd_spannung_horizon)
-    spn_sp = spn_sub.add_parser('spectral', help='Spectral analysis (PSD, coherence, ACF, band IC)')
-    spn_sp.add_argument('--data', type=str, default=None, help='Data dir')
-    spn_sp.add_argument('--symbol', type=str, default='all', help='Symbol or "all"')
-    spn_sp.add_argument('--output', type=str, default=None, help='Output directory')
-    spn_sp.set_defaults(func=cmd_spannung_spectral)
-    spn_rg = spn_sub.add_parser('regime', help='Systematic regime condition screener')
-    spn_rg.add_argument('--data', type=str, default=None, help='Data dir')
-    spn_rg.add_argument('--symbol', type=str, default='all', help='Symbol or "all"')
-    spn_rg.add_argument('--output', type=str, default=None, help='Output directory')
-    spn_rg.set_defaults(func=cmd_spannung_regime)
+    cli_spannung.register(sub)  # spannung group -> scripts/cli/spannung.py
 
     # ── agent ──
     ag_p = sub.add_parser('agent', help='Autonomous research agent')
