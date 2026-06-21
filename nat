@@ -26,6 +26,14 @@ import nat_paths  # noqa: E402  (several handlers reference nat_paths directly)
 from cli.common import *  # noqa: E402,F401,F403  (constants + _sh/_output/_p/colors/…)
 from cli import metrics as cli_metrics  # noqa: E402
 from cli.metrics import *  # noqa: E402,F401,F403  (re-export cmd_metrics_* for test_nat_cli)
+from cli import config as cli_config  # noqa: E402
+from cli.config import *  # noqa: E402,F401,F403
+from cli import data as cli_data  # noqa: E402
+from cli.data import *  # noqa: E402,F401,F403
+from cli import reports as cli_reports  # noqa: E402
+from cli.reports import *  # noqa: E402,F401,F403
+from cli import package as cli_package  # noqa: E402
+from cli.package import *  # noqa: E402,F401,F403
 
 
 def cmd_doctor(args):
@@ -419,18 +427,6 @@ def cmd_report_ls(args):
     return 0
 
 
-def cmd_package_deb(args):
-    """Build the .deb package via packaging/build_deb.sh."""
-    script = ROOT / "packaging" / "build_deb.sh"
-    if not script.exists():
-        _p("x", R, f"Missing {script}")
-        return 1
-    extra = " --no-build" if getattr(args, 'no_build', False) else ""
-    _banner("Building nat .deb")
-    sys.stdout.flush()
-    return _exec(f"bash {script}{extra}").returncode
-
-
 def cmd_dashboard(args):
     """Start or show dashboard."""
     r = _sh("tmux has-session -t nat-dashboard 2>/dev/null")
@@ -813,152 +809,6 @@ def cmd_run_tunnel(args):
 
 
 # ── Data commands ────────────────────────────────────────────────────────────
-
-def cmd_data(args):
-    """Show data statistics."""
-    dd = Path(_data(args))
-    if not dd.exists():
-        if _json_mode(args):
-            _output({"error": "No data directory", "path": str(dd)}, args)
-        else:
-            _p("x", R, "No data directory")
-        return
-    parquets = sorted(dd.rglob("*.parquet"))
-    stats = [(f, f.stat()) for f in parquets]
-    valid = [(f, s) for f, s in stats if s.st_size > 0]
-    total_size = sum(s.st_size for _, s in valid)
-    days = sorted(set(f.parent.name for f, _ in valid))
-
-    if _json_mode(args):
-        per_day = []
-        for day in days:
-            day_files = [(f, s) for f, s in valid if f.parent.name == day]
-            day_size = sum(s.st_size for _, s in day_files)
-            per_day.append({"date": day, "files": len(day_files), "size_mb": round(day_size / 1e6, 1)})
-        _output({
-            "path": str(dd),
-            "files": len(valid), "empty_files": len(parquets) - len(valid),
-            "size_mb": round(total_size / 1e6, 1),
-            "days": len(days),
-            "date_range": [days[0], days[-1]] if days else None,
-            "estimated_rows": int(total_size // 300),
-            "per_day": per_day,
-        }, args)
-        return
-
-    print(f"\n  {BOLD}Data Summary{W}\n")
-    print(f"  Files:     {len(valid)} ({len(parquets) - len(valid)} empty)")
-    print(f"  Disk:      {total_size / 1e6:.1f} MB")
-    print(f"  Days:      {len(days)}")
-    if days:
-        print(f"  Range:     {days[0]} to {days[-1]}")
-    print(f"\n  {BOLD}Per Day{W}\n")
-    for day in days:
-        day_files = [(f, s) for f, s in valid if f.parent.name == day]
-        day_size = sum(s.st_size for _, s in day_files)
-        print(f"  {day}: {len(day_files)} files, {day_size / 1e6:.1f} MB")
-    print(f"\n  ~{total_size // 300:.0f} rows (estimated)\n")
-
-
-def cmd_data_ls(args):
-    """List individual parquet files (path, date, size, rows, mtime)."""
-    dd = Path(_data(args))
-    if not dd.exists():
-        if _json_mode(args):
-            _output({"error": "No data directory", "path": str(dd)}, args)
-        else:
-            _p("x", R, "No data directory")
-        return 1
-
-    import pyarrow.parquet as _pq
-    want_date = getattr(args, 'date', None)
-    want_sym = getattr(args, 'symbol', None)
-    limit = getattr(args, 'limit', None)
-
-    files = sorted(dd.rglob("*.parquet"), key=os.path.getmtime, reverse=True)
-    rows = []
-    for f in files:
-        if want_date and f.parent.name != want_date:
-            continue
-        st = f.stat()
-        if st.st_size == 0:
-            continue
-        nrows = None
-        try:
-            nrows = _pq.read_metadata(f).num_rows  # cheap: footer only, no full read
-        except Exception:
-            pass
-        rows.append({
-            "path": str(f),
-            "date": f.parent.name,
-            "size_mb": round(st.st_size / 1e6, 2),
-            "rows": nrows,
-            "mtime": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
-        })
-
-    # --symbol filter requires peeking the file; keep it best-effort and last so
-    # the cheap path stays fast when no symbol filter is requested.
-    if want_sym:
-        keep = []
-        for r in rows:
-            try:
-                tbl = _pq.read_table(r["path"], columns=["symbol"])
-                if want_sym in set(tbl.column("symbol").to_pylist()):
-                    keep.append(r)
-            except Exception:
-                keep.append(r)
-        rows = keep
-
-    if limit:
-        rows = rows[:limit]
-
-    def _human(_data):
-        files_ = _data["files"]
-        if not files_:
-            _p("x", Y, "No parquet files match")
-            return
-        print(f"\n  {BOLD}Parquet files{W}  ({len(files_)} shown)\n")
-        print(f"  {'DATE':<12} {'SIZE':>9} {'ROWS':>10}  {'MTIME':<19}  FILE")
-        for r in files_:
-            rws = f"{r['rows']:,}" if r['rows'] is not None else "?"
-            print(f"  {r['date']:<12} {r['size_mb']:>7.2f}MB {rws:>10}  "
-                  f"{r['mtime']:<19}  {Path(r['path']).name}")
-        print()
-
-    _output({"path": str(dd), "files": rows, "count": len(rows)}, args, _human)
-    return 0
-
-
-def cmd_data_validate(args):
-    path = getattr(args, 'path', None)
-    target = path or _data(args)
-    as_json = _json_mode(args)
-    if not as_json:
-        _banner(f"Validating {'file' if path else 'collected data'}: {target}")
-        sys.stdout.flush()
-    hours = getattr(args, 'hours', None)
-    cmd = f"scripts/validate_data.py {target}"
-    if not as_json:
-        cmd += " --verbose"
-    if hours:
-        cmd += f" --hours {hours}"
-    if as_json:
-        cmd += " --json"
-    return _py(cmd).returncode
-
-
-def cmd_data_explore(args):
-    _exec("jupyter notebook notebooks/explore_features.ipynb")
-
-
-def cmd_data_schema(args):
-    _banner("Scanning parquet schema & vector coverage")
-    _exec(
-        f'{PY} -c "from cluster_pipeline.loader import print_schema_summary; '
-        f"print_schema_summary('../{_data(args)}')\"",
-        cwd=ROOT / "scripts",
-    )
-
 
 # ── Test commands ────────────────────────────────────────────────────────────
 
@@ -3733,208 +3583,6 @@ def cmd_health(args):
                    f"last write {sym_info.get('last_write_s', '?')}s ago")
 
 
-def cmd_config_show(args):
-    """Show full merged configuration."""
-    config_dir = CONFIG_DIR
-    try:
-        import tomllib
-    except ImportError:
-        import tomli as tomllib
-
-    merged = {}
-    for toml_file in sorted(config_dir.glob("*.toml")):
-        try:
-            with open(toml_file, "rb") as f:
-                data = tomllib.load(f)
-            merged[toml_file.stem] = data
-        except Exception as e:
-            merged[toml_file.stem] = {"_error": str(e)}
-
-    if _json_mode(args):
-        _output(merged, args)
-        return
-
-    _banner("Configuration")
-    for name, data in merged.items():
-        print(f"  {BOLD}[{name}]{W} ({config_dir / name}.toml)")
-        if isinstance(data, dict) and "_error" in data:
-            _p("x", R, f"Parse error: {data['_error']}")
-        else:
-            for key, val in data.items():
-                if isinstance(val, dict):
-                    print(f"    [{key}]")
-                    for k2, v2 in val.items():
-                        print(f"      {k2} = {v2}")
-                else:
-                    print(f"    {key} = {val}")
-        print()
-
-
-def cmd_config_get(args):
-    """Get specific config value by dot-notation key."""
-    try:
-        import tomllib
-    except ImportError:
-        import tomli as tomllib
-
-    key_parts = args.key.split(".")
-    if len(key_parts) < 2:
-        print(f"  {R}Error:{W} Use file.section.key format, e.g. 'agent.agent.ic_threshold'")
-        return 1
-
-    config_file = CONFIG_DIR / f"{key_parts[0]}.toml"
-    if not config_file.exists():
-        print(f"  {R}Error:{W} Config file not found: {config_file}")
-        return 1
-
-    with open(config_file, "rb") as f:
-        data = tomllib.load(f)
-
-    val = data
-    for part in key_parts[1:]:
-        if isinstance(val, dict) and part in val:
-            val = val[part]
-        else:
-            print(f"  {R}Error:{W} Key '{args.key}' not found")
-            return 1
-
-    if _json_mode(args):
-        _output({"key": args.key, "value": val}, args)
-    else:
-        print(f"  {args.key} = {val}")
-
-
-def cmd_config_paths(args):
-    """Show the resolved data/config/log/report locations (and how each was chosen)."""
-    info = nat_paths.describe()
-
-    def _human(d):
-        print(f"\n  {BOLD}Resolved paths{W}  (source: {d['source']})\n")
-        order = ["install_root", "home", "data_root", "features_dir", "trades_dir",
-                 "config_dir", "reports_dir", "log_dir", "db_path"]
-        for k in order:
-            print(f"    {k:<14} {d[k]}")
-        print(f"\n  Override with NAT_HOME (master) or NAT_DATA/NAT_CONFIG/NAT_REPORTS/NAT_LOG.\n")
-
-    _output(info, args, _human)
-    return 0
-
-
-def cmd_config_validate(args):
-    """Validate all TOML config files for syntax errors."""
-    try:
-        import tomllib
-    except ImportError:
-        import tomli as tomllib
-
-    config_dir = CONFIG_DIR
-    results = []
-    for toml_file in sorted(config_dir.glob("*.toml")):
-        try:
-            with open(toml_file, "rb") as f:
-                tomllib.load(f)
-            results.append({"file": toml_file.name, "valid": True})
-        except Exception as e:
-            results.append({"file": toml_file.name, "valid": False, "error": str(e)})
-
-    if _json_mode(args):
-        _output({"configs": results, "all_valid": all(r["valid"] for r in results)}, args)
-        return
-
-    for r in results:
-        if r["valid"]:
-            _p("*", G, f"{r['file']}: OK")
-        else:
-            _p("x", R, f"{r['file']}: {r['error']}")
-
-
-def cmd_reports(args):
-    """List all reports."""
-    reports_dir = REPORTS_DIR
-    if not reports_dir.exists():
-        if _json_mode(args):
-            _output({"reports": []}, args)
-        else:
-            _p("x", R, "No reports directory")
-        return
-
-    entries = []
-    for f in sorted(reports_dir.rglob("*"), key=lambda p: p.stat().st_mtime, reverse=True):
-        if f.is_file():
-            s = f.stat()
-            entries.append({
-                "path": str(f.relative_to(ROOT)),
-                "type": f.suffix.lstrip(".") or "unknown",
-                "size_kb": round(s.st_size / 1024, 1),
-                "modified": datetime.fromtimestamp(s.st_mtime).isoformat(),
-            })
-
-    if _json_mode(args):
-        _output({"reports": entries, "count": len(entries)}, args)
-        return
-
-    print(f"\n  {BOLD}Reports ({len(entries)}){W}\n")
-    for e in entries[:50]:
-        print(f"  {e['modified'][:10]}  {e['size_kb']:>8.1f} KB  {e['path']}")
-    if len(entries) > 50:
-        print(f"\n  ... and {len(entries) - 50} more")
-    print()
-
-
-def cmd_reports_latest(args):
-    """Show most recent report per category."""
-    reports_dir = REPORTS_DIR
-    if not reports_dir.exists():
-        if _json_mode(args):
-            _output({"latest": {}}, args)
-        else:
-            _p("x", R, "No reports directory")
-        return
-
-    categories = {}
-    for f in reports_dir.rglob("*"):
-        if not f.is_file():
-            continue
-        cat = f.parent.name if f.parent != reports_dir else "root"
-        if cat not in categories or f.stat().st_mtime > categories[cat].stat().st_mtime:
-            categories[cat] = f
-
-    if _json_mode(args):
-        result = {cat: {"path": str(f.relative_to(ROOT)),
-                        "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()}
-                  for cat, f in categories.items()}
-        _output({"latest": result}, args)
-        return
-
-    print(f"\n  {BOLD}Latest Reports by Category{W}\n")
-    for cat, f in sorted(categories.items()):
-        mtime = datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-        print(f"  {cat:20s}  {mtime}  {f.relative_to(ROOT)}")
-    print()
-
-
-def cmd_reports_show(args):
-    """Print report content."""
-    p = Path(args.path)
-    if not p.exists():
-        p = ROOT / args.path
-    if not p.exists():
-        _p("x", R, f"Not found: {args.path}")
-        return 1
-    content = p.read_text()
-    if p.suffix == ".json":
-        try:
-            data = _json.loads(content)
-            if _json_mode(args):
-                print(content)
-            else:
-                print(_json.dumps(data, indent=2, default=str))
-        except _json.JSONDecodeError:
-            print(content)
-    else:
-        print(content)
-
-
 def cmd_log_agent(args):
     """Tail agent daemon log."""
     # Check for agent logs in logs/ dir or stdout
@@ -5694,23 +5342,7 @@ def build_parser():
     rsub.add_parser('tunnel', help='Cloudflare tunnel').set_defaults(func=cmd_run_tunnel)
 
     # ── data ──
-    data_p = sub.add_parser('data', help='Data stats & validation')
-    data_p.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    data_p.set_defaults(func=cmd_data)
-    dsub = data_p.add_subparsers(dest='subcmd')
-    dv = dsub.add_parser('validate', help='Validate parquet data (a directory or a single file)')
-    dv.add_argument('path', nargs='?', help='A single .parquet file to validate (default: scan the data dir)')
-    dv.add_argument('--hours', type=int, help='Validate only last N hours (ignored for a single file)')
-    dv.add_argument('--json', action='store_true', help='Emit the report as JSON')
-    dv.set_defaults(func=cmd_data_validate)
-    dsub.add_parser('explore', help='Launch Jupyter').set_defaults(func=cmd_data_explore)
-    dsub.add_parser('schema', help='Scan parquet schema').set_defaults(func=cmd_data_schema)
-    dls = dsub.add_parser('ls', help='List individual parquet files (path/size/rows/mtime)')
-    dls.add_argument('--symbol', '-s', default=None, help='Filter to files containing this symbol')
-    dls.add_argument('--date', default=None, help='Filter to one day YYYY-MM-DD')
-    dls.add_argument('--limit', type=int, default=None, help='Show only the newest N files')
-    dls.add_argument('--json', action='store_true', help='JSON output')
-    dls.set_defaults(func=cmd_data_ls)
+    cli_data.register(sub)  # data group → scripts/cli/data.py
 
     # ── test ──
     test_p = sub.add_parser('test', help='Testing (default: all Rust unit tests)')
@@ -6162,13 +5794,7 @@ def build_parser():
     algc.set_defaults(func=cmd_algorithm_config)
 
     # ── package (build distributables) ──
-    pkg_p = sub.add_parser('package', help='Build distributables (.deb)')
-    pkg_p.set_defaults(func=lambda a: pkg_p.print_help())
-    pkgsub = pkg_p.add_subparsers(dest='subcmd')
-    pkgdeb = pkgsub.add_parser('deb', help='Build the nat .deb (packaging/build_deb.sh)')
-    pkgdeb.add_argument('--no-build', action='store_true',
-                        help='Skip the release Rust build (use existing binaries)')
-    pkgdeb.set_defaults(func=cmd_package_deb)
+    cli_package.register(sub)  # package group → scripts/cli/package.py
 
     cli_metrics.register(sub)  # metrics group → scripts/cli/metrics.py
 
@@ -6745,26 +6371,10 @@ def build_parser():
     sub.add_parser('health', help='Comprehensive system health check (all components)').set_defaults(func=cmd_health)
 
     # ── config ──
-    cfg_p = sub.add_parser('config', help='Configuration inspection')
-    cfg_p.set_defaults(func=cmd_config_show)
-    cfgsub = cfg_p.add_subparsers(dest='subcmd')
-    cfgsub.add_parser('show', help='Full config dump (all TOML files merged)').set_defaults(func=cmd_config_show)
-    cfg_get = cfgsub.add_parser('get', help='Get specific config value (file.section.key)')
-    cfg_get.add_argument('key', help='Config key in dot notation (e.g., agent.agent.ic_threshold)')
-    cfg_get.set_defaults(func=cmd_config_get)
-    cfgsub.add_parser('validate', help='Check all config files for syntax errors').set_defaults(func=cmd_config_validate)
-    cfg_paths = cfgsub.add_parser('paths', help='Show resolved data/config/log/report locations')
-    cfg_paths.add_argument('--json', action='store_true', help='JSON output')
-    cfg_paths.set_defaults(func=cmd_config_paths)
+    cli_config.register(sub)  # config group → scripts/cli/config.py
 
     # ── reports ──
-    rpt_p = sub.add_parser('reports', help='Report management')
-    rpt_p.set_defaults(func=cmd_reports)
-    rptsub = rpt_p.add_subparsers(dest='subcmd')
-    rptsub.add_parser('latest', help='Most recent report per category').set_defaults(func=cmd_reports_latest)
-    rpt_show = rptsub.add_parser('show', help='Print report content')
-    rpt_show.add_argument('path', help='Report file path')
-    rpt_show.set_defaults(func=cmd_reports_show)
+    cli_reports.register(sub)  # reports group → scripts/cli/reports.py
 
     # ── commands (for AI agent discovery) ──
     sub.add_parser('commands', help='List all commands with descriptions').set_defaults(func=cmd_commands)
