@@ -1,0 +1,5805 @@
+{
+  "commands": [
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Start ingestor + watchdog + dashboard",
+      "name": "start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Stop everything",
+      "name": "stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Health check",
+      "name": "status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Ingestion preflight (data-dir ownership, binary, disk)",
+      "name": "doctor"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Tail ingestor log",
+      "name": "log"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Tail agent daemon log",
+      "name": "log agent"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "List all log files with sizes and dates",
+      "name": "log list"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Ingestor control (start/stop/status/log)",
+      "name": "ing"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Start ingestor locally",
+      "name": "ing start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Stop ingestor + daemons",
+      "name": "ing stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Ingestor + data health",
+      "name": "ing status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Tail the latest ingestor log",
+      "name": "ing log"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Profiling",
+      "name": "profile"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "help": "Show top N features",
+          "name": "--top",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "Run forward test",
+          "name": "--forward-test"
+        },
+        {
+          "help": "Bar timeframe (e.g. 5min, 15min)",
+          "name": "--timeframe"
+        }
+      ],
+      "help": "Scalping feature profiler (--symbol, --top, --forward-test)",
+      "name": "profile scalp"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Experiment reports (generate / ls)",
+      "name": "report"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Generate the full experiment report",
+      "name": "report generate"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Filter by extension (json|md|html|csv)",
+          "name": "--ext"
+        },
+        {
+          "help": "Show only the newest N",
+          "name": "--limit",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "List experiment-outcome artifacts",
+      "name": "report ls"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Filter by extension (json|md|html|csv)",
+          "name": "--ext"
+        },
+        {
+          "help": "Show only the newest N",
+          "name": "--limit",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "",
+      "name": "report list"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Start dashboard",
+      "name": "dashboard"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "10",
+          "help": "Update frequency in Hz (default: 10, max 50)",
+          "name": "--hz",
+          "type": "int"
+        }
+      ],
+      "help": "Live feature probe: stream computed features (no ingestion)",
+      "name": "monitor"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "1",
+          "help": "Initial tab: 1=Health, 2=Agent, 3=Features",
+          "name": "--tab",
+          "type": "int"
+        }
+      ],
+      "help": "Legacy rich dashboard (Redis health/agent/features tabs)",
+      "name": "monitor tui"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Daily macro signals",
+      "name": "macro"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Search commands/help by keyword",
+          "name": "--grep"
+        }
+      ],
+      "help": "Show full help",
+      "name": "help"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "",
+          "name": "screen_args",
+          "positional": true
+        }
+      ],
+      "help": "Alpha screening",
+      "name": "screen"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "help": "Tail percentile threshold",
+          "name": "--tail",
+          "type": "int"
+        }
+      ],
+      "help": "Scalp edge scanner",
+      "name": "scan"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Alpha research pipeline (Steps 2-9)",
+      "name": "alpha"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "reports/alpha_screen.json",
+          "help": "Screen results JSON",
+          "name": "--screen"
+        },
+        {
+          "help": "Filter to specific horizon",
+          "name": "--horizon"
+        },
+        {
+          "default": "20",
+          "help": "Top N features",
+          "name": "--top",
+          "type": "int"
+        },
+        {
+          "default": "0.8",
+          "help": "Correlation dedup threshold",
+          "name": "--max-corr",
+          "type": "float"
+        },
+        {
+          "default": "15min",
+          "help": "Bar aggregation timeframe (default: 15min)",
+          "name": "--timeframe"
+        },
+        {
+          "default": "equal",
+          "help": "Combination method",
+          "name": "--method"
+        },
+        {
+          "default": "reports/alpha_combine.json",
+          "help": "Output JSON path",
+          "name": "--output"
+        }
+      ],
+      "help": "Feature combination (Step 2)",
+      "name": "alpha combine"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Signal .npy file",
+          "name": "--signal",
+          "required": true
+        },
+        {
+          "help": "Estimated IC",
+          "name": "--ic",
+          "required": true,
+          "type": "float"
+        },
+        {
+          "help": "Return volatility",
+          "name": "--vol",
+          "required": true,
+          "type": "float"
+        },
+        {
+          "default": "16",
+          "help": "Holding period in bars",
+          "name": "--horizon-bars",
+          "type": "int"
+        },
+        {
+          "default": "1.5",
+          "help": "Cost safety multiplier",
+          "name": "--cost-multiplier",
+          "type": "float"
+        },
+        {
+          "default": "1.0",
+          "help": "Position scale factor",
+          "name": "--scale",
+          "type": "float"
+        },
+        {
+          "default": "15.0",
+          "help": "Bar duration in minutes",
+          "name": "--bar-minutes",
+          "type": "float"
+        },
+        {
+          "default": "reports/alpha_position.json",
+          "help": "Output JSON path",
+          "name": "--output"
+        }
+      ],
+      "help": "Cost-aware position sizing (Step 3)",
+      "name": "alpha size"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Signal .npy file",
+          "name": "--signal",
+          "required": true
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "15min",
+          "help": "Bar aggregation timeframe",
+          "name": "--timeframe"
+        },
+        {
+          "default": "1998",
+          "help": "Number of permutation trials",
+          "name": "--n-trials",
+          "type": "int"
+        },
+        {
+          "default": "0.3",
+          "help": "Signal entry threshold",
+          "name": "--entry-threshold",
+          "type": "float"
+        },
+        {
+          "default": "5",
+          "help": "Walk-forward splits",
+          "name": "--n-splits",
+          "type": "int"
+        },
+        {
+          "default": "600",
+          "help": "Embargo bars between folds",
+          "name": "--embargo-bars",
+          "type": "int"
+        },
+        {
+          "default": "['long', 'short']",
+          "help": "Trade direction(s)",
+          "name": "--direction"
+        },
+        {
+          "default": "reports/alpha_validation.json",
+          "help": "Output JSON path",
+          "name": "--output"
+        }
+      ],
+      "help": "Walk-forward validation (Step 4)",
+      "name": "alpha validate"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "reports/alpha_screen.json",
+          "help": "Screen results JSON",
+          "name": "--screen"
+        },
+        {
+          "help": "Regime GMM model JSON",
+          "name": "--model"
+        },
+        {
+          "default": "15min",
+          "help": "Bar aggregation timeframe",
+          "name": "--timeframe"
+        },
+        {
+          "default": "10",
+          "help": "Top N features to condition",
+          "name": "--top-n",
+          "type": "int"
+        },
+        {
+          "default": "reports/alpha_regime.json",
+          "help": "Output JSON path",
+          "name": "--output"
+        }
+      ],
+      "help": "Regime conditioning (Step 5)",
+      "name": "alpha regime"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "help": "Pre-computed signal JSON",
+          "name": "--signal"
+        },
+        {
+          "default": "15min",
+          "help": "Bar aggregation timeframe",
+          "name": "--timeframe"
+        },
+        {
+          "default": "reports/alpha_multi_freq.json",
+          "help": "Output JSON path",
+          "name": "--output"
+        }
+      ],
+      "help": "Multi-frequency integration (Step 6)",
+      "name": "alpha multi-freq"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "['BTC', 'ETH', 'SOL']",
+          "help": "Symbols to include",
+          "name": "--symbols"
+        },
+        {
+          "default": "15min",
+          "help": "Bar aggregation timeframe",
+          "name": "--timeframe"
+        },
+        {
+          "default": "reports/alpha_portfolio.json",
+          "help": "Output JSON path",
+          "name": "--output"
+        }
+      ],
+      "help": "Portfolio assembly (Step 7)",
+      "name": "alpha portfolio"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "15min",
+          "help": "Bar aggregation timeframe",
+          "name": "--timeframe"
+        },
+        {
+          "default": "1.0",
+          "help": "Min backtest Sharpe to simulate",
+          "name": "--backtest-sharpe",
+          "type": "float"
+        },
+        {
+          "default": "0.03",
+          "help": "Min backtest IC to simulate",
+          "name": "--backtest-ic",
+          "type": "float"
+        },
+        {
+          "default": "reports/alpha_paper.json",
+          "help": "Output JSON path",
+          "name": "--output"
+        }
+      ],
+      "help": "Paper trading simulation (Step 8)",
+      "name": "alpha paper"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Run readiness check",
+          "name": "--check"
+        },
+        {
+          "default": "reports/alpha_paper.json",
+          "help": "Paper trading report JSON",
+          "name": "--paper-report"
+        },
+        {
+          "default": "10000.0",
+          "help": "Account value in USD",
+          "name": "--account-value",
+          "type": "float"
+        }
+      ],
+      "help": "Deployment status & readiness (Step 9)",
+      "name": "alpha deploy"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "config/alpha.toml",
+          "help": "Alpha config TOML",
+          "name": "--config"
+        }
+      ],
+      "help": "Start fresh alpha pipeline run (all 9 steps)",
+      "name": "alpha pipeline-start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "config/alpha.toml",
+          "help": "Alpha config TOML",
+          "name": "--config"
+        },
+        {
+          "default": "False",
+          "help": "Continue past GATE_FAILED",
+          "name": "--force-gate"
+        }
+      ],
+      "help": "Resume alpha pipeline from last phase",
+      "name": "alpha pipeline-resume"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "config/alpha.toml",
+          "help": "Alpha config TOML",
+          "name": "--config"
+        }
+      ],
+      "help": "Alpha pipeline state + gate verdicts",
+      "name": "alpha pipeline-status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "config/alpha.toml",
+          "help": "Alpha config TOML",
+          "name": "--config"
+        }
+      ],
+      "help": "Detailed gate report with metrics",
+      "name": "alpha pipeline-gates"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Step number (1-9)",
+          "name": "step",
+          "positional": true
+        },
+        {
+          "default": "config/alpha.toml",
+          "help": "Alpha config TOML",
+          "name": "--config"
+        }
+      ],
+      "help": "Run single alpha pipeline step (1-9)",
+      "name": "alpha pipeline-step"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "help": "Scanner JSON report path",
+          "name": "--report"
+        },
+        {
+          "default": "/home/onat/nat/reports/figures/scanner",
+          "help": "Output directory for plots",
+          "name": "--output"
+        },
+        {
+          "default": "150",
+          "help": "Plot DPI resolution",
+          "name": "--dpi",
+          "type": "int"
+        }
+      ],
+      "help": "Visualization suite",
+      "name": "visualize"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Scanner plots (1-7)",
+      "name": "visualize scan"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Data quality plots (8-10)",
+      "name": "visualize data"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Cluster profiling plots",
+      "name": "visualize profile"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "entropy",
+          "help": "Feature vector (entropy, orderflow, etc.)",
+          "name": "--vector"
+        },
+        {
+          "default": "15min",
+          "help": "Bar aggregation timeframe",
+          "name": "--timeframe"
+        }
+      ],
+      "help": "Hierarchical profiling plots (Phase 8)",
+      "name": "visualize hierarchy"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Feature subset (entropy, orderflow, etc.)",
+          "name": "--subset"
+        },
+        {
+          "default": "gmm",
+          "help": "Clustering algorithm",
+          "name": "--cluster-method"
+        }
+      ],
+      "help": "Cluster exploration plots (PCA/UMAP/t-SNE)",
+      "name": "visualize cluster"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Skeptical validation diagnostic plots",
+      "name": "visualize skeptical"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "All visualizations",
+      "name": "visualize all"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Build & dev tools (default: release)",
+      "name": "build"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Debug binary",
+      "name": "build debug"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "API server",
+      "name": "build api"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Remove artifacts",
+      "name": "build clean"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Format code",
+      "name": "build fmt"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run clippy",
+      "name": "build lint"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Check code",
+      "name": "build check"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run in foreground (default: ingestor)",
+      "name": "run"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Ingestor + dashboard",
+      "name": "run serve"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "1",
+          "help": "Frequency in Hz",
+          "name": "--freq",
+          "type": "int"
+        }
+      ],
+      "help": "Real-time features",
+      "name": "run show"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Cloudflare tunnel",
+      "name": "run tunnel"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        }
+      ],
+      "help": "Data stats & validation",
+      "name": "data"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "A single .parquet file to validate (default: scan the data dir)",
+          "name": "path",
+          "positional": true
+        },
+        {
+          "help": "Validate only last N hours (ignored for a single file)",
+          "name": "--hours",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "Emit the report as JSON",
+          "name": "--json"
+        }
+      ],
+      "help": "Validate parquet data (a directory or a single file)",
+      "name": "data validate"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Launch Jupyter",
+      "name": "data explore"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Scan parquet schema",
+      "name": "data schema"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Filter to files containing this symbol",
+          "name": "--symbol"
+        },
+        {
+          "help": "Filter to one day YYYY-MM-DD",
+          "name": "--date"
+        },
+        {
+          "help": "Show only the newest N files",
+          "name": "--limit",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "List individual parquet files (path/size/rows/mtime)",
+      "name": "data ls"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Testing (default: all Rust unit tests)",
+      "name": "test"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Rust unit tests",
+      "name": "test unit"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Tests with --nocapture",
+      "name": "test verbose"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol or 'all' (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "16",
+          "help": "Max features per page",
+          "name": "--max-features",
+          "type": "int"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "False",
+          "help": "Stream full ingestor + render logs (default: clean summary)",
+          "name": "--verbose"
+        }
+      ],
+      "help": "Capture 1m of live data then visualize",
+      "name": "test 1m"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol or 'all' (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "16",
+          "help": "Max features per page",
+          "name": "--max-features",
+          "type": "int"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "False",
+          "help": "Stream full ingestor + render logs (default: clean summary)",
+          "name": "--verbose"
+        }
+      ],
+      "help": "Capture 5m of live data then visualize",
+      "name": "test 5m"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol or 'all' (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "16",
+          "help": "Max features per page",
+          "name": "--max-features",
+          "type": "int"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "False",
+          "help": "Stream full ingestor + render logs (default: clean summary)",
+          "name": "--verbose"
+        }
+      ],
+      "help": "Capture 15m of live data then visualize",
+      "name": "test 15m"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Hypothesis tests",
+      "name": "test hypotheses"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Specific validation (omit for all)",
+          "name": "target",
+          "positional": true
+        }
+      ],
+      "help": "Live API validations",
+      "name": "test validate"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Test API endpoints",
+      "name": "test api"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Test Redis",
+      "name": "test redis"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Integration tests",
+      "name": "test integration"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Run with coverage reporting",
+          "name": "--coverage"
+        }
+      ],
+      "help": "Backtest tests",
+      "name": "test backtest"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Run with coverage reporting",
+          "name": "--coverage"
+        }
+      ],
+      "help": "Cluster quality tests",
+      "name": "test cluster"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Run with coverage reporting",
+          "name": "--coverage"
+        }
+      ],
+      "help": "Pipeline tests",
+      "name": "test pipeline"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Pipeline runner tests",
+      "name": "test pipeline-runner"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Dashboard tests",
+      "name": "test dashboard"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Model serving tests",
+      "name": "test serving"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Include integration tests",
+          "name": "--integration"
+        }
+      ],
+      "help": "EAMM tests",
+      "name": "test eamm"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Run with coverage reporting",
+          "name": "--coverage"
+        }
+      ],
+      "help": "Scalp edge scanner tests",
+      "name": "test scan"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Run with coverage reporting",
+          "name": "--coverage"
+        }
+      ],
+      "help": "Scanner visualization tests",
+      "name": "test viz"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "",
+          "name": "--data-dir"
+        },
+        {
+          "default": "BTC",
+          "help": "",
+          "name": "--symbol"
+        },
+        {
+          "default": "1",
+          "help": "",
+          "name": "--hours",
+          "type": "int"
+        }
+      ],
+      "help": "Capture data snapshot + save algorithm baseline",
+      "name": "test snapshot"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run algorithms and compare against baseline",
+      "name": "test regression"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Process framework tests (synthetic + real-data smoke)",
+      "name": "test process"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "whale_flow_simple",
+          "help": "Strategy name (default: whale_flow_simple)",
+          "name": "--strategy"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        }
+      ],
+      "help": "Backtesting",
+      "name": "backtest"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Walk-forward validation",
+      "name": "backtest validate"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "./predictions.parquet",
+          "help": "ML predictions parquet file",
+          "name": "--predictions"
+        },
+        {
+          "default": "0.001",
+          "help": "Entry signal threshold",
+          "name": "--entry",
+          "type": "float"
+        },
+        {
+          "default": "0.0",
+          "help": "Exit signal threshold",
+          "name": "--exit",
+          "type": "float"
+        }
+      ],
+      "help": "ML predictions backtest",
+      "name": "backtest ml"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "./predictions.parquet",
+          "help": "ML predictions parquet file",
+          "name": "--predictions"
+        },
+        {
+          "default": "0.001",
+          "help": "Entry signal threshold",
+          "name": "--entry",
+          "type": "float"
+        },
+        {
+          "default": "0.0",
+          "help": "Exit signal threshold",
+          "name": "--exit",
+          "type": "float"
+        }
+      ],
+      "help": "ML walk-forward",
+      "name": "backtest ml-validate"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "./predictions.parquet",
+          "help": "ML predictions parquet file",
+          "name": "--predictions"
+        },
+        {
+          "default": "0.75",
+          "help": "Entry quantile threshold",
+          "name": "--entry-q",
+          "type": "float"
+        },
+        {
+          "default": "0.5",
+          "help": "Exit quantile threshold",
+          "name": "--exit-q",
+          "type": "float"
+        }
+      ],
+      "help": "ML quantile thresholds",
+      "name": "backtest ml-quantile"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "./predictions.parquet",
+          "help": "ML predictions parquet file",
+          "name": "--predictions"
+        },
+        {
+          "default": "0.001",
+          "help": "Entry signal threshold",
+          "name": "--entry",
+          "type": "float"
+        },
+        {
+          "default": "0.0",
+          "help": "Exit signal threshold",
+          "name": "--exit",
+          "type": "float"
+        },
+        {
+          "default": "long",
+          "help": "Trade direction (long/short)",
+          "name": "--direction"
+        },
+        {
+          "default": "./backtest_results.json",
+          "help": "Output results JSON",
+          "name": "--output"
+        }
+      ],
+      "help": "ML with tracking",
+      "name": "backtest ml-tracked"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "List strategies",
+      "name": "backtest list"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Funding rate reversion backtest",
+      "name": "backtest funding"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Algorithm name",
+          "name": "--algorithm",
+          "required": true
+        },
+        {
+          "help": "Feature column for signal (default: first)",
+          "name": "--feature"
+        },
+        {
+          "default": "0.3",
+          "help": "Entry threshold (default: 0.3)",
+          "name": "--entry-threshold",
+          "type": "float"
+        },
+        {
+          "default": "-0.1",
+          "help": "Exit threshold (default: -0.1)",
+          "name": "--exit-threshold",
+          "type": "float"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        }
+      ],
+      "help": "Backtest using algorithm features as signals",
+      "name": "backtest algorithm"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Model training & serving",
+      "name": "model"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "baseline_30d",
+          "help": "Dataset snapshot name",
+          "name": "--snapshot"
+        },
+        {
+          "default": "elasticnet",
+          "help": "Model type (elasticnet/lightgbm)",
+          "name": "--type"
+        },
+        {
+          "default": "./models",
+          "help": "Model output directory",
+          "name": "--output-dir"
+        }
+      ],
+      "help": "Train baseline model",
+      "name": "model train"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Auto BIC selection",
+          "name": "--auto"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        }
+      ],
+      "help": "Train GMM classifier",
+      "name": "model train-gmm"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "60",
+          "help": "Forward return horizon in bars (default: 60 = 5h)",
+          "name": "--horizon",
+          "type": "int"
+        },
+        {
+          "default": "0.5",
+          "help": "L1 z-score gate threshold",
+          "name": "--l1-threshold",
+          "type": "float"
+        },
+        {
+          "help": "Earliest date (YYYY-MM-DD)",
+          "name": "--start-date"
+        },
+        {
+          "default": "False",
+          "help": "Evaluate only, no save",
+          "name": "--dry-run"
+        },
+        {
+          "default": "False",
+          "help": "Run layer ablation analysis (auto with --dry-run)",
+          "name": "--ablation"
+        },
+        {
+          "default": "walk_forward",
+          "help": "Validation method (default: walk_forward)",
+          "name": "--validation-mode"
+        }
+      ],
+      "help": "Train hierarchical signal combiner",
+      "name": "model train-hier"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "./models",
+          "help": "Model directory",
+          "name": "--model-dir"
+        }
+      ],
+      "help": "List models",
+      "name": "model list"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "models/latest.pkl",
+          "help": "Model file path",
+          "name": "--model"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "False",
+          "help": "Save predictions to file",
+          "name": "--save"
+        },
+        {
+          "default": "./predictions.parquet",
+          "help": "Predictions output path",
+          "name": "--output"
+        }
+      ],
+      "help": "Score data",
+      "name": "model score"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "8000",
+          "help": "Server port (default: 8000)",
+          "name": "--port",
+          "type": "int"
+        },
+        {
+          "default": "0.0.0.0",
+          "help": "Server host (default: 0.0.0.0)",
+          "name": "--host"
+        },
+        {
+          "default": "5",
+          "help": "Model cache size",
+          "name": "--cache-size",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "Hot-reload mode",
+          "name": "--dev"
+        },
+        {
+          "default": "False",
+          "help": "Serve best model",
+          "name": "--best"
+        },
+        {
+          "default": "sharpe_ratio",
+          "help": "Metric to select best model",
+          "name": "--metric"
+        }
+      ],
+      "help": "Model serving API",
+      "name": "model serve"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Cluster analysis",
+      "name": "cluster"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "24",
+          "help": "Hours of data to analyze",
+          "name": "--hours",
+          "type": "int"
+        }
+      ],
+      "help": "Analyze cluster quality",
+      "name": "cluster analyze"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        }
+      ],
+      "help": "Analyze with GMM",
+      "name": "cluster gmm"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        }
+      ],
+      "help": "Analyze all symbols",
+      "name": "cluster all"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Q3 predictive quality test",
+      "name": "cluster quality"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "help": "Feature subset (entropy, orderflow, etc.)",
+          "name": "--subset"
+        },
+        {
+          "default": "gmm",
+          "help": "Clustering algorithm",
+          "name": "--method"
+        }
+      ],
+      "help": "Exploratory clustering (PCA/UMAP/t-SNE)",
+      "name": "cluster explore"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "3",
+          "help": "Number of hidden states",
+          "name": "--n-states",
+          "type": "int"
+        },
+        {
+          "default": "100",
+          "help": "Max EM iterations",
+          "name": "--n-iter",
+          "type": "int"
+        },
+        {
+          "default": "full",
+          "help": "Covariance type",
+          "name": "--covariance"
+        },
+        {
+          "default": "15min",
+          "help": "Bar aggregation timeframe",
+          "name": "--timeframe"
+        },
+        {
+          "default": "reports/hmm_fit.json",
+          "help": "Output JSON path",
+          "name": "--output"
+        }
+      ],
+      "help": "Fit HMM on feature data (Baum-Welch)",
+      "name": "cluster hmm-fit"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Validation suites",
+      "name": "validate"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "reports/skeptical_validation",
+          "help": "Output directory",
+          "name": "--output"
+        }
+      ],
+      "help": "20+ statistical tests before investment",
+      "name": "validate skeptical"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "18000",
+          "help": "Forward horizon in ticks (default: 18000)",
+          "name": "--horizon",
+          "type": "int"
+        },
+        {
+          "help": "Output JSON report path",
+          "name": "--json-report"
+        },
+        {
+          "help": "Start date filter (YYYY-MM-DD)",
+          "name": "--start-date"
+        },
+        {
+          "help": "End date filter (YYYY-MM-DD)",
+          "name": "--end-date"
+        },
+        {
+          "default": "200",
+          "help": "Permutation test iterations",
+          "name": "--n-permutations",
+          "type": "int"
+        }
+      ],
+      "help": "Skeptical regression signal test battery (10 tests)",
+      "name": "validate regression"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Experiment tracking",
+      "name": "experiment"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Filter by stage",
+          "name": "--stage"
+        }
+      ],
+      "help": "List experiments",
+      "name": "experiment list"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Experiment ID",
+          "name": "--id",
+          "required": true
+        }
+      ],
+      "help": "Get experiment details",
+      "name": "experiment get"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Space-separated experiment IDs",
+          "name": "--ids",
+          "required": true
+        }
+      ],
+      "help": "Compare experiments",
+      "name": "experiment compare"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "sharpe_ratio",
+          "help": "Metric to rank by",
+          "name": "--metric"
+        }
+      ],
+      "help": "Find best",
+      "name": "experiment best"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "baseline_30d",
+          "help": "Dataset snapshot name",
+          "name": "--snapshot"
+        },
+        {
+          "default": "elasticnet",
+          "help": "Model type (elasticnet/lightgbm)",
+          "name": "--type"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "0.001",
+          "help": "Entry signal threshold",
+          "name": "--entry",
+          "type": "float"
+        },
+        {
+          "default": "0.0",
+          "help": "Exit signal threshold",
+          "name": "--exit",
+          "type": "float"
+        },
+        {
+          "default": "./predictions.parquet",
+          "help": "Predictions parquet path",
+          "name": "--predictions"
+        },
+        {
+          "default": "./backtest_results.json",
+          "help": "Output results JSON",
+          "name": "--output"
+        }
+      ],
+      "help": "Full ML workflow",
+      "name": "experiment workflow"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Snapshot name",
+          "name": "--name",
+          "required": true
+        },
+        {
+          "help": "Snapshot description",
+          "name": "--description"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        }
+      ],
+      "help": "Create dataset snapshot",
+      "name": "experiment snapshot"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "/home/onat/nat/config/pipeline.toml",
+          "help": "Pipeline config TOML",
+          "name": "--config"
+        }
+      ],
+      "help": "Automated pipeline",
+      "name": "pipeline"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Start pipeline",
+      "name": "pipeline start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Resume from saved state",
+      "name": "pipeline resume"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Analyze existing data",
+      "name": "pipeline analyze"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Stop pipeline",
+      "name": "pipeline stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Show state",
+      "name": "pipeline status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "8050",
+          "help": "Dashboard port (default: 8050)",
+          "name": "--port",
+          "type": "int"
+        }
+      ],
+      "help": "Pipeline dashboard",
+      "name": "pipeline dashboard"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Signal testing",
+      "name": "signal"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "3000",
+          "help": "Forward horizon in ticks (1 tick=100ms)",
+          "name": "--horizon",
+          "type": "int"
+        },
+        {
+          "default": "1.0",
+          "help": "Spread cost in basis points",
+          "name": "--spread-bps",
+          "type": "float"
+        },
+        {
+          "default": "False",
+          "help": "Remove forward-looking features",
+          "name": "--remove-leaky"
+        }
+      ],
+      "help": "Signal existence test",
+      "name": "signal test"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "3000",
+          "help": "Forward horizon in ticks (1 tick=100ms)",
+          "name": "--horizon",
+          "type": "int"
+        },
+        {
+          "default": "1.0",
+          "help": "Spread cost in basis points",
+          "name": "--spread-bps",
+          "type": "float"
+        }
+      ],
+      "help": "Full symbol sweep",
+      "name": "signal test-all"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "EAMM market making",
+      "name": "eamm"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "3000",
+          "help": "Forward horizon in ticks",
+          "name": "--horizon",
+          "type": "int"
+        },
+        {
+          "default": "regression",
+          "help": "Pipeline mode (default: regression)",
+          "name": "--mode"
+        }
+      ],
+      "help": "Full EAMM pipeline",
+      "name": "eamm run"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "3000",
+          "help": "Forward horizon in ticks",
+          "name": "--horizon",
+          "type": "int"
+        }
+      ],
+      "help": "Regime analysis",
+      "name": "eamm regime"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "3000",
+          "help": "Forward horizon in ticks",
+          "name": "--horizon",
+          "type": "int"
+        },
+        {
+          "default": "0.1",
+          "help": "Risk aversion parameter",
+          "name": "--gamma",
+          "type": "float"
+        },
+        {
+          "default": "1.0",
+          "help": "Maximum inventory",
+          "name": "--q-max",
+          "type": "float"
+        }
+      ],
+      "help": "Stateful backtest",
+      "name": "eamm backtest"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "API & alert services",
+      "name": "api"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Start API server",
+      "name": "api start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Telegram alerts",
+      "name": "api alerts"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Full stack in tmux",
+      "name": "api serve-all"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Experiment runner",
+      "name": "exp"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Start ingestor in tmux",
+      "name": "exp start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Stop ingestor",
+      "name": "exp stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Health + data stats",
+      "name": "exp status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "24",
+          "help": "Hours of data to validate",
+          "name": "--hours",
+          "type": "int"
+        }
+      ],
+      "help": "Daily validation",
+      "name": "exp check"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Full validation",
+      "name": "exp midweek"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "End-of-experiment",
+      "name": "exp analyze"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Show dashboard URL",
+      "name": "exp dashboard"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Cloudflare tunnel",
+      "name": "exp tunnel"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Microstructure algorithm evaluation",
+      "name": "algorithm"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Algorithm name (default: all)",
+          "name": "--algorithm"
+        },
+        {
+          "default": "False",
+          "help": "Evaluate all registered algorithms",
+          "name": "--all"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "help": "Output JSON report path",
+          "name": "--json-report"
+        }
+      ],
+      "help": "Run IC/drift evaluation",
+      "name": "algorithm evaluate"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "List registered algorithms + lifecycle state + IC",
+      "name": "algorithm list"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "",
+      "name": "algorithm ls"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Specific algorithm section",
+          "name": "section",
+          "positional": true
+        }
+      ],
+      "help": "Show algorithm configuration (from algorithms.toml)",
+      "name": "algorithm config"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "",
+      "name": "alg"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Algorithm name (default: all)",
+          "name": "--algorithm"
+        },
+        {
+          "default": "False",
+          "help": "Evaluate all registered algorithms",
+          "name": "--all"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "help": "Output JSON report path",
+          "name": "--json-report"
+        }
+      ],
+      "help": "Run IC/drift evaluation",
+      "name": "alg evaluate"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "List registered algorithms + lifecycle state + IC",
+      "name": "alg list"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "",
+      "name": "alg ls"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Specific algorithm section",
+          "name": "section",
+          "positional": true
+        }
+      ],
+      "help": "Show algorithm configuration (from algorithms.toml)",
+      "name": "alg config"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Build distributables (.deb)",
+      "name": "package"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Skip the release Rust build (use existing binaries)",
+          "name": "--no-build"
+        }
+      ],
+      "help": "Build the nat .deb (packaging/build_deb.sh)",
+      "name": "package deb"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Metric catalogue (IC, MI, TE, Sharpe, \u2026)",
+      "name": "metrics"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Filter: core | information-theory",
+          "name": "--category"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "List all metrics (name/category/definition)",
+      "name": "metrics ls"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Filter: core | information-theory",
+          "name": "--category"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "",
+      "name": "metrics list"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Metric name (see nat metrics ls)",
+          "name": "name",
+          "positional": true
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Show one metric (formula + estimator docstring)",
+      "name": "metrics show"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Analytical processes (IC sweep, MI/TE, spectral, ML importance)",
+      "name": "process"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "",
+          "name": "--kind"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "List registered processes",
+      "name": "process list"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Process name (see `nat process list`)",
+          "name": "name",
+          "positional": true
+        },
+        {
+          "default": "BTC",
+          "help": "",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "help": "Bar timeframe (default from processes.toml)",
+          "name": "--timeframe"
+        },
+        {
+          "help": "e.g. 2026-06-05",
+          "name": "--start-date"
+        },
+        {
+          "help": "",
+          "name": "--end-date"
+        },
+        {
+          "help": "Comma-separated name prefixes to score",
+          "name": "--features"
+        },
+        {
+          "default": "[]",
+          "help": "Process param override (repeatable)",
+          "name": "--param"
+        },
+        {
+          "help": "Evaluation process chained onto transform output",
+          "name": "--score-with"
+        },
+        {
+          "default": "False",
+          "help": "Skip persistence",
+          "name": "--no-save"
+        },
+        {
+          "default": "False",
+          "help": "Print full result JSON",
+          "name": "--json"
+        }
+      ],
+      "help": "Run a process on feature data",
+      "name": "process run"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Filter by process name",
+          "name": "--process"
+        },
+        {
+          "help": "",
+          "name": "--symbol"
+        },
+        {
+          "default": "20",
+          "help": "",
+          "name": "--limit",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "List past runs from the nat.db index",
+      "name": "process results"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "",
+          "name": "run_id",
+          "positional": true
+        },
+        {
+          "default": "20",
+          "help": "Findings rows to print",
+          "name": "--top",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Show one run record",
+      "name": "process show"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Path to nat.db (default: data/nat.db)",
+          "name": "--db"
+        }
+      ],
+      "help": "Signal promotion lifecycle (DISCOVERED\u2192LIVE\u2192RETIRED)",
+      "name": "lifecycle"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Count signals by state",
+      "name": "lifecycle status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Filter by state",
+          "name": "--state"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "List signals",
+      "name": "lifecycle list"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "",
+          "name": "signal_id",
+          "positional": true
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Transition history for one signal",
+      "name": "lifecycle history"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "",
+          "name": "signal_id",
+          "positional": true
+        },
+        {
+          "default": "False",
+          "help": "Actually promote (else dry-run)",
+          "name": "--confirm"
+        }
+      ],
+      "help": "APPROVAL_PENDING \u2192 LIVE (human gate)",
+      "name": "lifecycle approve"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "",
+          "name": "signal_id",
+          "positional": true
+        },
+        {
+          "help": "Rejection reason",
+          "name": "--reason"
+        }
+      ],
+      "help": "Reject a pre-LIVE signal",
+      "name": "lifecycle reject"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Seed deployable winners (idempotent)",
+      "name": "lifecycle seed"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Kill-switch daemon + halt control (T16)",
+      "name": "risk"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Show current halt state",
+      "name": "risk status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Actually clear the halt",
+          "name": "--confirm"
+        }
+      ],
+      "help": "Clear a halt (kill_strategy refused; halt_review/halt need --confirm)",
+      "name": "risk resume"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run the kill-switch daemon (foreground)",
+      "name": "risk start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Graceful shutdown (SIGTERM)",
+      "name": "risk stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Data-gap alert daemon (Telegram page on ingestion stall, T0b)",
+      "name": "gap"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Show current gap state",
+      "name": "gap status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "One-shot freshness check (exit 1 if gapping)",
+      "name": "gap check"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run the gap-alert daemon (foreground)",
+      "name": "gap start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Graceful shutdown (SIGTERM)",
+      "name": "gap stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Remove the watchdog cron",
+          "name": "--remove"
+        }
+      ],
+      "help": "Install cron watchdog (auto-restart every 5 min)",
+      "name": "gap watchdog"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "systemd --user supervision: reboot-proof ingestor + gap daemon",
+      "name": "service"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Install + enable units (replaces tmux+cron; brief ingestor restart)",
+      "name": "service install"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Remove units, restore the tmux+cron path",
+      "name": "service uninstall"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Unit active/enabled + linger state",
+      "name": "service status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "",
+          "name": "target",
+          "positional": true
+        }
+      ],
+      "help": "Restart a unit",
+      "name": "service restart"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Signal promotion daemon (lifecycle automation, T14)",
+      "name": "promotion"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Signals by state + clean-day guard",
+      "name": "promotion status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Log intended transitions without applying",
+          "name": "--dry-run"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Run a single promotion cycle",
+      "name": "promotion once"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run the promotion daemon (foreground)",
+      "name": "promotion start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Graceful shutdown (SIGTERM)",
+      "name": "promotion stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Signal bridge daemon \u2014 executes LIVE signals under risk gating (T17)",
+      "name": "bridge"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Mode / halt state / LIVE signals",
+      "name": "bridge status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "No orders (the default)",
+          "name": "--dry-run"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Run a single execution cycle",
+      "name": "bridge once"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run the bridge daemon (foreground)",
+      "name": "bridge start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Graceful shutdown (SIGTERM)",
+      "name": "bridge stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Terminal-first visualization (features/algorithm/paper)",
+      "name": "viz"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Parquet file (full path or bare name resolved in data dir)",
+          "name": "file",
+          "positional": true
+        },
+        {
+          "default": "1m",
+          "help": "Bar timeframe for the curated panels (default: 1m)",
+          "name": "--tf"
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "16",
+          "help": "Max features per page",
+          "name": "--max-features",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "Raw-tick top-variance quick-look (old slice_viewer) instead of curated panels",
+          "name": "--raw"
+        },
+        {
+          "help": "(--raw only) Rows: 0:500, a count like 200, or 'all'",
+          "name": "--slice"
+        },
+        {
+          "help": "(--raw only) Comma-separated columns (default: top-variance)",
+          "name": "--cols"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Data dir for bare-name lookup",
+          "name": "--data"
+        },
+        {
+          "default": "False",
+          "help": "Keep the rendered PNGs",
+          "name": "--no-delete"
+        },
+        {
+          "default": "False",
+          "help": "Emit manifest instead of opening",
+          "name": "--json"
+        }
+      ],
+      "help": "Curated snapshot of one parquet file \u2192 show \u2192 delete",
+      "name": "viz file"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "",
+          "name": "--symbol"
+        },
+        {
+          "help": "Last N hours only",
+          "name": "--hours",
+          "type": "float"
+        },
+        {
+          "default": "False",
+          "help": "Skip all-NaN features",
+          "name": "--alive-only"
+        },
+        {
+          "default": "40",
+          "help": "Rows to show",
+          "name": "--top",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Per-feature overview (value/z/NaN%/IC/sparkline)",
+      "name": "viz features"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Algorithm name (see nat algorithm list)",
+          "name": "name",
+          "positional": true
+        },
+        {
+          "default": "BTC",
+          "help": "",
+          "name": "--symbol"
+        },
+        {
+          "help": "Last N hours only",
+          "name": "--hours",
+          "type": "float"
+        },
+        {
+          "default": "50",
+          "help": "Forward-return horizon (ticks)",
+          "name": "--horizon",
+          "type": "int"
+        },
+        {
+          "default": "0.3",
+          "help": "Entry threshold on |signal|",
+          "name": "--threshold",
+          "type": "float"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Algorithm signal timeline, IC, entry/exit, P&L proxy",
+      "name": "viz algorithm"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Signal/algorithm name (e.g. 3f_liquidity, jump_detector)",
+          "name": "name",
+          "positional": true
+        },
+        {
+          "default": "BTC",
+          "help": "",
+          "name": "--symbol"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Approval evidence: P&L, IC decay, G8 scorecard (NAT6)",
+      "name": "viz paper"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "1",
+          "help": "1 P&L \u00b7 2 exposure \u00b7 3 correlation \u00b7 4 risk",
+          "name": "--tab",
+          "type": "int"
+        },
+        {
+          "default": "BTC",
+          "help": "",
+          "name": "--symbol"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Portfolio P&L / exposure / correlation / risk (NAT7)",
+      "name": "viz portfolio"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "15m",
+          "help": "Time granularity / page width (default: 15m)",
+          "name": "--tf"
+        },
+        {
+          "help": "1-based page: omit for whole-day overview, N to zoom into the Nth window",
+          "name": "index",
+          "positional": true
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol or 'all' (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "help": "Day YYYY-MM-DD (default: latest available)",
+          "name": "--date"
+        },
+        {
+          "help": "Render the last N of the freshest readable data (e.g. 15m, 1h); bypasses --date/INDEX",
+          "name": "--last"
+        },
+        {
+          "help": "Scope to a category / named vector / comma-list / 'all' (renders a per-feature panel grid instead of the curated panels)",
+          "name": "--features"
+        },
+        {
+          "default": "16",
+          "help": "With --features, cap the grid to top-N by variance (default: 16)",
+          "name": "--max-features",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "Open the produced PNG(s) with the default viewer",
+          "name": "--open"
+        },
+        {
+          "help": "Output directory (default: reports/figures/snapshots)",
+          "name": "--output"
+        }
+      ],
+      "help": "Paged PNG viewer at 1m/5m/15m (overview, or page INDEX)",
+      "name": "viz render"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "15m",
+          "help": "Time granularity / page width (default: 15m)",
+          "name": "--tf"
+        },
+        {
+          "help": "1-based page: omit for whole-day overview, N for the Nth window",
+          "name": "index",
+          "positional": true
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "help": "Day YYYY-MM-DD (default: latest available)",
+          "name": "--date"
+        },
+        {
+          "help": "Category, named vector, comma-list, or 'all' (default: all, capped)",
+          "name": "--features"
+        },
+        {
+          "default": "zscore",
+          "help": "Per-feature normalization (default: zscore)",
+          "name": "--z"
+        },
+        {
+          "default": "40",
+          "help": "Cap y-axis to top-N features by variance (default: 40)",
+          "name": "--max-features",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "Static PNG via the native natviz3d binary (no Plotly/kaleido)",
+          "name": "--png"
+        },
+        {
+          "default": "False",
+          "help": "Open the produced HTML/PNG with the default viewer",
+          "name": "--open"
+        },
+        {
+          "help": "Output directory (default: reports/figures/mesh)",
+          "name": "--output"
+        }
+      ],
+      "help": "Interactive 3D feature-surface-over-time (Plotly HTML)",
+      "name": "viz3d"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "15m",
+          "help": "Time granularity / page width (default: 15m)",
+          "name": "--tf"
+        },
+        {
+          "help": "1-based page: omit for whole-day overview, N for the Nth window",
+          "name": "index",
+          "positional": true
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "help": "Day YYYY-MM-DD (default: latest available)",
+          "name": "--date"
+        },
+        {
+          "help": "Category, named vector, comma-list, or 'all' (default: all, capped)",
+          "name": "--features"
+        },
+        {
+          "default": "zscore",
+          "help": "Per-feature normalization (default: zscore)",
+          "name": "--z"
+        },
+        {
+          "default": "40",
+          "help": "Cap y-axis to top-N features by variance (default: 40)",
+          "name": "--max-features",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "Static PNG via the native natviz3d binary (no Plotly/kaleido)",
+          "name": "--png"
+        },
+        {
+          "default": "False",
+          "help": "Open the produced HTML/PNG with the default viewer",
+          "name": "--open"
+        },
+        {
+          "help": "Output directory (default: reports/figures/mesh)",
+          "name": "--output"
+        }
+      ],
+      "help": "",
+      "name": "mesh"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "300",
+          "help": "Signal bridge cycle seconds (default: 300)",
+          "name": "--cycle",
+          "type": "int"
+        }
+      ],
+      "help": "MF 3-feature liquidity signal (100min)",
+      "name": "alg1"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol for watch mode (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "300",
+          "help": "Watch poll interval seconds (default: 300)",
+          "name": "--poll",
+          "type": "int"
+        }
+      ],
+      "help": "Paper trader batch + watch",
+      "name": "alg1 paper"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "300",
+          "help": "Signal bridge cycle seconds (default: 300)",
+          "name": "--cycle",
+          "type": "int"
+        }
+      ],
+      "help": "LIVE orders on Hyperliquid (requires HL_PRIVATE_KEY)",
+      "name": "alg1 live"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "data/features",
+          "help": "Feature data directory",
+          "name": "--data-dir"
+        },
+        {
+          "default": "['BTC', 'ETH', 'SOL']",
+          "help": "Symbols to test",
+          "name": "--symbols"
+        }
+      ],
+      "help": "30-day OOS validation for winning algorithms",
+      "name": "oos30"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "30d",
+          "help": "Trailing window in trading days, e.g. 30d (default: 30d)",
+          "name": "--window"
+        },
+        {
+          "default": "['BTC', 'ETH', 'SOL']",
+          "help": "",
+          "name": "--symbols"
+        },
+        {
+          "help": "Algorithms to analyze (default: the 5 deployables)",
+          "name": "--algos"
+        },
+        {
+          "default": "0.67",
+          "help": "Walk-forward train fraction (default: 0.67)",
+          "name": "--train-frac",
+          "type": "float"
+        }
+      ],
+      "help": "Longitudinal OOS validation over a trailing window of gauntlet P&L",
+      "name": "oos"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Test date (YYYY-MM-DD). Default: latest.",
+          "name": "--date",
+          "type": "str"
+        },
+        {
+          "default": "data/features",
+          "help": "Feature data directory",
+          "name": "--data-dir"
+        },
+        {
+          "default": "4.0",
+          "help": "Minimum hours of data (default: 4)",
+          "name": "--min-hours",
+          "type": "float"
+        },
+        {
+          "default": "['BTC', 'ETH', 'SOL']",
+          "help": "Symbols to test",
+          "name": "--symbols"
+        },
+        {
+          "default": "False",
+          "help": "Don't save report file",
+          "name": "--no-save"
+        },
+        {
+          "default": "binance_vip9",
+          "help": "Cost model (default: binance_vip9 = 1.61 bps RT)",
+          "name": "--cost-mode"
+        }
+      ],
+      "help": "Daily 6-hour OOS snapshot for winning algorithms",
+      "name": "daily"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Multi-day OOS sweep across all algorithms",
+      "name": "gauntlet"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Only test the last N dates",
+          "name": "--last",
+          "type": "int"
+        },
+        {
+          "help": "Start date (YYYY-MM-DD)",
+          "name": "--from",
+          "type": "str"
+        },
+        {
+          "help": "End date (YYYY-MM-DD)",
+          "name": "--to",
+          "type": "str"
+        },
+        {
+          "default": "data/features",
+          "help": "Feature data directory",
+          "name": "--data-dir"
+        },
+        {
+          "default": "['BTC', 'ETH', 'SOL']",
+          "help": "Symbols to test",
+          "name": "--symbols"
+        },
+        {
+          "help": "Only run these algorithms",
+          "name": "--algos"
+        },
+        {
+          "help": "Run all algorithms except these",
+          "name": "--exclude-algos"
+        },
+        {
+          "default": "binance_vip9",
+          "help": "Cost model (default: binance_vip9 = 1.61 bps RT)",
+          "name": "--cost-mode"
+        }
+      ],
+      "help": "Start the sweep",
+      "name": "gauntlet run"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Stop running gauntlet, print partial results",
+      "name": "gauntlet stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Print the latest gauntlet report",
+      "name": "gauntlet report"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Merge all gauntlet runs into combined summary",
+      "name": "gauntlet report_all"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "7",
+          "help": "Lookback: last N available dates (default 7)",
+          "name": "--last",
+          "type": "int"
+        },
+        {
+          "default": "data/features",
+          "help": "Feature data directory",
+          "name": "--data-dir"
+        },
+        {
+          "default": "['BTC', 'ETH', 'SOL']",
+          "help": "Symbols to analyze",
+          "name": "--symbols"
+        },
+        {
+          "default": "False",
+          "help": "Coarser subsampling, never launch the screener",
+          "name": "--quick"
+        },
+        {
+          "default": "False",
+          "help": "Use cached gauntlet results instead of running the sweep",
+          "name": "--skip-gauntlet"
+        },
+        {
+          "default": "False",
+          "help": "Include slow algos excluded by default (cascade_probability)",
+          "name": "--full-gauntlet"
+        },
+        {
+          "help": "Comma list: health,wiring,features,gauntlet,viz",
+          "name": "--sections",
+          "type": "str"
+        }
+      ],
+      "help": "Overnight feature stats + algo performance report",
+      "name": "nightly"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Print latest nightly summary",
+      "name": "nightly report"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Open latest nightly HTML report",
+      "name": "nightly open"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Continuous algorithm testing engine",
+      "name": "tournament"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run a single evaluation cycle",
+      "name": "tournament run"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Start background daemon",
+      "name": "tournament start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Stop daemon",
+      "name": "tournament stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Show daemon state and DB stats",
+      "name": "tournament status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Current leaderboard",
+      "name": "tournament rankings"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Algorithm name",
+          "name": "algorithm",
+          "positional": true
+        },
+        {
+          "default": "30",
+          "help": "Number of days (default: 30)",
+          "name": "--days",
+          "type": "int"
+        }
+      ],
+      "help": "Per-day history for one algorithm",
+      "name": "tournament history"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "First algorithm",
+          "name": "algo_a",
+          "positional": true
+        },
+        {
+          "help": "Second algorithm",
+          "name": "algo_b",
+          "positional": true
+        }
+      ],
+      "help": "Head-to-head comparison of two algorithms",
+      "name": "tournament compare"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Generate markdown report",
+      "name": "tournament report"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Kalman filter research (OU filter IC + drift analysis)",
+      "name": "kalman"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "False",
+          "help": "Run on all symbols",
+          "name": "--all-symbols"
+        },
+        {
+          "help": "Output JSON report path",
+          "name": "--json-report"
+        }
+      ],
+      "help": "Phase 1: Kalman filter IC analysis",
+      "name": "kalman analysis"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Trading symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "default": "False",
+          "help": "Run on all symbols",
+          "name": "--all-symbols"
+        },
+        {
+          "help": "Output JSON report path",
+          "name": "--json-report"
+        },
+        {
+          "default": "2",
+          "help": "Execution latency in ticks (default: 2)",
+          "name": "--latency-ticks",
+          "type": "int"
+        }
+      ],
+      "help": "Phase 2: Drift analysis (latency-aware)",
+      "name": "kalman drift"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Backtest audit and parameter sweep tools",
+      "name": "audit"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Directory containing walk_forward_*.json files",
+          "name": "audit_dir",
+          "positional": true
+        }
+      ],
+      "help": "Aggregate walk-forward backtest results",
+      "name": "audit aggregate"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "/home/onat/nat/data/features",
+          "help": "Feature data directory",
+          "name": "--data"
+        },
+        {
+          "help": "Symbols to sweep (default: BTC ETH SOL)",
+          "name": "--symbols"
+        },
+        {
+          "help": "Timeframes (default: 5min 15min 1h)",
+          "name": "--timeframes"
+        },
+        {
+          "default": "False",
+          "help": "Verbose output",
+          "name": "-v"
+        }
+      ],
+      "help": "Systematic parameter sweep across symbols/timeframes",
+      "name": "audit sweep"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Fetch historical data from exchanges",
+      "name": "fetch"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "['BTC']",
+          "help": "Symbols to fetch (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "1m",
+          "help": "Candle interval (default: 1m)",
+          "name": "--interval"
+        },
+        {
+          "default": "90",
+          "help": "Days of history (default: 90)",
+          "name": "--days",
+          "type": "int"
+        },
+        {
+          "help": "Start date (ISO, overrides --days)",
+          "name": "--start"
+        }
+      ],
+      "help": "Fetch OHLCV candles from Hyperliquid",
+      "name": "fetch candles"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Alpha discovery orchestrator",
+      "name": "discovery"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Launch discovery orchestrator",
+      "name": "discovery start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run single sweep",
+      "name": "discovery once"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Current state",
+      "name": "discovery status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Stop orchestrator",
+      "name": "discovery stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Comprehensive system health check (all components)",
+      "name": "health"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Configuration inspection",
+      "name": "config"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Full config dump (all TOML files merged)",
+      "name": "config show"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Config key in dot notation (e.g., agent.agent.ic_threshold)",
+          "name": "key",
+          "positional": true
+        }
+      ],
+      "help": "Get specific config value (file.section.key)",
+      "name": "config get"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Check all config files for syntax errors",
+      "name": "config validate"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Show resolved data/config/log/report locations",
+      "name": "config paths"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Report management",
+      "name": "reports"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Most recent report per category",
+      "name": "reports latest"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Report file path",
+          "name": "path",
+          "positional": true
+        }
+      ],
+      "help": "Print report content",
+      "name": "reports show"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "List all commands with descriptions",
+      "name": "commands"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Remote host (default: su-35, env: NAT_DEPLOY_HOST)",
+          "name": "--host",
+          "type": "str"
+        },
+        {
+          "help": "Remote dir (default: ~/nat, env: NAT_DEPLOY_DIR)",
+          "name": "--dir",
+          "type": "str"
+        }
+      ],
+      "help": "Deploy ingestor to remote host",
+      "name": "deploy"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "",
+          "name": "--host",
+          "type": "str"
+        },
+        {
+          "help": "",
+          "name": "--dir",
+          "type": "str"
+        }
+      ],
+      "help": "Check remote ingestor status",
+      "name": "deploy status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "",
+          "name": "--host",
+          "type": "str"
+        },
+        {
+          "help": "",
+          "name": "--dir",
+          "type": "str"
+        }
+      ],
+      "help": "Rollback to previous binary",
+      "name": "deploy rollback"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Docker operations",
+      "name": "docker"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Show full build output",
+          "name": "--verbose"
+        },
+        {
+          "help": "Services to build (default: all)",
+          "name": "services",
+          "positional": true
+        }
+      ],
+      "help": "Build images (nat docker build [--verbose] [services...])",
+      "name": "docker build"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Services to start (default: all)",
+          "name": "services",
+          "positional": true
+        }
+      ],
+      "help": "Start services (nat docker up [services...])",
+      "name": "docker up"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Stop services",
+      "name": "docker down"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Show running services",
+      "name": "docker ps"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Services to tail (default: all)",
+          "name": "services",
+          "positional": true
+        }
+      ],
+      "help": "View logs (nat docker logs [services...])",
+      "name": "docker logs"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "Verbose build output",
+          "name": "--verbose"
+        },
+        {
+          "default": "False",
+          "help": "Skip build, start only",
+          "name": "--no-build"
+        },
+        {
+          "default": "False",
+          "help": "Build only, do not start",
+          "name": "--build-only"
+        },
+        {
+          "help": "Services (default: all)",
+          "name": "services",
+          "positional": true
+        }
+      ],
+      "help": "Build + start + verify full stack",
+      "name": "docker stack"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Quick health check of running stack",
+      "name": "docker smoke"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Parameter sweep optimization",
+      "name": "swarm"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "16",
+          "help": "Number of configs (default: 16)",
+          "name": "--instances",
+          "type": "int"
+        },
+        {
+          "default": "24",
+          "help": "Hours of data per eval (default: 24)",
+          "name": "--hours",
+          "type": "int"
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol (default: BTC)",
+          "name": "--symbol",
+          "type": "str"
+        },
+        {
+          "help": "Random seed",
+          "name": "--seed",
+          "type": "int"
+        },
+        {
+          "help": "Max parallel workers",
+          "name": "--workers",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Generate configs and evaluate in parallel",
+      "name": "swarm run"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Show swarm run status",
+      "name": "swarm status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "10",
+          "help": "Number of results (default: 10)",
+          "name": "--top",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Show top configs ranked by Sharpe",
+      "name": "swarm results"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "config/best_algorithms.toml",
+          "help": "Output path",
+          "name": "--export",
+          "type": "str"
+        }
+      ],
+      "help": "Export best config as TOML",
+      "name": "swarm best"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "16",
+          "help": "Number of configs",
+          "name": "--count",
+          "type": "int"
+        },
+        {
+          "default": "data/swarm/configs",
+          "help": "Output directory",
+          "name": "--output",
+          "type": "str"
+        },
+        {
+          "help": "Random seed",
+          "name": "--seed",
+          "type": "int"
+        }
+      ],
+      "help": "Generate configs only (no evaluation)",
+      "name": "swarm generate"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Evolutionary config optimization (Optuna)",
+      "name": "evolve"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "nat_evolve",
+          "help": "Study name (default: nat_evolve)",
+          "name": "--study",
+          "type": "str"
+        },
+        {
+          "default": "cma",
+          "help": "Sampler: cma (continuous), tpe (mixed), nsga2 (multi-objective)",
+          "name": "--sampler"
+        },
+        {
+          "default": "500",
+          "help": "Number of trials (default: 500)",
+          "name": "--trials",
+          "type": "int"
+        },
+        {
+          "default": "1",
+          "help": "Parallel trial threads (default: 1)",
+          "name": "--jobs",
+          "type": "int"
+        },
+        {
+          "help": "Timeout in seconds",
+          "name": "--timeout",
+          "type": "int"
+        },
+        {
+          "default": "42",
+          "help": "Random seed (default: 42)",
+          "name": "--seed",
+          "type": "int"
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol (default: BTC)",
+          "name": "--symbol",
+          "type": "str"
+        },
+        {
+          "default": "720",
+          "help": "Eval window hours (default: 720 = 30d)",
+          "name": "--hours",
+          "type": "int"
+        },
+        {
+          "default": "0.667",
+          "help": "Train fraction (default: 0.667)",
+          "name": "--train-frac",
+          "type": "float"
+        },
+        {
+          "default": "",
+          "help": "Optuna storage URL (default: SQLite)",
+          "name": "--storage",
+          "type": "str"
+        },
+        {
+          "default": "False",
+          "help": "Disable overfit detection",
+          "name": "--no-guard-rails"
+        }
+      ],
+      "help": "Start evolutionary optimization",
+      "name": "evolve start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "nat_evolve",
+          "help": "Study name",
+          "name": "--study",
+          "type": "str"
+        },
+        {
+          "default": "",
+          "help": "Optuna storage URL",
+          "name": "--storage",
+          "type": "str"
+        }
+      ],
+      "help": "Show study status",
+      "name": "evolve status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "nat_evolve",
+          "help": "Study name",
+          "name": "--study",
+          "type": "str"
+        },
+        {
+          "default": "",
+          "help": "Optuna storage URL",
+          "name": "--storage",
+          "type": "str"
+        },
+        {
+          "default": "5",
+          "help": "Number of configs (default: 5)",
+          "name": "--top",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Show best configs",
+      "name": "evolve best"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "nat_evolve",
+          "help": "Study name",
+          "name": "--study",
+          "type": "str"
+        },
+        {
+          "default": "",
+          "help": "Optuna storage URL",
+          "name": "--storage",
+          "type": "str"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Pareto front (NSGA-II)",
+      "name": "evolve pareto"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "nat_evolve",
+          "help": "Study name",
+          "name": "--study",
+          "type": "str"
+        },
+        {
+          "default": "",
+          "help": "Optuna storage URL",
+          "name": "--storage",
+          "type": "str"
+        },
+        {
+          "default": "config/evolved_algorithms.toml",
+          "help": "Output path",
+          "name": "--output",
+          "type": "str"
+        }
+      ],
+      "help": "Export best config as TOML",
+      "name": "evolve export"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "900",
+          "help": "Collection seconds (default: 900)",
+          "name": "--duration",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "Skip clustering phase",
+          "name": "--skip-cluster"
+        }
+      ],
+      "help": "15-minute experiment (ingest \u2192 analyze \u2192 report)",
+      "name": "15m"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Data directory",
+          "name": "--data",
+          "type": "str"
+        },
+        {
+          "default": "False",
+          "help": "Skip clustering phase",
+          "name": "--skip-cluster"
+        }
+      ],
+      "help": "Analyze existing data (no ingestion)",
+      "name": "15m offline"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Data directory (default: latest)",
+          "name": "--data",
+          "type": "str"
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol or \"all\"",
+          "name": "--symbol",
+          "type": "str"
+        },
+        {
+          "help": "Window size in minutes",
+          "name": "--window",
+          "type": "int"
+        },
+        {
+          "default": "all",
+          "help": "Page: 0=basic, 1=advanced, all=both",
+          "name": "--page",
+          "type": "str"
+        },
+        {
+          "default": "True",
+          "help": "Do not auto-open the PNG (default: open)",
+          "name": "--no-open"
+        }
+      ],
+      "help": "Visualize latest experiment",
+      "name": "15m viz"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run unit tests",
+      "name": "15m test"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Paper trade visualization",
+      "name": "trade"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Date (YYYY-MM-DD)",
+          "name": "--date",
+          "type": "str"
+        },
+        {
+          "help": "Date range (inclusive)",
+          "name": "--date-range"
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol or \"all\"",
+          "name": "--symbol",
+          "type": "str"
+        }
+      ],
+      "help": "Visualize paper trades (snapshot PNG)",
+      "name": "trade viz"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Data dir (auto-detects latest)",
+          "name": "--data",
+          "type": "str"
+        },
+        {
+          "default": "all",
+          "help": "Symbol or \"all\" (default: all)",
+          "name": "--symbol",
+          "type": "str"
+        },
+        {
+          "help": "Forward horizons in ticks (1 tick=100ms, default: 10 50 100 300 600)",
+          "name": "--horizons",
+          "type": "int"
+        },
+        {
+          "default": "20",
+          "help": "Top N results to display",
+          "name": "--top",
+          "type": "int"
+        },
+        {
+          "help": "Output directory",
+          "name": "--output",
+          "type": "str"
+        }
+      ],
+      "help": "Spannung signal grid search",
+      "name": "spannung"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Data dir",
+          "name": "--data",
+          "type": "str"
+        },
+        {
+          "default": "all",
+          "help": "Symbol or \"all\"",
+          "name": "--symbol",
+          "type": "str"
+        },
+        {
+          "help": "Horizon in ticks",
+          "name": "--horizon",
+          "type": "int"
+        }
+      ],
+      "help": "Cost-aware backtest + regime gating",
+      "name": "spannung backtest"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Data dir",
+          "name": "--data",
+          "type": "str"
+        },
+        {
+          "default": "all",
+          "help": "Symbol or \"all\"",
+          "name": "--symbol",
+          "type": "str"
+        },
+        {
+          "help": "Output directory",
+          "name": "--output",
+          "type": "str"
+        }
+      ],
+      "help": "Longer-horizon sweep (30s\u201315min bars)",
+      "name": "spannung horizon"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Data dir",
+          "name": "--data",
+          "type": "str"
+        },
+        {
+          "default": "all",
+          "help": "Symbol or \"all\"",
+          "name": "--symbol",
+          "type": "str"
+        },
+        {
+          "help": "Output directory",
+          "name": "--output",
+          "type": "str"
+        }
+      ],
+      "help": "Spectral analysis (PSD, coherence, ACF, band IC)",
+      "name": "spannung spectral"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "Data dir",
+          "name": "--data",
+          "type": "str"
+        },
+        {
+          "default": "all",
+          "help": "Symbol or \"all\"",
+          "name": "--symbol",
+          "type": "str"
+        },
+        {
+          "help": "Output directory",
+          "name": "--output",
+          "type": "str"
+        }
+      ],
+      "help": "Systematic regime condition screener",
+      "name": "spannung regime"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Autonomous research agent",
+      "name": "agent"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Launch agent daemon",
+      "name": "agent start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Graceful shutdown (SIGTERM)",
+      "name": "agent stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run single cycle (testing)",
+      "name": "agent once"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Current state & stats",
+      "name": "agent status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Queued hypotheses by priority",
+      "name": "agent queue"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Validated signals",
+      "name": "agent registry"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Failed hypotheses",
+      "name": "agent graveyard"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Full summary report",
+      "name": "agent report"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "8060",
+          "help": "Dashboard port (default: 8060)",
+          "name": "--port",
+          "type": "int"
+        }
+      ],
+      "help": "Launch web dashboard (port 8060)",
+      "name": "agent dashboard"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Medium-frequency research agent (1min-1h)",
+      "name": "mf-agent"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Launch MF agent daemon (cycles every 2h)",
+      "name": "mf-agent start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Send SIGTERM to running daemon",
+      "name": "mf-agent stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run single discovery cycle (for testing)",
+      "name": "mf-agent once"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Phase, cycle count, generator hit rates",
+      "name": "mf-agent status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Pending hypotheses sorted by priority",
+      "name": "mf-agent queue"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Validated signals with IC and status",
+      "name": "mf-agent registry"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Failed hypotheses with failure reasons",
+      "name": "mf-agent graveyard"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Full summary: registry + graveyard + generator stats",
+      "name": "mf-agent report"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Macro research agent (1h-24h)",
+      "name": "macro-agent"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Launch macro agent daemon",
+      "name": "macro-agent start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Graceful shutdown (SIGTERM)",
+      "name": "macro-agent stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run single cycle (testing)",
+      "name": "macro-agent once"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Current state & stats",
+      "name": "macro-agent status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Queued hypotheses by priority",
+      "name": "macro-agent queue"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Validated signals",
+      "name": "macro-agent registry"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Failed hypotheses",
+      "name": "macro-agent graveyard"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Full summary report",
+      "name": "macro-agent report"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Meta-agent orchestrator (cross-agent)",
+      "name": "meta-agent"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Launch meta-agent daemon",
+      "name": "meta-agent start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Graceful shutdown (SIGTERM)",
+      "name": "meta-agent stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Run single orchestration cycle",
+      "name": "meta-agent once"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Current state & budgets",
+      "name": "meta-agent status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Signal portfolio",
+      "name": "meta-agent portfolio"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Cross-agent correlation matrix",
+      "name": "meta-agent correlation"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Agent budget allocation",
+      "name": "meta-agent budget"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Full orchestrator report",
+      "name": "meta-agent report"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Information-theoretic alpha discovery engine",
+      "name": "it-engine"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "Symbol (default: BTC)",
+          "name": "--symbol"
+        },
+        {
+          "default": "False",
+          "help": "Run on parquet files",
+          "name": "--offline"
+        },
+        {
+          "default": "data/features",
+          "help": "Parquet data dir",
+          "name": "--data-dir"
+        },
+        {
+          "default": "False",
+          "help": "Run 1 cycle and exit",
+          "name": "--dry-run"
+        },
+        {
+          "default": "False",
+          "help": "",
+          "name": "-v"
+        }
+      ],
+      "help": "Start IT engine",
+      "name": "it-engine start"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "",
+          "name": "--symbol"
+        }
+      ],
+      "help": "Stop IT engine",
+      "name": "it-engine stop"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "BTC",
+          "help": "",
+          "name": "--symbol"
+        },
+        {
+          "default": "10",
+          "help": "Top N features",
+          "name": "--top",
+          "type": "int"
+        }
+      ],
+      "help": "Show IT engine status",
+      "name": "it-engine status"
+    }
+  ],
+  "count": 330
+}
