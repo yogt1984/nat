@@ -42,6 +42,37 @@ PY = sys.executable
 
 G, R, Y, B, W, BOLD = "\033[32m", "\033[31m", "\033[33m", "\033[34m", "\033[0m", "\033[1m"
 
+# Time-granularity → (overview bar tf, window minutes, fine page tf). Shared by
+# the viz group and the test-capture flow.
+_TF_MAP = {
+    '1m':  ('1min',  1,  '2s'),
+    '5m':  ('5min',  5,  '10s'),
+    '15m': ('15min', 15, '30s'),
+}
+
+# ── Ops/gap state paths (shared by lifecycle ↔ ops/gap/service groups) ─────────
+GAP_TMUX = "nat-gap-alert"
+_OPS_DIR = nat_paths.state_dir("ops")
+GAP_PIDFILE = _OPS_DIR / "gap_alert.pid"
+GAP_STATE_FILE = _OPS_DIR / "gap_state.json"
+PAUSE_FILE = _OPS_DIR / "ingestion_paused"
+GAP_WATCHDOG_MARKER = "# nat-gap-watchdog"
+
+
+def _set_ingestion_paused(paused: bool):
+    """Write/clear the intentional-pause marker the gap daemon reads.
+
+    Paused = an expected `nat stop`, so no page; cleared on `nat start`."""
+    from datetime import datetime, timezone
+    try:
+        if paused:
+            PAUSE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            PAUSE_FILE.write_text(datetime.now(timezone.utc).isoformat())
+        else:
+            PAUSE_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
+
 
 def ensure_scripts_path():
     """Idempotently put scripts/ on sys.path (replaces the ~30 scattered inserts
@@ -162,6 +193,9 @@ __all__ = [
     "ROOT", "RUST", "BIN_ING", "CONFIG_DIR", "DATA_DEFAULT", "REPORTS_DIR",
     "LOG_DIR", "ING_CFG", "PIPE_CFG", "DEPLOY_HOST", "DEPLOY_DIR", "PY",
     "G", "R", "Y", "B", "W", "BOLD", "nat_paths",
+    # shared ops/viz state
+    "_TF_MAP", "GAP_TMUX", "_OPS_DIR", "GAP_PIDFILE", "GAP_STATE_FILE",
+    "PAUSE_FILE", "GAP_WATCHDOG_MARKER", "_set_ingestion_paused",
     # helpers
     "ensure_scripts_path", "_sh", "_exec", "_cargo", "_py", "_pid", "_p",
     "_banner", "_data", "_sym", "_json_mode", "_output", "_ensure_release",
