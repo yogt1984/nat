@@ -30,6 +30,10 @@ from cli import config as cli_config  # noqa: E402
 from cli.config import *  # noqa: E402,F401,F403
 from cli import data as cli_data  # noqa: E402
 from cli.data import *  # noqa: E402,F401,F403
+from cli import reports as cli_reports  # noqa: E402
+from cli.reports import *  # noqa: E402,F401,F403
+from cli import package as cli_package  # noqa: E402
+from cli.package import *  # noqa: E402,F401,F403
 
 
 def cmd_doctor(args):
@@ -421,18 +425,6 @@ def cmd_report_ls(args):
 
     _output({"reports": items, "count": len(items)}, args, _human)
     return 0
-
-
-def cmd_package_deb(args):
-    """Build the .deb package via packaging/build_deb.sh."""
-    script = ROOT / "packaging" / "build_deb.sh"
-    if not script.exists():
-        _p("x", R, f"Missing {script}")
-        return 1
-    extra = " --no-build" if getattr(args, 'no_build', False) else ""
-    _banner("Building nat .deb")
-    sys.stdout.flush()
-    return _exec(f"bash {script}{extra}").returncode
 
 
 def cmd_dashboard(args):
@@ -3591,93 +3583,6 @@ def cmd_health(args):
                    f"last write {sym_info.get('last_write_s', '?')}s ago")
 
 
-def cmd_reports(args):
-    """List all reports."""
-    reports_dir = REPORTS_DIR
-    if not reports_dir.exists():
-        if _json_mode(args):
-            _output({"reports": []}, args)
-        else:
-            _p("x", R, "No reports directory")
-        return
-
-    entries = []
-    for f in sorted(reports_dir.rglob("*"), key=lambda p: p.stat().st_mtime, reverse=True):
-        if f.is_file():
-            s = f.stat()
-            entries.append({
-                "path": str(f.relative_to(ROOT)),
-                "type": f.suffix.lstrip(".") or "unknown",
-                "size_kb": round(s.st_size / 1024, 1),
-                "modified": datetime.fromtimestamp(s.st_mtime).isoformat(),
-            })
-
-    if _json_mode(args):
-        _output({"reports": entries, "count": len(entries)}, args)
-        return
-
-    print(f"\n  {BOLD}Reports ({len(entries)}){W}\n")
-    for e in entries[:50]:
-        print(f"  {e['modified'][:10]}  {e['size_kb']:>8.1f} KB  {e['path']}")
-    if len(entries) > 50:
-        print(f"\n  ... and {len(entries) - 50} more")
-    print()
-
-
-def cmd_reports_latest(args):
-    """Show most recent report per category."""
-    reports_dir = REPORTS_DIR
-    if not reports_dir.exists():
-        if _json_mode(args):
-            _output({"latest": {}}, args)
-        else:
-            _p("x", R, "No reports directory")
-        return
-
-    categories = {}
-    for f in reports_dir.rglob("*"):
-        if not f.is_file():
-            continue
-        cat = f.parent.name if f.parent != reports_dir else "root"
-        if cat not in categories or f.stat().st_mtime > categories[cat].stat().st_mtime:
-            categories[cat] = f
-
-    if _json_mode(args):
-        result = {cat: {"path": str(f.relative_to(ROOT)),
-                        "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()}
-                  for cat, f in categories.items()}
-        _output({"latest": result}, args)
-        return
-
-    print(f"\n  {BOLD}Latest Reports by Category{W}\n")
-    for cat, f in sorted(categories.items()):
-        mtime = datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-        print(f"  {cat:20s}  {mtime}  {f.relative_to(ROOT)}")
-    print()
-
-
-def cmd_reports_show(args):
-    """Print report content."""
-    p = Path(args.path)
-    if not p.exists():
-        p = ROOT / args.path
-    if not p.exists():
-        _p("x", R, f"Not found: {args.path}")
-        return 1
-    content = p.read_text()
-    if p.suffix == ".json":
-        try:
-            data = _json.loads(content)
-            if _json_mode(args):
-                print(content)
-            else:
-                print(_json.dumps(data, indent=2, default=str))
-        except _json.JSONDecodeError:
-            print(content)
-    else:
-        print(content)
-
-
 def cmd_log_agent(args):
     """Tail agent daemon log."""
     # Check for agent logs in logs/ dir or stdout
@@ -5889,13 +5794,7 @@ def build_parser():
     algc.set_defaults(func=cmd_algorithm_config)
 
     # ── package (build distributables) ──
-    pkg_p = sub.add_parser('package', help='Build distributables (.deb)')
-    pkg_p.set_defaults(func=lambda a: pkg_p.print_help())
-    pkgsub = pkg_p.add_subparsers(dest='subcmd')
-    pkgdeb = pkgsub.add_parser('deb', help='Build the nat .deb (packaging/build_deb.sh)')
-    pkgdeb.add_argument('--no-build', action='store_true',
-                        help='Skip the release Rust build (use existing binaries)')
-    pkgdeb.set_defaults(func=cmd_package_deb)
+    cli_package.register(sub)  # package group → scripts/cli/package.py
 
     cli_metrics.register(sub)  # metrics group → scripts/cli/metrics.py
 
@@ -6475,13 +6374,7 @@ def build_parser():
     cli_config.register(sub)  # config group → scripts/cli/config.py
 
     # ── reports ──
-    rpt_p = sub.add_parser('reports', help='Report management')
-    rpt_p.set_defaults(func=cmd_reports)
-    rptsub = rpt_p.add_subparsers(dest='subcmd')
-    rptsub.add_parser('latest', help='Most recent report per category').set_defaults(func=cmd_reports_latest)
-    rpt_show = rptsub.add_parser('show', help='Print report content')
-    rpt_show.add_argument('path', help='Report file path')
-    rpt_show.set_defaults(func=cmd_reports_show)
+    cli_reports.register(sub)  # reports group → scripts/cli/reports.py
 
     # ── commands (for AI agent discovery) ──
     sub.add_parser('commands', help='List all commands with descriptions').set_defaults(func=cmd_commands)
