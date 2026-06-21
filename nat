@@ -38,6 +38,24 @@ from cli import process as cli_process  # noqa: E402
 from cli.process import *  # noqa: E402,F401,F403
 from cli import algorithm as cli_algorithm  # noqa: E402
 from cli.algorithm import *  # noqa: E402,F401,F403
+from cli import swarm as cli_swarm  # noqa: E402
+from cli.swarm import *  # noqa: E402,F401,F403
+from cli import evolve as cli_evolve  # noqa: E402
+from cli.evolve import *  # noqa: E402,F401,F403
+from cli import gauntlet as cli_gauntlet  # noqa: E402
+from cli.gauntlet import *  # noqa: E402,F401,F403
+from cli import nightly as cli_nightly  # noqa: E402
+from cli.nightly import *  # noqa: E402,F401,F403
+from cli import tournament as cli_tournament  # noqa: E402
+from cli.tournament import *  # noqa: E402,F401,F403
+from cli import kalman as cli_kalman  # noqa: E402
+from cli.kalman import *  # noqa: E402,F401,F403
+from cli import audit as cli_audit  # noqa: E402
+from cli.audit import *  # noqa: E402,F401,F403
+from cli import fetch as cli_fetch  # noqa: E402
+from cli.fetch import *  # noqa: E402,F401,F403
+from cli import discovery as cli_discovery  # noqa: E402
+from cli.discovery import *  # noqa: E402,F401,F403
 
 
 def cmd_doctor(args):
@@ -1338,57 +1356,11 @@ def cmd_alpha_pipeline_run_step(args):
     _py(f"scripts/alpha/alpha_pipeline.py --config {cfg} run-step {args.step}")
 
 
-# ── Audit commands ──────────────────────────────────────────────────────────
-
-def cmd_audit_aggregate(args):
-    _banner("Audit: Aggregate Walk-Forward Results")
-    _py(f"scripts/audit_aggregate.py {args.audit_dir}")
-
-def cmd_audit_sweep(args):
-    _banner("Audit: Parameter Sweep")
-    cmd = f"scripts/audit_sweep.py --data-dir {_data(args)}"
-    symbols = getattr(args, 'symbols', None)
-    if symbols:
-        cmd += " --symbols " + " ".join(symbols)
-    timeframes = getattr(args, 'timeframes', None)
-    if timeframes:
-        cmd += " --timeframes " + " ".join(timeframes)
-    if getattr(args, 'verbose', False):
-        cmd += " -v"
-    _py(cmd)
-
-
 # ── Funding reversion backtest ──────────────────────────────────────────────
 
 def cmd_backtest_funding(args):
     _banner("Backtest: Funding Rate Reversion")
     _py("scripts/backtest_funding_reversion.py")
-
-
-# ── Kalman research commands ───────────────────────────────────────────────
-
-def cmd_kalman_analysis(args):
-    _banner(f"Kalman IC Analysis: {_sym(args)}")
-    cmd = f"scripts/kalman/analysis.py --data-dir {_data(args)} --symbol {_sym(args)}"
-    if getattr(args, 'all_symbols', False):
-        cmd += " --all-symbols"
-    report = getattr(args, 'json_report', None)
-    if report:
-        cmd += f" --json-report {report}"
-    _py(cmd)
-
-def cmd_kalman_drift(args):
-    _banner(f"Kalman Drift Analysis: {_sym(args)}")
-    cmd = f"scripts/kalman/drift_analysis.py --data-dir {_data(args)} --symbol {_sym(args)}"
-    if getattr(args, 'all_symbols', False):
-        cmd += " --all-symbols"
-    report = getattr(args, 'json_report', None)
-    if report:
-        cmd += f" --json-report {report}"
-    latency = getattr(args, 'latency_ticks', None)
-    if latency:
-        cmd += f" --latency-ticks {latency}"
-    _py(cmd)
 
 
 # ── Skeptical regression test ──────────────────────────────────────────────
@@ -3102,123 +3074,6 @@ def cmd_oos_window(args):
     return _py(cmd).returncode
 
 
-# ── Gauntlet: Multi-Day OOS Sweep ────────────────────────────────────────────
-
-def cmd_gauntlet_run(args):
-    """Run all algorithms across multiple OOS days with aggregate statistics."""
-    _banner("Gauntlet: Multi-Day OOS Sweep")
-    sys.stdout.flush()
-
-    data_dir = getattr(args, 'data_dir', 'data/features')
-    symbols = getattr(args, 'symbols', ['BTC', 'ETH', 'SOL'])
-    cost_mode = getattr(args, 'cost_mode', 'binance_vip9')
-
-    cmd = f"scripts/alpha/overnight_sweep.py run --data-dir {data_dir}"
-    cmd += f" --symbols {' '.join(symbols)}"
-    cmd += f" --cost-mode {cost_mode}"
-
-    last = getattr(args, 'last', None)
-    date_from = getattr(args, 'date_from', None)
-    date_to = getattr(args, 'date_to', None)
-    if last:
-        cmd += f" --last {last}"
-    if date_from:
-        cmd += f" --from {date_from}"
-    if date_to:
-        cmd += f" --to {date_to}"
-    if getattr(args, 'algos', None):
-        cmd += f" --algos {' '.join(args.algos)}"
-    if getattr(args, 'exclude_algos', None):
-        cmd += f" --exclude-algos {' '.join(args.exclude_algos)}"
-
-    r = _py(cmd)
-    return r.returncode
-
-
-def cmd_gauntlet_stop(args):
-    """Stop a running gauntlet and print partial results."""
-    r = _py("scripts/alpha/overnight_sweep.py stop")
-    return r.returncode
-
-
-def cmd_gauntlet_report(args):
-    """Print the latest gauntlet report."""
-    r = _py("scripts/alpha/overnight_sweep.py report")
-    return r.returncode
-
-
-def cmd_gauntlet_report_all(args):
-    """Merge all gauntlet reports into a combined summary."""
-    r = _py("scripts/alpha/overnight_sweep.py report_all")
-    return r.returncode
-
-
-# ── Nightly Report ───────────────────────────────────────────────────────────
-
-def cmd_nightly_run(args):
-    """Run the full overnight report pass (one-shot)."""
-    _banner("Nightly Report")
-    sys.stdout.flush()
-    cmd = f"scripts/nightly_report.py run --last {getattr(args, 'last', 7)}"
-    cmd += f" --data-dir {getattr(args, 'data_dir', 'data/features')}"
-    symbols = getattr(args, 'symbols', None)
-    if symbols:
-        cmd += f" --symbols {' '.join(symbols)}"
-    if getattr(args, 'quick', False):
-        cmd += " --quick"
-    if getattr(args, 'skip_gauntlet', False):
-        cmd += " --skip-gauntlet"
-    if getattr(args, 'full_gauntlet', False):
-        cmd += " --full-gauntlet"
-    if getattr(args, 'sections', None):
-        cmd += f" --sections {args.sections}"
-    r = _py(cmd)
-    return r.returncode
-
-
-def cmd_nightly_report(args):
-    """Print the latest nightly report summary."""
-    r = _py("scripts/nightly_report.py report")
-    return r.returncode
-
-
-def cmd_nightly_open(args):
-    """Open the latest nightly HTML report."""
-    r = _py("scripts/nightly_report.py open")
-    return r.returncode
-
-
-# ── Tournament ──────────────────────────────────────────────────────────────
-
-def cmd_tournament(args):
-    """Route tournament subcommands to the daemon script."""
-    subcmd = getattr(args, 'tournament_cmd', None)
-    if not subcmd:
-        return _py("scripts/tournament/daemon.py --help").returncode
-
-    cmd_parts = ["scripts/tournament/daemon.py", subcmd]
-
-    if subcmd == "history":
-        algo = getattr(args, 'algorithm', None)
-        if not algo:
-            print("Usage: nat tournament history <algorithm> [--days N]")
-            return 1
-        cmd_parts.append(algo)
-        days = getattr(args, 'days', 30)
-        if days != 30:
-            cmd_parts.extend(["--days", str(days)])
-
-    elif subcmd == "compare":
-        a = getattr(args, 'algo_a', None)
-        b = getattr(args, 'algo_b', None)
-        if not a or not b:
-            print("Usage: nat tournament compare <algo_a> <algo_b>")
-            return 1
-        cmd_parts.extend([a, b])
-
-    return _py(" ".join(cmd_parts)).returncode
-
-
 # ── Discovery orchestrator ──────────────────────────────────────────────────
 
 def cmd_health(args):
@@ -3414,33 +3269,6 @@ def cmd_commands(args):
         print()
 
 
-def cmd_fetch_candles(args):
-    cmd = "scripts/data/fetch_candles.py"
-    cmd += f" --symbol {' '.join(args.fetch_symbols)}"
-    cmd += f" --interval {args.fetch_interval}"
-    if args.fetch_start:
-        cmd += f" --start {args.fetch_start}"
-    else:
-        cmd += f" --days {args.fetch_days}"
-    _py(cmd)
-
-
-def cmd_discovery_start(args):
-    _py("scripts/discovery_orchestrator.py --config config/discovery.toml start")
-
-
-def cmd_discovery_once(args):
-    _py("scripts/discovery_orchestrator.py --config config/discovery.toml once")
-
-
-def cmd_discovery_status(args):
-    _py("scripts/discovery_orchestrator.py --config config/discovery.toml status")
-
-
-def cmd_discovery_stop(args):
-    _py("scripts/discovery_orchestrator.py --config config/discovery.toml stop")
-
-
 # ── Docker commands ──────────────────────────────────────────────────────────
 
 def cmd_docker_build(args):
@@ -3609,98 +3437,6 @@ def cmd_docker_smoke(args):
 
 
 # ── Swarm commands ──────────────────────────────────────────────────────────
-
-def cmd_swarm_run(args):
-    """Generate configs and evaluate in parallel."""
-    _py(f"scripts/swarm/orchestrator.py run "
-        f"--instances {args.instances} --hours {args.hours} "
-        f"--symbol {args.symbol}"
-        + (f" --seed {args.seed}" if args.seed is not None else "")
-        + (f" --workers {args.workers}" if args.workers is not None else "")
-        + (" --json" if args.json else ""))
-
-
-def cmd_swarm_status(args):
-    """Show swarm run status."""
-    _py("scripts/swarm/orchestrator.py status")
-
-
-def cmd_swarm_results(args):
-    """Show top configs ranked by Sharpe."""
-    _py(f"scripts/swarm/orchestrator.py results --top {args.top}"
-        + (" --json" if args.json else ""))
-
-
-def cmd_swarm_best(args):
-    """Export best config as TOML."""
-    _py(f"scripts/swarm/orchestrator.py best --export {args.export}")
-
-
-def cmd_swarm_generate(args):
-    """Generate configs only (no evaluation)."""
-    _py(f"scripts/swarm/config_generator.py "
-        f"--count {args.count} --output {args.output}"
-        + (f" --seed {args.seed}" if args.seed is not None else ""))
-
-
-# ── Evolve commands (Tier 3 — Optuna optimization) ──────────────────────────
-
-
-def cmd_evolve_start(args):
-    """Start evolutionary optimization."""
-    cmd = (f"scripts/swarm/optuna_optimizer.py optimize "
-           f"--study {args.study} --sampler {args.sampler} "
-           f"--trials {args.trials} --jobs {args.jobs} "
-           f"--symbol {args.symbol} --hours {args.hours} "
-           f"--train-frac {args.train_frac}")
-    if args.seed is not None:
-        cmd += f" --seed {args.seed}"
-    if args.storage:
-        cmd += f" --storage {args.storage}"
-    if args.timeout is not None:
-        cmd += f" --timeout {args.timeout}"
-    if args.no_guard_rails:
-        cmd += " --no-guard-rails"
-    _py(cmd)
-
-
-def cmd_evolve_status(args):
-    """Show Optuna study status."""
-    cmd = f"scripts/swarm/optuna_optimizer.py status --study {args.study}"
-    if args.storage:
-        cmd += f" --storage {args.storage}"
-    _py(cmd)
-
-
-def cmd_evolve_best(args):
-    """Show best configs from optimization."""
-    cmd = (f"scripts/swarm/optuna_optimizer.py best "
-           f"--study {args.study} --top {args.top}")
-    if args.storage:
-        cmd += f" --storage {args.storage}"
-    if args.json:
-        cmd += " --json"
-    _py(cmd)
-
-
-def cmd_evolve_pareto(args):
-    """Show Pareto front (NSGA-II multi-objective studies)."""
-    cmd = f"scripts/swarm/optuna_optimizer.py pareto --study {args.study}"
-    if args.storage:
-        cmd += f" --storage {args.storage}"
-    if args.json:
-        cmd += " --json"
-    _py(cmd)
-
-
-def cmd_evolve_export(args):
-    """Export best config as usable TOML file."""
-    cmd = (f"scripts/swarm/optuna_optimizer.py export "
-           f"--study {args.study} --output {args.output}")
-    if args.storage:
-        cmd += f" --storage {args.storage}"
-    _py(cmd)
-
 
 # ── Deploy commands ──────────────────────────────────────────────────────────
 
@@ -5800,222 +5536,25 @@ def build_parser():
     daily_p.set_defaults(func=cmd_daily)
 
     # ── gauntlet (multi-day OOS sweep) ──
-    gauntlet_p = sub.add_parser('gauntlet', help='Multi-day OOS sweep across all algorithms',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
-        Runs all 19 algorithms (18 generic + 3f_liquidity) across multiple
-        OOS dates with walk-forward z-score calibration. Produces a ranked
-        summary table with cumulative PnL, Sharpe ratio, and win rate.
-
-        Each date uses the prior 3 days as training. Dates with <4h of data
-        are skipped automatically. Saves incrementally after each date.
-
-        Example:
-          nat gauntlet                           # all available dates
-          nat gauntlet --last 7                  # last 7 days only
-          nat gauntlet stop                      # kill + print partial results
-          nat gauntlet report                    # print latest report
-          nat gauntlet report_all                # merge all runs into one
-        """))
-    gauntlet_p.set_defaults(func=lambda a: gauntlet_p.print_help())
-    gsub = gauntlet_p.add_subparsers(dest='gauntlet_cmd')
-
-    # gauntlet run (also default when no subcommand)
-    g_run = gsub.add_parser('run', help='Start the sweep')
-    g_run.add_argument('--last', type=int, default=None,
-                       help='Only test the last N dates')
-    g_run.add_argument('--from', dest='date_from', type=str, default=None,
-                       help='Start date (YYYY-MM-DD)')
-    g_run.add_argument('--to', dest='date_to', type=str, default=None,
-                       help='End date (YYYY-MM-DD)')
-    g_run.add_argument('--data-dir', default='data/features',
-                       help='Feature data directory')
-    g_run.add_argument('--symbols', nargs='+', default=['BTC', 'ETH', 'SOL'],
-                       help='Symbols to test')
-    g_run.add_argument('--algos', nargs='+', default=None,
-                       help='Only run these algorithms')
-    g_run.add_argument('--exclude-algos', nargs='+', default=None,
-                       help='Run all algorithms except these')
-    g_run.add_argument('--cost-mode', choices=['binance_vip9', 'taker', 'maker'],
-                       default='binance_vip9',
-                       help='Cost model (default: binance_vip9 = 1.61 bps RT)')
-    g_run.set_defaults(func=cmd_gauntlet_run)
-
-    # gauntlet stop
-    g_stop = gsub.add_parser('stop', help='Stop running gauntlet, print partial results')
-    g_stop.set_defaults(func=cmd_gauntlet_stop)
-
-    # gauntlet report
-    g_report = gsub.add_parser('report', help='Print the latest gauntlet report')
-    g_report.set_defaults(func=cmd_gauntlet_report)
-
-    # gauntlet report_all
-    g_all = gsub.add_parser('report_all', help='Merge all gauntlet runs into combined summary')
-    g_all.set_defaults(func=cmd_gauntlet_report_all)
+    cli_gauntlet.register(sub)  # gauntlet group -> scripts/cli/gauntlet.py
 
     # ── nightly (overnight stats + performance report) ──
-    nightly_p = sub.add_parser('nightly', help='Overnight feature stats + algo performance report',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
-        One-shot overnight pass producing a self-contained HTML report:
-        data health, feature NaN coverage + distributions + drift, NaN-wiring
-        diagnostics (position tracker viability), gauntlet OOS sweep, and
-        embedded plots. Saves incrementally — a crash still leaves a valid
-        partial report.
-
-        By default the gauntlet skips cascade_probability, which alone takes
-        ~70 min/date (measured: 4065s of a 4297s date; every other algo runs
-        in <45s). Default full pass: ~30-60 min. --full-gauntlet includes
-        it (~1-1.5h per tested date).
-
-        Output: reports/nightly/YYYY-MM-DD.html (+ .json sidecar)
-
-        Example:
-          nat nightly &                          # start before bed
-          tmux new -d -s nightly 'nat nightly'   # or detached in tmux
-          nat nightly --last 2 --quick --skip-gauntlet   # fast smoke run
-          nat nightly --full-gauntlet            # include cascade_probability
-          nat nightly report                     # morning summary in terminal
-          nat nightly open                       # open HTML in browser
-        """))
-    nightly_p.add_argument('--last', type=int, default=7,
-                           help='Lookback: last N available dates (default 7)')
-    nightly_p.add_argument('--data-dir', default='data/features',
-                           help='Feature data directory')
-    nightly_p.add_argument('--symbols', nargs='+', default=['BTC', 'ETH', 'SOL'],
-                           help='Symbols to analyze')
-    nightly_p.add_argument('--quick', action='store_true',
-                           help='Coarser subsampling, never launch the screener')
-    nightly_p.add_argument('--skip-gauntlet', action='store_true',
-                           help='Use cached gauntlet results instead of running the sweep')
-    nightly_p.add_argument('--full-gauntlet', action='store_true',
-                           help='Include slow algos excluded by default (cascade_probability)')
-    nightly_p.add_argument('--sections', type=str, default=None,
-                           help='Comma list: health,wiring,features,gauntlet,viz')
-    nightly_p.set_defaults(func=cmd_nightly_run)
-    nsub = nightly_p.add_subparsers(dest='nightly_cmd')
-
-    n_report = nsub.add_parser('report', help='Print latest nightly summary')
-    n_report.set_defaults(func=cmd_nightly_report)
-
-    n_open = nsub.add_parser('open', help='Open latest nightly HTML report')
-    n_open.set_defaults(func=cmd_nightly_open)
+    cli_nightly.register(sub)  # nightly group -> scripts/cli/nightly.py
 
     # ── tournament (continuous algorithm testing) ──
-    tour_p = sub.add_parser('tournament', help='Continuous algorithm testing engine',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
-        Evaluates all algorithms (hand-coded + agent-discovered) on new data,
-        tracks performance over time, and manages algorithm lifecycle.
-
-        Example:
-          nat tournament run               # single evaluation cycle
-          nat tournament rankings           # current leaderboard
-          nat tournament history jump_detector --days 14
-          nat tournament compare optimal_entry funding_reversion
-        """))
-    tour_p.set_defaults(func=cmd_tournament)
-    tsub = tour_p.add_subparsers(dest='tournament_cmd')
-
-    tsub.add_parser('run', help='Run a single evaluation cycle').set_defaults(func=cmd_tournament)
-    tsub.add_parser('start', help='Start background daemon').set_defaults(func=cmd_tournament)
-    tsub.add_parser('stop', help='Stop daemon').set_defaults(func=cmd_tournament)
-    tsub.add_parser('status', help='Show daemon state and DB stats').set_defaults(func=cmd_tournament)
-    tsub.add_parser('rankings', help='Current leaderboard').set_defaults(func=cmd_tournament)
-
-    t_hist = tsub.add_parser('history', help='Per-day history for one algorithm')
-    t_hist.add_argument('algorithm', help='Algorithm name')
-    t_hist.add_argument('--days', type=int, default=30, help='Number of days (default: 30)')
-    t_hist.set_defaults(func=cmd_tournament)
-
-    t_cmp = tsub.add_parser('compare', help='Head-to-head comparison of two algorithms')
-    t_cmp.add_argument('algo_a', help='First algorithm')
-    t_cmp.add_argument('algo_b', help='Second algorithm')
-    t_cmp.set_defaults(func=cmd_tournament)
-
-    tsub.add_parser('report', help='Generate markdown report').set_defaults(func=cmd_tournament)
+    cli_tournament.register(sub)  # tournament group -> scripts/cli/tournament.py
 
     # ── kalman ──
-    kal_p = sub.add_parser('kalman', help='Kalman filter research (OU filter IC + drift analysis)')
-    kal_p.set_defaults(func=lambda a: kal_p.print_help())
-    kalsub = kal_p.add_subparsers(dest='subcmd')
-    ka = kalsub.add_parser('analysis', help='Phase 1: Kalman filter IC analysis',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
-        Evaluates OU Kalman filter on raw features. Computes IC at multiple
-        horizons with regime gating (ent_book_shape < P30).
-
-        Mathematics:
-          OU process:  dx = θ(μ - x)dt + σ dW
-          Kalman predict:  x̂⁻ = e^(-θΔt)·x̂,  P⁻ = e^(-2θΔt)·P + Q
-          Kalman update:   K = P⁻/(P⁻ + R),  x̂ = x̂⁻ + K·(z - x̂⁻)
-
-        Example:
-          nat kalman analysis --symbol BTC --all-symbols
-        """))
-    ka.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
-    ka.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    ka.add_argument('--all-symbols', action='store_true', help='Run on all symbols')
-    ka.add_argument('--json-report', default=None, help='Output JSON report path')
-    ka.set_defaults(func=cmd_kalman_analysis)
-    kd = kalsub.add_parser('drift', help='Phase 2: Drift analysis (latency-aware)',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=textwrap.dedent("""\
-        Analyzes signal drift and decay after Kalman filtering. Tests whether
-        filtered signals remain predictive after realistic execution latency.
-
-        Mathematics:
-          Drift IC:      IC(t+lag) for lag ∈ {0, 1, 2, 5, 10} ticks
-          Decay rate:    IC(lag) / IC(0) — measures signal half-life
-          Latency cost:  IC loss from N ticks of execution delay
-
-        Example:
-          nat kalman drift --symbol BTC --latency-ticks 2
-        """))
-    kd.add_argument('--symbol', default='BTC', help='Trading symbol (default: BTC)')
-    kd.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    kd.add_argument('--all-symbols', action='store_true', help='Run on all symbols')
-    kd.add_argument('--json-report', default=None, help='Output JSON report path')
-    kd.add_argument('--latency-ticks', type=int, default=2, help='Execution latency in ticks (default: 2)')
-    kd.set_defaults(func=cmd_kalman_drift)
+    cli_kalman.register(sub)  # kalman group -> scripts/cli/kalman.py
 
     # ── audit ──
-    aud_p = sub.add_parser('audit', help='Backtest audit and parameter sweep tools')
-    aud_p.set_defaults(func=lambda a: aud_p.print_help())
-    audsub = aud_p.add_subparsers(dest='subcmd')
-    agg = audsub.add_parser('aggregate', help='Aggregate walk-forward backtest results')
-    agg.add_argument('audit_dir', help='Directory containing walk_forward_*.json files')
-    agg.set_defaults(func=cmd_audit_aggregate)
-    asw = audsub.add_parser('sweep', help='Systematic parameter sweep across symbols/timeframes')
-    asw.add_argument('--data', default=str(DATA_DEFAULT), help='Feature data directory')
-    asw.add_argument('--symbols', nargs='+', default=None, help='Symbols to sweep (default: BTC ETH SOL)')
-    asw.add_argument('--timeframes', nargs='+', default=None, help='Timeframes (default: 5min 15min 1h)')
-    asw.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
-    asw.set_defaults(func=cmd_audit_sweep)
+    cli_audit.register(sub)  # audit group -> scripts/cli/audit.py
 
     # ── discovery ──
     # ── fetch ──
-    fetch_p = sub.add_parser('fetch', help='Fetch historical data from exchanges')
-    fetch_p.set_defaults(func=lambda a: fetch_p.print_help())
-    ftsub = fetch_p.add_subparsers(dest='subcmd')
-    fc = ftsub.add_parser('candles', help='Fetch OHLCV candles from Hyperliquid')
-    fc.add_argument('--symbol', nargs='+', default=['BTC'], dest='fetch_symbols',
-                    help='Symbols to fetch (default: BTC)')
-    fc.add_argument('--interval', default='1m', dest='fetch_interval',
-                    help='Candle interval (default: 1m)')
-    fc.add_argument('--days', type=int, default=90, dest='fetch_days',
-                    help='Days of history (default: 90)')
-    fc.add_argument('--start', default=None, dest='fetch_start',
-                    help='Start date (ISO, overrides --days)')
-    fc.set_defaults(func=cmd_fetch_candles)
+    cli_fetch.register(sub)  # fetch group -> scripts/cli/fetch.py
 
-    disc_p = sub.add_parser('discovery', help='Alpha discovery orchestrator')
-    disc_p.set_defaults(func=lambda a: disc_p.print_help())
-    dcsub = disc_p.add_subparsers(dest='subcmd')
-    dcsub.add_parser('start', help='Launch discovery orchestrator').set_defaults(func=cmd_discovery_start)
-    dcsub.add_parser('once', help='Run single sweep').set_defaults(func=cmd_discovery_once)
-    dcsub.add_parser('status', help='Current state').set_defaults(func=cmd_discovery_status)
-    dcsub.add_parser('stop', help='Stop orchestrator').set_defaults(func=cmd_discovery_stop)
+    cli_discovery.register(sub)  # discovery group -> scripts/cli/discovery.py
 
     # ── health ──
     sub.add_parser('health', help='Comprehensive system health check (all components)').set_defaults(func=cmd_health)
@@ -6069,70 +5608,10 @@ def build_parser():
     dksub.add_parser('smoke', help='Quick health check of running stack').set_defaults(func=cmd_docker_smoke)
 
     # ── swarm ──
-    sw_p = sub.add_parser('swarm', help='Parameter sweep optimization')
-    sw_p.set_defaults(func=lambda a: sw_p.print_help())
-    swsub = sw_p.add_subparsers(dest='subcmd')
-    sw_run = swsub.add_parser('run', help='Generate configs and evaluate in parallel')
-    sw_run.add_argument('--instances', '-n', type=int, default=16, help='Number of configs (default: 16)')
-    sw_run.add_argument('--hours', type=int, default=24, help='Hours of data per eval (default: 24)')
-    sw_run.add_argument('--symbol', type=str, default='BTC', help='Symbol (default: BTC)')
-    sw_run.add_argument('--seed', type=int, default=None, help='Random seed')
-    sw_run.add_argument('--workers', type=int, default=None, help='Max parallel workers')
-    sw_run.add_argument('--json', action='store_true', help='JSON output')
-    sw_run.set_defaults(func=cmd_swarm_run)
-    sw_st = swsub.add_parser('status', help='Show swarm run status')
-    sw_st.set_defaults(func=cmd_swarm_status)
-    sw_res = swsub.add_parser('results', help='Show top configs ranked by Sharpe')
-    sw_res.add_argument('--top', type=int, default=10, help='Number of results (default: 10)')
-    sw_res.add_argument('--json', action='store_true', help='JSON output')
-    sw_res.set_defaults(func=cmd_swarm_results)
-    sw_best = swsub.add_parser('best', help='Export best config as TOML')
-    sw_best.add_argument('--export', type=str, default='config/best_algorithms.toml', help='Output path')
-    sw_best.set_defaults(func=cmd_swarm_best)
-    sw_gen = swsub.add_parser('generate', help='Generate configs only (no evaluation)')
-    sw_gen.add_argument('--count', '-n', type=int, default=16, help='Number of configs')
-    sw_gen.add_argument('--output', type=str, default='data/swarm/configs', help='Output directory')
-    sw_gen.add_argument('--seed', type=int, default=None, help='Random seed')
-    sw_gen.set_defaults(func=cmd_swarm_generate)
+    cli_swarm.register(sub)  # swarm group -> scripts/cli/swarm.py
 
     # ── evolve (Optuna) ──
-    ev_p = sub.add_parser('evolve', help='Evolutionary config optimization (Optuna)')
-    ev_p.set_defaults(func=lambda a: ev_p.print_help())
-    evsub = ev_p.add_subparsers(dest='subcmd')
-    ev_start = evsub.add_parser('start', help='Start evolutionary optimization')
-    ev_start.add_argument('--study', type=str, default='nat_evolve', help='Study name (default: nat_evolve)')
-    ev_start.add_argument('--sampler', choices=['cma', 'tpe', 'nsga2'], default='cma',
-                          help='Sampler: cma (continuous), tpe (mixed), nsga2 (multi-objective)')
-    ev_start.add_argument('--trials', '-n', type=int, default=500, help='Number of trials (default: 500)')
-    ev_start.add_argument('--jobs', type=int, default=1, help='Parallel trial threads (default: 1)')
-    ev_start.add_argument('--timeout', type=int, default=None, help='Timeout in seconds')
-    ev_start.add_argument('--seed', type=int, default=42, help='Random seed (default: 42)')
-    ev_start.add_argument('--symbol', type=str, default='BTC', help='Symbol (default: BTC)')
-    ev_start.add_argument('--hours', type=int, default=720, help='Eval window hours (default: 720 = 30d)')
-    ev_start.add_argument('--train-frac', type=float, default=0.667, help='Train fraction (default: 0.667)')
-    ev_start.add_argument('--storage', type=str, default='', help='Optuna storage URL (default: SQLite)')
-    ev_start.add_argument('--no-guard-rails', action='store_true', help='Disable overfit detection')
-    ev_start.set_defaults(func=cmd_evolve_start)
-    ev_st = evsub.add_parser('status', help='Show study status')
-    ev_st.add_argument('--study', type=str, default='nat_evolve', help='Study name')
-    ev_st.add_argument('--storage', type=str, default='', help='Optuna storage URL')
-    ev_st.set_defaults(func=cmd_evolve_status)
-    ev_best = evsub.add_parser('best', help='Show best configs')
-    ev_best.add_argument('--study', type=str, default='nat_evolve', help='Study name')
-    ev_best.add_argument('--storage', type=str, default='', help='Optuna storage URL')
-    ev_best.add_argument('--top', type=int, default=5, help='Number of configs (default: 5)')
-    ev_best.add_argument('--json', action='store_true', help='JSON output')
-    ev_best.set_defaults(func=cmd_evolve_best)
-    ev_pareto = evsub.add_parser('pareto', help='Pareto front (NSGA-II)')
-    ev_pareto.add_argument('--study', type=str, default='nat_evolve', help='Study name')
-    ev_pareto.add_argument('--storage', type=str, default='', help='Optuna storage URL')
-    ev_pareto.add_argument('--json', action='store_true', help='JSON output')
-    ev_pareto.set_defaults(func=cmd_evolve_pareto)
-    ev_export = evsub.add_parser('export', help='Export best config as TOML')
-    ev_export.add_argument('--study', type=str, default='nat_evolve', help='Study name')
-    ev_export.add_argument('--storage', type=str, default='', help='Optuna storage URL')
-    ev_export.add_argument('--output', type=str, default='config/evolved_algorithms.toml', help='Output path')
-    ev_export.set_defaults(func=cmd_evolve_export)
+    cli_evolve.register(sub)  # evolve group -> scripts/cli/evolve.py
 
     # ── 15m experiment ──
     sm_p = sub.add_parser('15m', help='15-minute experiment (ingest → analyze → report)')
