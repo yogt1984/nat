@@ -1289,7 +1289,7 @@ class TestOrchestratorMetadata:
         """n_temporal + n_cross must equal n_total."""
         bars = _make_vector_bars("entropy", n_bars=200)
         result = generate_derivatives(bars, vector="entropy")
-        assert result.n_temporal + result.n_cross == result.n_total
+        assert result.n_temporal + result.n_cross + result.n_spectral == result.n_total
 
     def test_base_features_length_matches_count(self):
         """len(base_features) must equal n_base_features."""
@@ -1307,7 +1307,8 @@ class TestOrchestratorMetadata:
     def test_warmup_rows_equals_max_window(self):
         """warmup_rows must equal max(temporal_windows)."""
         bars = _make_vector_bars("entropy", n_bars=200)
-        result = generate_derivatives(bars, vector="entropy", temporal_windows=[5, 20])
+        result = generate_derivatives(bars, vector="entropy", temporal_windows=[5, 20],
+                                      include_spectral=False)
         assert result.warmup_rows == 20
 
     def test_metadata_dict_populated(self):
@@ -1386,7 +1387,8 @@ class TestOrchestratorParameters:
     def test_no_cross_pairs(self):
         """Passing empty cross_pairs produces only temporal derivatives."""
         bars = _make_vector_bars("entropy", n_bars=200)
-        result = generate_derivatives(bars, vector="entropy", cross_pairs=[])
+        result = generate_derivatives(bars, vector="entropy", cross_pairs=[],
+                                      include_spectral=False)
         assert result.n_cross == 0
         assert result.n_total == result.n_temporal
 
@@ -1419,6 +1421,7 @@ class TestOrchestratorParameters:
             bars, vector="entropy",
             temporal_windows=[5, 10],
             cross_windows=[20],
+            include_spectral=False,  # isolate temporal-warmup; spectral_window(30) would dominate
         )
         assert result.warmup_rows == 10  # max of temporal, not cross
 
@@ -1467,7 +1470,8 @@ class TestOrchestratorEdgeCases:
         bad_pairs = [
             {"a": "nonexistent_*", "b": "also_missing_*", "ops": ["ratio"]},
         ]
-        result = generate_derivatives(bars, vector="entropy", cross_pairs=bad_pairs)
+        result = generate_derivatives(bars, vector="entropy", cross_pairs=bad_pairs,
+                                      include_spectral=False)
         assert result.n_cross == 0
         assert result.n_temporal > 0
         assert result.n_total == result.n_temporal
