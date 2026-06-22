@@ -20,19 +20,25 @@ from unittest.mock import patch, MagicMock
 import pytest
 from agent.base import BaseRunner
 from agent.hypothesis import Hypothesis
+from data.state import StateStore  # registry/signal store (SQLite; ":memory:" auto-migrates)
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
-def _make_runner(cls, claim="test claim", thresholds=None, manifest=None):
-    """Helper: create a runner with sensible defaults."""
+def _make_runner(cls, claim="test claim", thresholds=None, manifest=None,
+                 store=None, agent="test"):
+    """Helper: create a runner with sensible defaults.
+
+    The registry is SQLite-store-backed (StateStore); pass `store` for tests that
+    exercise correlation-check / register-signal (which read/write the registry)."""
     h = Hypothesis.create(
         claim, "gen", ["cmd --data data/features/2026-05-12 --symbol BTC"], 1.0,
         thresholds=thresholds or {"min_ic": 0.10},
     )
-    return cls(h, manifest or {"dates": {"2026-05-12": {}, "2026-05-13": {}}})
+    return cls(h, manifest or {"dates": {"2026-05-12": {}, "2026-05-13": {}}},
+               store=store, agent=agent)
 
 
 def _ok_result(stdout="ok"):
@@ -210,19 +216,14 @@ class TestSymbolReplication:
 class TestCorrelationCheck:
     def test_passes_with_empty_registry(self):
         from agent.mf_runner import MediumFrequencyRunner
-        orig = MediumFrequencyRunner.REGISTRY_PATH
-        MediumFrequencyRunner.REGISTRY_PATH = Path("/nonexistent")
-        runner = _make_runner(MediumFrequencyRunner)
+        runner = _make_runner(MediumFrequencyRunner, store=StateStore(":memory:"))
         assert runner.run_correlation_check() is True
-        MediumFrequencyRunner.REGISTRY_PATH = orig
 
-    def test_passes_with_no_registry_file(self, tmp_path):
+    def test_passes_with_no_registry(self):
         from agent.macro_runner import MacroRunner
-        orig = MacroRunner.REGISTRY_PATH
-        MacroRunner.REGISTRY_PATH = tmp_path / "no_such_file.json"
-        runner = _make_runner(MacroRunner)
+        # Empty store → load_registry returns [] → correlation check passes.
+        runner = _make_runner(MacroRunner, store=StateStore(":memory:"))
         assert runner.run_correlation_check() is True
-        MacroRunner.REGISTRY_PATH = orig
 
 
 # ===========================================================================
@@ -430,63 +431,46 @@ class TestRunnerIsolation:
 # ===========================================================================
 
 class TestRegisterSignal:
-    def test_register_writes_correct_horizon(self, tmp_path):
+    def test_register_writes_correct_horizon(self):
         from agent.macro_runner import MacroRunner
-        orig = MacroRunner.REGISTRY_PATH
-        MacroRunner.REGISTRY_PATH = tmp_path / "registry.json"
-
         h = Hypothesis.create("ctx_funding_zscore test", "gen",
                               ["cmd --data d --symbol BTC"], 1.0)
         h.status = "replicated"
         h.results = {"gate_results": [{"msg": "IC=0.10 PASS"}]}
-        runner = MacroRunner(h, {})
+        runner = MacroRunner(h, {}, store=StateStore(":memory:"), agent="macro")
         sig = runner.register_signal()
 
         # Macro default horizon is 3600s
         assert sig.horizon_s == 3600.0
-        MacroRunner.REGISTRY_PATH = orig
 
-    def test_register_appends_to_existing(self, tmp_path):
+    def test_register_appends_to_existing(self):
         from agent.mf_runner import MediumFrequencyRunner
-        orig = MediumFrequencyRunner.REGISTRY_PATH
-        reg_path = tmp_path / "registry.json"
-        MediumFrequencyRunner.REGISTRY_PATH = reg_path
-
-        # Pre-populate registry
-        with open(reg_path, "w") as f:
-            json.dump([{"name": "existing_signal", "hypothesis_id": "old"}], f)
+        store = StateStore(":memory:")
+        store.append_signal("mf", {"name": "existing_signal", "hypothesis_id": "old"})
 
         h = Hypothesis.create("trend_momentum_300 test", "gen",
                               ["cmd --data d --symbol BTC"], 1.0)
         h.status = "replicated"
         h.results = {"gate_results": [{"msg": "IC=0.12 PASS"}]}
-        runner = MediumFrequencyRunner(h, {})
+        runner = MediumFrequencyRunner(h, {}, store=store, agent="mf")
         runner.register_signal()
 
-        with open(reg_path) as f:
-            registry = json.load(f)
+        registry = store.load_registry("mf")
         assert len(registry) == 2
-        assert registry[0]["hypothesis_id"] == "old"
-        assert registry[1]["hypothesis_id"] == h.id
+        ids = {r.get("hypothesis_id") for r in registry}
+        assert "old" in ids and h.id in ids
 
-        MediumFrequencyRunner.REGISTRY_PATH = orig
-
-    def test_register_uses_threshold_horizon_over_default(self, tmp_path):
+    def test_register_uses_threshold_horizon_over_default(self):
         from agent.runner import MicrostructureRunner
-        orig = MicrostructureRunner.REGISTRY_PATH
-        MicrostructureRunner.REGISTRY_PATH = tmp_path / "registry.json"
-
         h = Hypothesis.create("test", "gen",
                               ["cmd --data d --symbol BTC"], 1.0,
                               thresholds={"horizon_s": 10.0})
         h.status = "replicated"
         h.results = {"gate_results": [{"msg": "IC=0.20 PASS"}]}
-        runner = MicrostructureRunner(h, {})
+        runner = MicrostructureRunner(h, {}, store=StateStore(":memory:"), agent="micro")
         sig = runner.register_signal()
         # Threshold horizon overrides default 5.0
         assert sig.horizon_s == 10.0
-
-        MicrostructureRunner.REGISTRY_PATH = orig
 
 
 # ===========================================================================
@@ -537,23 +521,16 @@ class TestRunnerBackwardCompat:
         for cls in [MicrostructureRunner, MediumFrequencyRunner, MacroRunner]:
             assert issubclass(cls, BaseRunner)
 
-    def test_load_registry_returns_empty_for_missing_path(self, tmp_path):
-        """_load_registry returns [] when registry file doesn't exist."""
+    def test_load_registry_returns_empty_for_empty_store(self):
+        """_load_registry returns [] when the store has no signals for this agent."""
         from agent.runner import MicrostructureRunner
         from agent.mf_runner import MediumFrequencyRunner
         from agent.macro_runner import MacroRunner
-        # Override REGISTRY_PATH to non-existent path for test
-        fake_path = tmp_path / "nonexistent" / "registry.json"
         for cls in [MicrostructureRunner, MediumFrequencyRunner, MacroRunner]:
-            runner = _make_runner(cls)
-            orig = cls.REGISTRY_PATH
-            cls.REGISTRY_PATH = fake_path
-            try:
-                result = runner._load_registry()
-                assert isinstance(result, list)
-                assert result == []
-            finally:
-                cls.REGISTRY_PATH = orig
+            runner = _make_runner(cls, store=StateStore(":memory:"))
+            result = runner._load_registry()
+            assert isinstance(result, list)
+            assert result == []
 
 
 # ===========================================================================
