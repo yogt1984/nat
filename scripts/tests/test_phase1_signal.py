@@ -472,24 +472,27 @@ class TestCLI:
         assert "--json-report" in result.stdout
 
     def test_remove_leaky_flag(self, data_dir, tmp_dir):
-        report_path = tmp_dir / "report.json"
         import subprocess
-        result = subprocess.run(
-            [sys.executable, "scripts/phase1_signal_test.py",
-             "--symbol", "BTC",
-             "--horizon", "50",
-             "--data-dir", str(data_dir),
-             "--remove-leaky",
-             "--json-report", str(report_path),
-             "--max-memory-mb", "500"],
-            capture_output=True, text=True,
-            timeout=120,
-        )
-        assert result.returncode == 0, f"stderr: {result.stderr}"
-        with open(report_path) as f:
-            report = json.load(f)
-        # With --remove-leaky, fewer features should be used
-        assert report["n_features"] < 20  # The synthetic df has ~14 numeric + some raw
+
+        def _run_n_features(extra_flags):
+            rp = tmp_dir / f"report{'_leaky' if extra_flags else '_base'}.json"
+            r = subprocess.run(
+                [sys.executable, "scripts/phase1_signal_test.py",
+                 "--symbol", "BTC", "--horizon", "50",
+                 "--data-dir", str(data_dir), *extra_flags,
+                 "--json-report", str(rp), "--max-memory-mb", "500"],
+                capture_output=True, text=True, timeout=120,
+            )
+            assert r.returncode == 0, f"stderr: {r.stderr}"
+            with open(rp) as f:
+                return json.load(f)["n_features"]
+
+        # --remove-leaky drops the absolute-value leaky features, so it must use
+        # strictly fewer features than the baseline. (The synthetic df mirrors the
+        # full NAT schema — ~200 cols — so the old absolute "< 20" assertion was stale.)
+        baseline = _run_n_features([])
+        leaky_removed = _run_n_features(["--remove-leaky"])
+        assert 0 < leaky_removed < baseline
 
 
 # ---------------------------------------------------------------------------
