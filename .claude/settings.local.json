@@ -311,7 +311,11 @@
       "Bash(docker exec:*)",
       "Bash(docker run:*)",
       "Bash(nat model:*)",
-      "Bash(sort -t/ -k1,1)"
+      "Bash(sort -t/ -k1,1)",
+      "Bash(echo \"=== exit $? \\(1=clean\\) ===\")",
+      "Bash(./nat oos *)",
+      "Bash(./nat --json oos --window 30d)",
+      "Bash(echo \"exit=$?\")"
     ]
   }
 }
