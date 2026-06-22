@@ -537,6 +537,7 @@ class DerivativeResult:
     base_features: List[str]
     n_temporal: int
     n_cross: int
+    n_spectral: int
     n_total: int
     warmup_rows: int
     metadata: Dict = field(default_factory=dict)
@@ -597,6 +598,7 @@ def generate_derivatives(
             base_features=[],
             n_temporal=0,
             n_cross=0,
+            n_spectral=0,
             n_total=0,
             warmup_rows=0,
         )
@@ -638,6 +640,7 @@ def generate_derivatives(
         base_features=base_features,
         n_temporal=td.shape[1],
         n_cross=cd.shape[1],
+        n_spectral=n_spectral,
         n_total=combined.shape[1],
         warmup_rows=warmup,
         metadata={
