@@ -103,6 +103,28 @@ class MeanReversionDetector(MicrostructureAlgorithm):
             return 0.0
         return (midprice - ema) / denom
 
+    # `zscore` is the one derived (computed-in-step) model feature; everything
+    # else in the model's feature list is a raw tick column.
+    _DERIVED = {"zscore"}
+
+    def _model_feature_names(self) -> list[str]:
+        """The exact feature order the loaded model was trained on (its SoT),
+        falling back to FEATURE_COLS if metadata is unavailable."""
+        names = getattr(self._meta, "feature_names", None)
+        if names is None and isinstance(self._meta, dict):
+            names = self._meta.get("feature_names")
+        return list(names) if names else list(self.FEATURE_COLS)
+
+    def _model_row(self, tick: dict[str, float], zscore: float) -> np.ndarray:
+        """One inference row in the model's feature order, with derived features
+        (zscore) substituted from the computed value."""
+        derived = {"zscore": zscore}
+        return np.array(
+            [derived[n] if n in self._DERIVED else tick.get(n, np.nan)
+             for n in self._model_feature_names()],
+            dtype=float,
+        )
+
     def step(self, tick: dict[str, float]) -> dict[str, float]:
         nan_out = {f.name: np.nan for f in self.alg_features()}
 
@@ -131,8 +153,11 @@ class MeanReversionDetector(MicrostructureAlgorithm):
                 "alg_mr_entropy_gate": gate,
             }
 
-        # Model inference — LightGBM Booster uses predict()
-        x_2d = x.reshape(1, -1)
+        # Model inference — LightGBM Booster uses predict().
+        # The model was trained on its `feature_names` (raw cols + the derived
+        # `zscore`), NOT on raw FEATURE_COLS. Assemble the vector in the model's
+        # own feature order, substituting computed values for derived features.
+        x_2d = self._model_row(tick, zscore).reshape(1, -1)
         prob = float(self._model.predict(x_2d)[0])
         prob = np.clip(prob, 0.0, 1.0)
 
@@ -175,9 +200,9 @@ class MeanReversionDetector(MicrostructureAlgorithm):
                 "alg_mr_entropy_gate": gates,
             }, index=df.index)
 
-        # Build feature matrix
-        X = df[list(self.FEATURE_COLS)].values
-        valid = np.all(np.isfinite(X), axis=1)
+        # Validity is judged on the raw inputs (incl. midprice/ema needed for zscore).
+        X_raw = df[list(self.FEATURE_COLS)].values
+        valid = np.all(np.isfinite(X_raw), axis=1)
 
         # Z-score (vectorized)
         midprice = df["raw_midprice_mean"].values
@@ -188,6 +213,13 @@ class MeanReversionDetector(MicrostructureAlgorithm):
         zs = (midprice - ema) / safe_denom
         zs = np.where(np.isfinite(zs), zs, 0.0)
         zscores = np.where(valid, zs, np.nan)
+
+        # Model matrix in the model's own feature order (derived `zscore` column
+        # substituted), NOT raw FEATURE_COLS — see _model_feature_names().
+        X = np.column_stack([
+            zs if n in self._DERIVED else df[n].values
+            for n in self._model_feature_names()
+        ])
 
         # Entropy gate INVERTED (vectorized)
         ent = df["ent_tick_1m_mean"].values

@@ -107,8 +107,12 @@ def test_signal_range():
             assert -1.0 <= sig <= 1.0, f"Signal out of range: {sig}"
 
 
-def test_no_model_returns_neutral_for_signal(mrd):
-    """No model: signal=0.0, probability=0.5 (neutral), zscore and gate computed."""
+def test_no_model_returns_neutral_for_signal():
+    """No model: signal=0.0, probability=0.5 (neutral), zscore and gate computed.
+
+    A trained model now ships in models/, so force the no-model path explicitly
+    rather than relying on the (model-loading) `mrd` fixture."""
+    mrd = MeanReversionDetector(model_path="/nonexistent/no_model_here")
     r = mrd.step(_make_tick(ent_tick_1m_mean=0.80))
 
     assert r["alg_mr_signal"] == 0.0
