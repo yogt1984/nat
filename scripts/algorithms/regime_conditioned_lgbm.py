@@ -97,7 +97,8 @@ class RegimeConditionedLGBM(MicrostructureAlgorithm):
         confidence_threshold: float = 0.60,
         min_samples_regime: int = 500,
     ):
-        self._models = {}  # key -> LightGBM Booster
+        self._models = {}          # key -> LightGBM Booster
+        self._model_features = {}  # key -> the exact feature order that model was trained on
         self._confidence_threshold = confidence_threshold
         self._min_samples_regime = min_samples_regime
 
@@ -109,8 +110,17 @@ class RegimeConditionedLGBM(MicrostructureAlgorithm):
                 for key in ["trending", "ranging", "volatile", "global"]:
                     fpath = model_path / f"model_{key}.txt"
                     if fpath.exists():
-                        model, _ = load_lightgbm_model(fpath)
+                        model, meta = load_lightgbm_model(fpath)
                         self._models[key] = model
+                        names = getattr(meta, "feature_names", None)
+                        if names is None and isinstance(meta, dict):
+                            names = meta.get("feature_names")
+                        # The trained model's feature list is the SoT; the code-side
+                        # GROUP_FEATURES is only a fallback (it drifted — a union of
+                        # ~10 cols where the global model trained on a 7-col subset).
+                        self._model_features[key] = (
+                            list(names) if names else list(GROUP_FEATURES.get(key, GLOBAL_FEATURES))
+                        )
         except (ImportError, Exception):
             pass
 
@@ -130,9 +140,14 @@ class RegimeConditionedLGBM(MicrostructureAlgorithm):
         ]
 
     def required_columns(self) -> list[str]:
-        # Union of all per-regime features + regime label + confidence
-        # Exclude optional features (convolver outputs may not be present)
-        cols = set(GLOBAL_FEATURES) - _OPTIONAL_FEATURES
+        # Union of all per-regime features (code-side) AND every loaded model's
+        # actual trained features, so real inference never silently 0.0-fills a
+        # feature the chosen model needs. Plus regime label + confidence.
+        # Exclude optional features (convolver outputs may not be present).
+        cols = set(GLOBAL_FEATURES)
+        for names in self._model_features.values():
+            cols.update(names)
+        cols -= _OPTIONAL_FEATURES
         cols.add("alg_rsm_regime_last")
         cols.add("alg_rsm_confidence_last")
         return sorted(cols)
@@ -146,7 +161,8 @@ class RegimeConditionedLGBM(MicrostructureAlgorithm):
         """
         # Low confidence or missing regime -> global
         if not np.isfinite(regime) or confidence < self._confidence_threshold:
-            return self._models.get("global"), GLOBAL_FEATURES, 5.0
+            return (self._models.get("global"),
+                    self._model_features.get("global", GLOBAL_FEATURES), 5.0)
 
         regime_int = int(regime)
         group = REGIME_TO_GROUP.get(regime_int, "global")
@@ -154,10 +170,10 @@ class RegimeConditionedLGBM(MicrostructureAlgorithm):
 
         # No per-regime model -> global fallback
         if model is None:
-            model = self._models.get("global")
-            return model, GLOBAL_FEATURES, 5.0
+            return (self._models.get("global"),
+                    self._model_features.get("global", GLOBAL_FEATURES), 5.0)
 
-        return model, GROUP_FEATURES[group], float(regime_int)
+        return model, self._model_features.get(group, GROUP_FEATURES[group]), float(regime_int)
 
     def step(self, tick: dict[str, float]) -> dict[str, float]:
         nan_out = {f.name: np.nan for f in self.alg_features()}
@@ -247,10 +263,12 @@ class RegimeConditionedLGBM(MicrostructureAlgorithm):
             return result_df
 
         # Process each regime group in batch
-        for group_name, group_features in GROUP_FEATURES.items():
+        for group_name in GROUP_FEATURES:
             model = self._models.get(group_name)
             if model is None:
                 continue
+            # Feed the model its own trained feature order, not the code-side union.
+            group_features = self._model_features.get(group_name, GROUP_FEATURES[group_name])
 
             if group_name == "global":
                 # Global: low confidence or missing regime

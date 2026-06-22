@@ -58,8 +58,11 @@ def test_probability_range():
             assert 0.0 <= prob <= 1.0, f"Probability out of range: {prob}"
 
 
-def test_no_model_returns_neutral(ml):
-    """No model: probability=0.5, side=0, size=0."""
+def test_no_model_returns_neutral():
+    """No model: probability=0.5, side=0, size=0.
+
+    A trained model now ships in models/, so force the no-model path explicitly."""
+    ml = MetaLabeling(model_path="/nonexistent/no_model_here")
     r = ml.step(_make_tick())
     assert r["alg_meta_probability"] == 0.5
     assert r["alg_meta_side"] == 0.0

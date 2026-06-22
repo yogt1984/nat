@@ -92,6 +92,15 @@ class MetaLabeling(MicrostructureAlgorithm):
     def required_columns(self) -> list[str]:
         return list(self.STATE_COLS)
 
+    def _model_feature_names(self) -> list[str]:
+        """The exact feature order the loaded model/scaler was trained on (its SoT).
+        STATE_COLS is a superset (some cols, e.g. whale_directional_agreement_last,
+        feed `side`, not the model), so feeding STATE_COLS would shape-mismatch."""
+        names = getattr(self._meta, "feature_names", None)
+        if names is None and isinstance(self._meta, dict):
+            names = self._meta.get("feature_names")
+        return list(names) if names else list(self.STATE_COLS)
+
     def step(self, tick: dict[str, float]) -> dict[str, float]:
         nan_out = {f.name: np.nan for f in self.alg_features()}
 
@@ -108,8 +117,9 @@ class MetaLabeling(MicrostructureAlgorithm):
                 "alg_meta_size": 0.0,
             }
 
-        # Model inference
-        x_2d = x.reshape(1, -1)
+        # Model inference — feed the model's own feature order, not STATE_COLS.
+        x_2d = np.array([tick.get(c, np.nan) for c in self._model_feature_names()],
+                        dtype=float).reshape(1, -1)
         if self._scaler is not None:
             x_2d = self._scaler.transform(x_2d)
 
@@ -149,7 +159,8 @@ class MetaLabeling(MicrostructureAlgorithm):
                 "alg_meta_size": sizes,
             }, index=df.index)
 
-        # Build feature matrix
+        # Validity from all required state cols; model matrix from the model's
+        # own feature order (a subset of STATE_COLS).
         X = df[list(self.STATE_COLS)].values
         valid = np.all(np.isfinite(X), axis=1)
 
@@ -159,7 +170,8 @@ class MetaLabeling(MicrostructureAlgorithm):
             sides = np.where(valid, 0.0, np.nan)
             sizes = np.where(valid, 0.0, np.nan)
         else:
-            X_valid = X[valid]
+            X_model = df[self._model_feature_names()].values
+            X_valid = X_model[valid]
             if self._scaler is not None:
                 X_valid = self._scaler.transform(X_valid)
             probs_valid = self._model.predict_proba(X_valid)[:, 1]

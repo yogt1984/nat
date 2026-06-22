@@ -93,8 +93,11 @@ def test_missing_regime_label():
     assert np.isfinite(r["alg_rlgbm_predicted_return"])
 
 
-def test_no_models_returns_neutral(rlgbm):
-    """No models loaded: neutral output (0.0 signal/return), regime computed."""
+def test_no_models_returns_neutral():
+    """No models loaded: neutral output (0.0 signal/return), regime computed.
+
+    Trained models now ship in models/, so force the no-models path explicitly."""
+    rlgbm = RegimeConditionedLGBM(model_dir="/nonexistent/no_models_here")
     r = rlgbm.step(_make_tick())
     assert r["alg_rlgbm_signal"] == 0.0
     assert r["alg_rlgbm_predicted_return"] == 0.0
