@@ -26,6 +26,10 @@ import numpy as np
 import pytest
 from scipy import stats
 
+# Heavy clustering-engine suite (~110s): GMM/agglomerative/HDBSCAN fits across many
+# cases. Passes — just slow. Deselect with `-m "not slow"` for fast runs.
+pytestmark = pytest.mark.slow
+
 from cluster_pipeline.cluster import (
     ClusterResult,
     QualityReport,
