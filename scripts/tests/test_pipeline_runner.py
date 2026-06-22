@@ -412,6 +412,7 @@ class TestCollectData:
 # ===========================================================================
 
 
+@pytest.mark.slow  # run_analysis() does real clustering+bootstrap (~1min); fast runs skip via -m "not slow"
 class TestRunAnalysis:
     def test_analysis_runs_on_synthetic_data(self, fake_data_dir, sample_config, tmp_dir):
         """Run analysis on minimal synthetic data — tests the full code path."""

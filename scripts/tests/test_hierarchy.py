@@ -21,6 +21,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
+# Heavy clustering/structure suite (~90s): GMM, Hopkins, block-bootstrap stability.
+# Passes — just slow. Deselect with `-m "not slow"` for fast runs.
+pytestmark = pytest.mark.slow
+
 from cluster_pipeline.hierarchy import (
     StructureTest,
     test_structure_existence,
