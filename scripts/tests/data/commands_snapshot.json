@@ -4644,6 +4644,40 @@
         {
           "help": "show this help message and exit",
           "name": "-h"
+        },
+        {
+          "help": "Cloud host or IP",
+          "name": "host",
+          "positional": true
+        },
+        {
+          "default": "nat",
+          "help": "SSH user (default: nat)",
+          "name": "--user"
+        },
+        {
+          "help": "Path to the .deb (default: newest in dist/, built if absent)",
+          "name": "--deb"
+        },
+        {
+          "default": "/var/lib/nat",
+          "help": "Data root on the box (default: /var/lib/nat)",
+          "name": "--nat-home"
+        },
+        {
+          "default": "False",
+          "help": "Print the ssh/scp steps without running them",
+          "name": "--dry-run"
+        }
+      ],
+      "help": "Deploy a redundant ingestor to a cloud box via the .deb + systemd (T0b)",
+      "name": "deploy cloud"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
         }
       ],
       "help": "Docker operations",
@@ -5801,5 +5835,5 @@
       "name": "it-engine status"
     }
   ],
-  "count": 330
+  "count": 331
 }
