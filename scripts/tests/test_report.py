@@ -23,8 +23,10 @@ from cluster_pipeline.validate import CrossSymbolResult
 def _make_structure_test(has_structure=True, hopkins=0.8, dip_p=0.01):
     st = MagicMock()
     st.has_structure = has_structure
-    st.hopkins = hopkins
-    st.dip_p = dip_p
+    # Field names must match the real StructureTest dataclass (hierarchy.py) —
+    # report.py formats these with :.4f, so they must be real numbers, not auto-mocks.
+    st.hopkins_statistic = hopkins
+    st.dip_test_p = dip_p
     st.recommendation = "proceed" if has_structure else "stop"
     return st
 
@@ -180,7 +182,7 @@ class TestSectionContent:
 
     def test_structure_test_hopkins(self):
         pr = _make_profiling_result()
-        pr.macro.structure_test.hopkins = 0.7654
+        pr.macro.structure_test.hopkins_statistic = 0.7654
         prices = _make_prices()
         report = generate_report(pr, prices)
         assert "0.7654" in report

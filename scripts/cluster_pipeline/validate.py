@@ -321,7 +321,7 @@ def _per_state_verdicts(
         # Check if any horizon has sufficient Sharpe
         has_signal = False
         for h, stats in rp.horizons.items():
-            if stats["n"] >= 10 and abs(stats["sharpe_per_bar"]) >= min_sharpe:
+            if stats["n"] >= 10 and abs(stats["sharpe"]) >= min_sharpe:
                 has_signal = True
                 break
 

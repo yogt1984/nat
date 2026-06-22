@@ -28,7 +28,7 @@ def _make_synthetic_bars(n: int = 2000, seed: int = 42) -> pd.DataFrame:
 def test_build_dataset_labels_binary():
     """Labels from build_dataset() are 0.0 or 1.0 only (no NaN in valid rows)."""
     bars = _make_synthetic_bars()
-    X, y, bars_valid = build_dataset(bars)
+    X, y, bars_valid, _feat = build_dataset(bars)
 
     assert set(np.unique(y)) <= {0.0, 1.0}
     assert not np.any(np.isnan(y))
@@ -40,7 +40,7 @@ def test_build_dataset_drops_nan_features():
     # Inject NaN in first 50 rows of one feature
     bars.loc[:49, "trend_hurst_300_mean"] = np.nan
 
-    X, y, bars_valid = build_dataset(bars)
+    X, y, bars_valid, _feat = build_dataset(bars)
     # None of the NaN rows should appear in valid output
     assert len(y) <= len(bars) - 50
 
@@ -48,7 +48,7 @@ def test_build_dataset_drops_nan_features():
 def test_forward_return_alignment():
     """fwd_ret[0] uses midprice[20], not midprice[19]. Off-by-one check."""
     bars = _make_synthetic_bars(100)
-    X, y, bars_valid = build_dataset(bars, horizon=HORIZON_BARS)
+    X, y, bars_valid, _feat = build_dataset(bars, horizon=HORIZON_BARS)
 
     # Manually compute expected forward return for first row
     mid = bars["raw_midprice_mean"].values
@@ -65,7 +65,7 @@ def test_walk_forward_produces_folds():
     X = rng.standard_normal((1000, 7))
     y = (X[:, 0] > 0).astype(float)
 
-    result = walk_forward_train(X, y, n_splits=3, embargo=20, C=1.0)
+    result = walk_forward_train(X, y, [f"f{i}" for i in range(X.shape[1])], n_splits=3, embargo=20, C=1.0)
     assert len(result["fold_results"]) == 3
     assert "model" in result
     assert "scaler" in result
@@ -78,7 +78,7 @@ def test_walk_forward_embargo_respected():
     y = (X[:, 0] > 0).astype(float)
     embargo = 100
 
-    result = walk_forward_train(X, y, n_splits=4, embargo=embargo, C=1.0)
+    result = walk_forward_train(X, y, [f"f{i}" for i in range(X.shape[1])], n_splits=4, embargo=embargo, C=1.0)
 
     n = len(y)
     min_train = n // 5
@@ -100,7 +100,7 @@ def test_model_metadata_fields():
     X = rng.standard_normal((500, 7))
     y = (X[:, 0] > 0).astype(float)
 
-    result = walk_forward_train(X, y, n_splits=2, embargo=20, C=1.0)
+    result = walk_forward_train(X, y, [f"f{i}" for i in range(X.shape[1])], n_splits=2, embargo=20, C=1.0)
 
     assert result["model"] is not None
     assert result["scaler"] is not None
