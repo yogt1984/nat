@@ -1,93 +1,152 @@
-# PLAN — Next 30 Days (2026-06-14 → 2026-07-14)
+# NAT — Q / D / P Plan
 
-**Combines:** `docs/in_progress/tasks_assigned_12_6_26/plan.md` (rev 6, T0–T21 sequencer) · `Q/*` (gates)
-· `P/*` (academic) · `docs/in_progress/test_plan.md` (manual gate).
-**Read with:** `STATE_14_6_2026.md`, `PRIORITIES.md`, `MASTER_PLAN.md`.
+**Single source of truth for the three branches: Q (Quant), D (Development), P (PhD).**
+Supersedes the Jun-14 planning layer (`PLAN`/`PRIORITIES`/`MASTER_PLAN`/`STATE_14_6_2026`) and the
+Jun-22 `QDP_ROADMAP.md` — all harvested into this file and moved to [`archive/`](archive/).
+Durable companions (not merged, not archived): `OBJECTIVE.md` (mission), `METHODOLOGY.md` (method),
+`GLOSSARY.md`, `contracts/`, `commands.md`.
 
-**Goal for the window:** convert the data-accumulation wait into a validated, autonomously-promotable
-pipeline — land the **G1 alpha-screen verdict + `hierarchical_combiner` revalidation** on clean data, with
-the lifecycle / promotion / kill-switch machinery live behind it.
-
-**Hard constraints (from plan.md):** zero su-35 contact until the streak completes (Jun 17) · gates
-imported not invented · all costs via `load_costs()` · no live capital.
+*Last consolidated: 2026-06-24.*
 
 ---
 
-## Week 1 — Jun 14–17 · Stage A (zero su-35 risk; cloud + pure Python)
-**Theme: earn the substrate while the streak finishes.**
+## 0. Current Focus  *(pinned — update this block as state changes)*
 
-> **Progress (2026-06-15):** T2, T3–T5, T6, T7 (+ NAT4/NAT5) all merged & tested. Remaining in Week 1:
-> T0/T0b (ops — deploy the wired binary to the cloud box), Q1.3 (SQLite store, partial). Streak completes Jun 17.
-- **T0 / Q1.1 — dead-features resolution.** Enable `[position_tracker]`; deploy the wired binary to the
-  **T0b cloud box**; 24h coverage check; **48h viability verdict due ~Jun 15** (viable / noisy / unavailable).
-  *Test:* whale/liq coverage <100% NaN within 1h; `names_all()` == 236; verdict recorded in `01_concentration…`.
-- **T0b / M2 — cloud ingestion** (Hetzner AX52): Tier-1 docker stack + wired binary + Telegram <5min gap
-  alert. *Test:* 48h zero gaps >60s; alert fires on forced disconnect; feature parity vs su-35.
-- **[✓ DONE] T2 + Q1.4 + P1.5 — costs + provenance** (`scripts/utils/costs.py`, `scripts/provenance.py`).
-  *Test:* `load_costs("hyperliquid")` reproduces current `nat oos30` exactly; fingerprint deterministic.
-- **[✓ DONE] T3–T5 — lifecycle spine** (DB tables, `signal_lifecycle.py`, `nat lifecycle`, agent integration;
-  seeded 4 VALIDATED / 2 DISCOVERED). *Test:* scripted transition walk; illegal transition raises;
-  register_signal → DISCOVERED row.
-- **[✓ DONE] T6 — CLI quick wins** (NAT1/NAT2). **[✓ DONE] T7 — viz foundation** (NAT3 + NAT4/NAT5: `nat viz features|algorithm`).
-- **Start Q1.3** (SQLite store) if capacity. **P-track:** P1.5 done here; begin P1 preprint draft (long lead).
-- **Streak watch:** daily data check only; **do not touch su-35.** Re-check the Jun 10–11 thin-day risk
-  against the Jun-17 target.
+**Binding constraint:** data continuity. Every clean day appreciates all existing research; the
+whole Q-branch is gated on it.
 
-**Week-1 exit:** T0 verdict recorded · cloud ingestor unattended · costs/provenance live · `nat lifecycle`
-functional · streak intact to Jun 17.
+**Master gate — a clean 7-day data streak.** The Jun-17 su-35 target was **missed** (Jun-19 check:
+window only 7–16 h/day, no complete day), so re-establishing a clean streak — most likely on the
+**T0b cloud box** — is now the gating objective, and the dedicated ingest box is the critical path.
+Verify current status with `nat gap status` / `/streak` (local read; does **not** contact su-35).
+A clean streak lifts the su-35 freeze and unblocks Q2/Q3. **Hard rule: zero su-35 contact until a
+clean streak completes.**
 
-## Week 2 — Jun 17–24 · Stage B (streak complete → first real validation)
-**Theme: does the edge survive clean data?**
-- **su-35 cutover** to the wired binary (post-streak); T0b cutover decision (cloud vs su-35 primary).
-- **T11 / Q2.3 — alpha screen + BH-FDR (Gate G1)** across 191 feats × 3 symbols + `nat process run
-  ic_horizon|mi_ksg`. **Critical path.** *Test:* G1 report generated.
-- **T11 / Q2.1 — `hierarchical_combiner` revalidation** on 7 clean days + ablation (L2/L3 vs L1).
-  *Test:* ≥4 folds @500+ bars; IC not monotonically rising; combiner → VALIDATED only if G4 passes,
-  else REJECTED with reason recorded.
-- **T11b — process transforms** (`pca_combo --score-with ic_horizon`, triple_barrier) on the clean window.
-- **Q2.5 — spannung Kalman** ultra-low band.
-- **T8 / T9 — feature gaps F1–F5 + algo candidates** (HF4 VPIN gate, LF1 funding-settlement, HF1 microprice)
-  interleaved.
-- **T12 — dockerize agents**; **T13 — daily agent + candle fetcher.**
+**Do-now sequence:**
+1. **Q0** — verify the streak outcome.
+2. **T0b cloud deploy (P0)** — provision the Hetzner box and deploy the redundant ingestor
+   (`nat deploy cloud <ip> --dry-run` first). Removes single-point su-35 risk; the vehicle is ready
+   (root `HETZNER_DEPLOYMENT_PLAN.md`).
+3. **Q4 — alpha-skeptic gate on existing data** — run adversarial refutation of the winners
+   *before* investing in ~90 clean days (see the tension note in §2).
+4. **Conditional-IC > 0.15 (D1, ~Aug)** — the go/no-go for the whole trading business: IC≈0.45
+   collapses to ~0.03 under realistic fills.
 
-**Week-2 exit (the pivotal gate):** **G1 verdict + combiner-revalidation verdict** — the first read on
-whether the edge is real on clean data. *If G1 fails, stop and re-scope — do not loosen gates.*
+**Actionable now (no data needed):** T0b provisioning; the D-branch (D1/D2/D3); the entire P-branch
+(P1→P5); a first Q4 skeptic pass on existing data; the open bugs below.
 
-## Week 3 — Jun 24–Jul 1 · Stage C (automation + risk layer)
-**Theme: make promotion autonomous and safe.**
-- **T16 / Q3.1 — kill-switch daemon** (ships before any bridge). *Test:* each of 4 thresholds fires;
-  Telegram <60s; resume rules enforced.
-- **T14 — promotion daemon** (data-sufficiency guard; DISCOVERED→VALIDATED via G4 → PAPER).
-  *Test:* seeded signal auto-starts paper; insufficient-data case refuses OOS with logged reason.
-- **T15 — approval viz** (NAT6/NAT7; must precede the first APPROVAL_PENDING).
-- **T17 — signal bridge daemon** (dry-run; checks `halt_state.json` every cycle; risk-parity sizing).
-- **Q2.4/Q2.5 — combine + size + walk-forward (Gate G4)** if G1 passed.
+**Blocked on data/streak:** Q3 revalidation; the G1 alpha screen; `hierarchical_combiner`
+revalidation; combine → paper → live.
 
-**Week-3 exit:** lifecycle runs unattended discover→paper behind a healthy kill-switch; ≥1 signal VALIDATED
-or in paper.
+**Open bugs (P1):**
+- Retrain/revalidate the 3 ML algos (`mean_reversion_detector`, `meta_labeling`,
+  `regime_conditioned_lgbm`) against the current schema (artifacts date to 2026-06-08).
+- Fix `nat agent status` → `ModuleNotFoundError: logging_config` (blocks running agents, incl. on
+  the cloud box).
+- Fix + enable the GMM 5D regime classifier: correct `train_regime_gmm.py` column names, train,
+  enable. **Do NOT merge branch `936f7cb`** (it drops whale flow).
 
-## Week 4 — Jul 1–14 · Stage C→D (observability + paper window)
-**Theme: prove it under observation.**
-- **T18 — monitoring + E2E** (Prometheus on Python services; Grafana lifecycle/paper/P&L dashboards; full
-  `docker compose up`). *Test:* E2E ingestion → discovery → OOS → paper → approve → dry-run trade.
-- **T19 — 14-day paper window (Gate G8)** starts as soon as T14 promotes (paper clock starts here; first
-  APPROVAL_PENDING expected ~Aug).
-- **Manual `test_plan.md` pass** — Section A (260 commands dispatch) + Section B (viz correctness) as the
-  pre-paper release gate; record in the sign-off log.
-- **Begin T20** CLI polish (NAT8/NAT9; NAT10 only after NAT1–9 stabilize). **P-track:** continue preprint.
+**Dated milestones:** Jun-17 streak gate · D1 conditional-IC verdict + first G8 window ~Aug ·
+preprint camera-ready ~Aug, SSRN/arXiv ~Sep · D2 prof-interest checkpoint ~Nov · EPFL EDFI
+deadlines **Jan 15 / Mar 31 2027** · live capital Sep–Oct (only if D1 positive).
 
-## 30-day exit criteria
-1. T0 dead-feature verdict + conditional-IC direction known.
-2. **G1 alpha-screen + `hierarchical_combiner` revalidation** verdicts recorded.
-3. Lifecycle + promotion daemon + kill-switch + bridge (dry-run) live and dockerized.
-4. ≥1 signal in (or queued for) the 14-day paper window.
-5. `test_plan.md` Section A+B signed off; CI green.
-6. Costs / provenance / SQLite-store infra landed; preprint draft underway.
+---
 
-## Parallel P-track (writing — fills analyst time)
-P1.5 provenance (Week 1, shared with Q1.4) · P1 preprint drafting ongoing (~40h, camera-ready target Aug).
-P2–P4 deferred (Sep+).
+## 1. Guardrails  *(non-negotiable — imported, not invented)*
 
-## What slips past 30 days (by design)
-14-day paper *completion* (→ Aug) · live deployment T21 (Sep–Oct) · Q3.3 regime/multi-freq (skip if no OOS
-gain) · 3D-viz greenfield · HF3 Hawkes / LF3 cascade.
+- **Gates imported, never invented:** G4 = walk-forward + deflated Sharpe; G8 = 14-day paper, 5
+  criteria; kill thresholds = ROADMAP Step 9.
+- **All costs via `load_costs()`** (`config/costs.toml`). Never hardcode a fee or slippage.
+- **No live capital before G8 + a healthy kill-switch.**
+- **Plan before any feature-vector / schema change** (it ripples to Parquet and every reader).
+- **Planted (synthetic) test before any real-data use.**
+- **su-35: zero contact until the clean-data streak completes.**
+
+---
+
+## 2. Q — Quant  *(prove the edge is real and capturable)*
+
+Aim: re-test the promising algorithms over a longer window with a dedicated tool and a dedicated
+ingest box, then adversarially try to kill them. No live capital until paper passes G8.
+
+- **Q0 — Verify the streak.** `nat gap status` / `/streak`. ⏳ do first; gating.
+- **Q1 — T0b Hetzner ingest box.** 24/7 ingestor + Telegram <5 min gap alert (per root
+  `HETZNER_DEPLOYMENT_PLAN.md`). Removes single-point su-35 risk.
+- **Q2 — Longitudinal tool.** Generalize `nat oos30` → `nat oos --window <N>d` (walk-forward folds
+  + deflated Sharpe, `--json`). Depends on Q0.
+- **Q3 — Extended revalidation** of the 5 winners (`3f_liquidity`, `jump_detector`,
+  `funding_reversion`, `optimal_entry`, `surprise_signal`) on ≥30 clean days. Blocked on Q1+Q2.
+- **Q4 — Adversarial kill gate.** Run each survivor through the `alpha-skeptic` agent before any
+  trust/paper decision. *"Q2/Q3 only matter if Q4 survives."*
+
+**Sequencing:** Q0 → (Q1 ∥ Q2) → Q3 → Q4.
+**Tension to resolve:** `archive/tasks_22_6_26__2.md` argues Q4 should run *before* the Q1 data
+investment — don't accumulate ~90 days for edges that die under refutation on data already in hand.
+Recommended: run a first Q4 pass on existing data now (it's in the do-now sequence above).
+
+---
+
+## 3. D — Development  *(harden/ship `nat`, converge to a cloud lab)*
+
+Most of the Jun-12 CLI plan already shipped. Remaining:
+
+- **D1 — Viz set + maturity tags.** `nat viz portfolio/paper/spectral/regime`; `[PROVEN] / [PRELIM]
+  / [SPEC] / [LIVE]` tags. ~20h.
+- **D2 — Modularize the `nat` monolith** (5,113 lines) → `scripts/cli/*.py` with a `register()`
+  protocol. ~12h. Prerequisite for packaging.
+- **D3 — Ship `nat` apt-installable.** Phased: (1) **relocatable paths** (XDG, `NAT_HOME`) — the
+  real blocker, pairs with D2; (2) interim `pipx`/wheel; (3) native `.deb` + self-hosted apt repo
+  (see `packaging/README.md`).
+- **D4 — Continuous-discovery → cloud research lab.** Harden `discovery_orchestrator` + the 4
+  agents; surface via the `api` crate + Next.js (per `cloud_deployment/`). Partially built.
+
+**Gate:** D3 is gated on its step-1 relocatable paths ("nothing installs cleanly until this is done").
+
+---
+
+## 4. P — PhD  *(publish, then outreach)*
+
+Goal: PhD at ETH Zürich / EPFL in spectral microstructure / quant finance. **Decision:** the
+convolver preprint is already a complete contribution — **publish it now**; develop Spannung as
+paper #2 (don't gate outreach behind more writing).
+
+- **P1 — Polish** → camera-ready PDF (~1d).
+- **P2 — SSRN** upload (1–3 business days).
+- **P3 — arXiv `q-fin.TR`** endorsement.
+- **P4 — Outreach:** gather Tier-1 prof emails + send (~5h). *Prof emails are not stored — gathering
+  them is part of P4.*
+- **P5 — Track responses,** stagger Tier-2; milestone = 2+ interested → formal applications.
+
+**Deadlines:** EPFL EDFI **Jan 15 2027** (R1) / **Mar 31 2027** (R2), Sep-2027 entry; ETH rolling.
+
+**Artifact locations:**
+- Preprints: `research/convolver_preprint.{tex,pdf}` and
+  `research/microstructure_alpha_preprint.{tex,pdf}` — both authored **Yigit Onat**
+  (`yionat@gmail.com`).
+- Findings / build appendix: `synthesis/{microstructure_alpha_findings,build_implementation_spec}.{tex,pdf}`.
+- Guide + prof list + email template: `phd_related/phd_application_guide.tex`; one-pager
+  `phd_related/phd_application_summary.{tex,pdf}`.
+
+---
+
+## 5. Synergies & decision points
+
+The three branches compete for **time allocation**, not resources — they share infrastructure,
+data, and methodology. Decision gates:
+- **D1 (~Aug):** conditional-IC verdict — "is there a trading business?" (gates Q-branch live work).
+- **D2 (~Nov):** prof-interest checkpoint — "do professors want this?" (gates P-branch effort).
+- Live capital only after D1 positive **and** G8 **and** a healthy kill-switch.
+
+---
+
+## 6. Companions & references  *(durable — not part of this plan, do not archive)*
+
+- **Mission / method:** `OBJECTIVE.md`, `METHODOLOGY.md`, `GLOSSARY.md`.
+- **Unit contracts:** `contracts/` — feature / algorithm / **process** / viz.
+- **Process definitions:** `contracts/process.md` (contract) +
+  `in_progress/tasks_assigned_12_6_26/{process_concept, process_signal_design, process_mi_targets_derivatives}.md`
+  + the `scripts/processes/` framework (7 shipped processes).
+- **CLI:** `commands.md`.
+- **Consolidated specs/findings (appendix):** `synthesis/`.
+- **Deployment runbook:** root `HETZNER_DEPLOYMENT_PLAN.md` + `cloud_deployment/`.
+- **Superseded sources** (harvested into this file, kept for provenance): [`archive/`](archive/).

@@ -1,0 +1,893 @@
+\documentclass[11pt]{article}
+
+% ---------------------------------------------------------------------------
+%  NAT Signal-Extraction Build Specification
+%  Consolidates the build/implementation specs (docs/in_progress §5 cluster):
+%    - convolver_implementation/01..14   (14-stage discovery pipeline)
+%    - nan_wiring/01..05                  (whale/liquidation/concentration wiring)
+%    - process_concept / process_signal_design / process_mi_targets_derivatives
+%    - ml_implementation_plan.txt, convolver_implementation.txt
+%    - cloud_deployment/{0_overview,2_observability_and_e2e}
+%    - HETZNER_DEPLOYMENT_PLAN.md (docs + root), packaging/README.md
+% ---------------------------------------------------------------------------
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{array}
+\usepackage{longtable}
+
+% --- shims for packages absent from this minimal TeX Live install ---
+\newcommand{\toprule}{\hline}
+\newcommand{\midrule}{\hline}
+\newcommand{\bottomrule}{\hline}
+
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\ic}{\textnormal{IC}}
+
+\setlength{\parskip}{0.35em}
+
+\title{\textbf{NAT Signal-Extraction Build Specification}\\[4pt]
+\large Pattern Discovery, Feature Wiring, the Process Framework,\\
+the ML Plan, and Cloud Deployment}
+\author{NAT Quantitative Research Platform}
+\date{Consolidated 2026-06-24}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\bigskip
+
+% ===========================================================================
+\section{Scope and Source Inventory}
+% ===========================================================================
+
+This document consolidates the engineering specifications of the NAT platform's
+build/implementation track into a single reference. It is organized by subsystem rather
+than by source file. The source documents are:
+
+\begin{itemize}
+  \item \textbf{Convolver discovery pipeline} --- \code{convolver_implementation/01..14}
+        (14 per-stage specs) plus the draft \code{convolver_implementation.txt}.
+        See \S\ref{sec:convolver}.
+  \item \textbf{Feature wiring} --- \code{nan_wiring/01..05} (whale-flow, position-tracker,
+        feature wiring, wallet discovery, concentration viability). See \S\ref{sec:wiring}.
+  \item \textbf{Process framework} --- \code{process_concept.md},
+        \code{process_signal_design.md}, \code{process_mi_targets_derivatives.md}.
+        See \S\ref{sec:process}.
+  \item \textbf{ML implementation plan} --- \code{ml_implementation_plan.txt}.
+        See \S\ref{sec:mlplan}.
+  \item \textbf{Cloud deployment and operations} --- \code{cloud_deployment/0_overview.md},
+        \code{cloud_deployment/2_observability_and_e2e.md}, two copies of
+        \code{HETZNER_DEPLOYMENT_PLAN.md}, and \code{packaging/README.md}.
+        See \S\ref{sec:deploy}.
+\end{itemize}
+
+% ===========================================================================
+\section{Convolver Pattern-Discovery Pipeline}\label{sec:convolver}
+% ===========================================================================
+
+The convolver discovers data-driven pattern kernels from OHLCV candle data via
+event-aligned SVD, then deploys them as an online matched filter on the 100\,ms tick
+stream. One discovery run is executed per \emph{(symbol, candle\_freq)} pair, processing
+all event types and channels in a single pass.
+
+\subsection{Data ingestion and overall flow}
+Historical OHLCV is fetched from Hyperliquid's native \code{candleSnapshot} REST API
+(\code{scripts/data/fetch_candles.py}; \code{POST https://api.hyperliquid.xyz/info}),
+using only the standard library (no CCXT). Pagination is $5000$ candles/request
+($\sim$\,$3.5$ days at $1$m), auto-paginated and incremental. Minimum data: $50$K candles
+($\sim$\,$35$ days) for sample size, $6$+ months for regime coverage. The offline pipeline
+is:
+
+\begin{verbatim}
+[0] fetch_candles      Hyperliquid candleSnapshot API -> parquet
+[1] OHLCV decomposition    4 channels: body, upper_wick, lower_wick, volume
+[2] event detection        6 boolean masks (breakout/turtle/trap x bull/bear)
+[3] ATR normalization      center by mean, scale by ATR (shape-preserving)
+[4] matrix assembly        stack W-candle windows around events -> X in R^{n x W}
+[5] thin SVD               X = U S V^T; right singular vectors V_k are shapes
+[6] IC gate                keep components whose loadings predict forward returns
+[7] BH-FDR correction      control false discovery rate across all tests
+[8] kernel library output  .npz (arrays) + .json (metadata)
+\end{verbatim}
+
+Supporting stages run during discovery but outside the core linear flow: walk-forward
+validation, rolling SVD stability, and analytical-basis alignment. Online scoring
+(\S\ref{sec:convolver-online}) is the separate production runtime. The key files are
+\code{scripts/analysis/convolver_discovery.py} (offline discovery, stages 0--8 plus
+validation), \code{scripts/algorithms/convolver_kernels.py} (shared math, data structures,
+persistence), and \code{scripts/algorithms/convolver.py} (online scoring).
+
+\paragraph{Anti-overfitting architecture.} Three independent safeguards each defend a
+distinct failure mode:
+
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+Layer & Mechanism & Failure mode defended \\
+\midrule
+SVD           & Return-blind decomposition         & Data snooping \\
+BH-FDR        & Multiple-testing correction, $q=0.05$ & False discovery \\
+Walk-forward  & $60/40$ OOS IC validation          & In-sample overfitting \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Stage 1 --- Candle decomposition}
+Raw OHLCV is decomposed into four orthogonal channels
+(\code{convolver_kernels.py:102-124}, \code{decompose_candles}):
+
+\begin{center}\small
+\begin{tabular}{llll}
+\toprule
+Channel & Formula & Captures & Sign \\
+\midrule
+\code{body}       & $C - O$            & Direction / momentum & signed ($+$ bullish) \\
+\code{upper_wick} & $H - \max(C,O)$    & Upside rejection     & $\geq 0$ \\
+\code{lower_wick} & $\min(C,O) - L$    & Downside rejection   & $\geq 0$ \\
+\code{volume}     & $V$                & Participation        & $\geq 0$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Body isolates direction from level noise; wicks capture rejection independently of body
+direction; volume is structurally independent of price. (BTC discovery: the trap-bull
+volume channel had $\text{EVR}=26.5\%$, $\text{SI}=2.74$ --- a stereotyped, distinct
+volume pattern.)
+
+\subsection{Stage 2 --- ATR computation and window normalization}
+Average True Range (Wilder 1978), \code{compute_atr(H,L,C,period=14)}
+(\code{convolver_kernels.py:132-151}):
+\begin{equation}
+  \text{TR}_t = \max\!\big(H_t - L_t,\; |H_t - C_{t-1}|,\; |L_t - C_{t-1}|\big),
+  \qquad
+  \text{ATR}_t = \frac{1}{N}\sum_{j=0}^{N-1}\text{TR}_{t-j}.
+\end{equation}
+The first \code{period} values are NaN (warmup). Each window is then shape-preservingly
+normalized (\code{normalize_window}, \code{convolver_kernels.py:159-168}):
+\begin{equation}
+  x_{\text{norm}} = \frac{x - \operatorname{mean}(x)}{\text{ATR}_t},
+\end{equation}
+removing absolute level (mean-centering) and volatility scale (ATR division). Edge case:
+$\text{ATR}\leq 0$ or non-finite returns the zero vector, which is then excluded by the
+validity check in matrix assembly.
+
+\subsection{Stage 3 --- Event detection (six types)}
+Six boolean event masks are computed. Default parameters: Donchian lookback $N=20$, volume
+multiplier \code{vol_mult}$=1.5$, trap lookahead $K=3$, ATR reversal threshold
+$\alpha=1.0$. Let $\operatorname{med}$ denote the rolling median.
+
+\paragraph{Breakouts} (\code{convolver_discovery.py:80-97}) --- Donchian breaks with volume
+confirmation:
+\begin{align}
+  \text{breakout\_bull}_t &:\; C_t > \max(H_{t-N..t-1}) \;\wedge\; V_t > \text{vol\_mult}\cdot\operatorname{med}(V_{t-N..t-1}),\\
+  \text{breakout\_bear}_t &:\; C_t < \min(L_{t-N..t-1}) \;\wedge\; V_t > \text{vol\_mult}\cdot\operatorname{med}(V_{t-N..t-1}).
+\end{align}
+Empirically the \emph{least} informative type: $0$ of $158$ breakout candidates survived
+BH-FDR (their content is arbitraged away).
+
+\paragraph{Turtle soup} (\code{convolver_discovery.py:100-112}) --- false range breaks, with
+\emph{no} volume filter (false breaks are characterized by low follow-through):
+\begin{align}
+  \text{turtle\_bull}_t &:\; L_t < \min(L_{t-N..t-1}) \;\wedge\; C_t > \min(L_{t-N..t-1}),\\
+  \text{turtle\_bear}_t &:\; H_t > \max(H_{t-N..t-1}) \;\wedge\; C_t < \max(H_{t-N..t-1}).
+\end{align}
+
+\paragraph{Traps} (\code{convolver_discovery.py:116-143}) --- confirmed false breakouts: a
+volume-confirmed breakout that reverses by more than $\alpha\cdot\text{ATR}$ within $K$
+bars. The \emph{only} event type with a lookahead ($K$ bars):
+\begin{align}
+  \text{bull\_trap}_t &:\; \text{breakout\_bull}_t \;\wedge\; C_{t+K} < C_t - \alpha\cdot\text{ATR}_t,\\
+  \text{bear\_trap}_t &:\; \text{breakout\_bear}_t \;\wedge\; C_{t+K} > C_t + \alpha\cdot\text{ATR}_t.
+\end{align}
+Traps carry the strongest forward information (highest rolling SVD stability) but are the
+\emph{sample-size bottleneck} ($11$--$14$ events per $1000$ candles).
+
+\subsection{Stage 4 --- Event-aligned matrix assembly}
+For each (event type, channel) pair, all valid normalized $W$-candle windows
+($W=20$ default) ending at events are stacked into $X\in\mathbb{R}^{n\times W}$
+(\code{build_event_matrix}, \code{convolver_discovery.py:167-207}). Three validity filters:
+event index $\geq W-1$ (sufficient lookback); finite positive ATR at the event bar; no NaN
+in the window. Each run produces $6\text{ event types}\times 4\text{ channels}=24$
+matrices.
+
+\subsection{Stage 5 --- Thin SVD, EVR truncation, stereotypy}
+Return-blind decomposition $X = U S V^{\top}$ via \code{np.linalg.svd(X, full\_matrices=False)}
+(LAPACK \code{dgesdd}, $O(nW^2)$): $U\in\mathbb{R}^{n\times K}$ are per-event loadings,
+$S$ the singular values, and the right singular vectors $V\in\mathbb{R}^{W\times K}$ are the
+\emph{discovered shapes}. Components are kept up to the explained-variance-ratio threshold:
+\begin{equation}
+  \text{EVR}_k = \frac{\sigma_k^2}{\sum_j \sigma_j^2},
+  \qquad
+  K = \min\Big\{k : \textstyle\sum_{j=1}^{k}\text{EVR}_j \geq 0.80\Big\}.
+\end{equation}
+The stereotypy index $\text{SI} = \sigma_1/\sigma_2$ measures shape consistency
+($\text{SI}>3$: highly stereotyped). Crucially, SVD never sees forward returns --- the IC
+gate alone connects shapes to predictability, preventing data snooping.
+
+\subsection{Stage 6 --- Information-coefficient gate}
+For each surviving component, correlate its scaled per-event loadings with forward returns
+(\code{\_compute\_ic}, \code{convolver_discovery.py:215-230}):
+\begin{equation}
+  \ic_k = \operatorname{corr}\!\big(U_k\,\sigma_k,\; r_{\text{forward}}\big),
+  \qquad
+  r_{\text{forward}}[t] = \log\!\frac{C[t+h]}{C[t]}.
+\end{equation}
+The discovery horizon is the primary horizon only (\code{horizons[0]}, default $h=10$
+candles $=10$ min at $60$s). Components with $|\ic|\geq 0.03$ are retained (deliberately
+lenient --- BH-FDR carries the multiple-testing burden). Significance uses a $t$-test under
+$H_0:\ic=0$:
+\begin{equation}
+  t = \ic\sqrt{\frac{n-2}{1-\ic^2}}, \qquad p = 2\big(1 - F_t(|t|,\,n-2)\big),
+\end{equation}
+via \code{scipy.stats.t.cdf} (the small-sample correction matters for sparse traps,
+$n<100$). Samples with $n<30$ return $\ic=0,\,p=1$.
+
+\subsection{Stage 7 --- Benjamini--Hochberg FDR correction}
+All p-values across every (event type, channel, component, horizon) test
+($\sim$\,$120$ tests) are corrected as a batch (\code{\_bh\_fdr}, \code{convolver_discovery.py:233-251}),
+controlling the expected false-discovery proportion at $q=0.05$: sort
+$p_{(1)}\leq\dots\leq p_{(m)}$, find the largest rank $j$ with $p_{(j)}\leq jq/m$, and
+reject (keep) all hypotheses of rank $\leq j$. Empirically: $158$ IC-passing candidates
+$\rightarrow 6$ survivors (all turtle/trap; zero breakouts).
+
+\subsection{Stage 8 --- Kernel library persistence}
+Surviving kernels are saved in dual format (\code{convolver_kernels.py:348-455}): a
+compressed \code{.npz} ($n_{\text{kernels}}\times W$ array, $\sim$\,$2$\,KB) plus a
+\code{.json} of metadata. The kernel record is:
+\begin{verbatim}
+@dataclass(frozen=True)
+class ConvolverKernel:
+    event_type: str       # "breakout_bull", "turtle_bear", ...
+    channel: str          # "body" | "upper_wick" | "lower_wick" | "volume"
+    component_idx: int    # SVD component index k (0-based)
+    kernel: np.ndarray    # v_k in R^W, unit norm
+    ic: float             # signed IC at primary horizon
+    ic_pvalue: float      # t-test p-value
+    evr: float            # explained variance ratio
+\end{verbatim}
+\code{.npz}+\code{.json} is chosen over HDF5 (C dependency), Parquet (schema overhead),
+and pickle (code-execution risk).
+
+\subsection{Analytical basis dictionary and fallback kernels}
+A fixed set of $10$ unit-norm parametric functions on $\tau\in[0,1]$, discretized to $W$
+points (\code{analytical_basis(W, a=5.0)}, \code{convolver_kernels.py:233-277}), serves as
+an interpretability diagnostic and a fallback library:
+
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+Family & Name / formula & Shape \\
+\midrule
+Polynomial & $\phi_{q1}=\tau^2$, $\phi_{q2}=(\tau-0.5)^2$, $\phi_{q3}=(1-\tau)^2$ & ramps / U-shape \\
+Cubic & $\phi_{c1}=\tau^3$, $\phi_{c2}=(\tau-0.5)^3$, $\phi_{c3}=(1-\tau)^3$, $\phi_{s1}=3\tau^2-2\tau^3$ & S-curves / smoothstep \\
+Exponential & $\phi_{e1}=e^{-a\tau}$, $\phi_{e2}=e^{-a(1-\tau)}$, $\phi_{b1}=e^{-a(\tau-0.5)^2}$ & spikes / Gaussian bump \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Decay rate $a=5.0$ (configurable in $[3,8]$). Alignment is
+$\operatorname{align}(v,\phi)=|\cos(v,\phi)|$; $>0.85$ indicates a known analytical form,
+$<0.50$ a novel data-driven shape. Six fallback kernels (body channel, one per event type)
+are used when no SVD library exists: breakout $=\pm\phi_{s1}$, turtle $=\pm\phi_{c2}$,
+trap $=\pm(\phi_{e2}-\phi_{e1})$.
+
+\subsection{Walk-forward validation and rolling stability}
+Two diagnostics gate the BH-FDR survivors. \textbf{Walk-forward} splits temporally
+($60\%$ train / $40\%$ test) and reports the decay ratio
+$\text{IC}_{\text{decay}} = \ic_{\text{OOS}}/\ic_{\text{IS}}$, with threshold $\geq 0.50$.
+\textbf{Rolling SVD stability} measures the mean cosine similarity of the first right
+singular vector across consecutive rolling windows, $\rho$, with threshold $\geq 0.70$.
+The joint interpretation:
+
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+IC decay & Stability $\rho$ & Interpretation \\
+\midrule
+$\geq 0.50$ & $\geq 0.70$ & Robust kernel --- deploy \\
+$< 0.50$ & $\geq 0.70$ & Shape real, needs more data for IC stability \\
+$\geq 0.50$ & $< 0.70$ & Accidental IC, unstable shape \\
+$< 0.50$ & $< 0.70$ & No signal \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+BTC (May 2026) sits in row 2: $0/6$ passed walk-forward, but turtle-bull $\rho=0.920$ and
+trap-bull $\rho=0.941$ --- shapes are real; only $12$K candles (single regime) limit IC
+estimation.
+
+\subsection{Online cosine-similarity scoring}\label{sec:convolver-online}
+The production algorithm (\code{convolver.py}, class \code{Convolver(MicrostructureAlgorithm)})
+is a matched filter (Turin 1960). It aggregates $600$ ticks into a $60$s micro-candle,
+decomposes into the four channels, normalizes the sliding $W$-window by ATR, and scores via
+cosine similarity. For unit-norm kernels, $s=\langle x,k\rangle/\lVert x\rVert$ (returns $0$
+if $\lVert x\rVert<10^{-12}$). Multi-channel aggregation per event type $e$:
+\begin{equation}
+  S^{(e)}(t) = \sum_c w_c \sum_j \ic_j\, s^{(e,c)}_j(t),
+\end{equation}
+with channel weights $w_c=0.25$ (equal) and IC weighting across kernels $j$. Eight features
+are emitted: six per-event similarities \code{alg_conv_breakout_bull/bear},
+\code{alg_conv_turtle_bull/bear}, \code{alg_conv_trap_bull/bear} (range $[-1,1]$);
+\code{alg_conv_best_score} $=\max|\,\cdot\,|$ over the six ($[0,1]$); and
+\code{alg_conv_best_pattern} (index $0$--$5$). Required columns: \code{raw_midprice},
+\code{flow_volume_1s}. Warmup $=(W+\text{atr\_period})\times\text{candle\_ticks}
+=(20+14)\times 600 = 20{,}400$ ticks ($\sim$\,$34$ min), NaN-blanked.
+
+\subsection{Operational integration and discovery roadmap}
+The convolver runs offline in Python (not in the Rust ingestor): the paper trader loads tick
+parquet, calls \code{convolver.run_batch}, appends the eight \code{alg_conv_*} columns,
+aggregates to bars, and z-scores to P80/P20 entry thresholds. Five operational steps refine and
+integrate it.
+
+\paragraph{Step 0 --- bar-aggregation fix.} \code{alg_conv_best_score} is $0$ for $\sim$\,$95\%$
+of candles and spikes to $0.3$--$0.8$ on a match. Aggregating five $60$s candle scores into a
+$5$-min bar with \code{bar_agg="mean"} dilutes a lone $0.8$ to $0.16$ --- below the P80 entry
+threshold, producing zero trades (the June-1 gauntlet bug). The fix is \code{bar_agg="max"},
+which preserves the peak match.
+
+\paragraph{Step 1 --- re-run BTC discovery.} The deployed kernels date from $12{,}059$ candles
+($\sim$\,$8.4$ days); $\sim$\,$30$ days ($\sim$\,$43$K candles at $60$s) is $\sim$\,$3.6\times$
+more, projected to yield $\sim$\,$550$ trap / $\sim$\,$1050$ turtle / $\sim$\,$1850$ breakout
+events ($\sim$\,$140$ trap events/channel --- above the $100$ SVD threshold; $\sim$\,$220$ OOS
+traps). If re-discovered ICs rise the shapes are real; if they fall, the May-24 set was overfit.
+Back up before \code{--save} overwrites.
+
+\paragraph{Step 2 --- cross-symbol universality.} Per-symbol discovery on ETH/SOL, then cosine
+similarity of matching kernels: $>0.80$ means universal --- pool BTC$+$ETH$+$SOL to
+$\sim$\,$129$K candles ($\sim$\,$410$ traps/channel) under one shared library; $<0.50$ means
+symbol-specific libraries. Pooled discovery is a $\sim$\,$50$-LOC wrapper calling the
+SVD/IC/FDR functions directly.
+
+\paragraph{Step 3 --- convolver as ML features.} The eight outputs are decorrelated from all
+microstructure features ($|\rho|<0.2$, a different data representation), making them high-value
+inputs to the ML algorithms (\S\ref{sec:mlplan}) rather than a standalone strategy --- the
+convolver need not pass the gauntlet alone if its features improve the models that consume them.
+This requires runner support for multi-algorithm chaining (\code{run_chain}: run the convolver
+first, \code{concat} its outputs, then run the ML algorithm on the augmented frame) --- the same
+Wave-0 prerequisite as the bar-level fix. Drop from the ML set if LightGBM importance $<0.01$.
+
+\paragraph{Step 4 --- quarterly re-discovery.} Every $90$ days ($\sim$\,$130$K new
+candles/symbol), re-run discovery, compare to the prior library by cosine similarity ($>0.85$:
+stable, adopt; $<0.85$: investigate a regime shift), and track FDR-survivor count, mean IC,
+decay ratio, and $\rho$ over time --- a data-volume learning curve revealing when discovery
+becomes OOS-robust. Cost is
+$O(n_{\text{candles}}\!\cdot\!W\!\cdot\!n_{\text{kernels}})\approx0.5$\,s per day of data;
+warmup is $(W+\text{atr\_period})\times600=20{,}400$ ticks ($\sim$\,$34$ min, $\sim$\,$2.4\%$ of
+a day).
+
+% ===========================================================================
+\section{Feature Wiring: Whale Flow, Liquidation Risk, Concentration}\label{sec:wiring}
+% ===========================================================================
+
+Of the $236$ schema features, $48$ are uniformly NaN because the position/trade-attribution
+pipeline is unwired. The Rust computation already exists; what is missing is the data feed.
+This five-step plan unlocks up to $40$ features ($12$ whale-flow $+$ $13$ liquidation-risk
+$+$ $15$ concentration). \textbf{Verified locally (Jun-16):} the wired binary populates all
+$31$ whale/liquidation/concentration columns $\sim$\,$6$ min after start, and
+\code{WsTrade.users} is populated (wallet discovery works).
+
+\subsection{Step 01 --- Whale flow from trade classification}
+A zero-cost heuristic: classify trades with notional
+$\geq\$100$K as whale activity and feed them to the already-implemented
+\code{WhaleFlowBuffer} ($1109$ LOC in \code{ing-features/src/whale_flow.rs}). On each
+\code{WsMessage::Trades}, if $\text{price}\times\text{size}\geq\text{whale\_threshold\_usd}$,
+a \code{WhalePositionChange} is added (signed by trade side; wallet $=$ \code{trade\_<tid>};
+\code{is_market_maker=false}). Config: \code{[features.whale\_flow] whale\_threshold\_usd = 100000.0}.
+Unlocks $12$ features: \code{whale_net_flow_1h/4h/24h},
+\code{whale_flow_normalized_1h/4h}, \code{whale_flow_momentum},
+\code{whale_flow_intensity}, \code{whale_flow_roc}, \code{whale_buy_ratio},
+\code{whale_directional_agreement}, \code{active_whale_count}, \code{whale_total_activity}.
+Limitation: trade size $\neq$ position change; upgraded in Step 03.
+
+\subsection{Step 02 --- Position tracker config and shared state}
+The fully-implemented \code{PositionTracker} ($367$ LOC, \code{ing/src/positions/tracker.rs};
+polls public \code{clearinghouse_state(wallet)} REST, no auth) is given a config section and a
+thread-safe \code{SharedPositionState} (new \code{positions/state.rs}) bridging the tracker task
+to per-symbol \code{MarketState}. Config defaults: \code{enabled=false} (opt-in),
+\code{poll_interval_secs=60}, \code{max_concurrent_requests=10},
+\code{discover_from_trades=true}, \code{max_tracked_wallets=50}, optional
+\code{initial_wallets}. \code{SharedPositionState} (built on \code{parking_lot::RwLock})
+exposes \code{update}, \code{drain_deltas}, \code{get_liquidation_positions},
+\code{get_concentration_positions}, and \code{snapshot_count}; \code{PositionSnapshot}
+already carries \code{liquidation_price}, \code{position_value}, \code{size}, \code{entry_price}.
+
+\subsection{Step 03 --- Spawn tracker and wire 40 features}
+\code{PositionTracker} is spawned as a tokio task in \code{main.rs} (when
+\code{position_tracker.enabled}), feeding snapshots/deltas through \code{mpsc} channels to a
+consumer that updates \code{SharedPositionState}; an \code{Arc<SharedPositionState>} is passed
+to each symbol ingestor. In \code{compute_features()}, real position deltas \emph{upgrade}
+whale-flow, and \code{liquidation::compute(...)} (13 features) and the
+\code{ConcentrationBuffer} (15 features) fire when positions are present. Data flow:
+\begin{verbatim}
+PositionTracker::poll_all()
+  -> clearinghouse_state(wallet) per wallet
+  -> PositionSnapshot + PositionDelta
+  -> mpsc channels -> consumer -> SharedPositionState
+  -> MarketState::compute_features() reads SharedPositionState
+  -> features.whale_flow / liquidation_risk / concentration = Some(...)
+  -> Parquet writer (real values instead of NaN)
+\end{verbatim}
+Graceful shutdown is automatic (the tracker is a read-only polling loop).
+
+\subsection{Step 04 --- Wallet discovery from the trade stream}
+Whale addresses are discovered from \code{WsTrade.users: Option<(String,String)>}
+(maker/taker). A \code{WalletDiscovery} accumulator counts addresses; every $5$ minutes the
+top-$N$ new wallets are promoted to the tracker (capped at \code{max_tracked_wallets}).
+\textbf{Risk:} \code{WsTrade.users} may not be populated by the public WebSocket --- a
+one-time diagnostic logs \code{Some} vs \code{None} on first trade; the fallback is curated
+\code{initial_wallets}, and Step-01 whale flow works regardless. (Field confirmed populated
+Jun-16.)
+
+\subsection{Step 05 --- Concentration viability gate}
+A \emph{decision gate}, not code: after $48$h with the tracker live, concentration features
+(Herfindahl, Gini, top-$N$ share) are judged against tracked-wallet count and open-interest
+coverage:
+
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+Wallets tracked & OI coverage & Verdict \\
+\midrule
+$50+$    & $>20\%$    & viable --- no change \\
+$20$--$50$ & $5$--$20\%$ & noisy --- add a \code{FEATURES.md} disclaimer \\
+$<20$    & $<5\%$     & unavailable --- keep NaN, documented \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+If not viable, the recommended action is Option A (keep NaN: no schema change, all
+downstream NaN-safe) over Option B (remove features: \code{count_all()} $236\rightarrow221$,
+a breaking schema change). Sanity ranges once populated: top5 $0.05$--$0.50$, HHI
+$0.01$--$0.25$, Gini $0.30$--$0.80$.
+
+% ===========================================================================
+\section{The Process Framework --- NAT's Third Citizen}\label{sec:process}
+% ===========================================================================
+
+\subsection{Concept and contract}
+A \emph{process} is the third first-class citizen alongside features and algorithms:
+
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+Citizen & Question it answers & Contract \\
+\midrule
+feature   & what is computed & ingestor / derived columns \\
+algorithm & how it trades & \code{MicrostructureAlgorithm} (\code{scripts/algorithms/}) \\
+process   & whether/where information about price action exists & \code{Process} (\code{scripts/processes/}) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Two kinds share one registry/CLI/persistence surface (\code{scripts/processes/base.py}):
+\code{EvaluationProcess} (\code{evaluate(df, ctx) -> ProcessResult}, scores existing columns)
+and \code{TransformProcess} (\code{transform(df, ctx) -> (derived_df, ProcessResult)},
+produces new series such as PCA components or triple-barrier labels that the runner chains
+into any evaluation via \code{--score-with}). Conventions mirror algorithms: \code{@register}
+decorator (registry key $=$ \code{name()} $=$ config section); \code{required_columns(available)}
+receives the schema for column pattern-selection; \code{data_level} is \code{"bars"} (default)
+or \code{"ticks"}; \code{describe()} returns a machine-readable param spec. \textbf{NaN policy
+(K2):} every process routes columns through \code{partition_usable_columns()} --- dead,
+constant, or thin columns are skipped with a recorded reason (\code{all_nan}, \code{constant},
+\code{n_valid<min}), never crashing a run.
+
+\subsection{Implemented processes}
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+Name & Kind & Description \\
+\midrule
+\code{ic_horizon}       & evaluation & Expanding Spearman IC $\times$ horizon sweep; overlap-corrected $n_{\text{eff}}=n/h$; BH-FDR. \\
+\code{mi_ksg}           & evaluation & KSG mutual information vs returns; gate $\text{MI}\geq I_{\min}(\text{fee},\sigma_r,\text{kurt})$; rank inputs. \\
+\code{transfer_entropy} & evaluation & Directed TE(feature $\to$ 1-bar return), linear (default) or KSG, with reverse control. \\
+\code{spectral}         & evaluation & Tick PSD / Hurst / OU half-life / band IC (wraps spannung). \\
+\code{ml_importance}    & evaluation & LightGBM expanding walk-forward gain importance $+$ net-PnL-after-cost. \\
+\code{triple_barrier}   & transform  & L\'opez de Prado 3-barrier labels (\code{tb_label/tb_ret/tb_hit_bars}), vol-scaled. \\
+\code{pca_combo}        & transform  & Train-prefix PCA $\to$ orthogonal \code{pc_1..pc_k}; holdout-only IC. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A note on \code{mi_ksg}: rank/copula-transforming inputs is mandatory --- raw-scale KSG
+manufactures a spurious $\sim$\,$0.07$-bit noise floor when feature and return scales differ
+(verified on planted data). \code{ic_horizon} deliberately uses full-sample $\rho$ with
+overlap-corrected $n_{\text{eff}}$, \emph{not} the screener's expansion-point $t$-test, which
+treats overlapping windows as replications and flags noise.
+
+\paragraph{Result schema and persistence.} \code{ProcessResult} (schema\_version 1) records
+\code{run_id}, process, kind, symbol, timeframe, params, data fingerprint, provenance
+(\code{git_sha}, dirty, timestamp), \code{features_tested/skipped}, \code{findings}
+(feature, horizon, metric, value, threshold, $p$, $p_{\text{adjusted}}$, \code{informative}),
+optional \code{derived}, and a \code{summary}. The authoritative JSON is written atomically to
+\code{data/research/processes/{run_id}.json}; a queryable index row goes to the
+\code{process_results} table in \code{nat.db} (best-effort). \textbf{FDR scope:} BH is
+\emph{per-run}; the index is a research log, not a meta-gate --- gates G1/G4 remain
+authoritative for promotion. CLI: \code{nat process list/run/results/show};
+tests via \code{nat test process} ($48$ planted-signal + no-lookahead + persistence tests).
+
+\subsection{Process set design (S1--S9): extracting uncorrelated signals}
+The design operationalizes one law --- the information ratio budget:
+\begin{equation}
+  \text{IR} \approx \overline{\ic}\,\sqrt{N_{\text{eff}}},
+  \qquad
+  N_{\text{eff}} = \frac{N}{1+(N-1)\,\overline{\rho}},
+\end{equation}
+so every process either raises $\overline{\ic}$ (find real information), raises
+$N_{\text{eff}}$ (kill redundancy), or protects both from estimation error and decay. Nine
+processes across four layers:
+
+\paragraph{Layer 1 --- existence with redundancy control.}
+\code{S1 cmi_select} (evaluation): greedy forward selection in information space,
+$f_1=\arg\max_f I(f;r)$, $f_{k+1}=\arg\max_f I(f;r\mid S_k)$, stopping when the marginal gain
+$<\max(I_{\min},\epsilon)$ --- uncorrelated-by-construction (catches nonlinear redundancy PCA
+misses). \code{S2 interaction_synergy} (evaluation): pairwise synergy
+$S(X,Y)=I([X,Y];r)-I(X;r)-I(Y;r)$ over the top-$K$ features. \code{S3 lead_lag_te}
+(evaluation): cross-symbol directed information $\text{TE}(x_A\to r_B,\text{lag }L)$, edges
+above $I_{\min}$ with directionality ratio $>1$ forming the lead--lag network.
+
+\paragraph{Layer 2 --- estimation hygiene.}
+\code{S4 permutation_null} (meta-process): stationary block bootstrap of returns
+($M=500$), $p_{\text{perm}}(f)=\#\{\text{metric}_{\text{null}}\geq\text{metric}_{\text{obs}}\}/M$,
+plus White's-Reality-Check excess discoveries. \code{S5 stability_decay}: rolling
+calendar-windowed IC with CUSUM / Page--Hinkley break detection and sign-consistency
+$\geq 0.7$.
+
+\paragraph{Layer 3 --- conditional structure.}
+\code{S6 regime_conditional}: conditional IC within regime buckets ($\text{lift}=\ic_{\text{active}}/\ic_{\text{uncond}}$)
+and \emph{stress} correlation of the signal set (per-bucket $\overline{\rho}$ and
+$N_{\text{eff}}$). \code{S7 residualize} (transform): $\text{res}_f(t)=f(t)-\beta'Z(t)$ with
+$\beta$ fit on the training prefix only. \code{S8} adds Marchenko--Pastur denoising to
+\code{pca_combo}: noise eigenvalues fall below $\lambda_+=(1+\sqrt{N/T})^2$; clip the noise
+band, keep signal eigenvectors.
+
+\paragraph{Layer 4 --- combination.}
+\code{S9 signal_book} (capstone transform): take features that are selected (S1)
+$\cap$ stable (S5) $\cap$ regime-robust/gated (S6), residualize sequentially into mutually
+orthogonal \code{sig_*} columns, and emit an honest manifest with $N_{\text{eff}}$ and
+$\text{IR}_{\text{expected}}=\overline{\ic}\sqrt{N_{\text{eff}}\cdot\text{bars/yr}}$ computed
+for \emph{both} calm and stress $\overline{\rho}$ (the gap is the risk disclosure). Sequencing
+(total $\sim$\,$49$h): S1$+$S5$+$S4 ($17$h) yield the minimum honest loop; S9 is only worth
+building on $\geq 7$ clean days of data. Every process ships with its planted-signal contract
+in \code{synthetic.py} before real-data use.
+
+\subsection{MI lineage, target taxonomy, and derivative operators}
+\paragraph{Why MI (Part A).} The lineage runs Shannon (1948) $\to$ Cover \& Thomas
+(Fano / rate--distortion: MI lower-bounds prediction error, the parent of the
+\code{min_info_bits} cost gate) $\to$ KSG (2004, the estimator) $\to$ Schreiber (2000) /
+Granger (1969) for directed information $\to$ Battiti / Peng--Long--Ding (mRMR) / Brown et al.
+(2012) for selection $\to$ Bailey--Borwein--L\'opez de Prado--Zhu (2014) for data-snooping
+correction. The framework already instantiates all four currencies.
+
+\paragraph{Target taxonomy (Part C).} ``Price action'' is a 2-D space of \emph{aspect}
+$\times$ \emph{horizon}; the codebase currently studies essentially one cell (forward
+returns / magnitude):
+
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+Aspect & Example target & Current status \\
+\midrule
+Direction & $\operatorname{sign}(r)$ & binary in \code{ml_importance} only \\
+Magnitude & $|r|$, $r$ & \textbf{shipped} (forward returns) \\
+Volatility & future RV / range & not a target (scaler only) --- \emph{high-value gap} \\
+Path & triple-barrier, MFE/MAE, time-to-touch & \code{tb_label} partial \\
+Regime transition & $P(\text{switch})$ & none \\
+Jump / tail & Lee--Mykland & \code{jump_detector} algo only \\
+Microstructure & mid $\to$ micro $\to$ \textbf{fill-conditional} & mid only --- \emph{highest-value gap} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The proposed fix (\code{scripts/processes/targets.py}) promotes the target to a first-class
+\code{Target} node (\code{ForwardReturn}, \code{Direction}, \code{RealizedVol},
+\code{TripleBarrier}, \code{FillConditional}), so \emph{every} process computes
+$I(\text{feature};\text{Target})$ against one explicit target --- closing the gap that
+\code{mi_ksg}, \code{transfer_entropy}, and \code{spectral} silently use forward returns
+regardless.
+
+\paragraph{Derivative operators (Part D).} A proposed \code{feature_ops} transform-process
+(streak-safe, chainable) would mint \code{op_<operator>_<source>} columns. The
+highest-value missing operator is \textbf{fractional differentiation} $(1-B)^d$, $0<d<1$
+(L\'opez de Prado AFML Ch.5) --- stationarizes a level series while preserving memory that
+integer differencing destroys. Others: leaky integration $y_t=\rho y_{t-1}+x_t$; rolling
+spectral features (bandpower, spectral entropy, wavelet energy); robust normalization
+(rolling rank/quantile, median/MAD $z$); cross-feature synergy products; generalized
+rolling Hurst/DFA; nonlinear bases. Standing caveat: operators multiply the column space, so
+a program-level FDR ledger matters \emph{more}. The full assembly is
+\code{feature_ops} $\to$ \code{cmi_select} $\to$ Target $\to$ evaluation processes $\to$
+\code{signal_book} $\to$ algorithm.
+
+% ===========================================================================
+\section{Machine-Learning Implementation Plan}\label{sec:mlplan}
+% ===========================================================================
+
+\subsection{Strategy: a gated pipeline, not a waterfall}
+The plan is a \emph{gated pipeline} with explicit kill criteria at each wave: if ML does not
+add alpha on this dataset with this much data, work stops early rather than building all ten
+algorithms on hope. The defining constraint is data --- the five deployed winners
+(\code{jump_detector}, \code{3f_liquidity}, \code{optimal_entry}, \code{funding_reversion},
+\code{surprise_signal}) are handcrafted and need no training, whereas every ML algorithm here
+needs training data and only $30$ days exist. Algorithm IDs \#1--\#10 are intrinsic to the
+upstream spec and do \emph{not} match execution order (which is by wave). Three commitment
+tiers: \textbf{committed} (\#5, \#1, \#4, \#2; $\sim$\,$2600$ LOC), \textbf{conditional}
+(\#3, \#6, \#7; $\sim$\,$950$ LOC, gated on Wave~1--2), and \textbf{deferred}
+(\#8, \#9, \#10; not scheduled).
+
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+Wave & Algorithms & Gating \\
+\midrule
+0 --- Infrastructure prerequisites & (shared infra) & none \\
+1 --- Change-point $+$ Momentum (proof of concept) & \#5, \#1 & none \\
+2 --- Regime $+$ Mean-reversion $+$ Meta-labeling & \#4, \#2, \#3 & Wave 1 Case A/B \\
+3 (conditional) --- Regime-LightGBM $+$ KNN & \#7, \#6 & Wave 2 Case A/B \\
+4 (deferred) --- HMM, Stacking, Online & \#8, \#9, \#10 & not scheduled \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Data sufficiency (hard gates)}
+Data: $30$ days (2026-04-19 to 2026-06-03), $100$\,ms ticks, $\sim$\,$29$M ticks across three
+symbols, $\sim$\,$8640$ five-minute bars/symbol. Walk-forward uses $4$ folds, $75/25$ split,
+embargo $=100$ bars ($\sim$\,$6480$ train, $\sim$\,$2060$ effective test bars/fold). Logistic
+regression ($7$ features) is safe; LightGBM ($31$ leaves $\times$ $200$ trees $=6200$ nodes vs
+$6480$ bars) is risky, hence \code{num_leaves=15}. Four hard thresholds must pass \emph{before}
+training any model: (1) $\geq 4000$ bars/symbol; (2) binary-label positive rate in
+$[40\%,60\%]$; (3) per-feature NaN rate $<5\%$; (4) each test fold $\geq 500$ bars (else reduce
+\code{n_splits} $4\to3$). The verifier computes \code{n_bars = n_ticks // 3000}. Implications:
+logistic OK, LightGBM$(15,100)$ OK, HMM $3$--$5$ states OK, stacking and online \emph{not
+enough data} --- which is exactly why \#8/\#9/\#10 are deferred.
+
+\subsection{Wave 0 --- infrastructure ($1$ day)}
+The keystone is the \textbf{bar-level dispatch fix}: add \code{bar_level=False} and
+\code{bar_timeframe="5min"} to the \code{MicrostructureAlgorithm} ABC ($+2$ lines in
+\code{base.py}), and in \code{AlgorithmRunner.run_on_dataframe()} ($+20$ lines) call
+\code{aggregate_bars(df, timeframe=algo.bar_timeframe)} when \code{algo.bar_level} and
+\code{timestamp_ns} are present, then forward-fill bar results back to the tick index
+(\code{result.reindex(df.index, method='ffill')}). This replaces $\sim$\,$10$ duplicated
+detection blocks; each ML algorithm just declares \code{bar_level=True}. Also: extract
+\code{WelfordNormalizer} to \code{scripts/utils/online.py}; add bar fixtures to
+\code{conftest.py} (\code{make_bar_df}, \code{make_forward_returns}, \code{make_labeled_df},
+\code{make_regime_labels} with a $95\%$ self-loop transition matrix); create model directories
+only for committed algorithms; and run the four data-sufficiency checks.
+
+\subsection{Wave 1 --- change-point (\#5) and momentum (\#1) ($5$ days)}
+Purpose: answer Q1 (does bar-level integration work end-to-end? --- \#5, no training) and Q2
+(can a trained model produce positive OOS alpha? --- \#1, the simplest supervised case). If
+both fail, stop.
+
+\paragraph{\#5 ChangePointDetector} ($\sim$\,$200$ LOC, model-free, \code{bar_level=True}):
+CUSUM plus Bayesian online changepoint detection. Parameters \code{cusum_threshold=5.0},
+\code{cusum_drift=0.05}, \code{hazard_rate=1/200}, \code{max_run_length=500}, with a
+Normal-Inverse-Gamma predictive prior ($\mu_0=0$, $\kappa_0=1$, $\alpha_0=1$, $\beta_0=1$).
+Outputs \code{alg_cpd_cusum_signal}, \code{alg_cpd_run_length}, \code{alg_cpd_change_prob},
+\code{alg_cpd_regime_age}; required columns \code{imbalance_qty_l1_mean},
+\code{vol_returns_5m_last}, \code{ent_tick_1m_mean}. Per-bar update:
+\begin{equation}
+  S^{+}=\max(0, S^{+}+x-\text{drift}),\quad S^{-}=\max(0, S^{-}-x-\text{drift}),
+\end{equation}
+the Adams--MacKay run-length recursion (growth $=P(r)(1-h)\,\pi$, changepoint
+$=\sum P(r)\,h\,\pi$, renormalize), expected run length $\sum_r r\,P(r)$, and signal
+$\max(S^{+},S^{-})\cdot\operatorname{sign}(S^{+}-S^{-})$. The run-length vector must be capped
+at \code{max_run_length} and renormalized to avoid linear memory growth.
+
+\paragraph{\#1 MomentumContinuation} ($\sim$\,$250$ LOC, logistic regression,
+\code{bar_level=True}): the simplest supervised test. Training (\code{train_momentum.py}):
+$20$-bar forward return $\text{fwd}[t]=\text{midprice}[t+20]/\text{midprice}[t]-1$, binary
+label (assert $40$--$60\%$ balance), seven bar-aggregated features (\code{ent_tick_1m_mean},
+\code{ent_permutation_returns_16_mean}, \code{trend_hurst_300_mean}, \code{toxic_vpin_50_mean},
+\code{whale_net_flow_4h_sum}, \code{regime_accumulation_score_mean}, \code{vol_returns_5m_last};
+assert NaN $<5\%$), \code{StandardScaler}, \code{LogisticRegression(C=1.0, l2, max_iter=1000)},
+and walk-forward (polars) with \code{n_splits=4}, \code{embargo=100}. A LightGBM upgrade
+(\code{num_leaves=15}) is attempted \emph{only} if the logistic OOS Sharpe $>0.5$. Parameters
+\code{entropy_ceiling=0.85}, \code{p_long=0.6}, \code{p_short=0.4}; outputs \code{alg_mc_signal},
+\code{alg_mc_confidence}, \code{alg_mc_entropy_gate}. \code{step()} applies an entropy gate
+($\text{gate}=1$ if $\text{ent}<\text{ceiling}$ else $0$) and a dead-zone signal:
+$(\text{prob}-0.5)\cdot2\cdot\text{gate}$ if $\text{prob}>p_{\text{long}}$,
+$-(0.5-\text{prob})\cdot2\cdot\text{gate}$ if $\text{prob}<p_{\text{short}}$, else $0$.
+
+\paragraph{Wave 1 decision gate.} \textbf{Case A} (\#1 OOS Sharpe $>0.5$ and $2/3$ symbols
+positive): proceed to Wave~2 in full. \textbf{Case B} ($>0.5$ but $1/3$ symbols): Wave~2
+cautious --- per-symbol models, skip \#3. \textbf{Case C} ($0.0$--$0.5$): investigate via
+feature importance before proceeding. \textbf{Case D} ($<0.0$): stop --- ML adds no alpha; try
+a different horizon/label or accumulate $60+$ days. \#5 is model-free and survives the gate
+independently (kept as a regime gate if \code{alg_cpd_change_prob} vs subsequent volatility
+$\rho>0.15$).
+
+\subsection{Wave 2 --- regime (\#4), mean-reversion (\#2), meta-labeling (\#3) ($7$ days)}
+\textbf{\#4 RegimeStateMachine} ($\sim$\,$400$ LOC): start with \emph{manual thresholds only}
+(no training) over six states --- \code{ACCUMULATION}, \code{MARKUP}, \code{DISTRIBUTION},
+\code{MARKDOWN}, \code{HIGH_VOLATILITY}, \code{VOLATILE_NOISE} --- from \code{vol_returns_5m_last},
+\code{trend_hurst_300_mean}, \code{ent_tick_1m_mean}, \code{whale_net_flow_4h_sum},
+\code{toxic_vpin_50_mean}. Its primary value is as a \emph{gate} for other algorithms (notably
+\#7); acceptance requires no state below $5\%$ or above $60\%$ occupancy.
+\textbf{\#2 MeanReversionDetector} ($\sim$\,$300$ LOC, LightGBM \code{num_leaves=15}): predicts
+whether a price extreme reverts within $20$ bars; a SHAP step drops any feature with importance
+$<0.02$ and retrains; must be negatively correlated with \#1 ($\rho<-0.2$), else redundant.
+\textbf{\#3 MetaLabeling} ($\sim$\,$350$ LOC, logistic on triple-barrier labels): skipped under
+Wave-1 Case B. The hard part is preprocessing (\code{build_meta_training_data}): run all five
+winners, aggregate their outputs to bars (\code{alg_jump_signal_mean}, etc.), filter active
+bars, compute L\'opez de Prado triple-barrier labels, and train. Outputs
+\code{alg_meta_probability}, \code{alg_meta_side}, \code{alg_meta_size}. \textbf{Wave 2 gate:}
+Case A ($3+$ uncorrelated OOS $>0.5$) $\to$ Wave~3 full; Case B ($2$ working) $\to$ Wave~3
+partial (\#7 only); Case C ($1$) $\to$ stop and deploy it; Case D ($0$) $\to$ stop.
+
+\subsection{Wave 3 (conditional) --- regime-LightGBM (\#7) and KNN (\#6)}
+\textbf{\#7 RegimeConditionedLightGBM} ($\sim$\,$350$ LOC): a separate LightGBM per regime plus
+one global fallback; with $\sim$\,$8640$ bars over six regimes (average $\sim$\,$1440$),
+regimes below \code{min_samples_regime=500} use the fallback. Per-regime feature sets differ
+(trending: Hurst/whale/accumulation; mean-reverting: entropy/vol/imbalance; volatile:
+vol/VPIN/entropy). Must beat $\max(\text{\#1},\text{\#2})$ OOS or regime conditioning adds
+nothing. \textbf{\#6 KNN retrieval} ($\sim$\,$250$ LOC, buffer-based, no training): whiten via
+the Cholesky of a Ledoit--Wolf covariance and query a KD-tree, refitting the whitening every
+$100$ bars; \code{K=20}, \code{buffer_size=5000}, \code{time_decay_halflife=500},
+\code{min_buffer=100}. Built only under Wave-2 Case A; must satisfy $\rho<0.4$ with \#1/\#2.
+
+\subsection{Wave 4 (deferred)}
+\#8 (HMM with learned emissions) overlaps \#4; \#9 (stacking) needs $>15$K bars/symbol for a
+non-noisy out-of-fold protocol; \#10 (online SGD) needs a proven, measured concept drift.
+Re-evaluation triggers: data exceeds $60$ days, $4+$ uncorrelated ML algorithms deployed, or a
+deployed model shows $>30\%$ Sharpe degradation over two weeks.
+
+\subsection{Cross-cutting: codebase gotchas, verification, and risk}
+\paragraph{Gotchas (existing-codebase facts).} \code{@register} instantiates \code{cls()} with
+\emph{no arguments}, so every \code{__init__} parameter needs a default (constructor defaults
+\emph{are} the production values; \code{config/algorithms.toml} is an optional override and is
+not auto-injected). \code{walk_forward_validation()} consumes \emph{polars}, returning
+\code{in_sample_sharpe}, \code{out_of_sample_sharpe}, \code{oos_is_ratio}, \code{is_valid}.
+Bar-aggregation renames columns by suffix (price $\to$ \code{_mean}; entropy $\to$
+\code{_mean/_std/_slope}; flow $\to$ \code{_sum}; others $\to$ \code{_mean/_std/_last}), so
+\code{required_columns()} must use suffixes. \code{AlgorithmFeature} is frozen
+(\code{name}, \code{warmup} --- in bars for bar-level algos --- \code{description}); features need
+the \code{alg_} prefix; a registered-but-untrained algorithm returns all-NaN.
+
+\paragraph{Verification matrix.} Six phases, advancing only on pass:
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+Phase & Command & Pass criterion \\
+\midrule
+1. Smoke        & \code{pytest -k <name>}                 & all 6 \code{TestSmokeAll}; warmup NaN, rest finite \\
+2. Training (ML)& \code{python scripts/train_<name>.py}   & model saved; \code{is_valid}; OOS Sharpe $>0.5$ \\
+3. Feature audit& SHAP / coefficient importance           & no feature $<0.02$ (else drop $+$ retrain) \\
+4. Single-day   & \code{nat daily}                        & appears; non-NaN; trades $>0$ \\
+5. Multi-day    & \code{nat gauntlet run}                 & net positive; bps/trade $>1.0$; $2/3$ symbols \\
+6. Complementarity & Spearman correlation                 & $|\rho|<0.5$ vs winners, $<0.4$ vs ML \\
+\bottomrule
+\end{tabular}
+\end{center}
+The agent submission protocol then applies five gates: IC $>0.10$ and dIC $>0.05$; net Sharpe
+$>0.5$ after costs; temporal replication ($3+$ days); symbol replication ($2/3$); correlation
+$<0.6$ with all promoted signals.
+
+\paragraph{Risk register (highlights).} Insufficient data and overfitting are the HIGH risks
+(mitigated by the $\geq 4000$-bar gate, \code{num_leaves=15}, embargo $=100$, deflated Sharpe,
+and killing any OOS/IS ratio $<0.5$); data leakage (forward returns at $t+h$, embargo,
+out-of-fold stacking, automated lookahead test); the sunk-cost fallacy (the wave gates are
+\emph{hard} gates); plus model staleness (weekly retrain, IC-decay trigger), complexity creep
+(simplest model first, upgrade only on $>20\%$ OOS gain), and correlation clustering (keep the
+better OOS performer when $\rho>0.5$).
+
+\paragraph{Timeline.} One developer: committed work (Wave~0 $+$ Wave~1 $+$ gate) is $\sim$\,$7$
+days; running Wave~2 brings it to $\sim$\,$15$; Wave~3 to $\sim$\,$21$. First useful signal at
+day~$6$; the most likely outcome is $2$--$3$ algorithms deployed by day~$15$ with clear
+evidence for or against expanding. The git workflow is one \code{feat/ml-wave-N} branch per
+wave, merged \code{--no-ff} after the decision-gate metrics are recorded.
+
+% ===========================================================================
+\section{Cloud Deployment and Operations}\label{sec:deploy}
+% ===========================================================================
+
+\subsection{Objective and guardrails}
+Data continuity is the binding constraint. The cloud box is (a) a redundant, always-on
+second ingestor independent of su-35, and (b) the deployment vehicle for the wired binary
+(\code{[position_tracker]} enabled) while su-35 stays frozen. \textbf{Guardrails:}
+(1) \emph{su-35 zero contact} until the $7$-day clean streak completes --- the box is a
+\emph{separate} ingestor; su-35 upgrades only at cutover; (2) \emph{named-service invocations
+only} --- never a bare \code{docker compose up}; (3) gates imported, never invented; no live
+capital before G8 $+$ a healthy kill-switch.
+
+\subsection{Provisioning and deployment}
+\textbf{Sizing:} default Hetzner \textbf{AX52} dedicated ($8$-core / $64$\,GB, $\sim$\,EUR\,$60$/mo)
+for ingestion $+$ the evaluation swarm; ingestion-only first on a Hetzner \textbf{CX/CPX} VM
+($\sim$\,EUR\,$10$--$20$/mo, $2$ vCPU / $4$\,GB ample for $3$ symbols). Latency: Hetzner EU adds
+$\sim$\,$250$\,ms RTT to Hyperliquid (Tokyo) --- fine for research ingestion; live execution
+(T21) needs Tokyo-proximate hosting. Harden (Phase 0): Ubuntu LTS, SSH keys only, \code{ufw}
+allow $22/80/443$, non-root \code{nat} user, \code{loginctl enable-linger nat},
+\code{NAT_HOME=/var/lib/nat}. Secrets/DNS (Phase 1): \code{.env} with \code{DOMAIN},
+\code{ACME_EMAIL}, \code{POSTGRES_PASSWORD}, \code{GRAFANA_PASSWORD},
+\code{GRAFANA_ANON=false} on a public box, Telegram tokens; A-records for the apex plus
+\code{api.}, \code{dashboard.}, \code{prometheus.}, \code{research.}. One-command deploy:
+\code{nat deploy cloud <IP> --user nat --nat-home /var/lib/nat} chains
+scp\,$\to$\,\code{apt install}\,$\to$\,\code{nat service install} (systemd \code{--user} units
+\code{nat-ingestor}/\code{nat-gap-alert}, \code{Restart=always}, \code{WantedBy=default.target})\,$\to$\,health check.
+
+\subsection{The 15-service Docker stack}
+The full set (\code{docker compose config --services}): \code{redis}, \code{postgres},
+\code{ingestor}, \code{gap-alert}, \code{alerts}, \code{kill-switch}, \code{promotion},
+\code{signal-bridge}, \code{metrics-exporter}, \code{prometheus}, \code{grafana},
+\code{caddy}, \code{api}, \code{web}, \code{optuna-dashboard}. Health-gated \code{depends_on}
+order: redis\,$\to$\,ingestor\,$\to$\,gap-alert; kill-switch\,$\to$\,signal-bridge;
+prometheus\,$\to$\,grafana; caddy\,$\to$\,\{grafana, api\}; postgres\,$\to$\,optuna-dashboard.
+All services carry \code{restart: unless-stopped} (auto-restart on crash and host reboot ---
+this, not a script, makes the box 24/7). Bring-up (named services, in order):
+\begin{verbatim}
+nat doctor                            # preflight: data-dir ownership, binary, disk
+nat docker build
+docker compose up -d redis postgres
+docker compose up -d ingestor         # WIRED binary; writes ./data/features
+docker compose up -d gap-alert alerts kill-switch
+docker compose up -d promotion signal-bridge metrics-exporter
+docker compose up -d prometheus grafana caddy api web optuna-dashboard
+docker compose ps                     # all 15 healthy?
+\end{verbatim}
+
+\subsection{Acceptance: 24h / 48h / 7-day}
+\textbf{First 24h} --- the $40$ whale/liquidation/concentration columns leave $100\%$ NaN
+(per-column non-NaN coverage one-liner), \code{nat gap status} fresh, and
+\code{docker compose logs ingestor | grep WsTrade.users} shows \emph{IS populated} $+$
+\emph{Discovered and promoted whale wallets}. \textbf{48h} --- apply the concentration
+viability matrix (\S\ref{sec:wiring}, Step 05) and record the verdict, which unblocks the LF3
+liquidation-cascade work and the agents' dead-column skip lists. \textbf{Cutover} --- only
+after the $7$-day clean-data streak ($>$\,$\sim$\,$200$\,MB/day): compare cloud vs su-35 over
+overlapping hours (row counts, gap profile, feature parity within float noise); the cleaner
+box becomes primary, su-35 then upgrades to the wired binary.
+
+\subsection{Observability}
+Grafana reads only Prometheus, but NAT's business state lives in SQLite/JSON; the
+\code{metrics-exporter} (\code{scripts/monitoring/metrics_exporter.py}, \code{:9094/metrics})
+bridges them, exporting \code{nat_lifecycle_signals{state}} (from \code{signal_lifecycle} in
+\code{nat.db}), \code{nat_live_cum_pnl_pct} / \code{nat_live_last_daily_pnl_pct} /
+\code{nat_live_pnl_days} (from \code{data/execution/daily_pnl.json}), and
+\code{nat_paper_sharpe{signal}} / \code{nat_paper_max_drawdown_bps{signal}} (from
+\code{data/oos_validation/state.json}). Four auto-provisioned dashboards:
+
+\begin{center}\small
+\begin{tabular}{lll}
+\toprule
+Dashboard & uid & Reads \\
+\midrule
+NAT Lifecycle Funnel & \code{nat-lifecycle-funnel} & \code{nat_lifecycle_signals{state}} \\
+NAT Paper Performance & \code{nat-paper-performance} & \code{nat_paper_sharpe}, \code{nat_paper_max_drawdown_bps} \\
+NAT Live P\&L & \code{nat-live-pnl} & \code{nat_live_*} \\
+NAT Overview & \code{nat-overview} & ingestor throughput / freshness \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The lifecycle funnel highlights \code{APPROVAL_PENDING} (the human gate). Deferred:
+per-daemon \code{/metrics} endpoints and a full \code{docker compose up} E2E integration
+test.
+
+\subsection{Operations and the silent-stall gotcha}
+\textbf{Retention:} raw parquet grows per-symbol-per-day --- set an expiry/downsample.
+\textbf{Backups:} \code{data/nat.db} (lifecycle/research) $+$ the postgres volume (Optuna
+studies). \textbf{Data-dir ownership (silent stall):} the Docker ingestor runs as \emph{root}
+and creates root-owned \code{data/features} and \code{data/trades}; a native (non-root)
+ingestor against the same tree \emph{cannot write and stalls silently} (the writer task dies
+with no operator error). Fix: \code{sudo chown -R <user>:<user> data/}; \code{nat doctor}
+detects this --- run it before switching between Docker and native ingestors.
+
+\subsection{Packaging \code{nat} as a password-gated \code{.deb}}
+\code{nat} ships as a Debian package installable with \code{sudo apt install nat}, but only on
+machines holding credentials to a private, GPG-signed apt repository behind HTTP basic-auth.
+\textbf{Build:} \code{bash packaging/build_deb.sh} (or \code{nat package deb}) $\to$
+\code{dist/nat_<version>_amd64.deb}. \textbf{Installed layout:} the CLI at \code{/usr/lib/nat/nat},
+Python under \code{/usr/lib/nat/scripts/}, Rust binaries (\code{ing}, \code{api},
+\code{natviz3d}, validators) under \code{/usr/lib/nat/rust/target/release/}, config in
+\code{/etc/nat/}, symlink \code{/usr/bin/nat}. Path resolution (\code{scripts/nat_paths.py},
+\code{nat config paths}) follows precedence \code{NAT_HOME}/\code{NAT_*} env $\to$ source
+checkout $\to$ installed XDG. \textbf{Durable supervision:} \code{nat service install} writes
+systemd \code{--user} units (auto-restart $+$ boot-persistence via linger), superseding the
+default tmux$+$cron watchdogs that die on reboot. \textbf{Publish:} sign with a dedicated GPG
+key, build a flat repo with \code{aptly}, serve \code{~/.aptly/public} over HTTPS basic-auth
+(Caddy). \textbf{Onboard a client:} \code{scripts/setup_apt_client.sh} writes the keyring,
+\code{sources.list.d/nat.list}, and a mode-$600$ \code{auth.conf.d/nat.conf}; without
+credentials \code{apt update} returns $401$, and metadata is GPG-verified so an attacker can
+neither install nor tamper.
+
+\end{document}
