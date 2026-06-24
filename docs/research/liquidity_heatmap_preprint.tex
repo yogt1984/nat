@@ -1,0 +1,541 @@
+\documentclass[11pt,a4paper]{article}
+
+% ============================================================
+% Packages (core only — texlive-latex-base + texlive-base)
+% ============================================================
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{array}
+
+% ============================================================
+% Theorem environments
+% ============================================================
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{remark}{Remark}[section]
+\newtheorem{proposition}{Proposition}[section]
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}{Lemma}[section]
+
+% ============================================================
+% Notation macros
+% ============================================================
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\ind}{\mathbf{1}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\inner}[2]{\langle #1,\, #2 \rangle}
+\newcommand{\corr}{\operatorname{corr}}
+\newcommand{\sgn}{\operatorname{sign}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\DeclareMathOperator*{\argmax}{arg\,max}
+
+% ============================================================
+\begin{document}
+
+\title{\textbf{From Liquidation Geometry to Price Movement}\\[4pt]
+\large A Spatial-Density Heatmap and Cascade-Probability Model\\
+for Cryptocurrency Perpetual Futures}
+
+\author{Yigit Onat\\
+\textit{Independent Researcher}\\
+\texttt{yionat@gmail.com}}
+\date{June 2026}
+\maketitle
+
+% ============================================================
+\begin{abstract}
+Leveraged perpetual-futures positions carry deterministic liquidation prices; when price reaches a
+dense cluster of them, forced market liquidations impose price impact that can reach the next
+cluster, producing a self-reinforcing cascade. We formalize this intuition. We construct a
+\emph{spatial liquidation-density field}---a ``liquidity heatmap''---that discretizes the
+log-return axis around the mid-price into $K=200$ bins ($10$ basis points each, $\pm 10\%$) and
+maps the USD notional of each tracked position to the bin containing its liquidation price. From
+this field we extract eight scale- and level-invariant geometric features (nearest-cluster
+distance, mass concentration, cascade-chain length, directional asymmetry, absorption capacity,
+cluster velocity, mass-weighted distance, and spatial entropy). We then give a structural
+price-movement model in which a closed-form domino condition,
+$\delta_B-\delta_A < \lambda\,M_A/m_t$, determines whether liquidating one cluster triggers the
+next, with order-book depth acting as a damper (a liquidity spiral) and the directional asymmetry
+of the field predicting cascade sign. The geometry feeds an online, delayed-target logistic model
+of cascade probability. The contribution of this paper is the construction and the model, together
+with an explicit, falsifiable five-gate validation protocol and a candid treatment of the binding
+practical obstacle: on a decentralized venue the field is observed only through a \emph{sample} of
+tracked wallets, not the full population of open interest. We formalize this sample-to-population
+bias, propose an open-interest rescaling that preserves field \emph{shape}, and report the failure
+mode it produces in practice. We deliberately present no fabricated performance numbers; empirical
+validation under the stated protocol is the explicit next step.
+\end{abstract}
+
+\smallskip
+\noindent\textbf{Keywords:} market microstructure, liquidation cascade, price impact, perpetual
+futures, spatial density estimation, fire sales, order-book liquidity, cryptocurrency
+
+\smallskip
+\noindent\textbf{JEL Classification:} G12, G14, G17, C53
+
+\tableofcontents
+\bigskip
+
+% ============================================================
+\section{Introduction}
+\label{sec:intro}
+% ============================================================
+
+\subsection{The problem}
+
+Perpetual futures are the dominant instrument in cryptocurrency derivatives, and they are traded
+with high leverage. A leveraged position has a deterministic \emph{liquidation price}: the level at
+which the maintenance-margin constraint binds and the exchange force-closes the position with a
+market order. These forced orders are price-takers and price-movers. When the mid-price approaches
+a region of the price axis that is dense with liquidation prices, a move into that region triggers
+a burst of same-signed market orders whose impact can carry the price into the \emph{next} dense
+region---a liquidation cascade, the cryptocurrency analogue of a fire sale.
+
+Two facts make this mechanism tractable as a microstructure object. First, the trigger levels are
+not latent: a position's liquidation price is a deterministic function of its entry, leverage, and
+side. Second, the impact channel is the classical one: forced liquidations consume order-book
+depth, and their price impact is governed by market illiquidity. The open question is therefore not
+\emph{whether} liquidation geometry matters, but how to \emph{represent} it as a field over the
+price axis and how that field's geometry maps to future price movement.
+
+\subsection{Approach and contributions}
+
+We represent the liquidation landscape as a one-dimensional density field $H(t,\cdot)$ over the
+log-return axis relative to the current mid-price, updated at $100\,$ms resolution
+(Section~\ref{sec:heatmap}). From the field we extract eight geometric features that are invariant
+to price level and, being ratios or distances, approximately invariant to the unobserved scale of
+total open interest (Section~\ref{sec:features}). We then give a structural model of how the field
+moves price (Section~\ref{sec:cascade}): a single cluster's impact follows Kyle (1985), a
+closed-form condition determines whether it triggers the next cluster, order-book depth damps the
+chain in the manner of Brunnermeier and Pedersen (2009), and the field's directional asymmetry
+predicts the sign. The geometry drives an online logistic model of cascade probability with delayed
+targets (Section~\ref{sec:probmodel}), gated by an explicit five-criterion validation protocol
+(Section~\ref{sec:validation}).
+
+Specifically, this paper contributes:
+\begin{enumerate}
+  \item A construction of the liquidation-density field in \emph{log-return} coordinates, making
+        bins symmetric in percentage terms and invariant to price level, with an $O(N_t)$ update.
+  \item Eight scale-invariant geometric features of the field, each with a microstructural
+        interpretation.
+  \item A structural price-movement model with a closed-form domino-trigger condition and an
+        order-book absorption damper, linking field geometry to cascade magnitude and direction.
+  \item An online, delayed-target cascade-probability model and a falsifiable five-gate validation
+        protocol.
+  \item A formal treatment of the sample-to-population observation problem on decentralized venues,
+        an open-interest rescaling that preserves field shape, and an honest account of the
+        coverage-driven failure mode observed in practice.
+\end{enumerate}
+
+We emphasize at the outset that this is a \emph{methods and model} paper. The geometry and the model
+are fully specified and implemented; a full out-of-sample evaluation under the protocol of
+Section~\ref{sec:validation} is stated as future work, and we report no measured performance figures
+we cannot substantiate.
+
+% ============================================================
+\section{Related Work}
+\label{sec:related}
+% ============================================================
+
+\paragraph{Price impact of forced trades.}
+Kyle (1985) gives the canonical linear price-impact model in which order flow $q$ moves price by
+$\lambda q$; $\lambda$ is the inverse market depth. Forced liquidations are exactly such order flow.
+Our single-cluster impact and the domino condition are built directly on this primitive, with
+$\lambda$ estimated from recent trades in the spirit of Amihud (2002) and Hasbrouck (2009).
+
+\paragraph{Fire sales and endogenous risk.}
+The cascade mechanism is a fire sale in the sense of Caccioli, Shrestha, Moore, and Farmer (2014),
+who analyze contagion in overlapping portfolios, and of Cont and Wagalath (2016), who measure
+endogenous risk created by feedback between forced selling and price. Our cascade-chain feature is
+the length of the triggered component of exactly such a contagion graph.
+
+\paragraph{Liquidity spirals.}
+Brunnermeier and Pedersen (2009) show how market and funding liquidity interact to amplify shocks
+in thin markets. Our absorption term---order-book depth divided by cluster mass---is the
+discrete, level-local form of their damper: a deep book absorbs a liquidation without propagation,
+a thin one lets price gap through.
+
+\paragraph{Cryptocurrency liquidations.}
+Perpetual-futures liquidation cascades are a recognized empirical phenomenon in crypto markets, but
+they are typically studied ex post from exchange liquidation feeds. Our contribution is a
+\emph{forward-looking, spatial} representation built from position data, and an explicit treatment
+of the fact that on a decentralized venue this data is sampled, not complete.
+
+% ============================================================
+\section{The Liquidity Heatmap: Construction}
+\label{sec:heatmap}
+% ============================================================
+
+\subsection{Inputs and coordinates}
+
+Let $m_t$ denote the mid-price at time $t$. The system tracks a set of leveraged positions; position
+$i$ has notional $V_i$ (USD), liquidation price $\ell_i$, side, and entry price. We place each
+position on the \emph{log-return axis} relative to the mid,
+\begin{equation}
+  \delta_i = \ln\!\frac{\ell_i}{m_t},
+  \label{eq:logreturn}
+\end{equation}
+so that $\delta_i$ is the (signed) percentage distance of the liquidation level from the current
+price. The axis is discretized into $K$ uniform bins on $[-R, R]$:
+\begin{equation}
+  \delta_k = -R + \big(k+\tfrac12\big)\Delta,\quad
+  \Delta = \frac{2R}{K},\quad
+  \mathcal{B}_k = \big(-R + k\Delta,\; -R + (k{+}1)\Delta\big),\quad k = 0,\dots,K-1,
+  \label{eq:bins}
+\end{equation}
+with defaults $K = 200$, $R = 0.10$ (so $\Delta = 0.001$, i.e.\ $10$ basis points per bin,
+spanning $\pm 10\%$). Working in log-returns makes the bins symmetric in percentage terms and
+independent of the absolute price level.
+
+\subsection{The density field}
+
+\begin{definition}[Liquidation-density field]
+\label{def:field}
+The liquidity heatmap is the field
+\begin{equation}
+  H(t,k) = \sum_{i=1}^{N_t} V_i \,\ind\!\big[\delta_i \in \mathcal{B}_k\big]\,
+           \ind\!\big[V_i \geq \tau_V\big],
+  \qquad k = \Big\lfloor \tfrac{\delta_i + R}{\Delta} \Big\rfloor,
+  \label{eq:field}
+\end{equation}
+i.e.\ $H(t,k)$ is the total USD notional whose liquidation price lies in bin $k$. Positions with
+notional below $\tau_V$ (default $\$1{,}000$) or with $\delta_i \notin [-R,R]$ are discarded.
+\end{definition}
+
+The field is rebuilt in full each snapshot; each position maps to one bin via a logarithm, an
+addition, and a floor, so the update is $O(N_t)$. There is no temporal smoothing of $H$ itself;
+temporal information enters only through the velocity feature below.
+
+\subsection{Derived channels}
+
+Three further channels give the field local structure (here $k_0 = K/2$ is the at-the-money bin):
+\begin{align}
+  \text{cumulative mass:} \quad & C(t,k) = \textstyle\sum_{j \text{ between } k \text{ and } k_0} H(t,j),
+    \label{eq:cumulative}\\
+  \text{cluster gradient:} \quad & G(t,k) = H(t,k) - H(t,k-1),
+    \label{eq:gradient}\\
+  \text{temporal change:} \quad & T(t,k) = \alpha_1 \frac{H(t,k)-H(t-\Delta t_1,k)}{\Delta t_1}
+                                          + \alpha_2 \frac{H(t,k)-H(t-\Delta t_2,k)}{\Delta t_2},
+    \label{eq:temporal}
+\end{align}
+with $\Delta t_1 = 600$ ticks ($1$\,min), $\Delta t_2 = 3000$ ticks ($5$\,min), and weights
+$\alpha_1 = 0.7$, $\alpha_2 = 0.3$. The cumulative channel measures the fuel between the mid and a
+level (cascade reach), the gradient locates cluster boundaries, and the temporal channel is the
+cluster-migration velocity field.
+
+% ============================================================
+\section{Spatial Features}
+\label{sec:features}
+% ============================================================
+
+Eight scalar features summarize the field's geometry each snapshot. Write the total mass
+$\Sigma_H = \sum_k H(t,k)$, $\bar H = \Sigma_H/K$, and let $p_k = H(t,k)/\Sigma_H$ be the
+normalized mass. Let $\tau_{\text{cl}} = \$10^6$ and $\tau_{\text{ch}} = \$10^5$ be the cluster and
+chain thresholds.
+
+\begin{table}[ht]
+\begin{center}\small
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{p{3.4cm} p{6.2cm} p{4.6cm}}
+\hline
+\textbf{Feature} & \textbf{Definition} & \textbf{Interpretation} \\
+\hline
+\code{hm_nearest_cluster_dist} &
+  $d_{\min} = \min\{|\delta_k| : H(t,k) > \tau_{\text{cl}}\}$ &
+  distance to the nearest large cluster (smaller $=$ cascade closer) \\
+\code{hm_cluster_mass_ratio} &
+  $\mathrm{CMR} = H(t,k^\ast)/\bar H$, $k^\ast = \argmax_k H$ &
+  peak concentration relative to mean \\
+\code{hm_cascade_chain_length} &
+  longest run of consecutive bins with $H > \tau_{\text{ch}}$ within $|\delta|\le 0.05$ &
+  domino potential (triggered-chain length) \\
+\code{hm_asymmetric_cascade_pot} &
+  $\mathrm{ACP} = \dfrac{\sum_{0<\delta\le.05}H - \sum_{-.05\le\delta<0}H}{\sum_{|\delta|\le.05}H + \epsilon}$ &
+  directional bias: $>0$ short-squeeze, $<0$ long-cascade \\
+\code{hm_absorption_capacity} &
+  $A = \min\!\big(\tfrac{D^{\text{bid}}(.02)}{\text{down mass}+\epsilon},\,
+       \tfrac{D^{\text{ask}}(.02)}{\text{up mass}+\epsilon}\big)$ &
+  book depth per unit liquidation mass ($<1$ $=$ insufficient damping) \\
+\code{hm_cluster_velocity} &
+  $v = \big(d_{\min}(t) - d_{\min}(t-\tau)\big)/\tau$, $\tau = 600$ &
+  rate of approach of the nearest cluster ($<0$ approaching) \\
+\code{hm_mass_weighted_distance} &
+  $\bar d = \dfrac{\sum_k |\delta_k|\,H(t,k)}{\Sigma_H + \epsilon}$ &
+  centre of liquidation gravity \\
+\code{hm_heatmap_entropy} &
+  $S = -\sum_k p_k \ln p_k$ &
+  spatial concentration ($S$ low $=$ tight clusters) \\
+\hline
+\end{tabular}
+\end{center}
+\caption{The eight liquidity-heatmap features. $\epsilon$ is a small constant ($1$ USD).
+Absorption uses order-book depth within $2\%$ on each side; when a side carries no mass its ratio is
+treated as $+\infty$, and $A$ is clamped to $[0,100]$.}
+\label{tab:features}
+\end{table}
+
+These features are deliberately constructed to be \emph{ratios or signed distances}
+(Table~\ref{tab:features}): $\mathrm{CMR}$, $\mathrm{ACP}$, $S$, $\bar d$, and $d_{\min}$ are
+unchanged if the entire field is rescaled by a common factor. This is the property that makes them
+usable when only a fraction of total open interest is observed (Section~\ref{sec:data}).
+
+% ============================================================
+\section{The Cascade Mechanism: A Price-Movement Model}
+\label{sec:cascade}
+% ============================================================
+
+\subsection{Single-cluster impact}
+
+Let cluster $A$ at $\delta_A$ carry mass $M_A = H(t,k_A)$. Treating its forced liquidation as an
+order of notional $M_A$ and applying Kyle (1985) with depth parameter $\lambda$ (estimated from
+recent trades), its price impact in log-return units is
+\begin{equation}
+  \Delta p_A = \lambda \,\frac{M_A}{m_t}.
+  \label{eq:impact}
+\end{equation}
+
+\subsection{The domino condition}
+
+A second cluster $B$ at $\delta_B > \delta_A$ (on the same side of the mid) is reached if and only
+if cluster $A$'s impact closes the gap:
+\begin{equation}
+  \boxed{\;\delta_B - \delta_A < \lambda\,\frac{M_A}{m_t}\;}
+  \label{eq:domino}
+\end{equation}
+Equation~\eqref{eq:domino} is the structural heart of the model. It depends on the \emph{spacing}
+of clusters (captured by the gradient channel and the chain-length feature) and their \emph{mass}
+(the concentration feature), mediated by illiquidity $\lambda$. When it holds across a run of
+clusters $\delta_1 < \dots < \delta_n$, the total move is the sum of triggered masses,
+\begin{equation}
+  \Delta p_{\text{total}} \approx \frac{\lambda}{m_t} \sum_{j:\,\text{triggered}} M_j,
+  \label{eq:total}
+\end{equation}
+and the number of triggered nodes is exactly the cascade-chain feature, read off a Caccioli
+et al.\ (2014) contagion graph.
+
+\subsection{Absorption damping}
+
+Order-book depth opposes the cascade. With bid depth $D^{\text{bid}}(\delta_A)$ available to absorb
+a downward liquidation at $A$, define the damping
+\begin{equation}
+  \eta = \min\!\Big(1,\; \frac{D^{\text{bid}}(\delta_A)}{M_A}\Big),
+  \qquad
+  \Delta p_A^{\text{eff}} = (1-\eta)\,\Delta p_A.
+  \label{eq:damping}
+\end{equation}
+When $\eta \to 1$ (a deep ``wall,'' i.e.\ absorption $A \gg 1$) the impact is absorbed and the chain
+breaks; when $\eta \to 0$ (a thin book) it is amplified---the Brunnermeier--Pedersen (2009) spiral.
+This is the mechanism behind support/resistance walls and absorption.
+
+\begin{proposition}[Magnet and rejection]
+\label{prop:magnet}
+Under \eqref{eq:domino}--\eqref{eq:damping}, a large cluster within reach acts as a price
+\emph{magnet}: conditional on the mid entering its neighborhood, the probability of a move toward
+it increases with $M_A$ and decreases with the local absorption $A$. Conversely, a cluster fronted
+by a deep book ($\eta\approx 1$) produces \emph{rejection} rather than breakout.
+\end{proposition}
+
+\subsection{Direction}
+
+The sign of the field's near-money asymmetry predicts the cascade direction. With $\mathrm{ACP}$ as
+in Table~\ref{tab:features}, mass concentrated above the mid is short-liquidation fuel (an upward
+squeeze) and mass below is long-liquidation fuel (a downward cascade), so the predicted direction
+is $\sgn(\mathrm{ACP})$.
+
+% ============================================================
+\section{A Probabilistic Cascade Model}
+\label{sec:probmodel}
+% ============================================================
+
+\subsection{Event label}
+
+We define a cascade over horizon $T$ as a large \emph{liquidation-driven} move---a price move
+conjoined with abnormal liquidation volume, which distinguishes it from an ordinary news move:
+\begin{equation}
+  y_t = \ind\!\Big[\,|\Delta p_{t\to t+T}| > X\% \;\wedge\; \mathrm{LiqVol}_{t\to t+T} > Y\,\Big],
+  \qquad \Delta p = \ln\frac{m_{t+T}}{m_t},
+  \label{eq:label}
+\end{equation}
+with defaults $X = 3\%$, $Y = \$500\text{K}$, $T = 3000$ ticks ($5$\,min), giving a base rate near
+$5\%$. Because per-tick liquidation volume is not directly observable on the venue, the
+implementation currently uses the price-threshold component as a proxy---a conservative choice we
+flag explicitly.
+
+\subsection{Features and model}
+
+The model consumes an $11$-dimensional vector: the eight features of Table~\ref{tab:features} plus
+three interactions chosen from the mechanism,
+\begin{equation}
+  \mathbf{x}(t) = \big[\,d_{\min},\,\mathrm{CMR},\,L,\,\mathrm{ACP},\,A^{-1},\,v,\,\bar d,\,S,\;
+                       \underbrace{L\!\cdot\!A^{-1}}_{\text{fuel, no damper}},\;
+                       \underbrace{v\!\cdot\!\mathcal{I}}_{\text{approach}\times\text{illiquidity}},\;
+                       \underbrace{\mathrm{ACP}\!\cdot\!\sgn(f)}_{\text{aligned with funding}}\,\big]^\top,
+  \label{eq:xvec}
+\end{equation}
+where $L$ is the chain length, $\mathcal{I}$ a composite illiquidity, and $f$ the funding rate.
+Cascade probability is an online logistic regression,
+\begin{equation}
+  P(\text{cascade}\mid \mathbf{x}) = \sigma\!\big(\beta_0 + \boldsymbol\beta^\top \mathbf{x}\big),
+  \qquad \sigma(z) = \frac{1}{1+e^{-z}},
+  \label{eq:logistic}
+\end{equation}
+trained by stochastic gradient descent on the cross-entropy loss with $\ell_2$ regularization
+($\lambda_{\text{reg}} = 10^{-3}$). With per-step gradient $g_t = \hat p_t - y_t$,
+\begin{equation}
+  \boldsymbol\beta \leftarrow \boldsymbol\beta - \eta_t\big(g_t\,\mathbf{x}_t + \lambda_{\text{reg}}\boldsymbol\beta\big),
+  \qquad \beta_0 \leftarrow \beta_0 - \eta_t g_t,
+  \qquad \eta_t = \eta_0\,\gamma^t,
+  \label{eq:sgd}
+\end{equation}
+with $\eta_0 = 0.01$, $\gamma = 0.9999$. Because the label \eqref{eq:label} is only known $T$ ticks
+later, updates are applied from a \emph{delayed-target} buffer once each observation matures; inputs
+are standardized online by Welford's algorithm, and the logit is clipped to $[-20,20]$. A logistic
+model is deliberate: cascades are rare ($\approx 5\%$), leverage regimes are non-stationary, and the
+coefficients $\boldsymbol\beta$ are interpretable as the weight the data place on each geometric
+feature.
+
+% ============================================================
+\section{Validation Protocol}
+\label{sec:validation}
+% ============================================================
+
+The model is only credible if it clears pre-registered gates. We specify five; they are
+\emph{thresholds to be met}, not results claimed here.
+
+\begin{center}\small
+\begin{tabular}{l l}
+\hline
+\textbf{Gate} & \textbf{Criterion} \\
+\hline
+G1 — Discrimination & out-of-sample $\mathrm{AUC} > 0.65$ \emph{and} top-decile lift $> 2\times$ \\
+G2 — Net information & $\mathrm{IC}_{\text{net}} = \mathrm{IC}_{\text{gross}} - \tfrac{2\bar s}{\sigma_r\sqrt T} > 0.02$ \\
+G3 — Stability & walk-forward median $\mathrm{AUC} > 0.60$, $<20\%$ of windows below $0.55$ \\
+G4 — Universality & BTC, ETH, SOL each pass G1, and $\cos(\boldsymbol\beta_i,\boldsymbol\beta_j) > 0.6$ pairwise \\
+G5 — Orthogonality & $R^2 < 0.30$ regressing $\hat p$ on a spread/depth composite \\
+\hline
+\end{tabular}
+\end{center}
+
+\noindent Here $\bar s$ is the cascade-event spread (a cost proxy) and $\sigma_r$ the return
+volatility. G2 ensures the signal survives transaction costs; G5 ensures it is not a relabeling of
+ordinary liquidity. The prior empirical anchor that motivates the whole construction is the
+hypothesis-test result that coarse liquidation-cluster proximity predicts large moves with lift
+$> 2\times$; the heatmap's claim is that its eight \emph{spatial} features carry information
+\emph{incremental} to that coarse proximity---a claim Gate~G5 and an explicit ablation against
+\code{hm_nearest_cluster_dist} alone are designed to test.
+
+% ============================================================
+\section{Data Availability and the Sample-to-Population Problem}
+\label{sec:data}
+% ============================================================
+
+The model's binding obstacle is observational, not theoretical. On a decentralized venue, position
+data is obtained by querying the clearinghouse state of \emph{known wallet addresses}; no endpoint
+returns the full population of open positions. Wallets are discovered from the public trade stream
+and polled, yielding coverage on the order of $50$--$500$ wallets per symbol---an \emph{unknown}
+fraction of open interest. The field of Definition~\ref{def:field} is therefore a sample,
+$H^{\text{obs}}(t,k) = \rho_t\, H(t,k) + \text{noise}$, with sampling rate $\rho_t$ unobserved and
+time-varying.
+
+\paragraph{What survives sampling.} The scale-invariant features---$d_{\min}$, $\mathrm{CMR}$,
+$\mathrm{ACP}$, $\bar d$, $S$---depend on the field's \emph{shape}, which is preserved in
+expectation under uniform sampling; and the largest, cascade-causing positions are
+disproportionately likely to be discovered (they dominate trade flow). What is biased are the
+\emph{absolute-mass} quantities: absorption capacity $A$ is overestimated (observed mass
+underestimates the true denominator), and chain length may be undercounted when untracked positions
+fill gaps in \eqref{eq:domino}.
+
+\paragraph{A shape-preserving rescaling.} Because total open interest \emph{is} observable, we can
+restore scale without distorting shape,
+\begin{equation}
+  H^{\text{scaled}}(t,k) = H^{\text{obs}}(t,k)\cdot
+       \frac{\mathrm{OI}_{\text{total}}(t)}{\sum_k H^{\text{obs}}(t,k)},
+  \label{eq:oiscale}
+\end{equation}
+which leaves every ratio feature unchanged while correcting the mass-dependent ones. Validating
+\eqref{eq:oiscale} against realized cascade magnitudes is itself a clean empirical sub-study.
+
+\paragraph{Observed failure mode.} We report candidly that, in a preliminary multi-symbol backtest,
+the cascade-probability algorithm produced \emph{zero} trades and the nearest-cluster-distance
+feature frequently returned its no-data sentinel---direct evidence that, under current wallet
+coverage, the observed field is too sparse for the absolute-mass features to fire. This is the
+single most important practical result of the work to date: the geometry and the model are sound,
+but their utility is gated on coverage, and the first priority is therefore data---aggressive wallet
+discovery and the rescaling \eqref{eq:oiscale}---not further modeling.
+
+% ============================================================
+\section{Discussion}
+\label{sec:discussion}
+% ============================================================
+
+The model makes several falsifiable claims that a venue with adequate coverage could test directly.
+The domino condition \eqref{eq:domino} predicts that the probability of a multi-cluster cascade
+jumps discontinuously as inter-cluster spacing falls below $\lambda M_A/m_t$; the absorption
+relation \eqref{eq:damping} predicts that deep near-money book depth converts approach into
+rejection rather than breakout (Proposition~\ref{prop:magnet}); and the directional claim predicts
+that $\sgn(\mathrm{ACP})$ leads cascade sign. Each is a clean hypothesis with a pre-specified
+statistic. The most important open question is incremental information: do the eight spatial
+features add predictive content beyond simple cluster proximity? The construction is designed so
+that this question is answerable by ablation, and Gate~G5 guards against the field being a disguised
+liquidity proxy.
+
+The honest status is that this is a fully specified instrument awaiting the data to validate it.
+That ordering---specify the mechanism, expose the observational constraint, fix the data, then
+measure---is, we argue, the correct one for a phenomenon whose theoretical structure is clear but
+whose measurement on a decentralized venue is genuinely hard.
+
+% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+% ============================================================
+
+We have constructed a spatial liquidation-density field for cryptocurrency perpetual futures,
+extracted eight scale-invariant geometric features from it, and given a structural price-movement
+model in which a closed-form domino condition, an order-book damper, and a directional asymmetry map
+the field's geometry to cascade magnitude, occurrence, and sign. The geometry drives an online,
+delayed-target cascade-probability model, gated by an explicit five-criterion protocol. We have been
+deliberate in not reporting performance numbers we cannot substantiate, and in foregrounding the
+binding constraint: on a decentralized venue the field is sampled, not observed in full, and the
+immediate priority is the coverage and rescaling needed to make the absolute-mass features fire.
+With that data in hand, every claim above becomes a pre-registered, testable hypothesis.
+
+% ============================================================
+\section*{References}
+\addcontentsline{toc}{section}{References}
+% ============================================================
+
+\begin{enumerate}
+  \item Amihud, Y.\ (2002). Illiquidity and stock returns: cross-section and time-series effects.
+        \textit{Journal of Financial Markets}, 5(1), 31--56.
+
+  \item Brunnermeier, M.K.\ \& Pedersen, L.H.\ (2009). Market liquidity and funding liquidity.
+        \textit{Review of Financial Studies}, 22(6), 2201--2238.
+
+  \item Caccioli, F., Shrestha, M., Moore, C.\ \& Farmer, J.D.\ (2014). Stability analysis of
+        financial contagion due to overlapping portfolios. \textit{Journal of Banking \& Finance},
+        46, 233--245.
+
+  \item Cont, R.\ \& Wagalath, L.\ (2016). Fire sales forensics: measuring endogenous risk.
+        \textit{Mathematical Finance}, 26(4), 835--866.
+
+  \item Hasbrouck, J.\ (2009). Trading costs and returns for U.S.\ equities: estimating effective
+        costs from daily data. \textit{Journal of Finance}, 64(3), 1445--1477.
+
+  \item Kyle, A.S.\ (1985). Continuous auctions and insider trading. \textit{Econometrica}, 53(6),
+        1315--1335.
+
+  \item Roll, R.\ (1984). A simple implicit measure of the effective bid-ask spread in an efficient
+        market. \textit{Journal of Finance}, 39(4), 1127--1139.
+
+  \item Bandt, C.\ \& Pompe, B.\ (2002). Permutation entropy: a natural complexity measure for time
+        series. \textit{Physical Review Letters}, 88(17), 174102.
+
+  \item Welford, B.P.\ (1962). Note on a method for calculating corrected sums of squares and
+        products. \textit{Technometrics}, 4(3), 419--420.
+\end{enumerate}
+
+\end{document}

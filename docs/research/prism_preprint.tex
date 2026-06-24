@@ -1,0 +1,448 @@
+\documentclass[11pt,a4paper]{article}
+
+% ============================================================
+% Packages (core only — texlive-latex-base + texlive-base)
+% ============================================================
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{array}
+
+% ============================================================
+% Theorem environments
+% ============================================================
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{remark}{Remark}[section]
+\newtheorem{proposition}{Proposition}[section]
+
+% ============================================================
+% Notation macros
+% ============================================================
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\inner}[2]{\langle #1,\, #2 \rangle}
+\newcommand{\corr}{\operatorname{corr}}
+\newcommand{\sgn}{\operatorname{sign}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+% ============================================================
+\begin{document}
+
+\title{\textbf{Perception Pressure and Resonance}\\[4pt]
+\large Decomposable, Trust-Weighted Measures of Media Narrative\\
+from a Multi-Perspective News-Aggregation System}
+
+\author{Yigit Onat\\
+\textit{Independent Researcher}\\
+\texttt{yionat@gmail.com}}
+\date{June 2026}
+\maketitle
+
+% ============================================================
+\begin{abstract}
+We introduce two quantitative measures of media narrative computed continuously from a live,
+multi-source news stream, and the system---\emph{Prism}---that produces them. \emph{Resonance} scores
+the media impact of a single story by combining source diversity, source credibility, audience
+engagement, and recency. \emph{Perception Pressure} is a per-concept longitudinal signal,
+$P(K,t) = \text{salience}(K,t)\times\text{valence}(K,t)$, that couples \emph{how much} a concept is
+covered (a non-negative attention term) with \emph{how} it is framed (a credibility-weighted
+directional sentiment term in $[-1,+1]$). The design has three properties we argue are novel in
+combination: it multiplicatively couples attention and directional sentiment, so the signal is
+\emph{signed} and its magnitude is meaningful; source diversity enters as a \emph{multiplier}, so a
+single outlet cannot inflate the measure (multi-perspective by construction); and every component is
+persisted independently, so the measure is fully decomposable and auditable rather than a black box.
+Credibility is not hand-assigned but \emph{earned} through an automated cross-corroboration
+lifecycle. The system is realized as a five-agent pipeline (discover, analyze, track, personalize,
+deliver) coordinated by a database state machine. We position Perception Pressure against
+volume-only attention proxies and direction-only sentiment indices, formalize its construction, and
+specify a downstream application: treating $P(K,t)$ as an \emph{exogenous narrative signal} whose
+incremental predictive value for financial returns can be measured under a leakage-controlled
+information-theoretic protocol. We are explicit that this is a methods-and-system paper: the
+instrument is fully specified and parameterized for ablation, and empirical validation under the
+stated protocol is the next step rather than a claim made here.
+\end{abstract}
+
+\smallskip
+\noindent\textbf{Keywords:} media narrative, attention, sentiment, agenda-setting, source
+credibility, news analytics, exogenous signal, computational social science
+
+\smallskip
+\noindent\textbf{JEL Classification:} C43, D83, G14, L82
+
+\tableofcontents
+\bigskip
+
+% ============================================================
+\section{Introduction}
+\label{sec:intro}
+% ============================================================
+
+\subsection{Measuring narrative, not just volume or tone}
+
+Two literatures measure the media's relationship to attention and belief, and each captures only
+half of the object of interest. \emph{Attention} proxies---search-volume indices, mention counts---
+measure \emph{how much} a topic is discussed but are sign-blind: a surge of coverage looks identical
+whether the framing is favorable or hostile. \emph{Sentiment} indices measure \emph{how} a topic is
+framed but are typically volume-blind and treat all sources alike, so a single fringe outlet and a
+wire service count equally. What is missing is a single measure that is simultaneously
+\emph{directional} (positive vs.\ negative framing), \emph{magnitude-meaningful} (broad, authoritative,
+fresh coverage weighs more than thin coverage), and \emph{credibility-aware} (trusted corroboration
+counts for more than isolated amplification).
+
+This paper introduces such a measure, \emph{Perception Pressure}, and the system that computes it.
+The construction is deliberately simple: it multiplies a non-negative \emph{salience} term (weighted
+attention) by a \emph{valence} term (trust-weighted mean sentiment) bounded in $[-1,+1]$. The product
+is signed, its sign is the net framing of the concept, and its magnitude grows with the breadth,
+authority, and freshness of coverage. Because it is a longitudinal signal sampled on a fixed cadence,
+its time-derivative---\emph{momentum}---distinguishes a narrative building from a backlash forming.
+
+\subsection{Contributions}
+
+\begin{enumerate}
+  \item \textbf{Perception Pressure}, a per-concept, signed, magnitude-meaningful narrative signal
+        $P(K,t) = \text{salience}\times\text{valence}$, with a credibility-weighted valence and an
+        explicit momentum (Section~\ref{sec:perception}).
+  \item \textbf{Resonance}, a per-story media-impact score in which source diversity is a
+        \emph{multiplier}, operationalizing ``multi-perspective by construction''
+        (Section~\ref{sec:resonance}).
+  \item \textbf{Earned credibility}: an automated source-trust lifecycle in which a source's weight
+        emerges from cross-source corroboration rather than being assigned a priori
+        (Section~\ref{sec:trust}).
+  \item \textbf{Decomposability as a design constraint}: every sub-component (salience, valence,
+        breadth, decay, trust) is persisted independently, so the measure is auditable rather than a
+        black box (Section~\ref{sec:properties}).
+  \item \textbf{A downstream application and its evaluation protocol}: treating $P(K,t)$ as an
+        exogenous signal whose incremental predictive value for markets is measured under a
+        leakage-controlled information-theoretic protocol (Sections~\ref{sec:application}--\ref{sec:eval}).
+\end{enumerate}
+
+This is a methods-and-system paper. The metrics are implemented and every parameter is a tunable
+knob suitable for ablation; we report no empirical performance figures, and Section~\ref{sec:eval}
+specifies the evaluation that would substantiate the measure's utility.
+
+% ============================================================
+\section{Related Work}
+\label{sec:related}
+% ============================================================
+
+\paragraph{Agenda-setting and attention.}
+McCombs and Shaw (1972) established that media coverage shapes which issues the public deems
+important. Da, Engelberg, and Gao (2011) operationalize \emph{investor} attention with search
+volume; Preis, Moat, and Stanley (2013) and Choi and Varian (2012) use Google Trends to nowcast
+behavior. These are volume measures: they capture salience but not framing.
+
+\paragraph{Media tone and markets.}
+Tetlock (2007) shows that media \emph{pessimism} forecasts returns; Antweiler and Frank (2004) and
+Bollen, Mao, and Zeng (2011) study message-board and social tone; Loughran and McDonald (2011)
+provide finance-specific sentiment lexicons. These are direction measures, typically source-agnostic
+and not coupled to attention. Perception Pressure differs by \emph{multiplying} attention and tone
+and by weighting tone by earned source credibility.
+
+\paragraph{Text-based indices and slant.}
+Baker, Bloom, and Davis (2016) build a policy-uncertainty index from newspaper text; Gentzkow,
+Shapiro, and Taddy (2019) measure partisan slant from text. Our valence term is in this tradition but
+is computed online, per concept, with a credibility weight, and is paired with a salience term into a
+single signed signal.
+
+\paragraph{Information-theoretic signal evaluation.}
+Our downstream evaluation uses mutual information (Kraskov, St\"ogbauer, and Grassberger, 2004) and
+false-discovery-rate control (Benjamini and Hochberg, 1995) to test predictive content without
+overfitting---methods imported from the consuming system rather than invented here.
+
+% ============================================================
+\section{System Overview}
+\label{sec:system}
+% ============================================================
+
+Prism is an AI multi-perspective news-aggregation platform whose stated principle is to make
+editorial bias \emph{visible} rather than hidden: it performs no original reporting, attributes every
+claim to a source, and presents multiple framings of each story side by side. Quantitatively, it
+instruments the two narrative measures of this paper. It is realized as a five-agent pipeline,
+coordinated not by a message queue but by a database state machine in which each story advances
+through states \textsc{raw} $\to$ \textsc{analyzed} $\to$ \textsc{delivered}.
+
+\begin{center}\small
+\renewcommand{\arraystretch}{1.25}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{>{\raggedright\arraybackslash}p{1.9cm} >{\raggedright\arraybackslash}p{6.6cm} >{\raggedright\arraybackslash}p{5.8cm}}
+\hline
+\textbf{Agent} & \textbf{Role} & \textbf{Method} \\
+\hline
+Discovery & pull and cluster articles by event; grow the source registry &
+  news/RSS ingestion; lexical dedup (Jaccard, TF--IDF, entity overlap) \\
+Analysis & summarize a cluster; extract per-source perspective, sentiment, bias, claims &
+  large-language-model structured extraction with a quality score \\
+Tracking & scan clusters for tracked concepts; compute the narrative measures &
+  keyword matching; Resonance and Perception Pressure on a fixed cadence \\
+Personal\-ization & rank stories per reader &
+  explicit weighted scoring (interest, recency, diversity, resonance) \\
+Delivery & compose and deliver an attributed briefing &
+  templated generation; every claim links to its source \\
+\hline
+\end{tabular}
+\end{center}
+
+The tracking agent is the locus of this paper: on a fixed interval it recomputes, for each tracked
+concept, the salience, valence, perception, and momentum series defined below and persists them as a
+time-series. The other agents supply its inputs (clusters, perspectives, sentiments, source trust)
+and consume its outputs (resonance feeds personalization).
+
+% ============================================================
+\section{Source Trust as an Earned Weight}
+\label{sec:trust}
+% ============================================================
+
+Both measures weight evidence by source credibility. Crucially, credibility is not a static per-outlet
+constant; it is earned through an auditable lifecycle:
+\[
+  \textsc{seed} \longrightarrow \textsc{candidate} \longrightarrow \textsc{probation}
+  \longrightarrow \textsc{trusted} \;/\; \textsc{rejected}.
+\]
+A small registry of vetted outlets seeds the system. New domains observed in coverage become
+candidates and, after repeated sightings, enter probation with a low initial trust. During probation
+a source's articles are \emph{cross-validated}: an article is corroborated if it appears in a story
+cluster that also contains a trusted source, and flagged if it is effectively single-sourced. Trust
+during probation rises with the corroboration rate,
+\begin{equation}
+  \mathrm{trust} = 0.1 + 0.4\cdot\frac{\#\,\text{validated}}{\#\,\text{total}},
+  \label{eq:probation}
+\end{equation}
+and after a probation window a source is promoted to \textsc{trusted} only if it has accumulated
+enough corroborated articles at a sufficient rate; persistent contradiction demotes it. A bias label
+is then inferred from the average sentiment of its perspectives. This makes the trust weight in the
+measures below a function of demonstrated cross-source agreement rather than an editorial prior, and
+it is the mechanism that makes the measures robust to single-source amplification.
+
+% ============================================================
+\section{Resonance: Per-Story Media Impact}
+\label{sec:resonance}
+% ============================================================
+
+\begin{definition}[Resonance]
+\label{def:resonance}
+For a story cluster $c$ comprising mentions $m$ (one per article), with mention source $s_m$,
+audience reaction count $\mathrm{re}_m$, and age $a_m$,
+\begin{equation}
+  \mathrm{Res}(c,t) = \underbrace{\mathrm{breadth}(c)}_{\text{diversity multiplier}}
+       \cdot \sum_{m\in c} \mathrm{trust}(s_m)\,\cdot\,\mathrm{eng}(m)\,\cdot\,\mathrm{dec}(a_m),
+  \label{eq:resonance}
+\end{equation}
+with
+\begin{equation}
+  \mathrm{breadth}(c) = \log_2\!\big(1 + n_{\text{sources}}(c)\big),\quad
+  \mathrm{eng}(m) = 1 + \log_2\!\Big(1 + \tfrac{\mathrm{re}_m}{\text{median}}\Big),\quad
+  \mathrm{dec}(a) = e^{-\lambda a},\;\; \lambda = \tfrac{\ln 2}{h},
+  \label{eq:resonance-terms}
+\end{equation}
+where $n_{\text{sources}}(c)$ is the number of \emph{distinct} sources, $\mathrm{re}_m/\text{median}$
+normalizes reactions to a platform median, and $h$ is a half-life (default $24$\,h).
+\end{definition}
+
+Three design choices follow from the platform's principle. \emph{Breadth as a multiplier}: a story
+carried by one outlet, however loud, has $\mathrm{breadth} = \log_2 2 = 1$ and cannot resonate;
+diversity is a precondition, not an additive bonus. \emph{Logarithmic engagement}: viral outliers are
+compressed, so a single spike cannot dominate. \emph{Exponential decay}: impact is recency-weighted.
+Derived quantities---\emph{momentum} $\mathrm{Res}(t)-\mathrm{Res}(t-\Delta t)$, peak resonance, and
+persistence---track a story's life cycle. Every factor in \eqref{eq:resonance} is stored
+independently, so resonance is queryable down to its components.
+
+% ============================================================
+\section{Perception Pressure: Per-Concept Narrative}
+\label{sec:perception}
+% ============================================================
+
+Resonance scores a single story. Perception Pressure aggregates across all stories touching a tracked
+concept $K$ into a longitudinal, signed signal.
+
+\begin{definition}[Salience, valence, perception]
+\label{def:perception}
+For concept $K$ at time $t$, summing over clusters $c$ mentioning $K$ (with cluster breadth and decay
+as above) and over each cluster's per-source perspectives $p$ (with trust $\mathrm{trust}(p)$ and
+sentiment $\mathrm{sen}(p)\in[-1,1]$):
+\begin{align}
+  \text{salience:}\quad & A(K,t) = \sum_{c} \mathrm{breadth}(c)\,\mathrm{dec}(a_c) \;\;\ge 0,
+    \label{eq:salience}\\[2pt]
+  \text{valence:}\quad & V(K,t) =
+    \frac{\sum_{c} \mathrm{breadth}(c)\,\mathrm{dec}(a_c)\,\sum_{p}\mathrm{trust}(p)\,\mathrm{sen}(p)}
+         {\sum_{c} \mathrm{breadth}(c)\,\mathrm{dec}(a_c)\,\sum_{p}\mathrm{trust}(p)}
+    \;\in [-1,1],
+    \label{eq:valence}\\[2pt]
+  \text{perception:}\quad & P(K,t) = A(K,t)\cdot V(K,t),
+    \label{eq:perception}
+\end{align}
+with momentum $\dot P(K,t) = P(K,t) - P(K,t-1)$ over consecutive snapshots.
+\end{definition}
+
+The interpretation is direct. The sign of $P$ is the net framing of the concept; its magnitude grows
+with strong, broad, authoritative, fresh coverage. $|P|\approx 0$ is genuinely ambiguous between
+\emph{uncovered} (low salience) and \emph{perfectly balanced} (valence near zero)---a distinction the
+system preserves by storing salience and valence \emph{separately}, so a consumer can tell silence
+from contested framing. The momentum $\dot P$ is positive when a narrative is building and negative
+when a backlash is forming. Because salience, valence, perception, and momentum are each persisted on
+a fixed cadence, any of the four is independently available as a series.
+
+\begin{remark}[Why the product]
+\label{rem:product}
+Coupling attention and tone \emph{multiplicatively} is the key modeling choice. An additive
+combination would let high attention mask neutral tone, or strong tone with negligible coverage
+register as a large signal. The product is zero whenever \emph{either} factor is zero---no coverage,
+or perfectly balanced coverage---and is large only when a concept is both heavily covered and
+directionally framed. This is the formal content of ``pressure.''
+\end{remark}
+
+% ============================================================
+\section{Properties}
+\label{sec:properties}
+% ============================================================
+
+\begin{proposition}[Single-source immunity]
+\label{prop:single}
+Both measures are immune to single-source amplification. In \eqref{eq:resonance} and
+\eqref{eq:salience} the breadth factor $\log_2(1+n_{\text{sources}})$ multiplies the entire
+contribution, so a cluster drawn from one source contributes the minimum breadth regardless of its
+volume; and in \eqref{eq:valence} a single source's sentiment is down-weighted by its (necessarily
+low, un-corroborated) trust from \eqref{eq:probation}.
+\end{proposition}
+
+\begin{proposition}[Full decomposability]
+\label{prop:decomp}
+Every measure is a composition of independently persisted primitives (breadth, decay, trust,
+engagement, sentiment, salience, valence). Hence any reported value is reconstructable from stored
+components, and the contribution of any factor is recoverable by ablation---the measure is auditable
+by construction, never a black box.
+\end{proposition}
+
+These properties operationalize the platform's editorial stance as quantitative constraints: bias is
+shown rather than hidden (decomposability), and no single voice can manufacture consensus (single-source
+immunity).
+
+% ============================================================
+\section{Application: An Exogenous Narrative Signal for Markets}
+\label{sec:application}
+% ============================================================
+
+Perception Pressure is, by construction, a per-concept float-valued time-series aligned to wall-clock
+time. This makes it a candidate \emph{exogenous} predictor for any time-series problem whose entities
+can be mapped to tracked concepts---most naturally, financial markets, where the question is whether
+narrative leads price.
+
+The intended use, realized in a companion quantitative-research system, is to align $P(K,t)$ (and its
+components $A$, $V$, and momentum $\dot P$) to market bars for the matching entity by an as-of join,
+and then to test each series for predictive content exactly as one would test an endogenous market
+feature: by its information coefficient across forecast horizons and by its mutual information with
+forward returns, under planted-signal and no-look-ahead controls. The narrative series is thus not
+privileged; it must earn its place by the same gates as any other candidate signal.
+
+\begin{remark}[Leading vs.\ contemporaneous]
+\label{rem:leading}
+The momentum term $\dot P$ is the natural \emph{leading} candidate: a narrative that is building
+($\dot P > 0$) before it is fully priced is the economically interesting case, whereas a level $P$
+that merely co-moves with price is contemporaneous and of less predictive use. Distinguishing the two
+is a central question for the evaluation below.
+\end{remark}
+
+% ============================================================
+\section{Evaluation Protocol}
+\label{sec:eval}
+% ============================================================
+
+The repository implements the measures but contains no validation artifacts; we therefore specify the
+evaluation rather than report it. Four studies would substantiate the measure:
+
+\begin{enumerate}
+  \item \textbf{Construct validity.} Trace $P(K,t)$ across known narrative episodes (a story building
+        then fading; a sign flip on backlash) and confirm the trajectory matches the qualitative
+        account---a sign flip in $V$, a rise then decay in $A$.
+  \item \textbf{Decomposition.} Plot $A$, $V$, and $P$ jointly to show that the product separates
+        ``uncovered'' from ``balanced,'' which a scalar tone index cannot.
+  \item \textbf{Ablation.} Every constant (the half-lives, the engagement normalizer, the breadth
+        base, the trust thresholds) is a configuration parameter; vary each and measure sensitivity of
+        the resulting series, isolating the contribution of the breadth multiplier and the
+        trust-weighting.
+  \item \textbf{Predictive utility.} For matched market entities, test whether $\dot P$ carries
+        information \emph{incremental} to price and volume for forward returns, under the
+        information-coefficient and mutual-information gates of Section~\ref{sec:application}, with
+        false-discovery-rate control across concepts and horizons.
+\end{enumerate}
+
+Study~4 is the strongest possible empirical claim and the one the companion system is built to run; it
+is deliberately framed as leakage-controlled and multiple-testing-corrected, because a narrative
+signal tested against many entities and horizons is otherwise a textbook data-snooping trap.
+
+% ============================================================
+\section{Limitations}
+\label{sec:limitations}
+% ============================================================
+
+We disclose the principal threats to validity. Sentiment and bias labels are elicited from a large
+language model, not from gold-standard human annotation, so they carry measurement error whose
+structure is itself a research question. Story clustering and deduplication are lexical (token
+overlap, TF--IDF, regular-expression entity extraction) rather than embedding-based, which can split
+or merge events. The engagement term defaults to neutral when reaction counts are unavailable, so it
+is often inert in practice. Finally, the implementation is single-writer at the storage layer, which
+bounds throughput. None of these undermines the measures' definitions, but each bears on the fidelity
+of the computed series and must be controlled in any empirical study.
+
+% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+% ============================================================
+
+We have defined two decomposable, trust-weighted measures of media narrative and described the system
+that computes them continuously from a multi-source news stream. Perception Pressure couples weighted
+attention with credibility-weighted directional sentiment into a single signed, magnitude-meaningful,
+auditable signal; Resonance scores per-story impact with diversity as a precondition. Credibility is
+earned through cross-corroboration rather than assigned. The measures are fully specified and
+parameterized for ablation, and we have set out the construct-validity, decomposition, sensitivity,
+and predictive-utility studies that would validate them---the last, a leakage-controlled test of
+whether narrative momentum leads returns, being the sharpest empirical question. The contribution
+here is the instrument and its methodology; turning the instrument on data is the next step.
+
+% ============================================================
+\section*{References}
+\addcontentsline{toc}{section}{References}
+% ============================================================
+
+\begin{enumerate}
+  \item Antweiler, W.\ \& Frank, M.Z.\ (2004). Is all that talk just noise? The information content of
+        internet stock message boards. \textit{Journal of Finance}, 59(3), 1259--1294.
+
+  \item Baker, S.R., Bloom, N.\ \& Davis, S.J.\ (2016). Measuring economic policy uncertainty.
+        \textit{Quarterly Journal of Economics}, 131(4), 1593--1636.
+
+  \item Benjamini, Y.\ \& Hochberg, Y.\ (1995). Controlling the false discovery rate: a practical and
+        powerful approach to multiple testing. \textit{Journal of the Royal Statistical Society,
+        Series B}, 57(1), 289--300.
+
+  \item Bollen, J., Mao, H.\ \& Zeng, X.\ (2011). Twitter mood predicts the stock market.
+        \textit{Journal of Computational Science}, 2(1), 1--8.
+
+  \item Choi, H.\ \& Varian, H.\ (2012). Predicting the present with Google Trends.
+        \textit{Economic Record}, 88(s1), 2--9.
+
+  \item Da, Z., Engelberg, J.\ \& Gao, P.\ (2011). In search of attention.
+        \textit{Journal of Finance}, 66(5), 1461--1499.
+
+  \item Gentzkow, M., Shapiro, J.M.\ \& Taddy, M.\ (2019). Measuring group differences in
+        high-dimensional choices: method and application to congressional speech.
+        \textit{Econometrica}, 87(4), 1307--1340.
+
+  \item Kraskov, A., St\"ogbauer, H.\ \& Grassberger, P.\ (2004). Estimating mutual information.
+        \textit{Physical Review E}, 69(6), 066138.
+
+  \item Loughran, T.\ \& McDonald, B.\ (2011). When is a liability not a liability? Textual analysis,
+        dictionaries, and 10-Ks. \textit{Journal of Finance}, 66(1), 35--65.
+
+  \item McCombs, M.E.\ \& Shaw, D.L.\ (1972). The agenda-setting function of mass media.
+        \textit{Public Opinion Quarterly}, 36(2), 176--187.
+
+  \item Preis, T., Moat, H.S.\ \& Stanley, H.E.\ (2013). Quantifying trading behavior in financial
+        markets using Google Trends. \textit{Scientific Reports}, 3, 1684.
+
+  \item Tetlock, P.C.\ (2007). Giving content to investor sentiment: the role of media in the stock
+        market. \textit{Journal of Finance}, 62(3), 1139--1168.
+\end{enumerate}
+
+\end{document}

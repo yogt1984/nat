@@ -120,9 +120,10 @@ paper #2 (don't gate outreach behind more writing).
 **Deadlines:** EPFL EDFI **Jan 15 2027** (R1) / **Mar 31 2027** (R2), Sep-2027 entry; ETH rolling.
 
 **Artifact locations:**
-- Preprints: `research/convolver_preprint.{tex,pdf}` and
-  `research/microstructure_alpha_preprint.{tex,pdf}` — both authored **Yigit Onat**
-  (`yionat@gmail.com`).
+- Preprints (4, all **Yigit Onat** — `yionat@gmail.com`, each `.tex` + compiled `.pdf` in
+  `research/`): `convolver_preprint`, `microstructure_alpha_preprint`,
+  `liquidity_heatmap_preprint` (liquidation-density heatmap → cascade price-movement model),
+  `prism_preprint` (Prism's Perception Pressure / Resonance narrative metrics).
 - Findings / build appendix: `synthesis/{microstructure_alpha_findings,build_implementation_spec}.{tex,pdf}`.
 - Guide + prof list + email template: `phd_related/phd_application_guide.tex`; one-pager
   `phd_related/phd_application_summary.{tex,pdf}`.
