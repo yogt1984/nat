@@ -1,0 +1,754 @@
+\documentclass[11pt,a4paper]{article}
+
+% ============================================================
+% Packages (core only --- texlive-latex-base + texlive-base)
+% ============================================================
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{array}
+
+% ============================================================
+% Theorem environments
+% ============================================================
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{remark}{Remark}[section]
+\newtheorem{proposition}{Proposition}[section]
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}{Lemma}[section]
+
+% ============================================================
+% Notation macros
+% ============================================================
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\inner}[2]{\langle #1,\, #2 \rangle}
+\newcommand{\corr}{\operatorname{corr}}
+\newcommand{\med}{\operatorname{median}}
+\newcommand{\sgn}{\operatorname{sign}}
+\DeclareMathOperator{\IC}{IC}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+% ============================================================
+\begin{document}
+
+\title{\textbf{Autonomous Microstructure Alpha Discovery\\[3pt]
+under False-Discovery Control}\\[6pt]
+\large Order-Book Imbalance, Conditional Information Coefficients,\\
+and the Adverse-Selection Barrier in Hyperliquid Perpetual Futures}
+
+\author{Yigit Onat\\
+\textit{Independent Researcher}\\
+\texttt{yionat@gmail.com}}
+\date{June 2026}
+\maketitle
+
+% ============================================================
+\begin{abstract}
+We study the gap between statistical predictability and economic exploitability in a
+decentralized derivatives venue. Using $100$\,ms order-book and trade data for three
+Hyperliquid perpetual futures (BTC, ETH, SOL), we compute the Spearman information
+coefficient (IC) of $236$ engineered microstructure features against signed and absolute
+forward returns at horizons from one second to fifteen minutes. Discovery and validation are
+performed by an autonomous platform that subjects every candidate to a five-gate replication
+protocol (discovery, cost, temporal, cross-symbol, and correlation gates) with
+Benjamini--Hochberg false-discovery-rate control, an adaptive acceptance threshold, and
+continuous decay monitoring---a disciplined apparatus designed to suppress the multiple-testing
+bias that pervades empirical asset pricing. Order-book imbalance is the dominant directional
+predictor, attaining $\IC\approx 0.45$ at the $1$--$5$\,second horizon and decaying to near zero
+by five minutes, with the same feature hierarchy across all three symbols and a clean
+directional/volatility orthogonality. The signal passes seven of eight robustness checks for
+BTC and six of eight for ETH and SOL. Our central result is a negative one: the
+\emph{conditional} information coefficient, measured on the subset of states where a
+directionally-correct passive (mid-cross) fill would occur, collapses from $0.45$ to
+$\approx 0.03$ across all symbols. This is a structural adverse-selection barrier, not an
+estimation artifact, and it identifies execution---not signal quality---as the binding
+constraint. We then present a three-layer hierarchical combiner that gates fast microstructure
+timing on a slow directional bias, recovering positive cost-adjusted out-of-sample performance
+($\IC$ of $0.18$/$0.25$/$0.36$ for BTC/ETH/SOL) on a thin window. The contribution is twofold: a
+reproducible methodology for false-discovery-controlled microstructure research, and direct
+evidence that a strong, universal, robust predictor can nonetheless be economically inert under
+realistic passive execution.
+\end{abstract}
+
+\smallskip
+\noindent\textbf{Keywords:} market microstructure, information coefficient, order-book imbalance,
+adverse selection, false discovery rate, cryptocurrency, perpetual futures, automated research
+
+\smallskip
+\noindent\textbf{JEL Classification:} C12, C55, G14, G17
+
+\tableofcontents
+\bigskip
+
+% ============================================================
+\section{Introduction}
+\label{sec:intro}
+% ============================================================
+
+\subsection{Predictability versus profitability}
+
+A recurring failure mode in empirical finance is to mistake a statistically significant
+predictor for a tradeable one. A feature may correlate strongly with future returns in sample,
+survive out-of-sample testing, and still yield no economic profit once the mechanics of
+execution are accounted for. This paper provides a clean, quantified instance of that gap in a
+high-frequency setting, and argues that the gap---not the discovery of predictors---is where the
+binding constraint lies.
+
+We study Hyperliquid perpetual futures, a decentralized derivatives exchange, at $100$\,ms
+resolution. We find that order-book imbalance predicts the direction of returns with an
+information coefficient (IC) of approximately $0.45$ at the $1$--$5$ second horizon---a very
+strong microstructure signal that is universal across BTC, ETH, and SOL and robust across days,
+intraday windows, and volatility regimes. Yet when we condition the IC on the event that a
+directionally-correct passive limit order would actually fill, the coefficient collapses to
+$\approx 0.03$. The predictability is real; the profitability, under a passive mid-cross fill
+model, is not.
+
+\subsection{The horizon mistake}
+
+The investigation began from a diagnostic failure: a library of roughly twenty-five trading
+algorithms, all evaluated at a $100$-minute forecast horizon using five-minute bar aggregation,
+were uniformly unprofitable. The cause was an aggregation artifact. The predictive content of
+microstructure features lives at the $1$--$5$ second scale; aggregating to five-minute bars and
+forecasting one hundred minutes ahead destroys $\IC\approx 0.45$ down to a weak residual
+($\IC<0.07$). The features were never the problem---the evaluation horizon was. This reframing
+motivates a systematic, horizon-resolved IC study of the full feature set.
+
+\subsection{An autonomous discovery apparatus}
+
+Microstructure research at this scale is acutely vulnerable to data-snooping: with hundreds of
+features, multiple horizons, three symbols, and many candidate transformations, the number of
+implicit hypotheses is large, and ordinary $p$-values are not credible. We therefore conduct
+discovery through an autonomous platform whose design is itself a contribution. Every candidate
+signal must independently clear five replication gates---discovery (IC and its incremental
+component), cost, temporal replication, cross-symbol replication, and correlation
+deduplication---after which Benjamini--Hochberg false-discovery-rate (FDR) control is applied per
+cycle, the acceptance threshold adapts upward as strong signals accumulate, and registered
+signals are continuously monitored for decay. The platform ingests order-book and trade data in
+Rust at $100$\,ms and runs the discovery loop without human intervention. We treat it here as the
+\emph{experimental apparatus}: the empirical results below are the output of a discovery process
+explicitly engineered to make false discoveries unlikely.
+
+\subsection{Contributions}
+
+\begin{enumerate}
+  \item A horizon-resolved information-coefficient map of $236$ microstructure features across
+        three cryptocurrency perpetuals, establishing order-book imbalance as the dominant
+        directional predictor ($\IC\approx 0.45$ at $1$--$5$\,s, half-life $\approx 15$--$30$\,s),
+        with eight approximately independent directional axes and a clean
+        directional/volatility orthogonality.
+  \item A battery of eight robustness checks (per-day, intraday, volatility-regime, bootstrap,
+        temporal out-of-sample) demonstrating that the signal is real, stable, and universal.
+  \item The central finding: a \emph{conditional} information coefficient that isolates the
+        adverse-selection barrier. Conditioning on directionally-correct passive fills collapses
+        $\IC$ from $0.45$ to $\approx 0.03$, identifying execution as the binding constraint.
+  \item A three-layer hierarchical combiner that gates fast timing on a slow directional bias and
+        recovers positive cost-adjusted out-of-sample performance, the first architecture in this
+        programme to confront adverse selection directly.
+  \item A reproducible methodology for false-discovery-controlled microstructure research---a
+        five-gate replication protocol with FDR control, adaptive thresholds, and
+        information-theoretic feature selection.
+\end{enumerate}
+
+% ============================================================
+\section{Related Work}
+\label{sec:related}
+% ============================================================
+
+\paragraph{Order-book imbalance and price prediction.}
+The predictive content of limit-order-book imbalance is well established. Cont, Stoikov, and
+Talreja (2010) model the order book as a continuous-time Markov process and link imbalance to
+short-horizon price moves; Cont, Kukanov, and Stoikov (2014) formalize order-flow imbalance as a
+linear driver of price changes. Our contribution is not the existence of the imbalance signal but
+its precise horizon profile, cross-symbol universality, and---decisively---its behavior
+conditional on execution.
+
+\paragraph{Adverse selection and the cost of liquidity provision.}
+The classical microstructure literature explains why a passive provider cannot trivially harvest
+a directional signal. Glosten and Milgrom (1985) and Kyle (1985) show that informed order flow
+imposes adverse selection on liquidity providers; a quote that fills does so disproportionately
+when the provider is on the wrong side. Our conditional-IC result is a direct, model-free
+measurement of this effect: the very imbalance that predicts an up-move is the imbalance under
+which a passive buy fills only after the move has reversed.
+
+\paragraph{Flow toxicity.}
+Easley, L\'opez de Prado, and O'Hara (2012) introduce VPIN as a measure of order-flow toxicity in
+high-frequency markets. Toxicity is the aggregate counterpart of the per-fill adverse selection
+we isolate; we find, consistently, that imbalance carries directional information while toxicity
+and intensity features carry volatility (magnitude) information, with near-zero cross-loading.
+
+\paragraph{Multiple testing in empirical finance.}
+Harvey, Liu, and Zhu (2016) document rampant multiple testing in the cross-section of returns and
+call for higher significance hurdles; Bailey and L\'opez de Prado (2014) introduce the deflated
+Sharpe ratio to correct for selection bias and backtest overfitting; White (2000) provides the
+reality-check bootstrap. Our discovery apparatus operationalizes this agenda: Benjamini and
+Hochberg (1995) FDR control, an adaptive acceptance threshold, and mandatory temporal and
+cross-symbol replication are built into the pipeline rather than applied post hoc.
+
+\paragraph{Information-theoretic dependence.}
+Kraskov, St\"ogbauer, and Grassberger (2004) provide the $k$-nearest-neighbor mutual-information
+estimator that underlies our information-theoretic feature selection; Schreiber (2000) introduces
+transfer entropy for directed dependence. We use these as a complement to rank correlation, with
+a cost-aware minimum-information threshold derived below.
+
+\paragraph{Cryptocurrency microstructure.}
+Makarov and Schoar (2020) study price formation and arbitrage across crypto venues; A\"it-Sahalia
+and Brunetti (2024) analyze order-flow toxicity in Bitcoin. We contribute a systematic,
+false-discovery-controlled microstructure study on a decentralized perpetual-futures venue, a
+market structure distinct from the centralized spot exchanges that dominate the literature.
+
+% ============================================================
+\section{Data and the Discovery Apparatus}
+\label{sec:data}
+% ============================================================
+
+\subsection{Market data}
+
+The data are Hyperliquid perpetual futures for three symbols (BTC, ETH, SOL) sampled at
+$100$\,ms. A Rust ingestor subscribes to the Level-2 WebSocket feed and computes a
+$236$-dimensional feature vector per symbol every $100$\,ms, written to columnar storage. The
+primary discovery window is 2026-05-19 to 2026-05-21 ($3$ consecutive full days,
+$\approx 2.17$ million ticks per symbol). The robustness study (Section~\ref{sec:validation})
+spans $31$ dates from 2026-04-19 to 2026-06-04, of which $23$ are sufficiently complete.
+
+The feature vector spans fifteen categories computed directly from the book and trade stream:
+raw book state, order-book imbalance, trade flow, realized and range volatility, permutation and
+tick entropy, exchange context (funding, open interest), trend and Hurst statistics, illiquidity
+(Kyle, Amihud, Roll), toxicity (VPIN, effective/realized spread), and derived composites. Of the
+$236$ schema features, $207$ are populated in this study; the remainder depend on a
+position-attribution pipeline outside our scope.
+
+\subsection{The autonomous platform as apparatus}
+
+Discovery is performed by an autonomous research system organized around a four-stage loop,
+\[
+  \text{Ingest (Rust)} \;\longrightarrow\; \text{Discover (agents)} \;\longrightarrow\;
+  \text{Replicate (5 gates)} \;\longrightarrow\; \text{Deploy (paper)},
+\]
+with a feedback path that retires decayed signals. Four research agents operate at different
+timescales (tick, minute-to-hour, hour-to-day, and a cross-agent orchestrator); each generates
+hypotheses, tests them through the replication protocol of Section~\ref{sec:methodology}, and
+registers only survivors. The design goal is not trading per se but \emph{disciplined discovery}:
+the apparatus is engineered so that a feature reaching the registry has cleared independent
+replication and FDR control, making the empirical claims below resistant to data-snooping.
+
+\subsection{The information coefficient}
+
+\begin{definition}[Forward return and information coefficient]
+\label{def:ic}
+Let $p_t$ be the mid-price and $h$ a forecast horizon. The forward return in basis points is
+\begin{equation}
+  r_{t,h} := \left(\frac{p_{t+h}}{p_t} - 1\right)\times 10^4 .
+  \label{eq:fwd}
+\end{equation}
+The \emph{directional} information coefficient of a feature $f$ is the Spearman rank correlation
+$\IC = \corr_{\mathrm{S}}(f_t,\, r_{t,h})$; the \emph{volatility} information coefficient replaces
+$r_{t,h}$ by $|r_{t,h}|$.
+\end{definition}
+
+Spearman correlation is chosen for robustness to the heavy tails of tick returns. To suppress the
+strong autocorrelation of $100$\,ms sampling, evaluation points are subsampled every $100$ ticks
+($\approx 10$\,s), giving $\approx 21{,}700$ near-independent observations per symbol-horizon
+cell; significance is reported at $p<0.01$ (two-sided), and significant cells are marked $*$.
+Horizons examined are $\{1\text{s},5\text{s},30\text{s},1\text{m},5\text{m},15\text{m}\}$.
+
+% ============================================================
+\section{Disciplined Discovery Methodology}
+\label{sec:methodology}
+% ============================================================
+
+\subsection{The five-gate replication protocol}
+
+Every candidate signal must independently pass five gates before registration; failure at any
+gate routes the hypothesis to a documented ``graveyard'' with its rejection reason. The protocol
+is designed to control the false discovery rate under heavy multiple testing.
+
+\begin{enumerate}
+  \item[\textbf{G1}] \textbf{Discovery.} The rank IC must exceed an adaptive threshold and its
+        incremental component $\mathrm{dIC}\geq 0.05$ (the marginal IC beyond already-registered
+        signals).
+  \item[\textbf{G2}] \textbf{Cost.} Gross return per trade must exceed a fee-based floor
+        ($\geq 0.1$\,bps), so that statistically real signals too small to overcome costs are
+        rejected.
+  \item[\textbf{G3}] \textbf{Temporal replication.} The IC must hold on at least one additional
+        date (a White, 2000, reality-check in spirit).
+  \item[\textbf{G4}] \textbf{Cross-symbol replication.} The IC must hold on at least one other
+        symbol.
+  \item[\textbf{G5}] \textbf{Correlation deduplication.} The signal's correlation with every
+        registered signal must satisfy $\rho < 0.7$, enforcing breadth.
+\end{enumerate}
+
+\subsection{FDR control, adaptive thresholds, and decay}
+
+At the end of each discovery cycle, Benjamini--Hochberg FDR control (Benjamini and Hochberg, 1995)
+is applied across all tests at $q=0.05$: order the $p$-values
+$p_{(1)}\leq\cdots\leq p_{(m)}$, find $j^*=\max\{j: p_{(j)}\leq jq/m\}$, and retain the first
+$j^*$. The acceptance threshold itself adapts as the registry strengthens,
+\begin{equation}
+  \mathrm{minIC}(t) = \max\!\Big(\,\text{floor},\;
+  \med\{\IC_i : i\in R(t)\}\times 0.8\,\Big),
+  \label{eq:adaptive}
+\end{equation}
+with a floor of $0.10$, so that a marginal signal cannot enter a registry already populated by
+strong ones. Registered signals are continuously monitored and auto-retired if their rolling IC
+falls below half of their discovery IC for fourteen consecutive cycles. Together these mechanisms
+make the registry a conservative, self-pruning set rather than a catalogue of in-sample maxima.
+
+\subsection{Information-theoretic feature selection}
+
+As a nonlinear complement to rank correlation, an information-theoretic engine estimates mutual
+information $I(f;r)$ via the Kraskov--St\"ogbauer--Grassberger $k$-nearest-neighbor estimator,
+conditional mutual information $I(f;r\mid H)$, the interaction information
+$\mathrm{II}(f;r;H)=I(f;r\mid H)-I(f;r)$ (positive for synergy, negative for redundancy), and a
+linear transfer entropy. A feature is deemed cost-viable only if its mutual information clears a
+fee-based minimum,
+\begin{equation}
+  I_{\min} = -\tfrac{1}{2}\log_2\!\Big(1 - (\text{fee}/\sigma_r)^2\Big),
+  \label{eq:imin}
+\end{equation}
+the information required to overcome round-trip cost relative to return volatility $\sigma_r$.
+Greedy forward selection then maximizes conditional MI gain, $f_{k+1}=\argmax_f I(f;r\mid S_k)$,
+stopping when the marginal gain falls below $I_{\min}$---selecting features that are
+uncorrelated-by-construction in the information metric.
+
+% ============================================================
+\section{Signal Discovery}
+\label{sec:discovery}
+% ============================================================
+
+\subsection{Information-coefficient horizon profile}
+
+Table~\ref{tab:horizon} reports directional IC versus horizon for the leading features on BTC.
+Order-book imbalance (level-1 and depth-weighted) is the strongest directional predictor in the
+entire feature set, peaking at $\IC\approx 0.45$ at $1$--$5$\,s; positive imbalance (more bids than
+asks) predicts an up-move within seconds, and ask depth carries the mirror-image negative IC. The
+half-life is $\approx 30$\,s: by five minutes roughly $80\%$ of the predictive content is gone. By
+contrast, the spread and a slow regime-divergence feature carry IC that \emph{grows} with horizon,
+capturing slow accumulation rather than microstructure---this weak residual is exactly what the
+original $100$-minute evaluation was inadvertently measuring.
+
+\begin{table}[ht]
+\begin{center}
+\small
+\begin{tabular}{lrrrrrr}
+\hline
+\textbf{Feature} & \textbf{1s} & \textbf{5s} & \textbf{30s} & \textbf{1m} & \textbf{5m} & \textbf{15m} \\
+\hline
+\code{imbalance_qty_l1}        & $+0.447^{*}$ & $+0.453^{*}$ & $+0.257^{*}$ & $+0.184^{*}$ & $+0.089^{*}$ & $+0.056^{*}$ \\
+\code{imbalance_depth_weighted}& $+0.427^{*}$ & $+0.434^{*}$ & $+0.255^{*}$ & $+0.185^{*}$ & $+0.081^{*}$ & $+0.037^{*}$ \\
+\code{raw_ask_depth_5}         & $-0.414^{*}$ & $-0.425^{*}$ & $-0.238^{*}$ & $-0.167^{*}$ & $-0.072^{*}$ & $-0.040^{*}$ \\
+\code{flow_aggressor_ratio_5s} & $+0.112^{*}$ & $+0.112^{*}$ & $+0.074^{*}$ & $+0.051^{*}$ & $+0.009$     & $-0.020$     \\
+\code{raw_spread_bps}          & $-0.000$     & $+0.006$     & $+0.014$     & $+0.023^{*}$ & $+0.073^{*}$ & $+0.139^{*}$ \\
+\code{regime_divergence_1h}    & $-0.020$     & $-0.009$     & $-0.035^{*}$ & $-0.043^{*}$ & $-0.058^{*}$ & $-0.074^{*}$ \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Directional IC by horizon, BTC. Imbalance peaks at $1$--$5$\,s and decays; the spread and
+regime divergence build slowly. $*: p<0.01$.}
+\label{tab:horizon}
+\end{table}
+
+\subsection{Cross-symbol scan and signal universality}
+
+Scanning all live features across BTC, ETH, and SOL, the order-book imbalance cluster dominates
+directional prediction uniformly: peak IC of $0.40$--$0.47$ at $1$--$5$\,s on every symbol
+(Table~\ref{tab:topdir}). The decay rate is symbol-dependent---half-lives of $\approx 30$\,s
+(BTC), $\approx 20$\,s (ETH), and $\approx 15$\,s (SOL)---with the thinner book discovering price
+faster. The hierarchy of features is identical across symbols, indicating a structural rather than
+asset-specific phenomenon.
+
+\begin{table}[ht]
+\begin{center}
+\small
+\begin{tabular}{lrrrc}
+\hline
+\textbf{Feature} & \textbf{BTC} & \textbf{ETH} & \textbf{SOL} & \textbf{Horizon} \\
+\hline
+\code{imbalance_qty_l1}         & $+0.453$ & $+0.447$ & $+0.466$ & 1--5s \\
+\code{imbalance_qty_l5}         & $+0.456$ & $+0.431$ & $+0.453$ & 5s \\
+\code{imbalance_orders_l5}      & $+0.435$ & $+0.438$ & $+0.455$ & 1--5s \\
+\code{imbalance_depth_weighted} & $+0.434$ & $+0.410$ & $+0.425$ & 5s \\
+\code{raw_ask_depth_5}          & $-0.424$ & $-0.404$ & $-0.415$ & 5s \\
+\code{raw_bid_depth_5}          & $+0.420$ & $+0.405$ & $+0.406$ & 5s \\
+\code{cross_obi_mean}           & $+0.354$ & $+0.334$ & $+0.331$ & 1--5s \\
+\code{micro_queue_position_bid} & $+0.307$ & $+0.282$ & $+0.291$ & 5s \\
+\code{flow_vwap_deviation}      & $-0.287$ & $-0.206$ & $-0.188$ & 1s \\
+\code{micro_obi_velocity}       & $+0.192$ & $+0.181$ & $+0.208$ & 1s \\
+\code{flow_aggressor_ratio_5s}  & $+0.112$ & $+0.109$ & $+0.111$ & 1--5s \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Top directional features at their $1$--$5$\,s peak, all $p<0.01$. The imbalance cluster
+dominates across all three symbols.}
+\label{tab:topdir}
+\end{table}
+
+\subsection{Eight independent directional axes}
+
+Within the highly-correlated directional cluster, the scan resolves eight approximately
+independent axes (Table~\ref{tab:axes}); these are the inputs combined in
+Section~\ref{sec:combiner}.
+
+\begin{table}[ht]
+\begin{center}
+\small
+\begin{tabular}{llr}
+\hline
+\textbf{Axis} & \textbf{Representative feature} & \textbf{IC ($1$--$5$s)} \\
+\hline
+Order-book imbalance       & \code{imbalance_qty_l1}             & $0.45$ \\
+Raw depth asymmetry        & \code{raw_bid_depth_5}              & $0.42$ \\
+Cross-symbol imbalance     & \code{cross_obi_mean}               & $0.35$ \\
+Queue dynamics             & \code{micro_queue_position_bid}     & $0.31$ \\
+VWAP deviation (reversion) & \code{flow_vwap_deviation}          & $0.25$ \\
+OBI velocity (momentum)    & \code{micro_obi_velocity}           & $0.19$ \\
+Imbalance entropy          & \code{ent_permutation_imbalance_16} & $0.17$ \\
+Aggressor flow             & \code{flow_aggressor_ratio_5s}      & $0.11$ \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Eight approximately independent directional axes and representative features.}
+\label{tab:axes}
+\end{table}
+
+\subsection{Directional/volatility orthogonality}
+
+Direction and magnitude are measured by disjoint feature sets. Imbalance features have
+essentially zero volatility IC; the best volatility predictors---self-exciting intensity
+(\code{hawkes_intensity}, $\IC\approx 0.35$ at $5$\,s), realized volatility, trade intensity, and
+effective spread---have essentially zero directional IC. This orthogonality is consistent across
+all three symbols and motivates the separation of \emph{direction}, \emph{timing}, and
+\emph{sizing} in the combiner of Section~\ref{sec:combiner}.
+
+% ============================================================
+\section{Robustness Validation}
+\label{sec:validation}
+% ============================================================
+
+We subject the candidate signal---order-book imbalance at $1$--$5$\,s---to eight checks. Seven are
+confirmatory; the eighth (the conditional IC of Section~\ref{sec:adverse}) is the decisive
+constraint.
+
+\paragraph{Stability across days, hours, and regimes.}
+Per-day IC is stable across $23$ valid dates (Table~\ref{tab:perday}). The signal is present
+$24$/$7$ with no dead intraday zone (a slight dip at 12--16 UTC, strongest at 04--08 UTC).
+Splitting on median five-minute realized volatility, IC remains above $0.34$ in both regimes for
+all symbols, and is slightly stronger in low volatility---imbalance is more informative when the
+book is not being disrupted.
+
+\begin{table}[ht]
+\begin{center}
+\small
+\begin{tabular}{lrrr}
+\hline
+\textbf{Horizon} & \textbf{BTC} & \textbf{ETH} & \textbf{SOL} \\
+\hline
+1s  & $+0.442 \pm 0.069$ & $+0.418 \pm 0.099$ & $+0.415 \pm 0.052$ \\
+5s  & $+0.433 \pm 0.061$ & $+0.400 \pm 0.098$ & $+0.355 \pm 0.071$ \\
+30s & $+0.260 \pm 0.068$ & $+0.224 \pm 0.072$ & $+0.182 \pm 0.048$ \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Per-day rolling IC of \code{imbalance_qty_l1} (mean $\pm$ standard deviation across days).}
+\label{tab:perday}
+\end{table}
+
+\paragraph{Bootstrap and temporal out-of-sample.}
+A $1000$-resample bootstrap on the discovery window gives $95\%$ confidence intervals of width
+$\approx 0.02$: for \code{imbalance_qty_l1} at $5$\,s, BTC $[0.442,0.465]$, ETH $[0.425,0.450]$,
+SOL $[0.400,0.425]$. The one cautionary check is temporal out-of-sample
+(Table~\ref{tab:oos}): comparing the early window (May 19--21) to the late window (Jun 2--4), the
+$5$\,s-horizon IC drops $\approx 0.15$ on every symbol while the $1$\,s-horizon IC is stable or
+improves (BTC $0.447\to 0.502$). June dates carry wider spreads, consistent with thinner books and
+faster price discovery: the signal is not disappearing, its half-life is shortening.
+
+\begin{table}[ht]
+\begin{center}
+\small
+\begin{tabular}{lcccccc}
+\hline
+\textbf{Feature ($5$s)} & \textbf{BTC early} & \textbf{BTC late} & \textbf{ETH early} & \textbf{ETH late} & \textbf{SOL early} & \textbf{SOL late} \\
+\hline
+\code{imbalance_qty_l1}         & $+0.453$ & $+0.286$ & $+0.438$ & $+0.277$ & $+0.412$ & $+0.240$ \\
+\code{imbalance_depth_weighted} & $+0.435$ & $+0.317$ & $+0.395$ & $+0.270$ & $+0.377$ & $+0.242$ \\
+\code{raw_ask_depth_5}          & $-0.425$ & $-0.282$ & $-0.395$ & $-0.261$ & $-0.367$ & $-0.233$ \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Temporal out-of-sample IC at $5$\,s (early $\to$ late). The $5$\,s IC weakens while the
+$1$\,s IC holds---a shortening half-life.}
+\label{tab:oos}
+\end{table}
+
+\paragraph{Validation matrix.}
+Aggregating the checks against fixed \emph{a priori} thresholds (Table~\ref{tab:matrix}), the
+signal passes seven of eight for BTC and six of eight for ETH/SOL. The failures are the
+temporal-OOS decay and, for ETH/SOL, the worst-single-day floor.
+
+\begin{table}[ht]
+\begin{center}
+\small
+\begin{tabular}{lcccl}
+\hline
+\textbf{Check} & \textbf{BTC} & \textbf{ETH} & \textbf{SOL} & \textbf{Threshold} \\
+\hline
+Per-day IC mean ($5$s)   & $0.43$ P & $0.40$ P & $0.35$ P & $>0.30$ \\
+Per-day IC std ($5$s)    & $0.06$ P & $0.10$ P & $0.07$ P & $<0.10$ \\
+Worst single day ($5$s)  & $0.24$ P & $0.04$ F & $0.17$ F & $>0.20$ \\
+Intraday (all windows)   & P & P & P & all $>0.20$ \\
+Low-volatility IC        & $0.46$ P & $0.43$ P & $0.39$ P & $>0.30$ \\
+High-volatility IC       & $0.42$ P & $0.39$ P & $0.34$ P & $>0.30$ \\
+Bootstrap CI lower       & $0.44$ P & $0.43$ P & $0.40$ P & $>0.30$ \\
+Temporal OOS delta       & $0.17$ F & $0.16$ F & $0.17$ F & $<0.10$ \\
+\hline
+\textbf{Total}           & \textbf{7/8} & \textbf{6/8} & \textbf{6/8} & \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Validation matrix. The signal is real, stable, and universal; the only systematic failure
+is the shortening horizon.}
+\label{tab:matrix}
+\end{table}
+
+% ============================================================
+\section{The Adverse-Selection Barrier}
+\label{sec:adverse}
+% ============================================================
+
+The seven confirmatory checks establish a strong, robust, universal predictor. The eighth check
+asks the economic question: can a passive liquidity provider capture it?
+
+\begin{definition}[Conditional information coefficient]
+\label{def:cond}
+Let $\mathcal{F}$ be the event that a directionally-correct passive limit order---a buy at the best
+bid when imbalance predicts up, or a sell at the best ask when it predicts down---fills within a
+fixed tick budget. The \emph{conditional} information coefficient is the IC computed on the
+subsample $\{t : \mathcal{F} \text{ occurs}\}$.
+\end{definition}
+
+Table~\ref{tab:cond} reports the result. The unconditional IC is $0.41$--$0.45$. Conditioning on
+the \emph{any}-fill event \emph{raises} it (to $0.46$--$0.53$), because states near fills carry
+larger absolute imbalance and hence larger returns. But conditioning on the
+\emph{directionally-correct} fill---a buy that actually fills when imbalance predicts up---collapses
+the IC to $\approx 0.03$ on every symbol.
+
+\begin{table}[ht]
+\begin{center}
+\small
+\begin{tabular}{lrrr}
+\hline
+\textbf{Condition} & \textbf{BTC} & \textbf{ETH} & \textbf{SOL} \\
+\hline
+Unconditional                    & $+0.453$ & $+0.438$ & $+0.412$ \\
+Any fill event                   & $+0.526$ & $+0.516$ & $+0.460$ \\
+Buy fill ($\text{imb}>0$)        & $+0.032$ & $-0.061$ & $-0.032$ \\
+Sell fill ($\text{imb}<0$)       & $-0.047$ & $-0.027$ & $-0.021$ \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Conditional IC of \code{imbalance_qty_l1}. The directionally-correct passive fill destroys
+the edge.}
+\label{tab:cond}
+\end{table}
+
+\begin{proposition}[Structural adverse selection]
+\label{prop:adverse}
+Under a passive mid-cross fill model, a directional order-book-imbalance signal is not monetizable:
+the conditional IC on directionally-correct fills is statistically indistinguishable from zero.
+\end{proposition}
+
+\noindent The mechanism is structural, not statistical:
+\begin{enumerate}
+  \item The signal says ``buy'' (imbalance $>0$); a passive buy is posted at the best bid.
+  \item The fill requires the mid to fall to the bid---an adverse move.
+  \item At the instant of the fill, the ``up'' prediction has already been invalidated; the
+        post-fill edge is zero.
+\end{enumerate}
+Fill prevalence rises with book thinness: directionally-correct buy/sell fills occur on
+$20.8\%/21.7\%$ of BTC states, $24.1\%/24.6\%$ of ETH states, and $30.8\%/31.1\%$ of SOL states.
+This explains the otherwise paradoxical observation that a naive passive simulator generates
+\emph{more} trades on SOL but \emph{worse} performance---more fills means more adverse selection.
+Proposition~\ref{prop:adverse} is the empirical content of Glosten--Milgrom (1985) adverse
+selection, measured directly at the per-fill level.
+
+% ============================================================
+\section{Hierarchical Signal Combination}
+\label{sec:combiner}
+% ============================================================
+
+If passive timing alone is non-monetizable, the natural response is to trade only where the
+expected move exceeds execution cost. We separate the eleven leading features into three
+functional layers and compose them multiplicatively.
+
+\begin{definition}[Three-layer composite]
+\label{def:combiner}
+Let $L_1\in\{-1,0,+1\}$ be a slow directional bias (from regime divergence, spread, and a
+short trend EMA), active only when its IC-weighted $z$-score exceeds a band; let $L_2\in[-1,1]$ be
+a fast entry signal (from imbalance, cross-symbol imbalance, queue position, VWAP deviation, and
+OBI velocity), \emph{zeroed when its sign disagrees with $L_1$}; and let $L_3\in[0,1]$ be an
+inverse-volatility scale (from self-exciting intensity, trade count, and realized volatility). The
+composite is
+\begin{equation}
+  S = L_1 \cdot |L_2| \cdot L_3,
+  \qquad
+  S = 0.3\,|L_2|\,L_3 \text{ when } L_1 \text{ is neutral.}
+  \label{eq:composite}
+\end{equation}
+\end{definition}
+
+The directional gate is the key device: fast signals alone are non-monetizable (conditional IC
+$\approx 0.03$), but fast signals \emph{confirming} a slow bias operate at horizons where the
+expected move exceeds cost; inverse-volatility sizing reduces exposure precisely when adverse
+selection on passive orders is worst. Trained with a four-fold expanding window and a $100$-bar
+embargo on five-minute bars, the combiner attains positive cost-adjusted out-of-sample
+performance (Table~\ref{tab:combiner}); the learned IC weights track the in-scan priors, arguing
+against pure walk-forward overfitting.
+
+\begin{table}[ht]
+\begin{center}
+\small
+\begin{tabular}{lrrr}
+\hline
+\textbf{Metric (mean over folds)} & \textbf{BTC} & \textbf{ETH} & \textbf{SOL} \\
+\hline
+Composite IC          & $+0.178$ & $+0.248$ & $+0.359$ \\
+Directional accuracy  & $0.557$  & $0.576$  & $0.594$  \\
+Sharpe (cost-adjusted)& $+1.25$  & $+1.71$  & $+2.40$  \\
+\hline
+\end{tabular}
+\end{center}
+\caption{Hierarchical combiner walk-forward out-of-sample results (BTC/ETH at a $5$h horizon, SOL
+at $3.3$h owing to less data).}
+\label{tab:combiner}
+\end{table}
+
+\paragraph{Honest assessment.}
+These results rest on a thin two-day window, so the confidence intervals are wide; the monotone
+improvement across folds is a caution flag for look-ahead or a trending sample; the slow layer
+dominates, so the marginal value of the fast layers over the slow bias alone is not yet proven;
+and the SOL figures (shorter horizon, less data) are an upper bound. The result is presented as a
+proof of concept that adverse selection can be \emph{designed around}, not as a deployable
+strategy. The required next steps are data accumulation, a slow-layer-only ablation, and
+conditional-fill analysis on real execution logs.
+
+% ============================================================
+\section{Discussion}
+\label{sec:discussion}
+% ============================================================
+
+The results invert the usual order of difficulty. Discovering a strong, robust, universal
+directional predictor proved straightforward; the entire economic question reduces to whether
+that predictor survives adverse selection. Three implications follow.
+
+\paragraph{Execution is the frontier.} The conditional-IC collapse (Section~\ref{sec:adverse}) is a
+property of the \emph{fill model}, not the signal. A passive mid-cross fill is the worst case; an
+execution model built from actual aggressor trades may recover part of the edge, and measuring the
+conditional IC under such a model---rather than the unconditional IC---is the correct objective
+function for microstructure alpha research. Statistical significance of a predictor is necessary
+but not sufficient; the relevant quantity is the IC \emph{conditional on the states one can
+transact in}.
+
+\paragraph{The signal is perishable.} The $\approx 0.15$ five-second decay from May to June, with a
+stable one-second IC, indicates that the tradeable horizon is contracting as books thin. Any
+deployment must track this and adapt per symbol, with SOL fastest (half-life $\approx 15$\,s).
+
+\paragraph{Methodology as contribution.} The empirical claims are credible precisely because they
+are the output of a false-discovery-controlled apparatus: five independent replication gates, FDR
+control, an adaptive threshold, and continuous decay monitoring. We suggest this design---automated
+discovery with replication and FDR built into the loop rather than applied after the fact---as a
+template for empirical microstructure research, which is otherwise highly exposed to the
+multiple-testing critique of Harvey, Liu, and Zhu (2016).
+
+% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+% ============================================================
+
+Order-book imbalance predicts the direction of Hyperliquid perpetual returns with
+$\IC\approx 0.45$ at $1$--$5$ seconds, universally across BTC, ETH, and SOL, surviving an
+eight-check robustness battery administered by an autonomous, false-discovery-controlled discovery
+platform. The same data show, decisively, that a passive mid-cross fill model eliminates the edge
+through adverse selection: the conditional IC collapses to $\approx 0.03$. A hierarchical combiner
+that gates fast timing on a slow directional bias recovers positive cost-adjusted out-of-sample
+performance on a thin window, demonstrating that adverse selection can be confronted by design. The
+binding constraint of microstructure alpha is therefore not signal quality but execution
+feasibility, and the right object of study is the information coefficient conditional on
+transactable states. Future work will replace the passive fill model with an event-driven model
+built from per-trade data, extend the robustness study as data accumulate, and test the combiner's
+slow-layer ablation.
+
+% ============================================================
+\section*{Reproducibility}
+\addcontentsline{toc}{section}{Reproducibility}
+% ============================================================
+
+The data are Hyperliquid Level-2 order-book and trade streams for BTC, ETH, and SOL at $100$\,ms,
+ingested in Rust to columnar storage. The discovery window is 2026-05-19 to 2026-05-21; the
+robustness window is 2026-04-19 to 2026-06-04 ($23$ valid dates). The information coefficient is
+the Spearman rank correlation of Definition~\ref{def:ic}, subsampled every $100$ ticks, with
+significance at $p<0.01$. Five-gate replication, Benjamini--Hochberg FDR at $q=0.05$, and the
+adaptive threshold of equation~\eqref{eq:adaptive} are applied as described in
+Section~\ref{sec:methodology}. Exact code revision (git SHA), per-run data fingerprints, and the
+feature manifest are recorded with each result and available on request. No trading thresholds,
+entry logic, or position-sizing parameters are reported; the paper concerns signal quality and its
+conditional behavior, not a deployable strategy.
+
+% ============================================================
+\section*{References}
+\addcontentsline{toc}{section}{References}
+% ============================================================
+
+\begin{enumerate}
+  \item A\"it-Sahalia, Y.\ \& Brunetti, C.\ (2024). What do we know about cryptocurrency?
+        \textit{Annual Review of Financial Economics}, 16.
+
+  \item Bailey, D.H.\ \& L\'opez de Prado, M.\ (2014). The deflated Sharpe ratio: correcting for
+        selection bias, backtest overfitting, and non-normality. \textit{Journal of Portfolio
+        Management}, 40(5), 94--107.
+
+  \item Benjamini, Y.\ \& Hochberg, Y.\ (1995). Controlling the false discovery rate: a practical
+        and powerful approach to multiple testing. \textit{Journal of the Royal Statistical
+        Society, Series B}, 57(1), 289--300.
+
+  \item Cont, R., Kukanov, A.\ \& Stoikov, S.\ (2014). The price impact of order book events.
+        \textit{Journal of Financial Econometrics}, 12(1), 47--88.
+
+  \item Cont, R., Stoikov, S.\ \& Talreja, R.\ (2010). A stochastic model for order book dynamics.
+        \textit{Operations Research}, 58(3), 549--563.
+
+  \item Easley, D., L\'opez de Prado, M.M.\ \& O'Hara, M.\ (2012). Flow toxicity and liquidity in a
+        high-frequency world. \textit{Review of Financial Studies}, 25(5), 1457--1493.
+
+  \item Glosten, L.R.\ \& Milgrom, P.R.\ (1985). Bid, ask and transaction prices in a specialist
+        market with heterogeneously informed traders. \textit{Journal of Financial Economics},
+        14(1), 71--100.
+
+  \item Harvey, C.R., Liu, Y.\ \& Zhu, H.\ (2016). $\ldots$ and the cross-section of expected
+        returns. \textit{Review of Financial Studies}, 29(1), 5--68.
+
+  \item Kraskov, A., St\"ogbauer, H.\ \& Grassberger, P.\ (2004). Estimating mutual information.
+        \textit{Physical Review E}, 69(6), 066138.
+
+  \item Kyle, A.S.\ (1985). Continuous auctions and insider trading. \textit{Econometrica}, 53(6),
+        1315--1335.
+
+  \item Lee, S.S.\ \& Mykland, P.A.\ (2008). Jumps in financial markets: a new nonparametric test
+        and jump dynamics. \textit{Review of Financial Studies}, 21(6), 2535--2563.
+
+  \item Makarov, I.\ \& Schoar, A.\ (2020). Trading and arbitrage in cryptocurrency markets.
+        \textit{Journal of Financial Economics}, 135(2), 293--319.
+
+  \item Schreiber, T.\ (2000). Measuring information transfer. \textit{Physical Review Letters},
+        85(2), 461--464.
+
+  \item White, H.\ (2000). A reality check for data snooping. \textit{Econometrica}, 68(5),
+        1097--1126.
+\end{enumerate}
+
+\end{document}

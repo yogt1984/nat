@@ -1,0 +1,684 @@
+\documentclass[11pt]{article}
+
+% ---------------------------------------------------------------------------
+%  Empirical Microstructure Alpha on Hyperliquid Perpetual Futures
+%  Synthesis of NAT internal research reports (2026-06-09 / 2026-06-10):
+%    - ic_horizon_analysis.md          (tick-level IC discovery, BTC)
+%    - full_ic_scan_report.md          (236-feature cross-symbol scan)
+%    - ic_validation_report.md         (6 robustness checks + conditional IC)
+%    - project_state_report.md         (system context / maturity)
+%    - hierarchical_combiner_report.md (3-layer combination, OOS)
+%    - convolver_data_analysis.txt     (pattern-discovery data requirements)
+% ---------------------------------------------------------------------------
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{array}
+\usepackage{longtable}
+
+% --- shims for packages absent from this minimal TeX Live install ---
+\newcommand{\toprule}{\hline}
+\newcommand{\midrule}{\hline}
+\newcommand{\bottomrule}{\hline}
+
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\ic}{\textnormal{IC}}
+
+\title{\textbf{Empirical Microstructure Alpha on Hyperliquid\\ Perpetual Futures}\\[4pt]
+\large Information-Coefficient Discovery, Cross-Symbol Validation, and\\
+Hierarchical Signal Combination under Adverse Selection}
+
+\author{NAT Quantitative Research Platform}
+\date{Synthesis compiled 2026-06-24\\
+\small{from internal research reports dated 2026-06-09 to 2026-06-10}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+We scan all 236 engineered features of the NAT platform against signed and absolute
+forward returns of Hyperliquid perpetual futures (BTC, ETH, SOL) at 100\,ms tick
+resolution. Order-book imbalance is the dominant directional predictor, attaining a
+Spearman information coefficient (\ic) of $0.40$--$0.47$ at the $1$--$5\,$s horizon and
+decaying to near zero by five minutes (half-life $\sim$\,$15$--$30\,$s). The same feature
+hierarchy holds across all three symbols, yielding eight approximately independent
+directional axes. The signal survives a battery of robustness checks --- per-day,
+intraday, volatility-regime, bootstrap, and temporal out-of-sample --- passing $7/8$
+for BTC and $6/8$ for ETH and SOL. The single decisive negative result is that the
+\emph{conditional} \ic, measured on the subset of ticks where a directionally-correct
+mid-cross limit fill would occur, collapses from $0.45$ to $\sim$\,$0.03$ across all
+symbols. This is a structural adverse-selection barrier, not an estimation artifact, and
+it is the binding constraint of the project: signal quality is solved; profitable
+execution is not. We then present a three-layer hierarchical combiner (slow directional
+bias, gated fast entry timing, inverse-volatility sizing) that is the first architecture
+to address adverse selection directly rather than ignore it; it achieves walk-forward
+out-of-sample composite \ic{} of $0.18$ (BTC), $0.25$ (ETH), and $0.36$ (SOL) with
+cost-adjusted Sharpe $> 0$ on a thin two-day window, with appropriate caveats. Finally,
+a complementary candle-shape pattern-discovery engine (the ``convolver,'' using
+SVD\,+\,IC-gate\,+\,Benjamini--Hochberg FDR) is shown to be methodologically sound but
+data-starved: regime-robust discovery requires $6$--$24$ months of data at the $60\,$s
+timescale and is effectively infeasible above the $15$-minute timescale.
+\end{abstract}
+
+\tableofcontents
+\bigskip
+
+% ===========================================================================
+\section{Introduction}
+% ===========================================================================
+
+NAT is a quantitative research platform for extracting alpha from Hyperliquid perpetual
+futures. A Rust ingestor computes 236 features per symbol every $100\,$ms; a Python stack
+performs discovery, validation, backtesting, and combination. For an extended period the
+platform's $\sim$\,$25$ trading algorithms were uniformly unprofitable. This paper
+synthesizes the sequence of internal studies that diagnosed the cause and reoriented the
+research programme.
+
+\paragraph{The horizon mistake.}
+Every algorithm in the system had been evaluated at a $100$-minute forecast horizon using
+$5$-minute bar aggregation. That aggregation destroys the predictive content of the
+microstructure features, which lives at the $1$--$5\,$second scale, while retaining only a
+weak residual ($\ic < 0.07$). The features were never the problem; the evaluation horizon
+was. The reframing is simple but consequential: \emph{the features work --- the horizon
+was wrong}.
+
+\paragraph{Contributions.}
+This document fuses six internal reports into a single account:
+\begin{enumerate}
+  \item \textbf{Tick-level signal discovery} (\S\ref{sec:discovery}): an \ic-by-horizon
+        profile that localizes the directional signal to $1$--$5\,$s, and a full
+        $236$-feature cross-symbol scan that resolves eight independent directional axes
+        and a clean directional/volatility orthogonality.
+  \item \textbf{Cross-symbol validation} (\S\ref{sec:validation}): eight robustness checks
+        over $31$ dates, culminating in the conditional-\ic{} (adverse-selection) result.
+  \item \textbf{Hierarchical signal combination} (\S\ref{sec:combiner}): a three-layer
+        architecture that gates fast signals on a slow directional bias, with
+        walk-forward out-of-sample results.
+  \item \textbf{Pattern-discovery data requirements} (\S\ref{sec:convolver}): an analysis
+        of why matched-filter candle-shape discovery needs years, not months, of data.
+\end{enumerate}
+\S\ref{sec:context} situates the findings in the broader system, and \S\ref{sec:discussion}
+states the resulting research frontier.
+
+% ===========================================================================
+\section{Data and Methodology}\label{sec:methodology}
+% ===========================================================================
+
+\paragraph{Data.}
+All studies use Hyperliquid perpetual futures at $100\,$ms tick resolution for three
+symbols (BTC, ETH, SOL). The primary discovery window is 2026-05-19 to 2026-05-21
+($3$ consecutive full days, $\approx 2.17$M ticks per symbol). The validation study
+(\S\ref{sec:validation}) spans $31$ dates from 2026-04-19 to 2026-06-04, of which $23$ are
+valid (sufficiently complete) trading days.
+
+\paragraph{Information coefficient.}
+The \ic{} is the Spearman rank correlation between a feature value at time $t$ and the
+forward return over horizon $h$,
+\begin{equation}
+  r_{t,h} \;=\; \left(\frac{p_{t+h}}{p_{t}} - 1\right)\times 10^{4}\quad\text{(basis points)},
+\end{equation}
+where $p_t$ is the mid-price. \emph{Directional} \ic{} uses the signed return $r_{t,h}$;
+\emph{volatility} \ic{} uses the absolute return $|r_{t,h}|$. Spearman correlation is chosen
+for its non-parametric robustness to the heavy tails of tick returns. To suppress the
+strong autocorrelation of $100\,$ms sampling, evaluation points are subsampled every $100$
+ticks ($\sim$\,$10\,$s), giving $\approx 21{,}700$ near-independent observations per
+symbol-horizon cell. Statistical significance is reported at $p < 0.01$ (two-sided);
+significant cells are marked with $*$. Horizons examined are
+$\{1\text{s},\,5\text{s},\,30\text{s},\,1\text{m},\,5\text{m},\,15\text{m}\}$.
+
+% ===========================================================================
+\section{Signal Discovery}\label{sec:discovery}
+% ===========================================================================
+
+\subsection{Information-coefficient horizon profile}
+
+Table~\ref{tab:dir-horizon} reports directional \ic{} versus horizon for the leading
+features on BTC. Order-book imbalance (level-1 and depth-weighted) is the strongest
+directional signal in the entire system, peaking at $\ic \approx 0.45$ at $1$--$5\,$s.
+Positive imbalance (more bids than asks) predicts upward movement within seconds; ask
+depth carries the mirror-image negative \ic. The signal half-life is $\sim$\,$30\,$s: by
+five minutes roughly $80\%$ of the predictive content is gone.
+
+\begin{table}[h]
+\centering\footnotesize
+\setlength{\tabcolsep}{5pt}
+\caption{Directional \ic{} (feature vs.\ signed forward return), BTC. $* : p<0.01$.}
+\label{tab:dir-horizon}
+\begin{tabular}{lrrrrrr}
+\toprule
+Feature & 1s & 5s & 30s & 1m & 5m & 15m \\
+\midrule
+\code{imbalance_qty_l1}        & $+0.447^{*}$ & $+0.453^{*}$ & $+0.257^{*}$ & $+0.184^{*}$ & $+0.089^{*}$ & $+0.056^{*}$ \\
+\code{imbalance_depth_weighted}& $+0.427^{*}$ & $+0.434^{*}$ & $+0.255^{*}$ & $+0.185^{*}$ & $+0.081^{*}$ & $+0.037^{*}$ \\
+\code{raw_ask_depth_5}         & $-0.414^{*}$ & $-0.425^{*}$ & $-0.238^{*}$ & $-0.167^{*}$ & $-0.072^{*}$ & $-0.040^{*}$ \\
+\code{flow_aggressor_ratio_5s} & $+0.112^{*}$ & $+0.112^{*}$ & $+0.074^{*}$ & $+0.051^{*}$ & $+0.009$     & $-0.020$     \\
+\code{raw_spread_bps}          & $-0.000$     & $+0.006$     & $+0.014$     & $+0.023^{*}$ & $+0.073^{*}$ & $+0.139^{*}$ \\
+\code{regime_divergence_1h}    & $-0.020$     & $-0.009$     & $-0.035^{*}$ & $-0.043^{*}$ & $-0.058^{*}$ & $-0.074^{*}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two slow features behave oppositely, with \ic{} that \emph{grows} with horizon:
+\code{raw_spread_bps} ($\ic = 0.14$ at $15$m) and \code{regime_divergence_1h}
+(reaching $\ic \approx 0.21$ at the $100$-minute scale). These capture slow
+accumulation/distribution rather than microstructure, and explain the weak residual
+that the original $100$-minute evaluation was inadvertently measuring.
+
+\subsection{Full 236-feature cross-symbol scan}
+
+Of $236$ schema features, $207$ are live ($48$ are uniformly NaN; see
+\S\ref{sec:dead}). Table~\ref{tab:classcounts} classifies the live features by behaviour
+for each symbol; Table~\ref{tab:topdir} lists the top directional features cross-symbol at
+their $1$--$5\,$s peak. The imbalance cluster dominates uniformly across BTC, ETH, and SOL
+--- the signal is universal, not symbol-specific.
+
+\begin{table}[h]
+\centering\footnotesize
+\caption{Feature classification counts by symbol.}
+\label{tab:classcounts}
+\begin{tabular}{lrrrl}
+\toprule
+Category & BTC & ETH & SOL & Description \\
+\midrule
+\code{dir_fast}   & 29 & 29 & 28 & Directional at $1$--$30$s \\
+\code{dir_medium} & 11 & 11 & 10 & Directional at $1$--$5$min \\
+\code{dir_slow}   &  7 &  3 & 14 & Directional at $5$--$15$min \\
+\code{volatility} & 68 & 75 & 68 & Predicts magnitude, not direction \\
+\code{weak}       & 11 &  9 &  7 & Marginal signal \\
+\code{no_signal}  & 33 & 32 & 32 & Nothing at any horizon \\
+\code{all_nan}    & 48 & 48 & 48 & No data produced \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering\footnotesize
+\setlength{\tabcolsep}{5pt}
+\caption{Top directional features (peak \ic{} at $1$--$5$s, all $p<0.01$).}
+\label{tab:topdir}
+\begin{tabular}{lrrrc}
+\toprule
+Feature & BTC & ETH & SOL & Horizon \\
+\midrule
+\code{imbalance_qty_l1}          & $+0.453$ & $+0.447$ & $+0.466$ & 1--5s \\
+\code{imbalance_qty_l5}          & $+0.456$ & $+0.431$ & $+0.453$ & 5s \\
+\code{imbalance_notional_l5}     & $+0.456$ & $+0.431$ & $+0.453$ & 5s \\
+\code{imbalance_orders_l5}       & $+0.435$ & $+0.438$ & $+0.455$ & 1--5s \\
+\code{imbalance_depth_weighted}  & $+0.434$ & $+0.410$ & $+0.425$ & 5s \\
+\code{raw_ask_depth_5}           & $-0.424$ & $-0.404$ & $-0.415$ & 5s \\
+\code{raw_bid_depth_5}           & $+0.420$ & $+0.405$ & $+0.406$ & 5s \\
+\code{imbalance_pressure_ask}    & $-0.417$ & $-0.387$ & $-0.418$ & 5s \\
+\code{cross_obi_mean}            & $+0.354$ & $+0.334$ & $+0.331$ & 1--5s \\
+\code{micro_queue_position_bid}  & $+0.307$ & $+0.282$ & $+0.291$ & 5s \\
+\code{flow_vwap_deviation}       & $-0.287$ & $-0.206$ & $-0.188$ & 1s \\
+\code{micro_obi_velocity}        & $+0.192$ & $+0.181$ & $+0.208$ & 1s \\
+\code{ent_permutation_imbalance_16} & $-0.170$ & $-0.173$ & $-0.177$ & 1s \\
+\code{flow_aggressor_ratio_5s}   & $+0.112$ & $+0.109$ & $+0.111$ & 1--5s \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Decay by symbol.}
+Peak directional \ic{} falls with horizon at a symbol-dependent rate:
+BTC $0.447 \to 0.456 \to 0.261 \to 0.187 \to 0.090 \to 0.056$;
+ETH $0.447 \to 0.438 \to 0.219 \to 0.160 \to 0.074 \to 0.031$;
+SOL $0.466 \to 0.412 \to 0.190 \to 0.135 \to 0.056 \to 0.036$
+(at $1$s/$5$s/$30$s/$1$m/$5$m/$15$m). The implied half-lives are $\sim$\,$30\,$s (BTC),
+$\sim$\,$20\,$s (ETH), and $\sim$\,$15\,$s (SOL): the thinner book discovers price faster.
+
+\subsection{Directional/volatility orthogonality}
+The separation between direction and magnitude is clean and consistent across all three
+symbols. Imbalance features have essentially \emph{zero} volatility \ic; the best
+volatility predictors --- \code{hawkes_intensity} ($\ic \approx 0.35$ at $5$s),
+realized volatility \code{vol_returns_5m}/\code{vol_returns_1m} ($\sim$\,$0.32$),
+\code{vol_parkinson_5m}, trade-intensity \code{flow_count_30s}/\code{flow_intensity}, and
+\code{toxic_effective_spread} --- have essentially zero \emph{directional} \ic. Direction
+and magnitude are measured by disjoint feature sets.
+
+\subsection{Eight independent signal axes}
+Within the highly-correlated directional cluster, the report resolves eight approximately
+independent axes (Table~\ref{tab:axes}). These are the inputs later combined in
+\S\ref{sec:combiner}.
+
+\begin{table}[h]
+\centering\footnotesize
+\caption{Independent directional signal axes and representative features.}
+\label{tab:axes}
+\begin{tabular}{llr}
+\toprule
+Axis & Representative feature & \ic{} ($1$--$5$s) \\
+\midrule
+Order-book imbalance       & \code{imbalance_qty_l1}             & $0.45$ \\
+Raw depth asymmetry        & \code{raw_bid_depth_5}              & $0.42$ \\
+Cross-symbol imbalance     & \code{cross_obi_mean}               & $0.35$ \\
+Queue dynamics             & \code{micro_queue_position_bid}     & $0.31$ \\
+VWAP deviation (reversion) & \code{flow_vwap_deviation}          & $0.25$ \\
+OBI velocity (momentum)    & \code{micro_obi_velocity}           & $0.19$ \\
+Imbalance entropy          & \code{ent_permutation_imbalance_16} & $0.17$ \\
+Aggressor flow             & \code{flow_aggressor_ratio_5s}      & $0.11$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Dead features}\label{sec:dead}
+The same $48$ features produce no data on every symbol: whale-flow ($12$),
+liquidation-risk ($13$), concentration ($15$), and GMM-regime ($8$). These depend on a
+position/trade-attribution pipeline that was not yet wired during these studies; their
+repair is tracked separately as the feature-wiring work. Their absence does not affect the
+order-book signals, which are computed directly from the L2 book.
+
+% ===========================================================================
+\section{Signal Validation}\label{sec:validation}
+% ===========================================================================
+
+The candidate signal --- order-book imbalance at $1$--$5\,$s --- is subjected to eight
+robustness checks. Seven are confirmatory; the eighth (conditional \ic) is the decisive
+constraint.
+
+\subsection{Per-day, intraday, and volatility-regime stability}
+Per-day \ic{} (Table~\ref{tab:perday}) is stable across $23$ valid dates. Intraday, the
+signal is present $24/7$ with no dead zones (a slight dip at 12--16 UTC, strongest at
+04--08 UTC). Splitting on median $5$-minute realized volatility, \ic{} remains above $0.34$
+in both regimes for all symbols, and is slightly stronger in low-volatility conditions
+--- imbalance is more informative when the book is not being disrupted.
+
+\begin{table}[h]
+\centering\footnotesize
+\setlength{\tabcolsep}{5pt}
+\caption{Per-day rolling \ic{} of \code{imbalance_qty_l1} (mean $\pm$ std across days).}
+\label{tab:perday}
+\begin{tabular}{lrrr}
+\toprule
+Horizon & BTC & ETH & SOL \\
+\midrule
+1s  & $+0.442 \pm 0.069$ & $+0.418 \pm 0.099$ & $+0.415 \pm 0.052$ \\
+5s  & $+0.433 \pm 0.061$ & $+0.400 \pm 0.098$ & $+0.355 \pm 0.071$ \\
+30s & $+0.260 \pm 0.068$ & $+0.224 \pm 0.072$ & $+0.182 \pm 0.048$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Bootstrap confidence and temporal out-of-sample}
+A $1000$-resample bootstrap on the May 19--21 data gives extremely tight $95\%$ confidence
+intervals of width $\sim$\,$0.02$: for \code{imbalance_qty_l1} at $5\,$s,
+BTC $[0.442, 0.465]$, ETH $[0.425, 0.450]$, SOL $[0.400, 0.425]$. There is no plausible
+sense in which the signal is noise.
+
+The one cautionary check is temporal out-of-sample (Table~\ref{tab:oos}). Comparing the
+early window (May 19--21) to the late window (Jun 2--4), the $5\,$s-horizon \ic{} drops
+$\sim$\,$0.15$ on every symbol, while the $1\,$s-horizon \ic{} is stable or improves
+(BTC $0.447 \to 0.502$). June dates carry wider spreads ($0.2$--$0.3$ bps vs.\ $0.1$ bps in
+May), consistent with thinner books and faster price discovery: the signal is not
+disappearing, its half-life is shortening.
+
+\begin{table}[h]
+\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{Temporal out-of-sample \ic{} at $5\,$s (early\,$\to$\,late).}
+\label{tab:oos}
+\begin{tabular}{lcccccc}
+\toprule
+Feature ($5$s) & BTC early & BTC late & ETH early & ETH late & SOL early & SOL late \\
+\midrule
+\code{imbalance_qty_l1}         & $+0.453$ & $+0.286$ & $+0.438$ & $+0.277$ & $+0.412$ & $+0.240$ \\
+\code{imbalance_depth_weighted} & $+0.435$ & $+0.317$ & $+0.395$ & $+0.270$ & $+0.377$ & $+0.242$ \\
+\code{raw_ask_depth_5}          & $-0.425$ & $-0.282$ & $-0.395$ & $-0.261$ & $-0.367$ & $-0.233$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Conditional information coefficient: the adverse-selection barrier}
+\label{sec:conditional}
+
+The central negative result conditions the \ic{} on whether a directionally-correct
+mid-cross limit fill would occur within $50$ ticks (Table~\ref{tab:conditional}).
+
+\begin{table}[h]
+\centering\footnotesize
+\caption{Conditional \ic{} of \code{imbalance_qty_l1} (BTC/ETH/SOL).}
+\label{tab:conditional}
+\begin{tabular}{lrrr}
+\toprule
+Condition & BTC & ETH & SOL \\
+\midrule
+Unconditional         & $+0.453$ & $+0.438$ & $+0.412$ \\
+Any fill event        & $+0.526$ & $+0.516$ & $+0.460$ \\
+Buy fill ($\text{imb}>0$) & $+0.032$ & $-0.061$ & $-0.032$ \\
+Sell fill ($\text{imb}<0$)& $-0.047$ & $-0.027$ & $-0.021$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Unconditional \ic{} is $0.41$--$0.45$. Conditioning on the \emph{any}-fill event raises it
+($0.46$--$0.53$), because ticks near fills carry larger absolute imbalance and hence larger
+returns. But conditioning on the \emph{directionally-correct} fill --- a buy order that
+actually fills when imbalance predicts up --- collapses \ic{} to $\sim$\,$0.03$ on every
+symbol. The mechanism is structural:
+\begin{enumerate}
+  \item The signal says ``buy'' (imbalance $> 0$); a passive buy is posted at the best bid.
+  \item The fill requires the mid to fall to the bid --- an adverse move.
+  \item At the instant of fill, the ``up'' prediction has already been invalidated; the
+        post-fill edge is zero.
+\end{enumerate}
+Fill prevalence rises with book thinness: buy/sell fills occur on $20.8\%/21.7\%$ of BTC
+ticks, $24.1\%/24.6\%$ of ETH ticks, and $30.8\%/31.1\%$ of SOL ticks. This explains why a
+naive limit-order simulator produced \emph{more} SOL trades but \emph{worse} PnL --- more
+fills means more adverse selection.
+
+\subsection{Validation matrix}
+Table~\ref{tab:matrix} aggregates the checks against fixed thresholds. The signal passes
+$7/8$ for BTC and $6/8$ for ETH/SOL; the failures are the temporal-OOS decay and (for
+ETH/SOL) the worst-single-day floor.
+
+\begin{table}[h]
+\centering\footnotesize
+\setlength{\tabcolsep}{5pt}
+\caption{Validation matrix. Thresholds are fixed \emph{a priori}.}
+\label{tab:matrix}
+\begin{tabular}{lcccl}
+\toprule
+Check & BTC & ETH & SOL & Threshold \\
+\midrule
+Per-day \ic{} mean ($5$s)   & $0.43$ \,P & $0.40$ \,P & $0.35$ \,P & $> 0.30$ \\
+Per-day \ic{} std ($5$s)    & $0.06$ \,P & $0.10$ \,P & $0.07$ \,P & $< 0.10$ \\
+Worst single day ($5$s)     & $0.24$ \,P & $0.04$ \,F & $0.17$ \,F & $> 0.20$ \\
+Intraday (all windows)      & P & P & P & all $> 0.20$ \\
+Low-vol \ic{}               & $0.46$ \,P & $0.43$ \,P & $0.39$ \,P & $> 0.30$ \\
+High-vol \ic{}              & $0.42$ \,P & $0.39$ \,P & $0.34$ \,P & $> 0.30$ \\
+Bootstrap CI lower          & $0.44$ \,P & $0.43$ \,P & $0.40$ \,P & $> 0.30$ \\
+Temporal OOS delta          & $0.17$ \,F & $0.16$ \,F & $0.17$ \,F & $< 0.10$ \\
+\midrule
+\textbf{Total}              & \textbf{7/8} & \textbf{6/8} & \textbf{6/8} & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Verdict.} The signal is real, stable, and universal, but non-monetizable under
+a mid-cross passive fill model. This motivates both an execution-model research track
+(\S\ref{sec:discussion}) and an architecture that trades only where the expected move
+exceeds cost (\S\ref{sec:combiner}).
+
+% ===========================================================================
+\section{Hierarchical Signal Combination}\label{sec:combiner}
+% ===========================================================================
+
+\subsection{Architecture}
+The hierarchical combiner separates eleven features from the scan into three functional
+layers and composes them multiplicatively:
+\begin{description}
+  \item[Layer 1 --- slow directional bias]
+        Inputs \code{regime_divergence_1h}, \code{spread_bps}, \code{trend_ema_short}.
+        \ic-weighted rolling z-score, thresholded to $\{-1,0,+1\}$; active only when
+        $|z| > 0.5$.
+  \item[Layer 2 --- fast entry timing]
+        Inputs \code{OBI_l1}, \code{cross_obi}, \code{queue_position_bid},
+        \code{vwap_deviation}, \code{obi_velocity}. \ic-weighted rolling z-score clipped to
+        $[-1,+1]$, \emph{zeroed when its sign disagrees with Layer 1}.
+  \item[Layer 3 --- volatility sizing]
+        Inputs \code{hawkes_intensity}, \code{flow_count_30s}, \code{vol_returns_5m}.
+        \ic-weighted z-score through a sigmoid to $[0,1]$, scaling position
+        \emph{inversely} with volatility.
+\end{description}
+The composite is
+\begin{equation}
+  S \;=\; L_1^{\text{dir}} \,\times\, \bigl|L_2^{\text{entry}}\bigr| \,\times\, L_3^{\text{scale}},
+  \qquad
+  S \;=\; 0.3\,\bigl|L_2^{\text{entry}}\bigr|\,L_3^{\text{scale}} \ \text{when } L_1 \text{ neutral.}
+\end{equation}
+
+\paragraph{Rationale.} Three design choices follow directly from \S\ref{sec:validation}:
+(i) \ic-magnitude weights (rather than a learned model) are more robust with only
+$3$--$5$ features per layer; (ii) directional gating is the key mechanism --- fast signals
+alone are non-monetizable (conditional \ic{} $\sim 0.03$), but fast signals
+\emph{confirming} a slow bias operate at horizons where the expected move exceeds execution
+cost; (iii) inverse-volatility sizing reduces exposure precisely when adverse selection on
+passive orders is worst.
+
+\subsection{Walk-forward out-of-sample results}
+Training uses a $4$-fold expanding window with a $100$-bar embargo on $5$-minute bars.
+Table~\ref{tab:combiner} reports per-fold and mean composite \ic, directional accuracy, and
+cost-adjusted Sharpe (BTC/ETH at a $60$-bar $\approx 5$h horizon; SOL at $40$ bars
+$\approx 3.3$h due to less data).
+
+\begin{table}[h]
+\centering\footnotesize
+\setlength{\tabcolsep}{5pt}
+\caption{Hierarchical combiner walk-forward OOS results.}
+\label{tab:combiner}
+\begin{tabular}{llrrrrr}
+\toprule
+Symbol & Metric & Fold 0 & Fold 1 & Fold 2 & Fold 3 & Mean \\
+\midrule
+BTC & Composite \ic{}     & $+0.077$ & $+0.179$ & $+0.224$ & $+0.253$ & $\mathbf{+0.178}$ \\
+ & Dir.\ accuracy      & $0.543$  & $0.552$  & $0.563$  & $0.571$  & $\mathbf{0.557}$  \\
+ & Sharpe (cost-adj.)  & $+0.41$  & $+1.12$  & $+1.58$  & $+1.87$  & $\mathbf{+1.25}$  \\
+\midrule
+ETH & Composite \ic{}     & $+0.156$ & $+0.210$ & $+0.278$ & $+0.349$ & $\mathbf{+0.248}$ \\
+ & Dir.\ accuracy      & $0.558$  & $0.571$  & $0.582$  & $0.591$  & $\mathbf{0.576}$  \\
+ & Sharpe (cost-adj.)  & $+0.92$  & $+1.38$  & $+2.01$  & $+2.54$  & $\mathbf{+1.71}$  \\
+\midrule
+SOL & Composite \ic{}     & $+0.212$ & $+0.318$ & $+0.401$ & $+0.504$ & $\mathbf{+0.359}$ \\
+ & Dir.\ accuracy      & $0.572$  & $0.588$  & $0.601$  & $0.615$  & $\mathbf{0.594}$  \\
+ & Sharpe (cost-adj.)  & $+1.35$  & $+2.08$  & $+2.71$  & $+3.45$  & $\mathbf{+2.40}$  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Layer-1 is active $42$--$45\%$ of the time. The learned \ic{} weights closely track the
+scan priors (e.g.\ BTC L1: \code{regime_divergence} $+0.071$, \code{spread_bps} $+0.138$,
+\code{trend_ema} $-0.142$), which argues against pure walk-forward overfitting.
+
+\subsection{Comparison and honest assessment}
+Against the $30$-day \code{nat oos30} benchmark at the $100$-minute horizon, the combiner
+(Sharpe $1.25/1.71/2.40$) is weaker than the deployable winners --- \code{3f_liquidity}
+($9.2/7.8/5.1$), \code{jump_detector} ($4.1/3.8/6.2$), \code{optimal_entry}
+($3.5/2.9/4.7$), \code{funding_reversion} ($2.8/3.1/1.9$). The comparison is unfair in both
+directions: the combiner used only two days of data (vs.\ thirty) and a different horizon,
+but it is the only architecture that explicitly addresses adverse selection.
+
+\paragraph{Promising.} Consistent positive OOS \ic{} on all three symbols with
+cost-adjusted Sharpe $> 0$; a layer structure matching the orthogonality of
+\S\ref{sec:discovery}; working directional gating (Layer-2 \ic{} conditional on Layer-1
+alignment exceeds its unconditional \ic); weight stability versus the scan priors.
+
+\paragraph{Concerning.} Only two days of data, so every figure carries wide intervals. The
+monotone fold progression ($\text{fold}_0 < \text{fold}_1 < \text{fold}_2 < \text{fold}_3$)
+is suspicious and may indicate look-ahead or a trending window. Layer-1 dominates the
+composite, so the ``hierarchical'' benefit over Layer-1 alone is not yet demonstrated. The
+SOL figures (shorter horizon, less data) are an upper bound. The $11$\,bps round-trip cost
+is a configuration assumption, not a measured fill. And at a $5$h effective horizon this is
+arguably a medium-frequency momentum signal rather than a microstructure one. The required
+next steps are data accumulation, an L1-only ablation, conditional-fill analysis on real
+logs, and a horizon cross-validation.
+
+% ===========================================================================
+\section{Complementary Pattern Discovery: The Convolver}\label{sec:convolver}
+% ===========================================================================
+
+A separate engine discovers \emph{candle-shape} patterns via matched filters: events
+(breakouts, turtle-soup reversals, traps) are detected, stacked into channel matrices, and
+reduced by truncated SVD (Eckart--Young low-rank approximation) into kernels; kernels are
+admitted by an \ic{} gate and a Benjamini--Hochberg false-discovery-rate correction. The
+methodology is sound; the constraint is data volume.
+
+\subsection{Current state and sample-size arithmetic}
+BTC discovery (2026-05-24) used $12{,}059$ $60$-second candles ($\approx 8.4$ days) and
+found $1{,}775$ events across six types, of which $6$ kernels survived FDR but
+$0/6$ were out-of-sample robust (walk-forward decay ratio $< 0.50$). Temporal stability of
+the surviving shapes was nonetheless high (turtle-bull $\rho = 0.920$, trap-bull
+$\rho = 0.941$). Table~\ref{tab:events} gives the event rates; trap events are the
+bottleneck at $11$--$14$ per $1000$ candles.
+
+\begin{table}[h]
+\centering\footnotesize
+\caption{Observed BTC event rates ($12{,}059$ candles, $60$s).}
+\label{tab:events}
+\begin{tabular}{lrrr}
+\toprule
+Event type & Count & Per $1000$ candles & Per day \\
+\midrule
+breakout\_bull & 418 & 34.7 & $\sim$50 \\
+breakout\_bear & 522 & 43.3 & $\sim$62 \\
+turtle\_bull   & 286 & 23.7 & $\sim$34 \\
+turtle\_bear   & 241 & 20.0 & $\sim$29 \\
+trap\_bull     & 136 & 11.3 & $\sim$16 \\
+trap\_bear     & 172 & 14.3 & $\sim$21 \\
+\midrule
+Total          & 1{,}775 & 147.2 & $\sim$212 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+SVD stability needs $\geq 100$ events per (event-type, channel) pair; with four channels,
+trap-bull's $136$ events give only $\sim$\,$34$ per channel, below threshold. Reliable
+walk-forward \ic{} needs $\geq 200$ OOS events, i.e.\ $\sim$\,$500$ total per type --- about
+$39{,}000$ candles for traps. The ``$50$K candle'' recommendation yields $\sim$\,$600$ trap
+events ($\sim$\,$240$ OOS): marginal but workable on \emph{sample size}.
+
+\subsection{Why 50K candles is necessary but not sufficient}
+Sample size is only one constraint. \textbf{Regime coverage} is the deeper one: $50$K
+$60$s-candles span $\sim$\,$35$ days, capturing only $1$--$2$ market regimes, so the
+walk-forward test is within-regime rather than across-regime. A pattern discovered during
+low-volatility accumulation may simply \emph{not occur} during a liquidation cascade. To
+prove regime-robustness the OOS window must straddle a regime transition, requiring
+$\sim$\,$6$ months minimum. \textbf{Multi-timeframe scaling} compounds this: event rates
+fall linearly with candle size (Table~\ref{tab:scaling}). \textbf{Non-stationarity} of
+event rates and \textbf{pattern decay} (market-maker, fee, and participant changes over
+months/years) create an irreducible tension between ``more data'' and ``stale data''; the
+proposed mitigation is exponential event weighting with a $3$--$6$ month half-life, not yet
+implemented.
+
+\begin{table}[h]
+\centering\footnotesize
+\caption{Calendar time to collect $200$ OOS trap events by candle size.}
+\label{tab:scaling}
+\begin{tabular}{lrrr}
+\toprule
+Candle & Candles/day & Trap rate/day & Calendar time \\
+\midrule
+60s   & 1{,}440 & $\sim$17   & $\sim$5 weeks \\
+5min  & 288     & $\sim$3.5  & $\sim$5 months \\
+15min & 96      & $\sim$1.2  & $\sim$1.5 years \\
+1hr   & 24      & $\sim$0.3  & $\sim$5 years \\
+4hr   & 6       & $\sim$0.07 & $\sim$20 years \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Viable niche and use as ML features}
+The convolver's defensible niche is short-timescale ($60$s, $20$-minute window) patterns on
+high-frequency data --- complementary to tick-level signals because it operates on candle
+\emph{shape}, not order-book state. Crucially, its eight \code{alg_conv_*} outputs are
+expected to be decorrelated from all microstructure features ($|\rho| < 0.2$) because they
+derive from a different data representation. This makes them high-value \emph{inputs} to the
+machine-learning algorithms rather than a standalone strategy --- the convolver need not
+pass the trading gauntlet independently if its features improve the models that consume
+them. Finally, a $0$-trade gauntlet result on June 1 was traced to a configuration bug
+(bar aggregation \code{mean} dilutes a score that is $0$ between candles and spikes briefly;
+the fix is \code{max} aggregation), not a signal failure.
+
+% ===========================================================================
+\section{System Context}\label{sec:context}
+% ===========================================================================
+
+These findings sit inside a mature platform ($\sim$\,$120$K LOC: a $4$-crate Rust ingestor
+of $\sim$\,$43$K LOC computing $236$ features at $p99 < 80\,$ms/tick, and $\sim$\,$70$K LOC
+of Python). The feature engine, ingestor, GMM regime classifier, five-hypothesis test
+suite (all of H1--H5 confirmed), a $34$+ algorithm library (five deployable winners), four
+autonomous research agents with Benjamini--Hochberg FDR control, a nine-stage alpha
+pipeline, and an eleven-service Docker stack are all production-grade. Against this
+backdrop the assessment is unambiguous: \emph{the binding constraint is no longer signal
+quality but execution feasibility}. A validated $\ic = 0.45$ directional signal exists; it
+drops to $\sim$\,$0.03$ conditional on mid-cross fills. Raw per-trade persistence
+(price/size/side/timestamp) was landed on 2026-06-09 specifically to enable an
+event-driven fill model that replaces the mid-cross approximation.
+
+% ===========================================================================
+\section{Discussion}\label{sec:discussion}
+% ===========================================================================
+
+The results invert the usual order of difficulty. Discovering a strong, robust, universal
+directional signal turned out to be the easy part; the entire economic question reduces to
+whether that signal can be captured net of adverse selection. Three implications follow.
+
+\paragraph{Execution is the frontier.} The conditional-\ic{} result
+(\S\ref{sec:conditional}) is a property of the \emph{fill model}, not the signal. The
+defined next steps are: (i) build a \code{load_trades()} utility over the new trade
+Parquet; (ii) construct an event-driven fill model from actual aggressor trades; (iii)
+re-measure conditional \ic{} under that model --- if it exceeds $\sim$\,$0.15$, the signal
+is tradeable; (iv) only then combine the eight axes and paper-trade.
+
+\paragraph{The signal is shortening.} The $\sim$\,$0.15$ five-second decay from May to June,
+with a stable one-second \ic, indicates that the tradeable horizon is contracting as books
+thin. Any deployment must track this and adapt stale-signal timeouts per symbol (SOL fastest
+at a $\sim$\,$15$s half-life).
+
+\paragraph{Two complementary tracks.} The hierarchical combiner and the convolver attack
+different timescales: the combiner gates microstructure timing on a slow bias to clear
+execution cost at multi-minute-to-hour horizons; the convolver supplies decorrelated
+candle-shape features to the ML layer. Neither is yet deployable --- the combiner needs more
+data and an ablation; the convolver needs $6$--$24$ months and recency weighting --- but
+both are structurally aligned with the orthogonality the data exhibits.
+
+% ===========================================================================
+\section{Conclusion}\label{sec:conclusion}
+% ===========================================================================
+
+Order-book imbalance predicts the direction of Hyperliquid perpetual returns with
+$\ic \approx 0.45$ at $1$--$5\,$seconds, universally across BTC/ETH/SOL, surviving an
+eight-check robustness battery. The same data show, decisively, that a passive mid-cross
+fill model eliminates the edge through adverse selection ($\ic \to 0.03$). A hierarchical
+combiner that gates fast timing on a slow directional bias produces positive, cost-adjusted
+out-of-sample performance on a thin window and is the first architecture here to confront
+adverse selection directly. A matched-filter pattern-discovery engine is sound but
+data-starved. The research programme's binding constraint is therefore execution
+feasibility, and the immediate path is an event-driven fill model built on newly-collected
+per-trade data.
+
+% ===========================================================================
+\begin{thebibliography}{99}
+\addcontentsline{toc}{section}{References}
+
+\bibitem{amihud2002} Amihud, Y. (2002). Illiquidity and stock returns: cross-section and
+  time-series effects. \emph{Journal of Financial Markets}, 5(1), 31--56.
+
+\bibitem{adams2007} Adams, R.\,P., \& MacKay, D.\,J.\,C. (2007). Bayesian online changepoint
+  detection. \emph{arXiv:0710.3742}.
+
+\bibitem{bailey2014} Bailey, D.\,H., \& L\'opez de Prado, M. (2014). The deflated Sharpe
+  ratio: correcting for selection bias, backtest overfitting, and non-normality.
+  \emph{Journal of Portfolio Management}, 40(5), 94--107.
+
+\bibitem{bh1995} Benjamini, Y., \& Hochberg, Y. (1995). Controlling the false discovery
+  rate: a practical and powerful approach to multiple testing.
+  \emph{Journal of the Royal Statistical Society B}, 57(1), 289--300.
+
+\bibitem{easley2012} Easley, D., L\'opez de Prado, M.\,M., \& O'Hara, M. (2012). Flow
+  toxicity and liquidity in a high-frequency world.
+  \emph{Review of Financial Studies}, 25(5), 1457--1493.
+
+\bibitem{eckart1936} Eckart, C., \& Young, G. (1936). The approximation of one matrix by
+  another of lower rank. \emph{Psychometrika}, 1(3), 211--218.
+
+\bibitem{hamilton1989} Hamilton, J.\,D. (1989). A new approach to the economic analysis of
+  nonstationary time series and the business cycle. \emph{Econometrica}, 57(2), 357--384.
+
+\bibitem{hawkes1971} Hawkes, A.\,G. (1971). Spectra of some self-exciting and mutually
+  exciting point processes. \emph{Biometrika}, 58(1), 83--90.
+
+\bibitem{kyle1985} Kyle, A.\,S. (1985). Continuous auctions and insider trading.
+  \emph{Econometrica}, 53(6), 1315--1335.
+
+\bibitem{lee2008} Lee, S.\,S., \& Mykland, P.\,A. (2008). Jumps in financial markets: a new
+  nonparametric test and jump dynamics.
+  \emph{Review of Financial Studies}, 21(6), 2535--2563.
+
+\bibitem{turin1960} Turin, G.\,L. (1960). An introduction to matched filters.
+  \emph{IRE Transactions on Information Theory}, 6(3), 311--329.
+
+\end{thebibliography}
+
+\end{document}
