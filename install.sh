@@ -37,6 +37,17 @@ if ! $PYTHON -c "import sqlite3" 2>/dev/null; then
     fi
 fi
 
+# tmux is required by `nat start` (ingestor + dashboard + gap-alert run in tmux sessions)
+if ! command -v tmux &>/dev/null; then
+    echo "  tmux not found — installing (required by 'nat start')..."
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get install -y tmux 2>/dev/null || \
+            echo "  Warning: Could not install tmux. Run: sudo apt-get install tmux"
+    else
+        echo "  Warning: tmux missing. Install tmux for your distro (required by 'nat start')."
+    fi
+fi
+
 if ! $PYTHON -c "import matplotlib" 2>/dev/null; then
     echo "  Installing Python visualization dependencies..."
     $PYTHON -m pip install --quiet matplotlib seaborn 2>/dev/null || \
