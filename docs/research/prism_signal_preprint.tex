@@ -1,0 +1,533 @@
+\documentclass[11pt,a4paper]{article}
+
+% ============================================================
+% Packages (core only --- texlive-latex-base + texlive-base)
+% ============================================================
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{array}
+
+% ============================================================
+% Theorem environments
+% ============================================================
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{remark}{Remark}[section]
+\newtheorem{proposition}{Proposition}[section]
+\newtheorem{assumption}{Assumption}[section]
+
+\theoremstyle{plain}
+\newtheorem{lemma}{Lemma}[section]
+
+% ============================================================
+% Notation macros
+% ============================================================
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Cov}{\operatorname{Cov}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\inner}[2]{\langle #1,\, #2 \rangle}
+\newcommand{\corr}{\operatorname{corr}}
+\newcommand{\sgn}{\operatorname{sign}}
+\DeclareMathOperator{\IC}{IC}
+\DeclareMathOperator{\IR}{IR}
+\DeclareMathOperator{\MI}{I}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+% ============================================================
+\begin{document}
+
+\title{\textbf{From Narrative to Alpha}\\[4pt]
+\large Exogenous Perception Pressure as an Orthogonal Signal in an\\
+Autonomous Microstructure Alpha Book: Timescale Separation,\\
+Effective Breadth, and the Adverse-Selection Barrier}
+
+\author{Yigit Onat\\
+\textit{Independent Researcher}\\
+\texttt{yionat@gmail.com}}
+\date{July 2026}
+\maketitle
+
+% ============================================================
+\begin{abstract}
+A book of alpha signals built entirely from order-book microstructure is powerful but structurally
+narrow: its signals share one information source (order flow), occupy one band of timescales
+(sub-second to minutes), and are jointly capped by an adverse-selection barrier that collapses a
+large unconditional information coefficient once one conditions on the states in which a passive fill
+actually occurs. We ask what a \emph{single exogenous signal from a different information domain}
+contributes to such a book, and we answer at the level of methodology rather than measured
+performance. Taking \emph{Perception Pressure} $P(K,t)$---a signed, credibility-weighted media-narrative
+signal produced by the Prism system---as the exogenous input, we specify (i) a source-agnostic
+integration architecture in which a narrative series is aligned to market bars by a point-in-time
+as-of join and scored by the same information-coefficient, mutual-information, and five-gate
+replication machinery as any endogenous feature, and (ii) three theoretical reasons the addition can
+improve the book that do not require the exogenous signal to be individually strong. First,
+\emph{timescale separation}: narrative momentum lives in a spectral band essentially disjoint from the
+$0.005$--$0.1$\,Hz band that carries order-book-imbalance predictability, so the two are close to
+orthogonal by construction. Second, \emph{effective breadth}: under the fundamental law of active
+management the information ratio scales with the effective number of independent bets
+$N_{\mathrm{eff}}=N/[1+(N-1)\bar\rho]$, and appending a low-correlation signal raises
+$N_{\mathrm{eff}}$ more than appending another correlated microstructure signal of equal strength.
+Third, \emph{partial evasion of the adverse-selection barrier}: because a slow exogenous signal is
+harvested by patient execution over its own horizon rather than by reactive spread-crossing, its
+coupling to the fillable-state indicator---the mechanism that destroys microstructure edge---is
+weaker, so its conditional information coefficient need not collapse in the same way. Each claim is
+stated as a hypothesis with an explicit, leakage-controlled, false-discovery-rate-corrected test; we
+report no performance figures. The contribution is a theory and a protocol for making an autonomous
+microstructure research platform \emph{more complete}---a decorrelated, multi-domain alpha book that
+reports its own honest effective breadth---by admitting narrative as a first-class, gated signal
+source.
+\end{abstract}
+
+\smallskip
+\noindent\textbf{Keywords:} exogenous signal, alpha combination, signal orthogonality, effective
+breadth, fundamental law of active management, adverse selection, mutual information, information
+coefficient, narrative, market microstructure
+
+\smallskip
+\noindent\textbf{JEL Classification:} C55, C58, G14, G17
+
+\tableofcontents
+\bigskip
+
+% ============================================================
+\section{Introduction}
+\label{sec:intro}
+% ============================================================
+
+\subsection{The completeness problem of a single-domain alpha book}
+
+An autonomous microstructure research platform can, in principle, manufacture an unbounded number of
+features from the order book: imbalances, depth slopes, queue dynamics, trade-sign runs, spectral and
+information-theoretic transforms. In practice these features are far from independent. They are
+computed from the same underlying object---the limit order book and the trade tape---so they share
+information, co-move, and, when combined, deliver far less than the naive sum of their individual
+information coefficients. Three structural facts bound such a book:
+
+\begin{enumerate}
+  \item \textbf{One information source.} Every signal is a functional of order flow. Whatever order
+        flow cannot see---an exogenous shock forming in public discourse before it reaches the
+        tape---no such signal can anticipate.
+  \item \textbf{One band of timescales.} Order-book-imbalance predictability is empirically
+        concentrated at high frequency and decays to noise within minutes; a companion study on the
+        same venue localizes essentially all of its predictive power to the $0.005$--$0.1$\,Hz band
+        (periods of $10$--$200$\,s) with an Ornstein--Uhlenbeck mean-reversion half-life of a few
+        seconds. A book living only in this band is exposed to a single regime of decay.
+  \item \textbf{A shared economic ceiling.} On a decentralized perpetual-futures venue, a strong
+        \emph{unconditional} predictor can be economically inert: conditioning the information
+        coefficient on the states in which a directionally-correct passive fill would actually occur
+        collapses it from large to near zero. This adverse-selection barrier is a property of order
+        flow itself and therefore afflicts order-flow signals \emph{jointly}.
+\end{enumerate}
+
+A book that is deep in one domain but empty in all others is thus fragile in a precise sense: its
+signals fail together, decay together, and are filled against together. Robustness---and additional,
+genuinely new information ratio---requires a signal that is \emph{not} a function of order flow.
+
+\subsection{Narrative as the exogenous domain}
+
+The natural exogenous domain for a liquid, sentiment-driven asset class is public narrative. We take
+as given the \emph{Perception Pressure} signal $P(K,t)$ and its momentum $\dot P(K,t)$ defined in the
+companion instrument paper (Onat, 2026a): a per-concept, signed, credibility-weighted media-narrative
+series, sampled on a fixed cadence, in which attention and directional sentiment are multiplicatively
+coupled and no single source can manufacture the measure. Our concern here is not how $P$ is
+computed---that is the instrument paper's subject---but what it is \emph{worth to a trading book} and
+how to admit it without contaminating an otherwise disciplined research process.
+
+\subsection{Contributions}
+
+\begin{enumerate}
+  \item \textbf{A source-agnostic integration architecture} (Section~\ref{sec:arch}) in which an
+        exogenous narrative series is aligned to market bars by a strictly backward-looking as-of join
+        and then scored---by information coefficient across horizons, by mutual information, and
+        through a five-gate replication protocol---by exactly the machinery that scores an endogenous
+        feature. The narrative signal is not privileged; it earns its place by the same gates.
+  \item \textbf{A timescale-separation argument} (Section~\ref{sec:timescale}) that narrative momentum
+        and order-book-imbalance predictability occupy near-disjoint spectral bands, making the
+        exogenous signal approximately orthogonal to the existing book by construction rather than by
+        luck.
+  \item \textbf{An effective-breadth argument} (Section~\ref{sec:breadth}) that formalizes, via the
+        fundamental law of active management and the effective number of independent bets, why a
+        low-correlation signal contributes more marginal information ratio than another correlated
+        microstructure signal of equal individual strength---and why the binding quantity is
+        \emph{stress-regime} correlation.
+  \item \textbf{An adverse-selection argument} (Section~\ref{sec:advsel}) that a slow exogenous signal,
+        harvested by patient execution over its own horizon, has weaker coupling to the fillable-state
+        indicator than a fast order-flow signal, and therefore need not suffer the same conditional-IC
+        collapse.
+  \item \textbf{A falsifiable evaluation protocol} (Section~\ref{sec:eval}) stating, for each claim, a
+        leakage-controlled and multiple-testing-corrected test with explicit kill criteria. We report
+        no empirical figures; this is a methods paper.
+\end{enumerate}
+
+We are explicit throughout that the value of an exogenous signal is an empirical question. What this
+paper supplies is the theory that says \emph{where} to look for that value, and the protocol that
+keeps the search honest.
+
+% ============================================================
+\section{Background and Related Work}
+\label{sec:related}
+% ============================================================
+
+\paragraph{Signal combination and breadth.}
+Grinold's fundamental law of active management (Grinold, 1989; Grinold and Kahn, 2000) relates the
+information ratio of a strategy to the skill of its signals and the number of independent bets,
+$\IR \approx \IC\cdot\sqrt{\mathrm{BR}}$. When signals are correlated the naive breadth $\mathrm{BR}=N$
+overstates the achievable ratio; the operative quantity is an \emph{effective} breadth that discounts
+for redundancy. We use the effective-number-of-bets form
+$N_{\mathrm{eff}}=N/[1+(N-1)\bar\rho]$ developed for this platform's process framework (Onat, 2026c),
+which makes the marginal value of a new signal an explicit function of its correlation to the
+incumbent book.
+
+\paragraph{Adverse selection and the limits of microstructure alpha.}
+That a statistically strong microstructure predictor can be economically inert is documented for this
+venue in the companion microstructure-alpha study (Onat, 2026b), where the imbalance information
+coefficient of $\approx 0.45$ at second horizons collapses to $\approx 0.03$ once restricted to
+fillable states---an empirical instance of the classical adverse-selection problem of informed versus
+uninformed order flow (Glosten and Milgrom, 1985; Kyle, 1985). The barrier motivates the search for
+signals whose exploitation does not require winning a race for the same passive fills.
+
+\paragraph{News, attention, and returns.}
+That media tone and attention carry return-relevant information is long established (Tetlock, 2007;
+Da, Engelberg, and Gao, 2011); the instrument paper (Onat, 2026a) situates Perception Pressure within
+this literature. The present paper is downstream of all of it: we treat the existence of \emph{some}
+narrative-return relationship as a hypothesis to be tested under controls, and study what its
+inclusion does to a microstructure book's \emph{portfolio} of signals.
+
+\paragraph{Information-theoretic evaluation.}
+We adopt mutual information as the currency of predictive content, justified through Fano's inequality
+as a bound on achievable prediction error (Cover and Thomas, 2006), estimated by the
+$k$-nearest-neighbour method (Kraskov, St\"ogbauer, and Grassberger, 2004), and controlled for
+multiple testing by the Benjamini--Hochberg procedure (Benjamini and Hochberg, 1995). These are
+imported from the consuming platform, not invented here.
+
+% ============================================================
+\section{The Exogenous Signal}
+\label{sec:signal}
+% ============================================================
+
+We recall only what is needed downstream. For a tracked concept $K$ (an entity mapped to a tradable
+symbol, e.g.\ ``Bitcoin'' $\to$ \code{BTC}), the instrument produces on a fixed cadence a salience
+$A(K,t)\ge 0$, a valence $V(K,t)\in[-1,1]$, a signed perception $P(K,t)=A(K,t)\,V(K,t)$, and its
+momentum $\dot P(K,t)=P(K,t)-P(K,t-1)$.
+
+\begin{assumption}[Entity map]
+\label{ass:map}
+A fixed, time-invariant, publicly reproducible map $\phi$ sends tradable symbols to sets of tracked
+concepts, $\phi(\code{BTC})=\{K_1,\dots\}$. When several concepts map to one symbol their signals are
+aggregated by a salience-weighted mean, itself computed only from information available at $t$.
+\end{assumption}
+
+\begin{remark}[Momentum is the leading candidate]
+\label{rem:momentum}
+As argued in the instrument paper, a level $P$ that merely co-moves with price is contemporaneous and
+of limited predictive use, whereas a narrative that is \emph{building}, $\dot P>0$, before it is fully
+priced is the economically interesting case. We therefore treat $\dot P$ (and higher-order changes) as
+the primary candidate and $P$, $A$, $V$ as secondary. Nothing in the architecture depends on this
+choice; it is a prior about where predictive content is most likely, to be confirmed or rejected by
+the gates.
+\end{remark}
+
+% ============================================================
+\section{Integration Architecture}
+\label{sec:arch}
+% ============================================================
+
+The design principle is that the exogenous signal must be \emph{indistinguishable}, to the scoring
+machinery, from an endogenous feature---so that it is held to the same standard and enjoys no special
+pleading.
+
+\subsection{The feature-source contract}
+
+A narrative series enters through a minimal contract: a source exposes
+\code{load(symbol, start, end)} returning a data frame indexed by a UTC timestamp with one column per
+narrative component. The platform's process runner merges these columns onto market bars and, from
+that point on, a narrative column is scored by \code{ic_horizon} and \code{mi_ksg} exactly as an
+order-book column is. Processes operate on columns and never learn a column's origin. This is the
+formal sense in which narrative is a first-class signal: it is admitted by the type system, not by a
+bespoke code path.
+
+\subsection{Point-in-time alignment}
+
+\begin{definition}[Backward as-of join]
+\label{def:asof}
+Let market bars close at times $\{t_i\}$ and let narrative snapshots be stamped at $\{\tau_j\}$, each
+$\tau_j$ being the instant the snapshot became \emph{queryable}. The aligned value on bar $i$ is
+$P^{\star}(t_i)=P(\tau_{j^\star})$ with $j^\star=\max\{j:\tau_j\le t_i-\delta\}$, where $\delta\ge 0$ is
+a mandatory latency guard.
+\end{definition}
+
+The join is strictly backward-looking and carries an explicit latency guard $\delta$ absorbing
+ingestion, analysis, and publication delay. Two failure modes are thereby excluded by construction:
+using a snapshot timestamped before it was computable (\emph{look-ahead}), and using the revised value
+of a snapshot later corrected (\emph{restatement}); the source must expose the value as first known,
+not as later amended.
+
+\subsection{Reusing the five-gate replication protocol}
+
+Once aligned, a narrative column traverses the same protocol as any candidate (Onat, 2026b):
+(1) a \emph{discovery} gate testing information coefficient against forward returns across horizons
+under Benjamini--Hochberg control; (2) a \emph{cost} gate re-testing net of realistic fees, funding,
+and slippage; (3) a \emph{temporal} gate requiring persistence across disjoint time folds;
+(4) a \emph{cross-symbol} gate requiring the effect to replicate across entities that map to distinct
+concepts; and (5) a \emph{correlation} gate testing incremental content against the incumbent book.
+A narrative signal that fails any gate is discarded exactly as an endogenous one would be. Crucially,
+the horizons at which narrative is tested are longer than those for microstructure---hours to days,
+not seconds---because that is where Section~\ref{sec:timescale} predicts its content lies; the gate
+thresholds and FDR ledger are shared, the horizon grid is not.
+
+% ============================================================
+\section{Why It Helps I: Timescale Separation}
+\label{sec:timescale}
+% ============================================================
+
+\begin{proposition}[Near-orthogonality by band disjointness]
+\label{prop:band}
+Let $x(t)$ be an order-book-imbalance signal whose predictive cross-spectrum with returns is supported
+on a high-frequency band $B_x$ (empirically $\approx[0.005,0.1]$\,Hz on this venue), and let $\dot P(t)$
+be narrative momentum sampled at cadence $\Delta$ with $1/\Delta \ll \min B_x$, so that its spectral
+content is supported on a low-frequency band $B_P$ with $B_P\cap B_x=\varnothing$. If both are
+approximately band-limited to their supports, their contemporaneous correlation obeys
+\[
+  |\corr(x,\dot P)| \;\le\; \frac{\int_{B_x\cap B_P} \sqrt{S_x(f)\,S_{\dot P}(f)}\,df}
+       {\sqrt{\int S_x \, \int S_{\dot P}}} \;\approx\; 0,
+\]
+by the Cauchy--Schwarz bound on cross-spectral density over disjoint supports.
+\end{proposition}
+
+The content of Proposition~\ref{prop:band} is not that narrative and microstructure are provably
+uncorrelated---real signals are only approximately band-limited, and spectral leakage leaves a small
+residual---but that their correlation is \emph{structurally suppressed}: they carry information at
+different frequencies, so a book combining them is combining near-independent bets rather than
+repackaging the same one. This is precisely the property that the effective-breadth argument rewards.
+
+\begin{remark}[Why the venue's spectral result matters]
+\label{rem:spannung}
+The empirical localization of imbalance predictability to a narrow high-frequency band (companion
+spectral study) is what makes the disjointness concrete: it is not merely that narrative is ``slower''
+in the abstract, but that the incumbent book's information demonstrably vanishes above periods of a
+few hundred seconds, exactly where a narrative signal sampled every few minutes to hours begins.
+\end{remark}
+
+% ============================================================
+\section{Why It Helps II: Effective Breadth}
+\label{sec:breadth}
+% ============================================================
+
+We formalize the marginal value of a low-correlation signal. Consider a book of $N$ microstructure
+signals, each standardized, with common individual information coefficient $\IC$ and common pairwise
+correlation $\rho\in[0,1)$. Its effective breadth is
+\begin{equation}
+  N_{\mathrm{eff}}(N,\rho) = \frac{N}{1+(N-1)\rho},
+  \label{eq:neff}
+\end{equation}
+and by the fundamental law $\IR\approx \IC\sqrt{N_{\mathrm{eff}}}$.
+
+\begin{proposition}[A low-correlation signal buys more breadth]
+\label{prop:marginal}
+Append one further signal of equal individual strength $\IC$ that has correlation $\rho_x$ with each
+incumbent. Write the augmented effective breadth as $N_{\mathrm{eff}}'(\rho_x)$ computed from the
+$(N{+}1)\times(N{+}1)$ correlation matrix with incumbent block correlation $\rho$ and new-row
+correlation $\rho_x$. Then $N_{\mathrm{eff}}'$ is strictly decreasing in $\rho_x$; consequently an
+exogenous signal with $\rho_x\approx 0$ (Proposition~\ref{prop:band}) delivers strictly greater
+marginal effective breadth than an additional microstructure signal with $\rho_x=\rho>0$.
+\end{proposition}
+
+\begin{proof}[Sketch]
+The mean off-diagonal correlation of the augmented book is
+$\bar\rho' = \big[N(N-1)\rho + 2N\rho_x\big]/\big[(N+1)N\big]$, which is increasing in $\rho_x$; the
+average-correlation form of the effective breadth,
+$N_{\mathrm{eff}}'=(N+1)/[1+N\bar\rho']$, is decreasing in $\bar\rho'$ and hence in $\rho_x$. The
+final claim is the comparison at $\rho_x\approx 0$ versus $\rho_x=\rho$.
+\end{proof}
+
+Proposition~\ref{prop:marginal} is the quantitative statement of ``more complete.'' Beyond some depth,
+the $N{+}1$-th microstructure signal is nearly redundant---it raises $N$ but also $\bar\rho$, and
+$N_{\mathrm{eff}}$ barely moves---whereas the first signal from a new, near-orthogonal domain moves
+$N_{\mathrm{eff}}$ by close to a full unit even at modest individual $\IC$. A book's information ratio
+is grown far more cheaply by \emph{widening its domains} than by \emph{deepening one domain}.
+
+\begin{remark}[Stress-regime correlation is the binding quantity]
+\label{rem:stress}
+The correlations in \eqref{eq:neff} must be measured where diversification is actually needed: in
+stress. Signals that are decorrelated in calm markets frequently co-move when volatility spikes,
+collapsing realized breadth exactly when it is demanded. A narrative signal is a candidate to break
+this pattern precisely because its driver---public discourse---is not the order flow that convulses in
+a microstructure stress event; but this is a hypothesis, and the evaluation therefore estimates
+$\rho_x$ \emph{conditionally on volatility regime}, not marginally.
+\end{remark}
+
+% ============================================================
+\section{Why It Helps III: The Adverse-Selection Barrier}
+\label{sec:advsel}
+% ============================================================
+
+The sharpest limit on microstructure alpha is not weak prediction but adverse selection: the signal
+predicts the future, yet a directionally-correct passive order is filled preferentially in the states
+where the prediction is wrong. Formally, for signal $g$ and forward return $r$, let $F$ be the event
+that a passive order placed on $g$'s side is filled. The exploitable skill is the \emph{conditional}
+information coefficient $\IC(g,r\mid F)$, and the barrier is the gap
+$\IC(g,r)-\IC(g,r\mid F)$, which the companion study finds to be almost the whole of $\IC$ for
+order-book imbalance.
+
+\begin{proposition}[Slow signals couple weakly to the fill state]
+\label{prop:advsel}
+Suppose signal $g$ is exploited not by a reactive passive quote at the touch but by a schedule that
+works into the position over a horizon $H_g$ comparable to $g$'s own decay timescale. Then the
+relevant conditioning event is not the instantaneous touch-fill $F$ but the average execution outcome
+over $[t,t+H_g]$, whose dependence on the fast fill-selection mechanism is diluted by a factor growing
+with $H_g$ relative to the spread-crossing timescale $\tau_s$. Hence the conditional-IC degradation of
+a signal with $H_g\gg\tau_s$ is bounded above by that of a signal with $H_g\approx\tau_s$, and can be
+strictly smaller.
+\end{proposition}
+
+The intuition is executional. Microstructure edge at second horizons must be captured by winning
+passive fills in a race, and the winner of that race is systematically the adversely-selected side. A
+narrative signal with an hours-to-days horizon is captured differently: one has time to work orders
+patiently, cross spreads selectively, and split execution, so the pathological correlation between
+``getting filled'' and ``being wrong'' is materially weaker. Proposition~\ref{prop:advsel} does not
+claim the barrier vanishes---exogenous signals face their own frictions, including that a widely-read
+narrative may already be priced---but it identifies a concrete channel by which a slow signal can
+convert a larger fraction of its statistical content into economic content than a fast one.
+
+% ============================================================
+\section{Evaluation Protocol}
+\label{sec:eval}
+% ============================================================
+
+Each claim above is falsifiable; we specify the test and its kill criterion, and report no numbers.
+
+\begin{enumerate}
+  \item \textbf{Orthogonality (tests Prop.~\ref{prop:band}).} Estimate the volatility-regime-conditional
+        correlation $\rho_x$ between aligned narrative momentum and the incumbent imbalance signal, and
+        the cross-spectral coherence across frequency. \emph{Kill:} if $\rho_x$ is not small in stress
+        regimes, the effective-breadth argument does not apply and the signal offers no diversification.
+  \item \textbf{Incremental predictive content (tests the reason to include at all).} Estimate the
+        conditional mutual information $\MI(r_{t\to t+h};\,\dot P_t \mid \text{price}_t,\text{volume}_t)$
+        at narrative-scale horizons $h$, under the $k$NN estimator with a block permutation null and
+        Benjamini--Hochberg control across concepts and horizons. \emph{Kill:} if conditional MI is not
+        significantly positive after FDR, narrative adds nothing beyond price and volume.
+  \item \textbf{Breadth realization (tests Prop.~\ref{prop:marginal}).} Compute the book's
+        $N_{\mathrm{eff}}$ and out-of-sample information ratio with and without the narrative signal,
+        walk-forward. \emph{Kill:} if $N_{\mathrm{eff}}$ and OOS IR do not rise on inclusion, the
+        marginal-breadth claim fails in practice.
+  \item \textbf{Execution realizability (tests Prop.~\ref{prop:advsel}).} Under a schedule-based
+        execution model at horizon $H_g$, estimate the conditional information coefficient
+        $\IC(\dot P,r\mid F)$ and compare its degradation to that of the imbalance signal. \emph{Kill:}
+        if the conditional IC collapses as severely as for microstructure, the adverse-selection
+        advantage is illusory.
+  \item \textbf{Leakage and stability audit.} Re-run studies 1--4 with the latency guard $\delta$
+        inflated and with the entity map $\phi$ frozen strictly before the test window. \emph{Kill:} if
+        results depend on a short $\delta$ or on post-hoc concept selection, they are artifacts.
+\end{enumerate}
+
+Study~2 is the necessary condition---without incremental information there is nothing to integrate---and
+studies~3 and~4 are what distinguish a signal that merely predicts from one that improves a
+\emph{book}. All five are framed as leakage-controlled and multiple-testing-corrected because a signal
+tested against many concepts and horizons is otherwise a textbook data-snooping trap.
+
+% ============================================================
+\section{What ``More Complete'' Means}
+\label{sec:complete}
+% ============================================================
+
+The object this paper argues for is not a narrative strategy but a \emph{multi-domain, decorrelated
+alpha book that reports its own honest effective breadth}. In that book the microstructure signals
+remain the high-frequency core; the narrative signal is a low-frequency, near-orthogonal overlay
+admitted through the same gates and deployed as one more process, not as a parallel system. Three
+consequences follow. The book's information ratio can grow through width rather than through ever more
+correlated depth (Section~\ref{sec:breadth}). Its failure modes diversify: a microstructure regime
+break need not coincide with a narrative regime break (Remark~\ref{rem:stress}). And a portion of its
+statistical content may survive the executional filter that caps its order-flow signals
+(Section~\ref{sec:advsel}). Sophistication here is not additional complexity for its own sake but the
+disciplined admission of a second information domain under an unchanged standard of proof---the
+platform becomes more complete by knowing, and gating, what it does not otherwise see.
+
+% ============================================================
+\section{Limitations}
+\label{sec:limitations}
+% ============================================================
+
+We disclose the principal threats. The narrative signal inherits every measurement limitation of its
+instrument (Onat, 2026a): language-model sentiment error, lexical rather than semantic clustering, and
+frequently-inert engagement terms; these bound the fidelity of $\dot P$ and hence of any measured
+effect. Narrative events are \emph{sparse} relative to microstructure ticks, so statistical power at
+narrative horizons is limited and the multiple-testing correction is correspondingly punishing---an
+honest evaluation may simply fail to reject the null for want of events. The narrative--return
+relationship is plausibly \emph{non-stationary}: a signal that leads price while under-attended can
+decay to contemporaneous as it becomes widely read, so any positive finding requires ongoing decay
+monitoring rather than a one-time validation. The entity map $\phi$ is a researcher choice and a
+degree of freedom that must be frozen before testing. Finally, the theoretical propositions are
+deliberately modest: Proposition~\ref{prop:band} bounds correlation only for approximately
+band-limited signals, Proposition~\ref{prop:marginal} assumes equal individual skill for its clean
+comparison, and Proposition~\ref{prop:advsel} identifies a channel without quantifying it. None of
+these is a claim of profit; each is a signpost for the evaluation.
+
+% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+% ============================================================
+
+We have set out how, and why, to admit an exogenous narrative signal into an autonomous microstructure
+alpha book. The how is an integration architecture that renders narrative indistinguishable from an
+endogenous feature to the scoring machinery, aligned point-in-time and gated by an unchanged five-gate
+protocol. The why is three structural arguments---timescale separation making the signal near-orthogonal
+by construction, effective breadth rewarding that orthogonality more than additional correlated depth,
+and a weaker coupling to the fill state partially evading the adverse-selection barrier that caps
+order-flow alpha. Each is a hypothesis with a stated, leakage-controlled, FDR-corrected test and an
+explicit kill criterion; none is a performance claim. The contribution is a principled route to a more
+complete quantitative research platform: not a bigger pile of order-book features, but a second
+information domain, admitted under the same standard of proof, whose value---if it exists---shows up
+exactly as increased effective breadth and surviving conditional skill. Turning the protocol on data
+is the next step.
+
+% ============================================================
+\section*{References}
+\addcontentsline{toc}{section}{References}
+% ============================================================
+
+\begin{enumerate}
+  \item Benjamini, Y.\ \& Hochberg, Y.\ (1995). Controlling the false discovery rate: a practical and
+        powerful approach to multiple testing. \textit{Journal of the Royal Statistical Society,
+        Series B}, 57(1), 289--300.
+
+  \item Cover, T.M.\ \& Thomas, J.A.\ (2006). \textit{Elements of Information Theory} (2nd ed.).
+        Wiley-Interscience.
+
+  \item Da, Z., Engelberg, J.\ \& Gao, P.\ (2011). In search of attention.
+        \textit{Journal of Finance}, 66(5), 1461--1499.
+
+  \item Glosten, L.R.\ \& Milgrom, P.R.\ (1985). Bid, ask and transaction prices in a specialist
+        market with heterogeneously informed traders. \textit{Journal of Financial Economics}, 14(1),
+        71--100.
+
+  \item Grinold, R.C.\ (1989). The fundamental law of active management.
+        \textit{Journal of Portfolio Management}, 15(3), 30--37.
+
+  \item Grinold, R.C.\ \& Kahn, R.N.\ (2000). \textit{Active Portfolio Management} (2nd ed.).
+        McGraw-Hill.
+
+  \item Kraskov, A., St\"ogbauer, H.\ \& Grassberger, P.\ (2004). Estimating mutual information.
+        \textit{Physical Review E}, 69(6), 066138.
+
+  \item Kyle, A.S.\ (1985). Continuous auctions and insider trading. \textit{Econometrica}, 53(6),
+        1315--1335.
+
+  \item Onat, Y.\ (2026a). Perception Pressure and Resonance: decomposable, trust-weighted measures of
+        media narrative from a multi-perspective news-aggregation system. Working paper (Prism).
+
+  \item Onat, Y.\ (2026b). Autonomous microstructure alpha discovery under false-discovery control:
+        order-book imbalance, conditional information coefficients, and the adverse-selection barrier
+        in Hyperliquid perpetual futures. Working paper.
+
+  \item Onat, Y.\ (2026c). The Process: a first-class analytical unit for orthogonal information
+        extraction from market microstructure. Working paper.
+
+  \item Tetlock, P.C.\ (2007). Giving content to investor sentiment: the role of media in the stock
+        market. \textit{Journal of Finance}, 62(3), 1139--1168.
+\end{enumerate}
+
+\end{document}
