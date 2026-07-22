@@ -6,7 +6,11 @@ Jun-22 `QDP_ROADMAP.md` — all harvested into this file and moved to [`archive/
 Durable companions (not merged, not archived): `OBJECTIVE.md` (mission), `METHODOLOGY.md` (method),
 `GLOSSARY.md`, `contracts/`, `commands.md`.
 
-*Last consolidated: 2026-06-24.*
+**Itemized backlog:** every actionable task lives in [`TASKS.md`](TASKS.md) (the single backlog) —
+this plan holds the strategic gate-level view; `TASKS.md` holds the rows. Process/IT-layer detail in
+[`specs/process_layer.md`](specs/process_layer.md).
+
+*Last consolidated: 2026-06-24. Backlog consolidated into `TASKS.md`: 2026-07-22.*
 
 ---
 
