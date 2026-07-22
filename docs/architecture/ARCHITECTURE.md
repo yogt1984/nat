@@ -2,6 +2,10 @@
 
 Full system map of the NAT quantitative research platform — from raw market data to live execution. Three major subsystems: Feature Ingestor (Rust), Signal Discovery (Python), and Execution (Python).
 
+> Feature counts in the diagram below are illustrative — [`FEATURES.md`](../../FEATURES.md) is the
+> authoritative manifest (236 features across 21 categories). Design rationale and the original
+> (2026-01) vision are at the end of this file.
+
 ---
 
 ## Complete System Diagram
@@ -253,3 +257,43 @@ Full system map of the NAT quantitative research platform — from raw market da
 | Config (alpha) | `config/alpha.toml` |
 | Config (agents) | `config/agent.toml` |
 | Config (algorithms) | `config/algorithms.toml` |
+
+---
+
+## Design Rationale
+
+The system's shape follows five decisions from the original 2026-01 design. The *rationale* is
+durable even where early implementation specifics have since evolved:
+
+1. **Rust for latency-critical paths.** Ingestion + feature computation in Rust (`rust/ing-*`);
+   Python for ML, analysis, orchestration. Determinism and memory safety over the hot path.
+2. **Columnar, zero-copy hand-off.** Features cross the Rust→Python boundary as Arrow/Parquet, not a
+   serialized message bus. (The original design floated shared-memory/ZeroMQ IPC; Parquet won for
+   reproducibility and operational simplicity.)
+3. **Deterministic replay.** All randomness is seeded and logged; feature extraction is a pure
+   function of input, so any run replays exactly. This is what makes the planted-test discipline in
+   [`METHODOLOGY.md`](../METHODOLOGY.md) possible.
+4. **Multi-objective fitness, not Sharpe-only.** Optimize the Pareto front over Sharpe / drawdown / IC
+   via NSGA-II (shipped in `nat evolve`), never a single scalar that invites overfitting.
+5. **Incremental complexity.** Baseline (z-score / logistic) before ML; validate each unit
+   independently — the feature / algorithm / process contracts in [`../contracts/`](../contracts/).
+
+## Regime discovery: unsupervised > supervised
+
+A methodological stance carried from the original design and still guiding the regime/process work:
+do **not** define regimes by strategy profitability (circular — regimes become artifacts of the
+strategy). Instead discover natural market states first (clustering / information-geometric
+structure), **then** ask "what works in each state?" This is why NAT keeps both a `cluster_pipeline/`
+and a conditional-predictability process (`PROC-6` in [`../TASKS.md`](../TASKS.md)): the regime is
+*measured*, then conditioned on — not assumed.
+
+## Historical vision (2026-01)
+
+The full original design doc — the agent-swarm ecosystem diagram, the proposed
+`{CATEGORY}_{SOURCE}_{TRANSFORM}_…` feature nomenclature (**never adopted**; live names are lowercase,
+see [`FEATURES.md`](../../FEATURES.md)), the aspirational HFT specs (`<10μs`, `SCHED_FIFO`), the
+polynomial-chaos / transfer-entropy / information-geometry "novel extensions", the genotype encoding,
+and the 24-week phased methodology — is preserved for provenance at
+[`../archive/architecture/ARCHITECTURE_vision_2026-01.md`](../archive/architecture/ARCHITECTURE_vision_2026-01.md).
+Several of its ideas have since materialized elsewhere: multi-objective evolution as `nat evolve`,
+the transfer-entropy causal graph as `PROC-9`, and the feature manifest as `FEATURES.md`.
