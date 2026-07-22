@@ -191,7 +191,21 @@ history follows the file.
   active C→`specs/`, preprints→`papers/`, ops→`runbooks/`.
 - **Phase 5 — rewrite `PLAN.md` as the sole index** (½ d): add the "Documentation Map" section
   linking the 8 homes + `TASKS.md`; retire `in_progress/INDEX.md`.
-- **Phase 6 — enforce conventions** (½ d): append §7 rules to `METHODOLOGY.md`.
+- **Phase 6 — front door, front-matter & conventions** (structure + readability, *no information
+  reduction*):
+  - **(a) `docs/README.md` front door — DONE.** A single navigable entry point: reading paths by
+    role (new / operator / researcher / builder / PhD / planner) + a map by *document type*
+    (a light [Diátaxis](https://diataxis.fr/) split: explanation / reference / how-to / research /
+    spec / planning). Replaces the stale 49-line index (strict superset — nothing lost).
+  - **(b) Front-matter schema.** Standard YAML header (`title/purpose/type/status/maturity/branch/
+    updated`) on every living doc → self-describing + machine-readable, with `[PROVEN]/[PRELIM]/
+    [SPEC]/[LIVE]` maturity badges (same tags as `nat viz` / D1).
+  - **(c) Generated map.** Once (b) is stamped, generate the `README.md` map + a `PLAN.md`
+    doc-index from front-matter so they never drift; retire `in_progress/INDEX.md` (Phase 5).
+  - **(d) Conventions.** Append the §7 anti-sprawl rules to `METHODOLOGY.md`.
+  - **Future readability (roadmap, not this phase):** `mkdocs-material` static site (search + nav,
+    zero source change), ASCII→Mermaid diagrams, generate `commands.md`/`FEATURES.md` from source,
+    and a `TL;DR` box + auto-TOC on long docs. All form-only, information-preserving.
 
 **Rollback:** every phase is a merge commit; revert the merge to undo. `git mv` preserves blame.
 
