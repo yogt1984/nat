@@ -2,7 +2,7 @@
 
 How to test the viz/validation tooling shipped this cycle, mapped to the commits that
 introduced it. Spec: [`docs/requirements/parquet_viz_validation.md`](../requirements/parquet_viz_validation.md).
-Full manual checklist: [`docs/in_progress/test_plan.md`](../in_progress/test_plan.md) → **Section A**.
+Full manual checklist: [`docs/archive/in_progress/test_plan.md`](../archive/in_progress/test_plan.md) → **Section A**.
 
 All commands run from the repo root (`/home/onat/nat`).
 

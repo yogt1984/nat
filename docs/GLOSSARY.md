@@ -46,9 +46,9 @@ with NAT9.)
 
 | Prefix | Meaning | Source |
 |---|---|---|
-| **T0, T0b, T1…T21** | Reconciled task sequencer | `in_progress/tasks_assigned_12_6_26/plan.md` (rev 6). T0=resolve 82 dead features; T0b=cloud ingestion; T11=alpha screen; T14=promotion daemon; T16=kill-switch; T21=live deploy. |
-| **Q1.1, Q2.3…** | Production-track gate items | `docs/in_progress/Q/*` |
-| **P1, P1.5…** | Academic-track (PhD preprint) items | `docs/in_progress/P/*` |
+| **T0, T0b, T1…T21** | Reconciled task sequencer | `archive/in_progress/tasks_assigned_12_6_26/plan.md` (rev 6; superseded by `TASKS.md`). T0=resolve 82 dead features; T0b=cloud ingestion; T11=alpha screen; T14=promotion daemon; T16=kill-switch; T21=live deploy. |
+| **Q1.1, Q2.3…** | Production-track gate items | `archive/in_progress/tasks_assigned_12_6_26/Q/*` (superseded by `TASKS.md`) |
+| **P1, P1.5…** | Academic-track (PhD preprint) items | `archive/in_progress/tasks_assigned_12_6_26/P/*` (superseded by `TASKS.md`) |
 | **D1–D4** | Decision points | D1 (~Aug)=conditional-IC verdict, "is there a trading business?"; D2 (~Nov)=≥2 professors; D3=paper Sharpe within 2× backtest; D4 (Apr–May 2027)=PhD offer. |
 | **NAT1–NAT10** | CLI/integration infra | NAT1/2=auto-help; NAT3–8=unified `nat viz *`; NAT9=maturity tags in help; NAT10=modularize the `nat` monolith into `nat/commands/*`. |
 | **HF*/LF*/MF*** | Feature/algo candidates by frequency | HF=high-freq (e.g. HF1 microprice, HF3 Hawkes, HF4 VPIN gate); LF=low-freq (LF1 funding-settlement, LF3 cascade); MF=medium-freq. |

@@ -209,7 +209,7 @@ CLI modularization (NAT1–7, NAT10 = D2), all 5 F-features (`settlement_clock`,
 stack (Caddy, `nat docker`, swarm CLI, Optuna CMA/TPE/NSGA-II). `process_concept` (process as 3rd
 citizen) shipped as `scripts/processes/`. `korrektur` K1/K5 marked fixed (K5 re-opened as REL-2).
 
-*Sources drained into this file are moved to `archive/` (docs-restructure Phase 3). Tier-A finding
-reports inside `in_progress/tasks_assigned_12_6_26/` (features_report, algorithms_report,
-data_inventory, situation_analysis) are **left in place** — they route to `research/FINDINGS.md` in
-Phase 4, not archived. See [`DOCS_RESTRUCTURE_PROPOSAL.md`](DOCS_RESTRUCTURE_PROPOSAL.md).*
+*Sources drained into this file are moved to `archive/` (docs-restructure Phase 3). The Tier-A finding
+reports (features_report, algorithms_report, data_inventory, situation_analysis, IC scans) were
+merged into [`research/FINDINGS.md`](research/FINDINGS.md) (Phase 4, 2026-07-25) and their sources
+archived. See [`DOCS_RESTRUCTURE_PROPOSAL.md`](DOCS_RESTRUCTURE_PROPOSAL.md).*

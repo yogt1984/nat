@@ -16,7 +16,7 @@ for your role, or jump to the map by document type. The strategic spine is
 |---|---|
 | **New to NAT** | [`OBJECTIVE.md`](OBJECTIVE.md) → [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md) → [`METHODOLOGY.md`](METHODOLOGY.md) → [`contracts/README.md`](contracts/README.md) → [`GLOSSARY.md`](GLOSSARY.md) |
 | **Operating the system** | [`commands.md`](commands.md) → [`../HETZNER_DEPLOYMENT_PLAN.md`](../HETZNER_DEPLOYMENT_PLAN.md) → [`AUTOMATION.md`](AUTOMATION.md) → `TASKS.md` §REL (reliability) |
-| **Doing research** | [`research/ALGORITHMS.md`](research/ALGORITHMS.md) → [`research/INSTITUTIONAL_ALGORITHMS.md`](research/INSTITUTIONAL_ALGORITHMS.md) → [`specs/process_layer.md`](specs/process_layer.md) → [`in_progress/INDEX.md`](in_progress/INDEX.md) |
+| **Doing research** | [`research/FINDINGS.md`](research/FINDINGS.md) → [`research/ALGORITHMS.md`](research/ALGORITHMS.md) → [`research/INSTITUTIONAL_ALGORITHMS.md`](research/INSTITUTIONAL_ALGORITHMS.md) → [`specs/process_layer.md`](specs/process_layer.md) |
 | **Building a unit** | [`contracts/`](contracts/) (feature / algorithm / process / viz) → [`METHODOLOGY.md`](METHODOLOGY.md) → `TASKS.md` (pick an ID) |
 | **On the PhD track** | `research/*_preprint.{tex,pdf}` → [`phd_related/`](phd_related/) → [`ideas/spannung.md`](ideas/spannung.md) |
 | **Planning / leading** | [`PLAN.md`](PLAN.md) → [`TASKS.md`](TASKS.md) → [`DOCS_RESTRUCTURE_PROPOSAL.md`](DOCS_RESTRUCTURE_PROPOSAL.md) |
@@ -61,10 +61,11 @@ Docs are grouped by **what they are for** (a light [Diátaxis](https://diataxis.
 ### Research & findings
 | Document | Purpose |
 |---|---|
+| [`research/FINDINGS.md`](research/FINDINGS.md) | **The consolidated empirical record** — every measured result (IC scans, adverse-selection proof, OOS tiers, data audits) with provenance. |
 | [`research/`](research/) | Experiment intros, `HYPER_DOCS`, liquidity-heatmap model, **preprints** (`*_preprint.{tex,pdf}`). |
+| [`research/math/`](research/math/) | Durable theory — IT-engine mathematical foundations, canonical IC reference. |
 | [`research/PAPERS_IDEAS.md`](research/PAPERS_IDEAS.md) | Literature review / reading bibliography. |
 | [`synthesis/`](synthesis/) | Consolidated academic findings + build-implementation spec. |
-| [`in_progress/INDEX.md`](in_progress/INDEX.md) | A/B/C/D information-content index of remaining in-progress docs (findings + references). |
 
 ### Specs — forward blueprints (what we're about to build)
 | Document | Purpose |
