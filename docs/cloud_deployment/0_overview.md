@@ -8,7 +8,7 @@ features in production, and run the T0 viability verdict.
 Companion docs: `1_1_docker_stack.md` (services), `1_2_prometheus_grafana.md`
 (ingestor metrics), `2_observability_and_e2e.md` (exporter + dashboards + bring-up
 order). Concentration decision matrix:
-`docs/in_progress/tasks_assigned_12_6_26/01_concentration_viability_assessment.md`.
+`docs/archive/in_progress/tasks_assigned_12_6_26/01_concentration_viability_assessment.md` (task Q-K2 in `TASKS.md`).
 
 ## Why a cloud box
 

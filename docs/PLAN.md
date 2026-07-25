@@ -151,9 +151,11 @@ data, and methodology. Decision gates:
 
 - **Mission / method:** `OBJECTIVE.md`, `METHODOLOGY.md`, `GLOSSARY.md`.
 - **Unit contracts:** `contracts/` — feature / algorithm / **process** / viz.
-- **Process definitions:** `contracts/process.md` (contract) +
-  `in_progress/tasks_assigned_12_6_26/{process_concept, process_signal_design, process_mi_targets_derivatives}.md`
-  + the `scripts/processes/` framework (7 shipped processes).
+- **Process definitions:** `contracts/process.md` (contract) + `specs/process_layer.md` (the
+  PROC-1..18 spec) + the `scripts/processes/` framework (7 shipped processes). (Original concept
+  docs archived under `archive/in_progress/tasks_assigned_12_6_26/`.)
+- **Empirical findings:** `research/FINDINGS.md` — the consolidated measured record (IC scans,
+  conditional-IC adverse-selection result, OOS tiers, data audits), with provenance.
 - **CLI:** `commands.md`.
 - **Consolidated specs/findings (appendix):** `synthesis/`.
 - **Deployment runbook:** root `HETZNER_DEPLOYMENT_PLAN.md` + `cloud_deployment/`.

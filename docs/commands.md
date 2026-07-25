@@ -33,7 +33,7 @@ itself is authoritative: `nat help`, `nat commands`, `nat commands --json` (~298
 6. `nat viz3d --tf 15m --symbol BTC` · `nat mesh` (alias) · `nat viz3d --tf 5m 9999`
 7. `nat 15m viz --symbol BTC` · `nat 15m viz --symbol BTC --no-open`
 
-## [`docs/in_progress/test_plan.md`](in_progress/test_plan.md) — manual test plan
+## [`docs/archive/in_progress/test_plan.md`](archive/in_progress/test_plan.md) — manual test plan
 
 **Section A — viz/validation tooling:**
 `nat data validate <file>` → `nat data validate /tmp/nope.parquet` → `nat viz render --tf 15m` →

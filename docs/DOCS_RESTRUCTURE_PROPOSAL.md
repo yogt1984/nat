@@ -187,8 +187,11 @@ history follows the file.
   architecture spec fragments. Diff-review before deleting either source.
 - **Phase 3 — build `TASKS.md`** (1–2 d): drain all Tier-D directive sources into the single backlog;
   archive each source as it's absorbed. This is the big one and your primary goal.
-- **Phase 4 — research/specs/runbooks routing** (1–2 d): route Tier A→`FINDINGS.md`, B→`math/`,
-  active C→`specs/`, preprints→`papers/`, ops→`runbooks/`.
+- **Phase 4 — research routing — DONE (2026-07-25):** Tier-A findings merged into
+  `research/FINDINGS.md` (all numbers + provenance preserved); Tier-B theory →
+  `research/math/` (IT-engine math foundations, IC reference); drained residue + `INDEX.md` →
+  `archive/in_progress/`; **`in_progress/` retired**; `gauntlet_analysis_2026_06_01` merged +
+  archived. Remaining (optional polish): preprints→`papers/`, ops→`runbooks/`.
 - **Phase 5 — rewrite `PLAN.md` as the sole index** (½ d): add the "Documentation Map" section
   linking the 8 homes + `TASKS.md`; retire `in_progress/INDEX.md`.
 - **Phase 6 — front door, front-matter & conventions** (structure + readability, *no information
