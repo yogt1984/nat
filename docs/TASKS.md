@@ -22,6 +22,52 @@ dropped (see the "Verified shipped" note at the bottom); ~60 live items retained
 
 ---
 
+## Execution order *(chronological — read this first)*
+
+The single ordered path through the backlog. Critical path is **reliability → data foundation →
+discovery engine → longitudinal validation → the go/no-go gate → capture & scale**; the **D**
+(platform) and **P** (PhD) tracks run in parallel throughout, independent of the data streak. The
+per-branch tables below hold the detail for each ID.
+
+**1 — Now: reliability & defects** *(data-independent; unblocks everything)*
+1. `REL-1` — add WebSocket connect timeout (`main.rs:378`) — the zombie-ingestor root cause.
+2. `REL-2` — in-process no-data watchdog + task supervision.
+3. `REL-3` — finish external freshness watchdog (`gap_alert.py`).
+4. `REL-4` — wire + verify Telegram push alerts end-to-end.
+5. `BUG-2` — fix `nat agent status` `ModuleNotFoundError` (blocks agents incl. cloud box).
+6. `COST-1/2/3` — unify cost systems, remove zero-cost fallback, purge hardcoded fee literals + CI guard.
+7. `BUG-3` — fix + enable the GMM 5D regime classifier.
+8. `BUG-1` — retrain the 3 stale ML algos against the current schema.
+
+**2 — Establish the data foundation** *(Q critical path)*
+9. `Q1` — deploy the T0b Hetzner ingest box (after `REL-1..4`) to kill su-35 SPOF.
+10. `Q0` — verify the clean-data streak (`/streak`) — the master gate.
+
+**3 — Build the discovery engine** *(parallel, data-in-hand)*
+11. `PROC-12` — null-calibration layer (bits-above-null / z-score) — the trust foundation.
+12. `PROC-6` — `conditional_predictability` process (`MI(f;label|Z=z)`) — the missing concept.
+13. `PROC-5` — schedule the 3-bar classifier as a standing evaluation.
+14. `PROC-13` → `PROC-7` → `PROC-8` — FDR gate, horizon/label MI-surface, predictability-surface viz.
+15. `Q4` — run the alpha-skeptic kill gate on data already in hand (before the 90-day spend).
+
+**4 — Longitudinal validation** *(streak-gated)*
+16. `Q2` — generalize `nat oos --window <N>d` (walk-forward + deflated Sharpe).
+17. `PROC-4` / `PROC-10` — longitudinal MI stability + predictability half-life (≥10 / ≥30 days).
+18. `Q-K2` — dead-feature / concentration production verdict (48h on T0b).
+19. `Q3` — revalidate the 5 winners on ≥30 clean days.
+20. `Q5` — **the go/no-go:** conditional-IC > 0.15 gate (~Aug).
+
+**5 — Capture & scale** *(only if `Q5` positive)*
+21. `PROC-3/9/1/11` — MI-combiner, TE causal graph, finding→algorithm compiler, two-stage regime-then-price.
+22. `QA` — build the institutional-GAP algos (`HF1` microprice, `HF4` VPIN-gate, `HF5` Avellaneda–Stoikov, `A4` queue-value).
+23. `G8` paper-trading window → live capital (Sep–Oct), gated on G8 + healthy kill-switch.
+
+**Parallel tracks** *(independent of the streak)*
+- **D (platform):** `D1` finish viz + maturity tags → `D3` apt-packaging → `D4` cloud lab; plus `DOCS-1/3`, `HYG-*`, `INF-*`. (`D2` done.)
+- **P (PhD):** `P1` polish preprint → `P2` SSRN → `P3` arXiv → `P4` prof outreach → `P5` track responses (EPFL EDFI **Jan 15 2027**).
+
+---
+
 ## Q — Quant gates *(prove the edge is real and capturable)*
 
 Gate chain: `Q0 → (Q1 ∥ Q2) → Q3 → Q4 → Q5`. No live capital before Q5 + G8 + kill-switch.
