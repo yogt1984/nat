@@ -70,8 +70,11 @@ async fn main() -> Result<()> {
     info!("Starting ING - Hyperliquid Ingestor");
     info!(?config, "Configuration loaded");
 
-    // Graceful shutdown: watch channel broadcasts to all symbol tasks
+    // Graceful shutdown: watch channel broadcasts to all symbol tasks. `main` keeps
+    // `shutdown_tx` so the supervisor can trigger a flush on an unexpected task death;
+    // the signal handler gets its own clone.
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+    let shutdown_tx_signal = shutdown_tx.clone();
     tokio::spawn(async move {
         let ctrl_c = tokio::signal::ctrl_c();
         let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
@@ -80,7 +83,7 @@ async fn main() -> Result<()> {
             _ = ctrl_c => info!("Received SIGINT (Ctrl+C), initiating shutdown..."),
             _ = sigterm.recv() => info!("Received SIGTERM, initiating shutdown..."),
         }
-        let _ = shutdown_tx.send(true);
+        let _ = shutdown_tx_signal.send(true);
     });
 
     // Initialize metrics
@@ -285,24 +288,44 @@ async fn main() -> Result<()> {
     drop(feature_tx);
     drop(trade_tx);
 
-    // Block until SIGINT/SIGTERM — this is where the process lives
-    // during normal operation. Symbol tasks emit features in the
-    // background; on signal they break their loops and drop senders.
-    let _ = shutdown_rx.changed().await;
-
-    // Wait for symbol tasks to exit (3s deadline)
-    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(3);
-    for handle in handles {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        match tokio::time::timeout(remaining, handle).await {
-            Ok(Ok(Ok(()))) => {}
-            Ok(Ok(Err(e))) => error!(?e, "Symbol task error"),
-            Ok(Err(e)) => error!(?e, "Symbol task panicked"),
-            Err(_) => warn!("Symbol task did not stop in time"),
+    // Live here during normal operation, waking on EITHER a shutdown signal OR the
+    // first symbol task to finish. A per-symbol task that exits while no shutdown was
+    // requested is a silent-death mode the external watchdogs can't see: the surviving
+    // symbols keep data fresh, so OPS-3 never fires and that one symbol just goes
+    // missing. Treat it as fatal (crash-only) — signal the rest, flush, then exit
+    // nonzero below so the watchdog restarts the process clean. (Panics already abort
+    // under panic=abort; this covers a clean Err/Ok exit, e.g. a failed reconnect.)
+    let fatal_exit = if handles.is_empty() {
+        // No symbol tasks (misconfig) — just wait for a shutdown signal; select_all
+        // would panic on an empty iterator.
+        let _ = shutdown_rx.changed().await;
+        false
+    } else {
+        let sup_shutdown = shutdown_rx.clone();
+        tokio::select! {
+            biased;
+            _ = shutdown_rx.changed() => false,
+            (res, idx, _rest) = futures_util::future::select_all(handles) => {
+                if symbol_exit_is_fatal(*sup_shutdown.borrow()) {
+                    match res {
+                        Ok(Ok(())) => error!(task = idx, "Symbol task exited unexpectedly — restarting process"),
+                        Ok(Err(e)) => error!(task = idx, ?e, "Symbol task failed — restarting process"),
+                        Err(e) => error!(task = idx, ?e, "Symbol task panicked — restarting process"),
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
         }
+    };
+
+    if fatal_exit {
+        // Ask the surviving symbol tasks to stop so the writer can flush before we bail.
+        let _ = shutdown_tx.send(true);
     }
 
-    info!("All symbol tasks stopped, waiting for writer flush...");
+    info!("Symbol tasks stopping, waiting for writer flush...");
 
     // Writer's recv() returns None now that all senders are dropped → flushes buffer
     match tokio::time::timeout(tokio::time::Duration::from_secs(3), writer_handle).await {
@@ -322,8 +345,20 @@ async fn main() -> Result<()> {
         }
     }
 
+    if fatal_exit {
+        error!("A symbol task died unexpectedly — exiting nonzero for watchdog restart");
+        std::process::exit(1);
+    }
+
     info!("ING shutdown complete");
     Ok(())
+}
+
+/// Crash-only supervision decision: a symbol task that finishes while no shutdown was
+/// requested means the process should restart (exit nonzero for the external watchdog).
+/// If shutdown WAS requested, the task exiting is the expected graceful path.
+fn symbol_exit_is_fatal(shutdown_requested: bool) -> bool {
+    !shutdown_requested
 }
 
 /// Run ingestor for a single symbol
@@ -772,6 +807,26 @@ async fn run_writer(
     writer.flush()?;
     info!("Parquet writer shutdown complete");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // OPS-2: crash-only per-symbol task supervision.
+
+    #[test]
+    fn unexpected_symbol_exit_is_fatal() {
+        // No shutdown requested → a finished symbol task must crash-restart the
+        // process (exit nonzero) so the watchdog brings it back clean.
+        assert!(symbol_exit_is_fatal(false));
+    }
+
+    #[test]
+    fn symbol_exit_during_shutdown_is_not_fatal() {
+        // Shutdown requested → a task finishing is the expected graceful path.
+        assert!(!symbol_exit_is_fatal(true));
+    }
 }
 
 /// Run the trade Parquet writer task
