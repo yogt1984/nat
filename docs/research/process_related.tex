@@ -1,0 +1,890 @@
+\documentclass[11pt,a4paper]{article}
+
+% ============================================================
+% Packages (core only --- texlive-latex-base + texlive-base)
+% ============================================================
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{array}
+
+% ============================================================
+% Theorem environments
+% ============================================================
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{remark}{Remark}[section]
+\newtheorem{example}{Example}[section]
+
+\theoremstyle{plain}
+\newtheorem{proposition}{Proposition}[section]
+\newtheorem{lemma}{Lemma}[section]
+\newtheorem{corollary}{Corollary}[section]
+
+% ============================================================
+% Notation macros
+% ============================================================
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\inner}[2]{\langle #1,\, #2 \rangle}
+\newcommand{\corr}{\operatorname{corr}}
+\newcommand{\cov}{\operatorname{cov}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\med}{\operatorname{median}}
+\newcommand{\sgn}{\operatorname{sign}}
+\newcommand{\Neff}{N_{\mathrm{eff}}}
+\newcommand{\ICbar}{\overline{\mathrm{IC}}}
+\newcommand{\rhobar}{\bar{\rho}}
+\newcommand{\given}{\,\vert\,}
+\DeclareMathOperator{\MI}{I}
+\DeclareMathOperator{\TE}{TE}
+\DeclareMathOperator{\IR}{IR}
+\DeclareMathOperator{\IC}{IC}
+\DeclareMathOperator{\BR}{BR}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+% ============================================================
+\begin{document}
+
+\title{\textbf{The Process: A First-Class Analytical Unit for\\[3pt]
+Orthogonal Information Extraction from Market Microstructure}\\[6pt]
+\large Conditional-Information Signal Selection and the Effective\\
+Degrees of Freedom of an Alpha Book}
+
+\author{Yigit Onat\\
+\textit{Independent Researcher}\\
+\texttt{yionat@gmail.com}}
+\date{June 2026}
+\maketitle
+
+% ============================================================
+\begin{abstract}
+A high-frequency microstructure feed produces hundreds of engineered features, most of them
+mutually redundant. The operative research question is therefore not whether an individual feature
+predicts future price action, but how much \emph{non-redundant} information the feature set carries
+in aggregate, and how many statistically \emph{independent} bets that information supports. We
+formalize this question around a third first-class analytical unit---the \emph{process}---placed
+beside the \emph{feature} (what is computed) and the \emph{algorithm} (how it trades). A process is
+a typed, registry-bound analytical contract that certifies whether a feature, or a
+derivative/combination of features, carries information about a precisely specified target. We then
+develop the mathematics the unit exists to serve. Adopting mutual information as the currency of
+prediction (justified by Fano's inequality, which makes information a hard lower bound on
+achievable error), we define the effective degrees of freedom of a signal book through the
+fundamental law of active management, $\IR \approx \ICbar\,\sqrt{\Neff}$ with
+$\Neff = N/[1+(N-1)\rhobar]$, and show that the binding quantity is the \emph{stress-regime}
+correlation, not the calm-regime correlation. We give five orthogonalization mechanisms, each as a
+process: conditional-mutual-information greedy selection, interaction-information synergy mining,
+training-prefix residualization, Marchenko--Pastur-denoised principal components, and a capstone
+decorrelated signal book that reports its own honest $\Neff$. We make ``price action'' explicit
+through an aspect$\times$horizon target taxonomy, and we add a derivative-operator layer that mints
+new feature degrees of freedom (fractional differentiation, leaky integration, causal spectral
+features) under a program-level false-discovery ledger. The contribution is a unifying analytical
+contract together with the orthogonality-and-breadth mathematics for disciplined microstructure
+alpha discovery. This is a methods/framework paper: empirical estimates are specified as future
+work, and every unit ships behind a mandatory planted-signal conformance gate.
+\end{abstract}
+
+\smallskip
+\noindent\textbf{Keywords:} market microstructure, mutual information, conditional mutual
+information, feature selection, effective breadth, fundamental law of active management, random
+matrix theory, false discovery rate, fractional differentiation.
+
+\smallskip
+\noindent\textbf{JEL Classification:} C14, C52, C58, G14, G17
+
+\tableofcontents
+\bigskip
+
+% ============================================================
+\section{Introduction}
+\label{sec:intro}
+% ============================================================
+
+\subsection{Redundancy is the problem, not scarcity}
+
+A modern microstructure pipeline does not suffer from a shortage of candidate predictors. The
+platform underlying this work emits $236$ engineered features every $100$\,milliseconds---order-book
+imbalance at several depths, trade-flow toxicity, realized-volatility estimators, entropy of book
+shape, funding pressure, liquidation geometry, and dozens of derived interactions. The difficulty
+is the opposite of scarcity: these features are heavily \emph{co-determined}. Imbalance at level one
+and level two move together; a dozen volatility proxies share a common factor; flow and price are
+mechanically linked. Screening each feature in isolation and keeping ``the ones with a high
+information coefficient'' therefore answers the wrong question. It rewards a crowd of near-copies of
+a single underlying bet and quietly overstates how much independent evidence the research has
+actually accumulated.
+
+The correct question has two parts, both of which this paper formalizes:
+
+\begin{enumerate}
+  \item \textbf{Orthogonal extraction.} From a large, redundant feature set, isolate a basis of
+        signals each of which carries information about future price action that the others do
+        \emph{not}. Redundancy must be measured in an information metric, not a linear one, because
+        microstructure dependence is routinely nonlinear (a feature can be linearly uncorrelated
+        with the target yet fully determine it---the canonical XOR obstruction).
+  \item \textbf{Effective degrees of freedom.} Quantify how many statistically independent bets the
+        resulting book supports. This number---not the raw count of ``significant'' features---is
+        what governs the achievable information ratio, and it is the quantity that collapses in
+        exactly the market states where a portfolio most needs diversification.
+\end{enumerate}
+
+\subsection{Three first-class citizens}
+
+The platform answers these questions by promoting the analytical act itself to a typed,
+versioned, testable object. There are three first-class citizens, summarized in
+Table~\ref{tab:citizens}. The \emph{feature} and the \emph{algorithm} are familiar; the
+\emph{process} is the unit this paper defines.
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{>{\raggedright\arraybackslash}p{2.4cm}
+                >{\raggedright\arraybackslash}p{6.4cm}
+                >{\raggedright\arraybackslash}p{5.6cm}}
+\hline
+\textbf{Citizen} & \textbf{Question it answers} & \textbf{Contract} \\
+\hline
+\textbf{feature}   & \emph{what} is computed                                   & ingestor columns / derived series \\
+\textbf{algorithm} & \emph{how} it trades                                      & \code{MicrostructureAlgorithm} \\
+\textbf{process}   & \emph{whether/where} information about price action exists & \code{Process} \\
+\hline
+\end{tabular}
+\caption{The three first-class citizens. A process formalizes what previously lived as scattered
+one-off analyses (a screener's information coefficient, an information-theory engine's mutual
+information, a spectral persistence study, a gradient-boosted importance test) behind one registry,
+one result schema, one command-line surface, and one persistence path.}
+\label{tab:citizens}
+\end{table}
+
+\subsection{Contributions}
+
+\begin{enumerate}
+  \item A formal, registry-bound \emph{process contract} (Section~\ref{sec:process}): two kinds
+        (evaluation and transform), a versioned result schema, and a typed-node refinement that
+        treats the prediction target as its own first-class object.
+  \item The \emph{information currency} (Section~\ref{sec:info}): why mutual information, not
+        correlation, is the right dependence measure, anchored in Fano's inequality and a
+        cost-aware minimum-information gate.
+  \item The \emph{effective degrees of freedom} of a signal book (Section~\ref{sec:dof}): a
+        derivation of $\Neff = N/[1+(N-1)\rhobar]$ from the fundamental law of active management,
+        and the calm-versus-stress decomposition that turns it into a risk disclosure.
+  \item Five \emph{orthogonalization processes} (Section~\ref{sec:ortho}), each defined
+        mathematically: conditional-MI greedy selection, interaction-information synergy mining,
+        residualization, Marchenko--Pastur-denoised PCA, and the capstone signal book.
+  \item A \emph{target taxonomy} (Section~\ref{sec:target}) making ``price action'' explicit along
+        an aspect$\times$horizon grid, and a \emph{derivative-operator} layer
+        (Section~\ref{sec:ops}) that mints new feature degrees of freedom under a program-level
+        false-discovery ledger.
+  \item An \emph{estimation-hygiene} layer and the planted-signal verification discipline
+        (Sections~\ref{sec:hygiene}--\ref{sec:status}) that keep the degrees-of-freedom estimate
+        honest.
+\end{enumerate}
+
+This is deliberately a methods/framework paper. Where the contract is implemented we say so; where a
+mechanism is specified but not yet built we say so; and we report no fabricated empirical estimates.
+The one empirical fact we import as motivation---that a mid-price information coefficient of
+$\approx 0.45$ collapses to $\approx 0.03$ once conditioned on states where a passive fill would
+actually occur---is established in a companion study and cited, not re-derived here.
+
+% ============================================================
+\section{The Process as an Analytical Unit}
+\label{sec:process}
+% ============================================================
+
+\subsection{Definition and the two kinds}
+
+\begin{definition}[Process]
+\label{def:process}
+A \emph{process} is an analytical map---statistical, signal-processing, or machine-learning---that
+takes a panel of feature columns and a context, and certifies whether a feature, or a
+derivative/combination of features, carries information about a specified target of future price
+action. It is identified by a unique name, registered through a decorator, parameterized through a
+configuration section keyed by that name, and persisted through a single result schema.
+\end{definition}
+
+Two kinds share the registry, command-line, and persistence surface.
+
+\begin{definition}[Evaluation and transform processes]
+An \emph{evaluation process} is a map
+\[
+   \mathcal{E} : (\,\mathbf{D},\, \mathcal{C}\,) \longmapsto \mathcal{R},
+\]
+where $\mathbf{D}\in\R^{T\times p}$ is a time-indexed feature panel, $\mathcal{C}$ is a
+\emph{process context} (symbol, timeframe, price column, horizon set, cost parameters, target,
+auxiliary sources), and $\mathcal{R}$ is a \emph{process result}: it scores existing columns and
+produces no new series. A \emph{transform process} is a map
+\[
+   \mathcal{T} : (\,\mathbf{D},\, \mathcal{C}\,) \longmapsto (\,\mathbf{D}',\, \mathcal{R}\,),
+   \qquad \mathbf{D}' \in \R^{T\times m},
+\]
+producing $m$ \emph{new} series $\mathbf{D}'$ on the input index (e.g.\ principal components,
+triple-barrier labels, residualized innovations). Derived series are themselves first-class
+evaluable inputs: the runner chains $\mathbf{D}'$ into any evaluation process, so
+$\mathcal{E}\circ\mathcal{T}$ is itself a process.
+\end{definition}
+
+The closure of evaluation under transform is the engine of the whole framework: orthogonalization
+is a transform whose output is then scored by an evaluation process, so ``extract the orthogonal
+part, then ask what it knows'' is a single composed pipeline rather than two disconnected scripts.
+
+\subsection{The result contract}
+
+\begin{definition}[Process result]
+A \emph{process result} $\mathcal{R}$ (schema version $1$) is the tuple
+\[
+   \mathcal{R} = \big(\, \mathrm{id},\, \mathrm{kind},\, \Pi,\, \mathcal{D},\, \mathcal{P},\,
+   \mathcal{F},\, \mathcal{S},\, \mathcal{G},\, \Sigma \,\big),
+\]
+with run identifier $\mathrm{id}$; kind; parameters $\Pi$; data fingerprint $\mathcal{D}$ (directory,
+dates, row/bar counts, content hash); provenance $\mathcal{P}$ (git SHA, dirty flag, timestamp); the
+set of tested features $\mathcal{F}$ and skipped features $\mathcal{S}$ with reasons; a list of
+findings $\mathcal{G}$; and a summary $\Sigma$. Each finding is
+\[
+   g = (\,\text{feature},\, \text{horizon},\, \text{metric},\, \text{value},\, \text{threshold},\,
+   p,\, p_{\mathrm{adj}},\, \text{informative},\, \text{extras}\,),
+\]
+where $p_{\mathrm{adj}}$ is the Benjamini--Hochberg-adjusted $p$-value within the run and
+\emph{informative} is the boolean verdict $\text{value} \ge \text{threshold}$ (and $p_{\mathrm{adj}}$
+below the false-discovery level where applicable).
+\end{definition}
+
+The full result is written as an atomic JSON document; a queryable index row is mirrored to a local
+database on a best-effort basis. Two disciplines in this contract matter for the rest of the paper.
+
+\begin{remark}[The not-a-number partition, K2]
+Before scoring, every process partitions its columns through a guard that removes dead, constant, or
+too-thin columns---each skipped with a recorded reason (\code{all_nan}, \code{constant},
+\code{n_valid<min})---so a missing optional feature category never crashes a run and never silently
+contaminates an estimate. Information measures on a constant column are undefined, not zero; the
+partition makes that explicit rather than letting a degenerate estimator return a spurious value.
+\end{remark}
+
+\begin{remark}[False-discovery scope]
+\label{rem:fdr-scope}
+Benjamini--Hochberg correction inside a result is \emph{per run}. The index of all runs is a
+research log, \emph{not} a meta-gate: aggregating ``informative'' flags across many runs inflates
+discoveries exactly as multiple testing predicts. The program-level ledger of
+Section~\ref{sec:hygiene} is the honest counterpart, and the deflated-Sharpe and reality-check
+gates remain authoritative for any promotion decision.
+\end{remark}
+
+\subsection{A typed-node view}
+
+The evaluation/transform dichotomy is a convenient first cut, but it already leaks: a portfolio-book
+transform performs construction rather than scoring, and a triple-barrier transform produces a
+\emph{target} rather than a feature. The mature model is therefore a typed computation graph with
+four node kinds---\emph{feature}, \emph{transform}, \emph{evaluation}, and \emph{target}---rather
+than a two-element stack. We do not refactor preemptively; we record the target node as the first
+new kind, because making the prediction target explicit (Section~\ref{sec:target}) is the single
+highest-leverage change for honest information measurement.
+
+% ============================================================
+\section{Information as the Currency of Prediction}
+\label{sec:info}
+% ============================================================
+
+\subsection{Why mutual information, not correlation}
+
+Let $X$ be a feature and $Y$ a target derived from future price action. The mutual information
+\[
+   \MI(X;Y) \;=\; \iint p(x,y)\,\log\frac{p(x,y)}{p(x)\,p(y)}\;dx\,dy
+   \;=\; H(Y) - H(Y\given X)
+\]
+measures \emph{any} statistical dependence, linear or not, and is invariant to monotone
+reparameterization of either variable. Correlation answers ``how much, linearly''; mutual
+information answers ``is there any exploitable dependence at all.'' The reason this distinction is
+not cosmetic is a hard inequality.
+
+\begin{proposition}[Information lower-bounds achievable error]
+\label{prop:fano}
+Let $\widehat{Y}=g(X)$ be any predictor of a discretized target $Y$ taking values in a set of size
+$K$, and let $P_e=\Pr[\widehat{Y}\neq Y]$. Then Fano's inequality gives
+\[
+   H(Y\given X) \;\le\; H_b(P_e) + P_e\,\log(K-1),
+\]
+hence
+\[
+   P_e \;\ge\; \frac{H(Y) - \MI(X;Y) - \log 2}{\log(K-1)} .
+\]
+\end{proposition}
+
+The content of Proposition~\ref{prop:fano} is that no estimator, however clever, can drive the error
+below a floor set by $\MI(X;Y)$. Information is therefore not one diagnostic among several; it is the
+budget. A feature with negligible mutual information cannot be rescued by a better model, and a
+feature selection that maximizes information is maximizing the only quantity that bounds achievable
+prediction error (Cover \& Thomas; the continuous analogue is the rate--distortion theorem).
+
+\subsection{The cost-aware information gate}
+
+Statistical information is necessary but not sufficient: a signal must carry enough information to
+pay the round-trip trading cost. The platform encodes this as a minimum-information threshold that
+every information-valued process compares against,
+\[
+   I_{\min} \;=\; I_{\min}\!\big(\,\text{fee},\, \sigma_r,\, \mathrm{kurt}(r)\,\big),
+\]
+the least mutual information a feature must share with returns for a position to clear fees and
+slippage given the return scale and tail heaviness. A finding is \emph{informative} only if its
+estimated information exceeds $I_{\min}$, not merely zero. This is the information-theoretic parent
+of the deflated, cost-adjusted gates used downstream, and it is why a process reports bits against a
+threshold rather than a bare $p$-value.
+
+\subsection{Estimating information without manufacturing it}
+
+Continuous mutual information is estimated with the Kraskov--St\"ogbauer--Grassberger $k$-nearest
+neighbour estimator. One practical caveat is load-bearing for everything that follows.
+
+\begin{remark}[Rank-transform before estimating]
+\label{rem:ksg}
+Raw-scale $k$-NN estimation manufactures a spurious information floor (empirically $\approx 0.07$
+bits on planted-null data) when feature and return scales differ, because the neighbour graph is
+dominated by the wider-scale coordinate. Rank/copula-transforming each input before estimation
+removes the artefact and makes the estimator scale-invariant. Every information-valued process in
+the framework rank-transforms its inputs; this single fix was found only because a planted-null test
+(Section~\ref{sec:status}) flagged a nonzero estimate where the true value was zero.
+\end{remark}
+
+Directed dependence---which way information flows between two series---is measured by transfer
+entropy $\TE(X\to Y)=\MI(Y_{t};X_{t-1}\given Y_{t-1})$ (Schreiber), with a linear (Gaussian)
+default where it is tolerable and the reverse direction $\TE(Y\to X)$ retained as a control.
+
+% ============================================================
+\section{The Effective Degrees of Freedom of a Signal Book}
+\label{sec:dof}
+% ============================================================
+
+The central quantity of the whole framework is not the information of any single feature but the
+\emph{breadth} of the book of features that survive selection. We define it, derive it under the
+natural redundancy model, and then show why its calm-regime value is a dangerous overstatement.
+
+\subsection{The fundamental law and effective breadth}
+
+The fundamental law of active management (Grinold; Grinold \& Kahn) relates the information ratio of
+a strategy to the skill per bet and the number of independent bets,
+\begin{equation}
+   \IR \;\approx\; \ICbar \,\sqrt{\BR},
+   \label{eq:fl}
+\end{equation}
+where $\ICbar$ is the average information coefficient (skill) and $\BR$ is the breadth---the number
+of independent bets per period. The research programme is the pursuit of the two factors in
+\eqref{eq:fl}: raise $\ICbar$ by finding real information, raise $\BR$ by combining \emph{independent}
+pieces. The question is what $\BR$ equals when the pieces are correlated, which they always are.
+
+\begin{proposition}[Effective breadth under equicorrelation]
+\label{prop:neff}
+Let $s_1,\dots,s_N$ be standardized signals ($\E[s_i]=0$, $\Var(s_i)=1$) with common pairwise
+correlation $\corr(s_i,s_j)=\rhobar\in[0,1)$ for $i\neq j$. The equal-weight aggregate
+$S=\tfrac{1}{N}\sum_{i=1}^{N}s_i$ has variance
+\[
+   \Var(S) \;=\; \frac{1}{N^2}\Big(\,N + N(N-1)\rhobar\,\Big)
+            \;=\; \frac{1+(N-1)\rhobar}{N}.
+\]
+Define the \emph{effective number of independent signals} $\Neff$ as the count of mutually
+independent unit-variance signals whose equal-weight aggregate has the same variance. Since $n$
+independent unit-variance signals give aggregate variance $1/n$, equating $1/\Neff=\Var(S)$ yields
+\begin{equation}
+   \boxed{\;\Neff \;=\; \dfrac{N}{1+(N-1)\rhobar}\;}
+   \label{eq:neff}
+\end{equation}
+and, identifying breadth with effective independence ($\BR=\Neff$) in \eqref{eq:fl},
+\[
+   \IR \;\approx\; \ICbar\,\sqrt{\dfrac{N}{1+(N-1)\rhobar}}.
+\]
+\end{proposition}
+
+\begin{proof}
+$\Var(S)=N^{-2}\big[\sum_i\Var(s_i)+\sum_{i\neq j}\cov(s_i,s_j)\big]
+        =N^{-2}\big[N+N(N-1)\rhobar\big]$. Equate with the independent-case variance $1/\Neff$ and
+solve.
+\end{proof}
+
+\begin{corollary}[The two limits]
+As $\rhobar\to 0$, $\Neff\to N$: uncorrelated signals each count fully. As $\rhobar\to 1$,
+$\Neff\to 1$: perfectly correlated signals count as one, regardless of how many were collected.
+Equation~\eqref{eq:neff} is monotone decreasing in both $N$ and $\rhobar$ in the relevant regime, so
+\emph{adding a redundant signal raises $N$ but cannot raise $\Neff$}---the defining property a
+selection procedure must respect.
+\end{corollary}
+
+Proposition~\ref{prop:neff} is the precise sense in which this paper ``defines the degrees of
+freedom mathematically.'' The raw count $N$ of significant features is a vanity metric; $\Neff$ is
+the quantity that enters the achievable information ratio, and the entire orthogonalization suite of
+Section~\ref{sec:ortho} exists to make $\Neff$ as close to $N$ as the data permit.
+
+\subsection{The correlation that matters is the stress correlation}
+
+The correlation $\rhobar$ in \eqref{eq:neff} is not a constant; it is regime-dependent,
+$\rhobar=\rhobar(\text{regime})$. Microstructure signals that are nearly uncorrelated in calm
+markets routinely co-move under stress, when a single liquidity factor drives every book at once.
+Hence two values of \eqref{eq:neff} must be reported:
+\[
+   \Neff^{\text{calm}} = \frac{N}{1+(N-1)\,\rhobar_{\text{calm}}},
+   \qquad
+   \Neff^{\text{stress}} = \frac{N}{1+(N-1)\,\rhobar_{\text{stress}}},
+   \qquad \rhobar_{\text{stress}} \ge \rhobar_{\text{calm}}.
+\]
+
+\begin{remark}[Diversification evaporates when it is needed]
+A book with $\rhobar_{\text{calm}}=0.1$ but $\rhobar_{\text{stress}}=0.7$ has, for $N=10$,
+$\Neff^{\text{calm}}\approx 5.3$ but $\Neff^{\text{stress}}\approx 1.4$: it offers five independent
+bets in quiet markets and barely more than one exactly when a drawdown is unfolding. The gap
+$\Neff^{\text{calm}}-\Neff^{\text{stress}}$ is therefore not a footnote---it \emph{is} the risk
+disclosure of the book, and any honest report of breadth must state both numbers and the regime
+buckets they were computed in.
+\end{remark}
+
+% ============================================================
+\section{Extracting Orthogonal Information}
+\label{sec:ortho}
+% ============================================================
+
+We now give the five processes that build a high-$\Neff$ book. Each is stated as a definition with
+its planted-signal contract; the layer they belong to is named in Table~\ref{tab:ortho}.
+
+\subsection{Conditional-MI greedy selection (the core extractor)}
+
+\begin{definition}[Redundancy-aware information selection]
+\label{def:cmi}
+Given a feature set $F=\{f_1,\dots,f_p\}$ and target $r$, build a selected set $S_k$ greedily:
+\[
+   f_{(1)} = \argmax_{f\in F}\ \MI(f;r),
+   \qquad
+   f_{(k+1)} = \argmax_{f\in F\setminus S_k}\ \MI\big(f;\,r \given S_k\big),
+\]
+terminating when the marginal conditional information gain falls below
+$\max\!\big(I_{\min},\,\varepsilon\big)$. Report per selected feature the gain in bits and, per
+rejected runner-up, the redundancy $\MI(f;r)-\MI(f;r\given S_k)$.
+\end{definition}
+
+The conditional mutual information $\MI(f;r\given S_k)$ is the information $f$ shares with $r$ that
+is \emph{not already present} in the selected set. A feature that duplicates an already-selected one
+contributes $\approx 0$ and is never chosen, so the selected set is orthogonal-by-construction in
+the information metric. This is strictly stronger than linear (principal-component) decorrelation,
+which a nonlinear redundancy---two features that jointly but not marginally determine the target---
+slips past entirely.
+
+\begin{remark}[Relation to mRMR]
+The first-order expansion of Definition~\ref{def:cmi} is the minimum-redundancy maximum-relevance
+criterion, $\MI(f;r)-\tfrac{1}{|S_k|}\sum_{s\in S_k}\MI(f;s)$ (Peng, Long \& Ding; unified by Brown
+et al.), and the lineage traces to Battiti's mutual-information feature selection. The conditional
+form is the exact object the approximation targets.
+\end{remark}
+
+\noindent\emph{Planted contract.} On a frame containing a signal $A$, an exact noisy copy $A'$, and
+an independent signal $B$, the process must select $\{$one of $A,A'$; $B\}$ and never both copies;
+the cumulative-information curve must flatten after the second pick.
+
+\subsection{Interaction information: mining synergy}
+
+\begin{definition}[Pairwise synergy]
+\label{def:synergy}
+For features $X,Y$ and target $r$, the interaction information is
+\[
+   \mathcal{S}(X,Y;r) \;=\; \MI\big(\{X,Y\};r\big) - \MI(X;r) - \MI(Y;r).
+\]
+$\mathcal{S}>0$ signals \emph{synergy} (the pair jointly carries more than the sum of its parts);
+$\mathcal{S}<0$ signals \emph{redundancy}.
+\end{definition}
+
+Synergy is invisible to any single-feature screen and to Definition~\ref{def:cmi}'s forward pass,
+because each marginal can be near zero while the joint is large. Run over the top-$K$ features only
+($K\approx 20\Rightarrow 190$ pairs, the cost of $k$-NN estimation being the binding constraint),
+synergistic pairs become candidate engineered composites fed back as derived features (the partial
+information decomposition of Williams \& Beer is the formal parent).
+
+\noindent\emph{Planted contract.} On an XOR construction $r=\sgn(x)\cdot\sgn(y)$, each marginal
+information is $\approx 0$ while the joint exceeds the gate; the process must flag that pair and only
+that pair.
+
+\subsection{Residualization: pure-innovation extraction}
+
+\begin{definition}[Residualization]
+\label{def:resid}
+For a target feature $f$ and a conditioning set $Z$ (a market mode, a cousin feature, or a principal
+component), the residual is
+\[
+   \mathrm{res}_f(t) = f(t) - \boldsymbol{\beta}^{\!\top} Z(t),
+   \qquad
+   \boldsymbol{\beta} = \argmin_{\boldsymbol{\beta}}\ \E_{\text{train}}\big[(f-\boldsymbol{\beta}^{\!\top} Z)^2\big],
+\]
+with $\boldsymbol{\beta}$ fit on the training prefix only. By the normal equations
+$\corr(\mathrm{res}_f,Z)=0$ on the training sample, and approximately so out of sample; scoring
+$\mathrm{res}_f$ against $r$ isolates what $f$ knows that $Z$ does not.
+\end{definition}
+
+Residualization is the per-feature, tradeable analogue of the set-level selection of
+Definition~\ref{def:cmi}: where conditional-MI selection \emph{ranks}, residualization \emph{emits a
+series}. The training-prefix fit is the no-lookahead guarantee, verified by the same holdout
+perturbation test used for principal components.
+
+\subsection{Denoised principal components and the count of real factors}
+
+Linear orthogonalization by principal components is cheap and complementary, but on short samples
+most ``components'' are noise dressed as structure. Random matrix theory says exactly how much.
+
+\begin{proposition}[Marchenko--Pastur noise band]
+\label{prop:mp}
+Let $\mathbf{C}$ be the sample correlation matrix of a $T\times N$ panel of i.i.d.\ standardized
+noise with aspect ratio $q=N/T\in(0,1]$. As $N,T\to\infty$ with $q$ fixed, the eigenvalues of
+$\mathbf{C}$ fall in $[\lambda_-,\lambda_+]$ with
+\[
+   \lambda_{\pm} = \big(1 \pm \sqrt{q}\,\big)^2 .
+\]
+Eigenvalues exceeding $\lambda_+$ cannot be attributed to noise; the count
+\[
+   n_{\text{signal}} = \#\{\, i : \lambda_i > \lambda_+ \,\}
+\]
+estimates the number of genuine factors---the linear degrees of freedom---in the feature block.
+\end{proposition}
+
+Clipping or shrinking the eigenvalues inside $[\lambda_-,\lambda_+]$ denoises the correlation
+estimate (Laloux et al.; L\'opez de Prado), and $n_{\text{signal}}$ is a direct, linear estimate of
+the degrees of freedom that Proposition~\ref{prop:neff} measures in the information metric. The
+principal-component transform reports $n_{\text{signal}}$ and the maximum off-diagonal holdout
+correlation as its orthogonality witness.
+
+\noindent\emph{Planted contract.} A frame of three true factors plus forty noise features must
+return $n_{\text{signal}}\approx 3$, and the denoised holdout orthogonality must strictly improve on
+the raw.
+
+\subsection{The capstone: a decorrelated signal book with honest breadth}
+
+\begin{definition}[Decorrelated signal book]
+\label{def:book}
+Given features that pass selection (Definition~\ref{def:cmi}), a stability gate, and a
+regime-robustness gate, the signal book is built by (i) sequentially residualizing in selection
+order so the surviving series are mutually orthogonal, (ii) walk-forward $z$-scoring them into
+$\code{sig_*}$ columns, and (iii) reporting, as the book's contract,
+\[
+   \Neff = \frac{N}{1+(N-1)\rhobar}, \qquad
+   \IR_{\text{expected}} = \ICbar\,\sqrt{\Neff \cdot \text{bars/year}},
+\]
+computed at \emph{both} calm and stress $\rhobar$, together with the full provenance chain of every
+upstream run that admitted each entry.
+\end{definition}
+
+The book is the object an algorithm consumes: an algorithm whose required inputs are the
+$\code{sig_*}$ columns and whose step is risk-parity weighting. The division of labour is the thesis
+of the framework in one line: \emph{processes certify what is combinable; algorithms combine.}
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{>{\raggedright\arraybackslash}p{4.0cm}
+                >{\raggedright\arraybackslash}p{2.1cm}
+                >{\raggedright\arraybackslash}p{8.1cm}}
+\hline
+\textbf{Process} & \textbf{Kind} & \textbf{Role in raising $\Neff$} \\
+\hline
+\code{cmi_select}          & evaluation & selects an information-orthogonal basis at the source \\
+\code{interaction_synergy} & evaluation & recovers joint information no marginal screen sees \\
+\code{lead_lag_te}         & evaluation & cross-symbol directed edges---the cheapest decorrelation \\
+\code{residualize}         & transform  & emits the pure innovation of a feature beyond a set \\
+\code{pca_combo}\,$+$\,MP  & transform  & linear orthogonal composites; counts real factors \\
+\code{signal_book}         & transform  & assembles the mutually orthogonal book; reports $\Neff$ \\
+\hline
+\end{tabular}
+\caption{The orthogonalization suite. Each process either raises the effective breadth $\Neff$ or
+certifies it. \code{pca_combo} is implemented; the others are specified (Section~\ref{sec:status}).}
+\label{tab:ortho}
+\end{table}
+
+% ============================================================
+\section{Defining the Target: What ``Price Action'' Means}
+\label{sec:target}
+% ============================================================
+
+Mutual information is always information \emph{about something}. A pervasive but silent error is to
+let every process default to simple forward returns while claiming to measure ``information about
+price action.'' Price action is not one thing, and the literature has studied features against many
+distinct targets. We make the target a first-class node.
+
+\begin{definition}[Target node]
+A \emph{target} is a map $\tau:(\text{prices},\,\text{bars},\,\text{horizon})\mapsto \R^{T}$ with a
+declared kind (continuous, binary, categorical), resolved from a registry and carried in the process
+context, so that every process computes $\MI(f;\tau)$ against one explicit, named target rather than
+an implicit default. Closing this gap is the highest-leverage single change in the framework: it
+makes ``mutual information between a feature and price action'' honest about \emph{which} price
+action.
+\end{definition}
+
+Table~\ref{tab:targets} is the resulting design surface: a run is the quadruple
+(process $\times$ target $\times$ horizon $\times$ symbol).
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{>{\raggedright\arraybackslash}p{4.3cm}
+                >{\raggedright\arraybackslash}p{4.6cm}
+                >{\raggedright\arraybackslash}p{4.9cm}}
+\hline
+\textbf{Aspect} & \textbf{Definition} & \textbf{Literature / status} \\
+\hline
+Direction        & $\sgn(r_h)$                                  & classification; partial support \\
+Magnitude        & $r_h$, $|r_h|$                               & rate--distortion; \emph{shipped default} \\
+Volatility       & future realized variance over $h$            & HAR (Corsi); a target, not a scaler \\
+Path             & triple-barrier label, time-to-touch          & L\'opez de Prado; partial \\
+Regime change    & $\Pr(\text{switch})$                         & Hamilton; unbuilt \\
+Jump / tail      & Lee--Mykland statistic                       & jump literature; algorithm only \\
+Fill-conditional & move at the transacted price                 & Kyle/Stoikov; the missing bridge \\
+\hline
+\end{tabular}
+\caption{An aspect$\times$horizon taxonomy of price-action targets (horizons: tick--second,
+minute--bar, multi-day). Two cells are both unbuilt and high value: \emph{volatility-as-target}
+(a whole tradeable family the platform cannot currently screen for) and \emph{fill-conditional move}
+---the target defined on the price one actually transacts at, where the mid-price edge of
+$\approx 0.45$ is known to collapse to $\approx 0.03$. The latter is the execution-realism gap made
+measurable.}
+\label{tab:targets}
+\end{table}
+
+% ============================================================
+\section{Minting Feature Degrees of Freedom}
+\label{sec:ops}
+% ============================================================
+
+Orthogonalization raises $\Neff$ toward the number of distinct bets present in the feature set; it
+cannot create a bet that no feature expresses. The complementary lever is a transform process,
+$\code{feature_ops}$, that applies operators to a chosen base-column set and emits new
+$\code{op_*}$ columns---candidate new degrees of freedom---each chainable into the evaluation and
+selection processes above. Only the operators that are genuinely missing from the existing feature
+set are proposed; the high-value, not-yet-built ones are:
+
+\begin{enumerate}
+  \item \textbf{Fractional differentiation} $(1-B)^{d}$, $0<d<1$ (L\'opez de Prado, after the long-memory
+        literature). Integer differencing destroys the memory that carries predictive content;
+        fractional differencing makes a level series stationary while \emph{preserving} memory,
+        so downstream information and IC estimates are both honest (stationary) and not amputated.
+        This is the single highest-value missing operator.
+  \item \textbf{Leaky / cumulative integration} $y_t = \varrho\,y_{t-1} + x_t$, accumulating a
+        memoryless flow or imbalance into a persistent pressure state for longer-horizon targets.
+  \item \textbf{Causal spectral features}: rolling band-power, dominant frequency, and rolling
+        spectral entropy, exposing oscillatory structure as a persisted feature rather than as a
+        one-off analysis.
+  \item \textbf{Distribution-free normalization}: rolling rank/quantile and robust (median/MAD)
+        $z$-scores, which both help the rank-based information estimator of
+        Remark~\ref{rem:ksg} and are fat-tail robust.
+  \item \textbf{Nonlinear bases}: polynomial/spline expansions and a sign$\times$magnitude split, so
+        that even linear processes catch curvature and direction-versus-size asymmetry.
+\end{enumerate}
+
+\begin{remark}[Operators sharpen, rather than relax, the multiple-testing problem]
+\label{rem:ledger-ops}
+Each operator multiplies the column space: one base feature becomes many $\code{op_*}$ candidates.
+A $\code{feature_ops}$ run must therefore log how many columns it minted, so the program-level
+false-discovery ledger of Section~\ref{sec:hygiene} can count them. Minting degrees of freedom and
+accounting for them are the same obligation.
+\end{remark}
+
+% ============================================================
+\section{Estimation Hygiene: Keeping the Breadth Estimate Honest}
+\label{sec:hygiene}
+% ============================================================
+
+A measured information coefficient or mutual information is an estimate, and estimates of small
+quantities on short, overlapping, heavy-tailed samples are biased upward by selection. Three
+processes protect the degrees-of-freedom estimate from being fiction.
+
+\paragraph{Permutation null (reality check).} For a candidate set or a prior run, rebuild the null
+by stationary block bootstrap of returns---which preserves autocorrelation and the overlap structure
+that naive shuffling destroys (Politis \& Romano)---over $M$ resamples, and recompute the headline
+metric. Report, per feature, $p_{\text{perm}}=M^{-1}\#\{\text{metric}_{\text{null}}\ge
+\text{metric}_{\text{obs}}\}$, and at the set level the \emph{excess discoveries}
+$n_{\text{obs}}-\E[n_{\text{null}}]$ (White's reality check). A set whose excess is $\approx 0$ is
+indistinguishable from luck regardless of any single feature's $p$-value.
+
+\paragraph{Stability and decay.} Signals are perishable inventory. A non-stationarity audit computes
+a calendar-windowed (not expanding) IC series, detects breaks by a CUSUM/Page--Hinkley test, and
+measures sign-consistency and the half-life of $|\IC|$ with window age. A feature is admissible only
+if no break is detected and its sign is consistent across sub-periods.
+
+\paragraph{Program-level ledger.} Per Remark~\ref{rem:fdr-scope}, the number that decides whether
+discoveries are real is the \emph{total} count of hypotheses the platform has ever tested. A ledger
+the runner appends to---(process, target, columns minted, timestamp, git SHA)---is the meta-gate at
+program scope, the generalization of the reality check from one run to the whole research history.
+Until it exists, every information number is un-budgeted against the platform's cumulative search
+(Bailey, Borwein, L\'opez de Prado \& Zhu).
+
+% ============================================================
+\section{Verification and Implementation Status}
+\label{sec:status}
+% ============================================================
+
+\subsection{The planted-signal discipline}
+
+No process touches real data before it passes a \emph{planted-signal} conformance test: a synthetic
+frame with a known signal column and known noise columns, on which the process must flag the signal
+and must \emph{not} flag the noise. This is not optional hygiene---three estimator bugs (including
+the scale artefact of Remark~\ref{rem:ksg}) were caught only by planted tests, each of which would
+otherwise have manufactured a discovery. A transform additionally passes a no-lookahead test (a
+holdout perturbation must not change in-sample outputs). A real-parquet smoke test on the latest day,
+with dead columns skipped and reasons recorded, is the final pre-commit gate.
+
+\subsection{What is built and what is specified}
+
+In the interest of honest reporting, Table~\ref{tab:status} separates the implemented contract and
+processes from the specified-but-unbuilt mechanisms. The framework, its result schema, its
+persistence, and seven processes are implemented; the orthogonalization suite that this paper
+centres on is specified with its planted contracts and is the immediate build queue.
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.3}
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{>{\raggedright\arraybackslash}p{6.4cm}
+                >{\raggedright\arraybackslash}p{8.0cm}}
+\hline
+\textbf{Implemented} & \textbf{Specified (planted contract written, not yet built)} \\
+\hline
+process contract + result schema + persistence    & \code{cmi_select} (conditional-MI selection) \\
+\code{ic_horizon} (expanding Spearman IC sweep)    & \code{interaction_synergy} (synergy mining) \\
+\code{mi_ksg} (KSG mutual information + CMI)        & \code{lead_lag_te} (cross-symbol TE) \\
+\code{transfer_entropy} (directed information)      & \code{residualize} (pure innovation) \\
+\code{spectral} (PSD / persistence)                & \code{permutation_null}, \code{stability_decay} \\
+\code{ml_importance} (walk-forward importance)      & \code{regime_conditional}, \code{signal_book} \\
+\code{triple_barrier}, \code{pca_combo}            & \code{targets} registry, \code{feature_ops} operators \\
+\hline
+\end{tabular}
+\caption{Implementation status. This is a methods/framework paper: the orthogonalization and
+degrees-of-freedom mathematics are the contribution, the implemented processes demonstrate the
+contract, and empirical estimation of $\Neff$ on a clean multi-day window is specified as future
+work---meaningful breadth estimates require more independent observations than a thin sample
+provides.}
+\label{tab:status}
+\end{table}
+
+\subsection{The end-to-end pipeline}
+
+The processes assemble into a single composition, each arrow a runner chain:
+\[
+\begin{array}{c}
+   \underbrace{\code{feature_ops}}_{\text{mint DOF}}
+   \;\to\;
+   \underbrace{\code{cmi_select}}_{\text{pick orthogonal}}
+   \;\to\;
+   \underbrace{\text{Target}}_{\text{which price action}}
+   \;\to\;
+   \\[2.4ex]
+   \underbrace{\text{evaluation}}_{\text{score in bits / IC}}
+   \;\to\;
+   \underbrace{\code{signal_book}}_{\text{book}+\Neff}
+   \;\to\;
+   \underbrace{\text{algorithm}}_{\text{risk-parity combine}} .
+\end{array}
+\]
+Two maturity gaps remain explicitly open. The first is execution realism: there is no fill/cost
+model node, and the fill-conditional target of Table~\ref{tab:targets} is the hook for the missing
+fourth citizen, where a mid-price edge becomes a transacted-price edge or does not. The second is the
+program-level multiple-testing ledger of Section~\ref{sec:hygiene}. Both are named here precisely so
+that no estimate downstream is mistaken for more than it is.
+
+% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+% ============================================================
+
+We have argued that the unit of microstructure research should be the \emph{process}: a typed,
+registry-bound analytical contract that certifies whether features carry non-redundant information
+about an explicit target. Around that unit we developed the two pieces of mathematics it exists to
+serve. Mutual information, justified by Fano's inequality as a hard floor on achievable error, is
+the right currency; and the effective degrees of freedom $\Neff=N/[1+(N-1)\rhobar]$, derived from
+the fundamental law of active management, is the right measure of a book's worth---with the
+stress-regime correlation, not the calm one, as the binding input. Orthogonal information is then
+extracted by five composable processes (conditional-MI selection, synergy mining, residualization,
+denoised principal components, and a capstone signal book), the target is made explicit along an
+aspect$\times$horizon taxonomy, and new degrees of freedom are minted by a derivative-operator layer
+under a program-level false-discovery ledger. The result is a single contract under which
+``does this feature add anything?'' and ``how many independent bets do we really have?'' become
+routine, testable, reproducible queries rather than one-off scripts. The empirical estimation of
+$\Neff$ on a clean longitudinal window, and the execution-realism node that the fill-conditional
+target anticipates, are the natural next steps---and, by construction, each will arrive behind its
+own planted-signal gate.
+
+% ============================================================
+\section*{References}
+\addcontentsline{toc}{section}{References}
+% ============================================================
+
+\begin{enumerate}
+
+  \item Bailey, D.H., Borwein, J.M., L\'opez de Prado, M.\ \& Zhu, Q.J.\ (2014). Pseudo-mathematics
+        and financial charlatanism: the effects of backtest overfitting on out-of-sample
+        performance. \textit{Notices of the AMS}, 61(5), 458--471.
+
+  \item Battiti, R.\ (1994). Using mutual information for selecting features in supervised neural net
+        learning. \textit{IEEE Transactions on Neural Networks}, 5(4), 537--550.
+
+  \item Benjamini, Y.\ \& Hochberg, Y.\ (1995). Controlling the false discovery rate: a practical and
+        powerful approach to multiple testing. \textit{Journal of the Royal Statistical Society,
+        Series B}, 57(1), 289--300.
+
+  \item Brown, G., Pocock, A., Zhao, M.-J.\ \& Luj\'an, M.\ (2012). Conditional likelihood
+        maximisation: a unifying framework for information theoretic feature selection.
+        \textit{Journal of Machine Learning Research}, 13, 27--66.
+
+  \item Cont, R.\ (2001). Empirical properties of asset returns: stylized facts and statistical
+        issues. \textit{Quantitative Finance}, 1(2), 223--236.
+
+  \item Corsi, F.\ (2009). A simple approximate long-memory model of realized volatility.
+        \textit{Journal of Financial Econometrics}, 7(2), 174--196.
+
+  \item Cover, T.M.\ \& Thomas, J.A.\ (2006). \textit{Elements of Information Theory}, 2nd ed.\
+        Wiley-Interscience.
+
+  \item Grinold, R.C.\ (1989). The fundamental law of active management. \textit{Journal of Portfolio
+        Management}, 15(3), 30--37.
+
+  \item Grinold, R.C.\ \& Kahn, R.N.\ (2000). \textit{Active Portfolio Management}, 2nd ed.\
+        McGraw-Hill.
+
+  \item Hamilton, J.D.\ (1989). A new approach to the economic analysis of nonstationary time series
+        and the business cycle. \textit{Econometrica}, 57(2), 357--384.
+
+  \item Hasbrouck, J.\ (1995). One security, many markets: determining the contributions to price
+        discovery. \textit{Journal of Finance}, 50(4), 1175--1199.
+
+  \item Kraskov, A., St\"ogbauer, H.\ \& Grassberger, P.\ (2004). Estimating mutual information.
+        \textit{Physical Review E}, 69(6), 066138.
+
+  \item Kyle, A.S.\ (1985). Continuous auctions and insider trading. \textit{Econometrica}, 53(6),
+        1315--1335.
+
+  \item Laloux, L., Cizeau, P., Bouchaud, J.-P.\ \& Potters, M.\ (1999). Noise dressing of financial
+        correlation matrices. \textit{Physical Review Letters}, 83(7), 1467--1470.
+
+  \item Lee, S.S.\ \& Mykland, P.A.\ (2008). Jumps in financial markets: a new nonparametric test and
+        jump dynamics. \textit{Review of Financial Studies}, 21(6), 2535--2563.
+
+  \item L\'opez de Prado, M.\ (2018). \textit{Advances in Financial Machine Learning}. Wiley.
+        (Fractional differentiation, Ch.\ 5; triple-barrier labelling, Ch.\ 3; correlation-matrix
+        denoising.)
+
+  \item Marchenko, V.A.\ \& Pastur, L.A.\ (1967). Distribution of eigenvalues for some sets of random
+        matrices. \textit{Mathematics of the USSR-Sbornik}, 1(4), 457--483.
+
+  \item Peng, H., Long, F.\ \& Ding, C.\ (2005). Feature selection based on mutual information:
+        criteria of max-dependency, max-relevance, and min-redundancy. \textit{IEEE Transactions on
+        Pattern Analysis and Machine Intelligence}, 27(8), 1226--1238.
+
+  \item Politis, D.N.\ \& Romano, J.P.\ (1994). The stationary bootstrap. \textit{Journal of the
+        American Statistical Association}, 89(428), 1303--1313.
+
+  \item Schreiber, T.\ (2000). Measuring information transfer. \textit{Physical Review Letters},
+        85(2), 461--464.
+
+  \item Shannon, C.E.\ (1948). A mathematical theory of communication. \textit{Bell System Technical
+        Journal}, 27, 379--423, 623--656.
+
+  \item White, H.\ (2000). A reality check for data snooping. \textit{Econometrica}, 68(5),
+        1097--1126.
+
+  \item Williams, P.L.\ \& Beer, R.D.\ (2010). Nonnegative decomposition of multivariate information.
+        \textit{arXiv:1004.2515}.
+
+\end{enumerate}
+
+\end{document}
