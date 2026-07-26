@@ -44,6 +44,19 @@ window = 100                 # rolling window for Lee-Mykland statistic
 significance = 3.0           # z-threshold for jump detection
 reversion_horizon = 50       # ticks to measure post-jump reversion
 
+[jump_detector_v2]
+window = 100                 # rolling window for bipower product pool
+threshold_mode = "evt"       # "evt" (Lee-Mykland Gumbel critical value) or "fixed"
+significance = 3.0           # threshold when threshold_mode = "fixed"
+evt_alpha = 0.01             # Gumbel tail probability (family-wise false-jump rate)
+evt_block = 864000           # observations per EVT family (1 day @ 100ms)
+staggered_bv = true          # skip-one bipower (jump-masking + bounce robust)
+vol_floor_frac = 0.1         # post-shock vol floor: bv >= frac * |prev return|
+adaptive_horizon = true      # reversion horizon scales with jump statistic L
+reversion_horizon = 50       # fixed horizon / adaptive floor (ticks)
+horizon_per_l = 10.0         # adaptive: extra ticks per unit of L at detection
+horizon_max = 500            # adaptive cap (ticks)
+
 [bipower_jump]
 window = 100                 # rolling window for bipower variation
 

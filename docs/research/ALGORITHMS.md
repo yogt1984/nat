@@ -24,6 +24,18 @@ Detects jumps using bipower variation volatility, then enters mean-reversion aft
 - **Signal polarity:** low_long (low jump ratio = stable = long)
 - **Source:** `scripts/algorithms/jump_detector.py`
 
+#### Variant: jump_detector_v2 — [PRELIM], no OOS results yet
+
+Statistical upgrade of the winner, kept as a separate registered algorithm so the v1 baseline
+stays frozen for A/B: EVT (Gumbel) detection threshold per Lee-Mykland 2008 asymptotics
+(≈7.2 at 1-day blocks vs legacy fixed 3.0), staggered (skip-one) bipower variation
+(consecutive-jump masking + bid-ask-bounce robustness), post-shock vol floor, directional
+reversion routing (`alg_jd2_rev_up`/`alg_jd2_rev_down`), magnitude-adaptive reversion horizon.
+Planted 17/17 green; real-parquet smoke green (16.7M ticks). **Maturity: PRELIM** — promotion
+blocked on the v1-vs-v2 A/B over the next ≥30-clean-day window (Q3).
+- **Primary feature:** `alg_jd2_reversion`
+- **Source:** `scripts/algorithms/jump_detector_v2.py` · config `[jump_detector_v2]`
+
 ---
 
 ### 2. 3f_liquidity — Total +16,028 bps
