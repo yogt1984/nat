@@ -256,7 +256,7 @@ def _tmp(path: Path, size: int, now: float, mtime_age: float = 5.0):
     os.utime(path, (mt, mt))
 
 
-def _stall_alerter(tmp_path, data_dir, clock, restarts, managed=True):
+def _stall_alerter(tmp_path, data_dir, clock, restarts, managed=True, bare_restarts=None):
     return GapAlerter(
         config={
             "gap_threshold_s": 300, "row_threshold_s": 600, "poll_interval_s": 30,
@@ -271,6 +271,7 @@ def _stall_alerter(tmp_path, data_dir, clock, restarts, managed=True):
         heartbeat_path=tmp_path / "hb", pid_file=tmp_path / "pid",
         clock=clock, notify=False,
         restart_fn=lambda unit: restarts.append((clock(), unit)),
+        bare_restart_fn=(lambda: bare_restarts.append(clock())) if bare_restarts is not None else (lambda: None),
         unit_managed_fn=lambda unit: managed,
     )
 
@@ -387,16 +388,54 @@ class TestAutoRestartGuards:
             self._drive_stall(a, f, clk, 1000)   # stalls again → restarts allowed afresh
         assert len(restarts) == 3                # 1 + 2 (count was reset)
 
-    def test_no_restart_when_unit_not_managed(self, tmp_path):
+    def test_stall_bare_restarts_when_unit_not_managed(self, tmp_path):
+        # OPS-3: no systemd unit → gap_alert is the only safety net, so a stall
+        # must be remediated via the bare `nat stop && nat start` path (NOT systemd).
         clk = {"now": 3_000_000.0}
         data = tmp_path / "features"
         f = data / "2026-06-15" / "live.parquet.tmp"
-        restarts = []
-        a = _stall_alerter(tmp_path, data, lambda: clk["now"], restarts, managed=False)
+        restarts, bare = [], []
+        a = _stall_alerter(tmp_path, data, lambda: clk["now"], restarts,
+                           managed=False, bare_restarts=bare)
         _tmp(f, 100, clk["now"]); a.check()
         st = self._drive_stall(a, f, clk, 1000)
         assert st.stalled is True            # still detected + alerted
-        assert restarts == []                # but not auto-restarted (no systemd unit)
+        assert restarts == []                # systemd path NOT used (no unit)
+        assert len(bare) == 1                # bare-process restart fired instead
+
+    def test_mtime_gap_bare_restarts_when_not_managed(self, tmp_path):
+        # OPS-3 incident regression: a fully hung process lets file mtimes go stale
+        # (an mtime gap, not a "stall"). With no systemd unit, gap_alert must still
+        # force a restart — this is exactly the 8.6-day Jul-2026 zombie.
+        clk = {"now": 3_000_000.0}
+        data = tmp_path / "features"
+        f = data / "2026-06-15" / "live.parquet.tmp"
+        restarts, bare = [], []
+        a = _stall_alerter(tmp_path, data, lambda: clk["now"], restarts,
+                           managed=False, bare_restarts=bare)
+        _tmp(f, 100, clk["now"]); a.check()
+        clk["now"] += 1000
+        _tmp(f, 100, clk["now"], mtime_age=1000)   # mtime old too → mtime gap (hung)
+        st = a.check()
+        assert st.gapping is True and st.stalled is False
+        assert restarts == []                # systemd path NOT used
+        assert len(bare) == 1                # bare restart recovered the hung process
+
+    def test_mtime_gap_no_restart_when_systemd_managed(self, tmp_path):
+        # Contract preserved: on a systemd box, a dead/hung process (mtime gap) is
+        # systemd's job (Restart=always) — gap_alert must NOT restart it.
+        clk = {"now": 3_000_000.0}
+        data = tmp_path / "features"
+        f = data / "2026-06-15" / "live.parquet.tmp"
+        restarts, bare = [], []
+        a = _stall_alerter(tmp_path, data, lambda: clk["now"], restarts,
+                           managed=True, bare_restarts=bare)
+        _tmp(f, 100, clk["now"]); a.check()
+        clk["now"] += 1000
+        _tmp(f, 100, clk["now"], mtime_age=1000)   # mtime gap
+        st = a.check()
+        assert st.gapping is True and st.stalled is False
+        assert restarts == [] and bare == []       # neither path fires (systemd owns it)
 
 
 # ---------------------------------------------------------------------------

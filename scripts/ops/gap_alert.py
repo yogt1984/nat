@@ -297,6 +297,17 @@ def _systemctl_restart(unit: str) -> None:
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def _restart_via_nat() -> None:
+    """Restart a bare (non-systemd) ingestor via the nat CLI (`nat stop && nat start`).
+    Used on deployments with no systemd unit — e.g. the current cron-launched
+    process — where nothing else recovers a hung/dead ingestor (the Jul-2026 zombie
+    ran 8.6 days precisely because remediation was systemd-only)."""
+    import subprocess
+    nat = str(ROOT / "nat")
+    subprocess.run(f"{nat} stop && {nat} start", shell=True, check=False,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 class GapAlerter:
     def __init__(
         self,
@@ -309,6 +320,7 @@ class GapAlerter:
         notify: bool = True,
         restart_fn: Callable[[str], None] | None = None,
         unit_managed_fn: Callable[[str], bool] | None = None,
+        bare_restart_fn: Callable[[], None] | None = None,
     ):
         self.config = config or load_config()
         self.state_path = Path(state_path or self.config["state_path"])
@@ -331,8 +343,10 @@ class GapAlerter:
         self.restart_unit = self.config.get("restart_unit", "nat-ingestor.service")
         self.restart_cooldown = float(self.config.get("restart_cooldown_s", 600))
         self.max_restarts = int(self.config.get("max_consecutive_restarts", 3))
-        # Injectable for tests; real impls touch systemd only.
+        # Injectable for tests. systemd-managed boxes restart the unit; bare
+        # (cron-launched) boxes restart via `nat stop && nat start`.
         self._restart_fn = restart_fn or _systemctl_restart
+        self._bare_restart_fn = bare_restart_fn or _restart_via_nat
         self._unit_managed_fn = unit_managed_fn or _unit_is_managed
         # clock returns epoch seconds (matches file mtimes)
         self._clock = clock or time.time
@@ -392,19 +406,26 @@ class GapAlerter:
         stall_age = (self._now() - started) if started is not None else 0.0
         return path, size, grew_at, stall_age
 
-    def _maybe_remediate(self, now: float, now_iso: str, prev: GapState) -> tuple[str | None, int]:
-        """Auto-restart the ingestor on a confirmed stall. systemd-only, guarded by
-        a cooldown and a max-consecutive cap. Returns (last_restart_at, restart_count)."""
+    def _maybe_remediate(self, now: float, now_iso: str, prev: GapState,
+                         managed: bool) -> tuple[str | None, int]:
+        """Auto-restart the ingestor, guarded by a cooldown and a max-consecutive cap.
+        A systemd-managed box restarts the unit; a bare (cron-launched) box restarts
+        via `nat stop && nat start`. Returns (last_restart_at, restart_count)."""
         last, count = prev.last_restart_at, (prev.restart_count or 0)
-        if not self.auto_restart or not self._unit_managed_fn(self.restart_unit):
+        if not self.auto_restart:
             return last, count
         last_ts = _parse_iso(last)
         if last_ts is not None and (now - last_ts) < self.restart_cooldown:
             return last, count                      # cooldown
         if count >= self.max_restarts:
             return last, count                      # give up auto-restarting
-        self._restart_fn(self.restart_unit)
-        self._send(f"🔧 STALL REMEDIATION — restarted {self.restart_unit} "
+        if managed:
+            self._restart_fn(self.restart_unit)
+            target = self.restart_unit
+        else:
+            self._bare_restart_fn()
+            target = "local ingestor (nat stop && nat start)"
+        self._send(f"🔧 REMEDIATION — restarted {target} "
                    f"(attempt {count + 1}/{self.max_restarts}) at {now_iso}")
         return now_iso, count + 1
 
@@ -435,9 +456,14 @@ class GapAlerter:
             write_gap_state(self.state_path, st)
             return st
 
-        # Guarded auto-remediation runs every stalled cycle (subject to cooldown/cap).
-        if stalled:
-            restart_last, restart_count = self._maybe_remediate(now, now_iso, prev)
+        # Guarded auto-remediation (subject to cooldown/cap). A zombie *stall* is
+        # always remediable. A plain *mtime gap* (hung/dead process) is remediated
+        # here only when there is no systemd unit to own it — on a systemd box,
+        # Restart=always handles a dead process, so gap_alert defers to it.
+        managed = self._unit_managed_fn(self.restart_unit)
+        remediable = stalled or (mtime_gap and not managed)
+        if remediable:
+            restart_last, restart_count = self._maybe_remediate(now, now_iso, prev, managed)
         else:
             restart_last, restart_count = prev.last_restart_at, 0
 
