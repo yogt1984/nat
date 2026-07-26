@@ -10,6 +10,10 @@ url = "wss://api.hyperliquid.xyz/ws"
 reconnect_delay_ms = 1000
 max_reconnect_delay_ms = 30000
 ping_interval_ms = 30000
+# Max time for the handshake (+ subscribe) before the attempt is treated as failed
+# and fed to the reconnect backoff. Guards against a hung handshake blocking a symbol
+# task forever (the Jul-2026 zombie-ingestor incident).
+connect_timeout_ms = 30000
 
 [symbols]
 # Canonical symbol list — loaded from symbols_file at startup.

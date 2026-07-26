@@ -49,13 +49,23 @@ impl HyperliquidClient {
         }
     }
 
-    /// Connect and subscribe to channels
+    /// Connect and subscribe to channels.
+    ///
+    /// The handshake and the subscription writes are each bounded by
+    /// `config.connect_timeout_ms`: a hung TCP/TLS/WS handshake (or a stuck
+    /// post-handshake send) returns `Err` — feeding the reconnect backoff — instead
+    /// of blocking the symbol task forever (the Jul-2026 zombie-ingestor failure).
     pub async fn connect(&mut self) -> Result<()> {
         info!(symbol = %self.symbol, url = %self.config.url, "Connecting to WebSocket");
 
-        let (stream, response) = connect_async(&self.config.url)
-            .await
-            .context("Failed to connect to WebSocket")?;
+        let timeout_ms = self.config.connect_timeout_ms;
+        let connect_timeout = std::time::Duration::from_millis(timeout_ms);
+
+        let (stream, response) =
+            tokio::time::timeout(connect_timeout, connect_async(&self.config.url))
+                .await
+                .with_context(|| format!("WebSocket handshake timed out after {timeout_ms}ms"))?
+                .context("Failed to connect to WebSocket")?;
 
         debug!(?response, "WebSocket connected");
 
@@ -68,10 +78,22 @@ impl HyperliquidClient {
         self.first_message_logged = false;
         self.message_count = 0;
 
-        // Subscribe to channels
-        self.subscribe().await?;
-
-        Ok(())
+        // Bound the subscription writes too — a stuck send is the same silent-hang
+        // class as the handshake. On timeout/error, drop the stream so the client is
+        // not left falsely "connected".
+        match tokio::time::timeout(connect_timeout, self.subscribe()).await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => {
+                self.stream = None;
+                Err(e).context("WebSocket subscribe failed")
+            }
+            Err(_elapsed) => {
+                self.stream = None;
+                Err(anyhow::anyhow!(
+                    "WebSocket subscribe timed out after {timeout_ms}ms"
+                ))
+            }
+        }
     }
 
     /// Subscribe to all required channels
@@ -291,6 +313,7 @@ mod tests {
             reconnect_delay_ms: 1000,
             max_reconnect_delay_ms: 30000,
             ping_interval_ms: 30000,
+            connect_timeout_ms: 30000,
         }
     }
 
@@ -452,12 +475,14 @@ mod tests {
             reconnect_delay_ms: 500,
             max_reconnect_delay_ms: 60000,
             ping_interval_ms: 15000,
+            connect_timeout_ms: 12345,
         };
         let client = HyperliquidClient::new(&config, "SOL");
         assert_eq!(client.config.url, "wss://custom.endpoint/ws");
         assert_eq!(client.config.reconnect_delay_ms, 500);
         assert_eq!(client.config.max_reconnect_delay_ms, 60000);
         assert_eq!(client.config.ping_interval_ms, 15000);
+        assert_eq!(client.config.connect_timeout_ms, 12345);
         assert_eq!(client.symbol, "SOL");
     }
 
@@ -506,5 +531,61 @@ mod tests {
         assert_eq!(delay_10, delay_11);
         assert_eq!(delay_10, delay_20);
         assert_eq!(delay_10, 1024000);
+    }
+
+    // --- OPS-1: connect handshake timeout (planted regression for the Jul-2026 zombie) ---
+
+    /// Planted regression: a peer that accepts TCP but never completes the WebSocket
+    /// handshake must make `connect()` return `Err` quickly (feeding the reconnect
+    /// backoff), NOT block forever. This is the exact Jul-2026 failure mode where all
+    /// symbol tasks logged "Connecting to WebSocket" and never logged again.
+    ///
+    /// Red (before the fix): `connect()` hangs on `connect_async`; the 5s outer guard
+    /// trips and the first assert fails. Green (after): it times out in ~connect_timeout_ms.
+    #[tokio::test]
+    async fn planted_connect_times_out_on_silent_handshake() {
+        // A listener that accepts connections and holds them open, sending nothing.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            loop {
+                match listener.accept().await {
+                    Ok((sock, _)) => held.push(sock), // hold open, never respond
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let config = WebSocketConfig {
+            url: format!("ws://{addr}"),
+            connect_timeout_ms: 300, // short bound for the test
+            ..test_config()
+        };
+        let mut client = HyperliquidClient::new(&config, "BTC");
+
+        let started = std::time::Instant::now();
+        // Outer guard so a regression shows as a clean assertion failure, not a hung run.
+        let guarded =
+            tokio::time::timeout(std::time::Duration::from_secs(5), client.connect()).await;
+        let elapsed = started.elapsed();
+
+        assert!(
+            guarded.is_ok(),
+            "connect() hung >5s on a silent handshake instead of timing out (OPS-1 regression)"
+        );
+        let result = guarded.unwrap();
+        assert!(
+            result.is_err(),
+            "connect() must return Err on a silent handshake"
+        );
+        assert!(
+            !client.is_connected(),
+            "client must not be marked connected after a handshake timeout"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "connect() should fail fast (~300ms), took {elapsed:?}"
+        );
     }
 }

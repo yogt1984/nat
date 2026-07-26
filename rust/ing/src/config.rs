@@ -82,6 +82,11 @@ pub struct WebSocketConfig {
     pub max_reconnect_delay_ms: u64,
     #[serde(default = "default_ping_interval")]
     pub ping_interval_ms: u64,
+    /// Max time for the TCP/TLS/WS handshake (+ subscribe) before the attempt is
+    /// treated as failed and fed to the reconnect backoff. Without this bound a
+    /// hung handshake blocks the symbol task forever (the Jul-2026 zombie incident).
+    #[serde(default = "default_connect_timeout")]
+    pub connect_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -224,6 +229,9 @@ fn default_max_reconnect_delay() -> u64 {
 fn default_ping_interval() -> u64 {
     30000
 }
+fn default_connect_timeout() -> u64 {
+    30000
+}
 fn default_format() -> String {
     "parquet".to_string()
 }
@@ -347,6 +355,7 @@ impl Default for Config {
                 reconnect_delay_ms: default_reconnect_delay(),
                 max_reconnect_delay_ms: default_max_reconnect_delay(),
                 ping_interval_ms: default_ping_interval(),
+                connect_timeout_ms: default_connect_timeout(),
             },
             symbols: SymbolsConfig {
                 assets: vec!["BTC".to_string(), "ETH".to_string(), "SOL".to_string()],
