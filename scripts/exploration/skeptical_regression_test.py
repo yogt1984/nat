@@ -427,9 +427,10 @@ def test_t7_nonoverlapping(X, y, horizon, seed=42):
     gross_pnl = positions * true_sampled
     avg_gross_bps = float(np.mean(gross_pnl) * 10000)
 
-    taker_cost_bps = 8.0
+    from utils.costs import maker_bps, round_trip_taker_bps
+    taker_cost_bps = round_trip_taker_bps()          # SSOT round-trip taker (was 8.0)
     avg_net_bps = avg_gross_bps - taker_cost_bps
-    maker_cost_bps = 1.0
+    maker_cost_bps = 2 * maker_bps()                 # SSOT round-trip maker (was 1.0)
     avg_net_maker_bps = avg_gross_bps - maker_cost_bps
 
     win_rate = float(np.mean(gross_pnl > 0)) if n_trades > 0 else 0.0

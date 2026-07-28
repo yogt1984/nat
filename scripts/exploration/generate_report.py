@@ -245,7 +245,8 @@ def _backtest_funding(df: pd.DataFrame, symbol: str, timeframe: str) -> dict:
     returns = np.diff(prices) / prices[:-1]
     strat_returns = sig * returns
 
-    cost_per_trade = 0.00035
+    from utils.costs import taker_bps
+    cost_per_trade = taker_bps() / 10000  # config taker fee as a fraction
     position_changes = np.abs(np.diff(np.concatenate([[0], sig])))
     costs = position_changes * cost_per_trade
     net_returns = strat_returns - costs

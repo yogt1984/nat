@@ -249,7 +249,8 @@ def test_3_confidence_filtered(df: pl.DataFrame, feature_cols: list, spread_bps:
     print("TEST 3: Confidence-Filtered Trading (the real test)")
     print("=" * 60)
 
-    taker_fee_bps = 3.5
+    from utils.costs import taker_bps
+    taker_fee_bps = taker_bps()
     half_spread_bps = spread_bps / 2
     round_trip_cost = 2 * (taker_fee_bps + half_spread_bps) / 10000
 
@@ -534,7 +535,8 @@ def reg_test_3_quantile_pnl(df: pl.DataFrame, feature_cols: list, spread_bps: fl
     print("REG TEST 3: Quantile-Based Trading (the real test)")
     print("=" * 60)
 
-    taker_fee_bps = 3.5
+    from utils.costs import taker_bps
+    taker_fee_bps = taker_bps()
     half_spread_bps = spread_bps / 2
     round_trip_cost = 2 * (taker_fee_bps + half_spread_bps) / 10000
     maker_round_trip = 2 * half_spread_bps / 10000

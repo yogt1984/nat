@@ -188,7 +188,8 @@ def run_backtest(
     if abs(q) > 0.01:
         # Force close at last midprice (market order — pay taker fee)
         last_mid = midprices[N - 1]
-        taker_fee = 3.5 / 10000.0 * last_mid
+        from utils.costs import taker_bps
+        taker_fee = taker_bps() / 10000.0 * last_mid
         liquidation_pnl = -abs(q) * taker_fee  # just the fee cost
         cumulative_pnl += liquidation_pnl
         q = 0.0

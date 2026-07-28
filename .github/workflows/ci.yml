@@ -116,6 +116,8 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.lock
+      - name: Cost guardrail (no hardcoded fees outside the SSOT)
+        run: bash scripts/ops/check_no_hardcoded_costs.sh
       - name: Run tests
         run: |
           python -m pytest scripts/tests/ -x -q \
