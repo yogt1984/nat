@@ -21,7 +21,7 @@ from datetime import datetime
 # Add scripts directory to path for imports
 
 from backtest.data_loader import load_features
-from backtest.costs import CostModel, hyperliquid_taker, conservative
+from backtest.costs import cost_model_from_name
 from backtest.engine import run_backtest
 from backtest.walk_forward import walk_forward_validation
 from backtest.ml_strategy import create_ml_strategy, join_predictions_with_features
@@ -92,13 +92,11 @@ def main():
     print("ML BACKTEST WITH TRACKING")
     print("=" * 70)
 
-    # Select cost model
-    if args.cost_model == "taker":
-        cost_model = hyperliquid_taker()
-    elif args.cost_model == "conservative":
-        cost_model = conservative()
-    else:
-        cost_model = CostModel(fee_bps=0, slippage_bps=0)
+    # Select cost model (COST-2: unknown names hard-error, never a silent zero-cost run)
+    try:
+        cost_model = cost_model_from_name(args.cost_model)
+    except ValueError as e:
+        parser.error(str(e))
 
     # Load data
     print(f"\nLoading data for {args.symbol} from {args.data_dir}...")

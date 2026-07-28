@@ -189,7 +189,8 @@ def _eval_fold_metrics(
     composite_ic, _ = spearmanr(tc, tr)
     dir_acc = np.mean(np.sign(tc) == np.sign(tr))
 
-    cost_bps = 11e-4
+    from utils.costs import round_trip_taker_bps
+    cost_bps = round_trip_taker_bps() / 10000  # per-turn round-trip taker as a fraction (SSOT)
     signal_returns = np.sign(tc) * tr - cost_bps * (np.abs(np.diff(np.sign(tc), prepend=0)) > 0)
     sharpe_proxy = np.mean(signal_returns) / max(np.std(signal_returns), 1e-8) * np.sqrt(252 * 288)
 

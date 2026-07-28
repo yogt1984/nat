@@ -16,7 +16,7 @@ from pathlib import Path
 
 from backtest.data_loader import load_features, validate_features_for_strategy
 from backtest.strategy import get_strategy, get_all_strategies
-from backtest.costs import CostModel, hyperliquid_taker, conservative
+from backtest.costs import cost_model_from_name
 from backtest.engine import run_backtest
 from backtest.walk_forward import walk_forward_validation
 from backtest.ml_strategy import (
@@ -153,13 +153,11 @@ Examples:
                 print(f"  Description: {strategy.description}")
         return
 
-    # Select cost model
-    if args.cost_model == "taker":
-        cost_model = hyperliquid_taker()
-    elif args.cost_model == "conservative":
-        cost_model = conservative()
-    else:
-        cost_model = CostModel(fee_bps=0, slippage_bps=0)
+    # Select cost model (COST-2: unknown names hard-error, never a silent zero-cost run)
+    try:
+        cost_model = cost_model_from_name(args.cost_model)
+    except ValueError as e:
+        parser.error(str(e))
 
     print(f"Cost Model: {cost_model}")
 

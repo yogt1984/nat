@@ -588,18 +588,21 @@ if __name__ == "__main__":
     df = load_symbol("BTC")
     print(f"Loaded {len(df):,} rows, {df['ts'].min()} to {df['ts'].max()}")
 
-    # Run all analyses
+    # Run all analyses (fees from the SSOT — config/costs.toml via utils.costs)
+    from utils.costs import maker_bps, round_trip_taker_bps
+    rt_taker = round_trip_taker_bps()
     funding_rate_mechanics(df)
     analyze_funding_persistence(df)
     analyze_adverse_drift(df)
-    simulate_carry_trades(df, fee_bps=7.0)
-    feature_conditioned_carry(df, fee_bps=7.0)
-    multi_symbol_carry(fee_bps=7.0)
+    simulate_carry_trades(df, fee_bps=rt_taker)
+    feature_conditioned_carry(df, fee_bps=rt_taker)
+    multi_symbol_carry(fee_bps=rt_taker)
 
     # Also test with maker fees (lower)
+    maker_rt = 2 * maker_bps()
     print("\n" + "=" * 80)
-    print("7. SENSITIVITY: MAKER FEES (2 bps RT instead of 7)")
+    print(f"7. SENSITIVITY: MAKER FEES ({maker_rt} bps RT instead of {rt_taker})")
     print("=" * 80)
-    simulate_carry_trades(df, fee_bps=2.0)
+    simulate_carry_trades(df, fee_bps=maker_rt)
 
     print("\nDone.")

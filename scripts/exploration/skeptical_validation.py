@@ -1107,10 +1107,11 @@ def test_transaction_cost_survival(df: pd.DataFrame, report: ValidationReport, o
 
     returns = df["returns"].dropna().values
 
-    # Hyperliquid costs
-    maker_fee = 0.0002  # 2 bps
-    taker_fee = 0.0005  # 5 bps
-    spread_cost = 0.0003  # 3 bps average
+    # Hyperliquid costs (fees from the SSOT — config/costs.toml via utils.costs)
+    from utils.costs import maker_bps, taker_bps
+    maker_fee = maker_bps() / 10000
+    taker_fee = taker_bps() / 10000
+    spread_cost = 0.0003  # 3 bps average spread (modeling assumption, not a fee)
     round_trip = 2 * taker_fee + spread_cost  # Conservative
 
     # What edge is needed to survive costs?

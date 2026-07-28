@@ -1,11 +1,21 @@
 """
 Cost Model for NAT Backtester
 
-Realistic transaction cost modeling for Hyperliquid perpetuals.
+Realistic transaction cost modeling for Hyperliquid perpetuals. Fees come from the
+single source of truth (config/costs.toml via utils.costs) — never hardcode them here.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
+
+try:
+    from utils.costs import maker_bps, taker_bps
+except ImportError:  # pragma: no cover - path bootstrap for direct/script imports
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from utils.costs import maker_bps, taker_bps
 
 
 @dataclass
@@ -16,25 +26,21 @@ class CostModel:
     Attributes
     ----------
     fee_bps : float
-        Trading fee in basis points (1 bp = 0.01%)
-        Hyperliquid: ~2.5 bps maker, ~5 bps taker
+        Trading fee in basis points (1 bp = 0.01%). Defaults to the config taker fee
+        (config/costs.toml `hyperliquid.taker_bps`) — the single source of truth.
     slippage_bps : float
-        Expected slippage in basis points
-        Depends on order size and liquidity
+        Expected slippage in basis points. Depends on order size and liquidity.
     funding_enabled : bool
-        Whether to apply funding rate costs
-        (requires funding_rate column in data)
+        Whether to apply funding rate costs (requires funding_rate column in data).
 
     Notes
     -----
-    Hyperliquid fee structure (as of 2026):
-    - Maker: 0.02% (2 bps) - adds liquidity
-    - Taker: 0.05% (5 bps) - removes liquidity
-
-    For backtesting, assume taker fees (conservative).
+    Hyperliquid fees live in config/costs.toml (taker 3.5 bps, maker 0.2 bps rebate as
+    of 2026). This model defaults to the taker fee — always sourced from that file, so a
+    fee change ripples everywhere. Slippage is a modeling assumption (no config key yet).
     """
 
-    fee_bps: float = 5.0  # Taker fee
+    fee_bps: float = field(default_factory=taker_bps)  # config taker fee (SSOT)
     slippage_bps: float = 2.0  # Conservative slippage estimate
     funding_enabled: bool = False
     fill_probability: float = 1.0  # Probability an order fills (1.0 = always)
@@ -48,33 +54,25 @@ class CostModel:
             raise ValueError(f"fill_probability must be in (0, 1], got {self.fill_probability}")
 
     @classmethod
-    def from_config(cls, path: str = "config/costs.toml",
+    def from_config(cls, path: str | None = None,
                     venue: str = "hyperliquid",
                     role: str = "taker") -> "CostModel":
-        """Load from shared costs.toml.
+        """Build from the shared cost SSOT (config/costs.toml via utils.costs).
 
         Parameters
         ----------
-        path : config file path
+        path : accepted for backwards-compat but ignored — utils.costs owns resolution.
         venue : "hyperliquid" or "binance"
         role : "taker" or "maker"
         """
-        import os
-        try:
-            import tomllib
-        except ImportError:
-            import tomli as tomllib
+        from utils.costs import load_costs, maker_bps, taker_bps
 
-        if not os.path.exists(path):
-            return cls()  # defaults
-
-        with open(path, "rb") as f:
-            raw = tomllib.load(f)
-
-        section = raw.get(venue, {})
-        fee = section.get(f"{role}_bps", 3.5)
-        slip = section.get("slippage_bps", 2.0)
-        return cls(fee_bps=fee, slippage_bps=slip)
+        if venue == "hyperliquid":
+            fee = maker_bps() if role == "maker" else taker_bps()
+        else:
+            section = load_costs().get(venue, {})
+            fee = section.get(f"{role}_bps", taker_bps())
+        return cls(fee_bps=fee)
 
     @property
     def one_way_cost_bps(self) -> float:
@@ -284,3 +282,26 @@ def conservative() -> CostModel:
 def zero_cost() -> CostModel:
     """Zero cost model - only for debugging, not real backtests."""
     return CostModel(fee_bps=0.0, slippage_bps=0.0)
+
+
+# Named presets selectable via a `--cost-model` flag.
+_COST_PRESETS = {
+    "taker": hyperliquid_taker,
+    "maker": hyperliquid_maker,
+    "conservative": conservative,
+    "zero": zero_cost,  # explicit opt-in only — never an accidental fallback
+}
+
+
+def cost_model_from_name(name: str) -> CostModel:
+    """Resolve a ``--cost-model`` preset name to a CostModel.
+
+    Unknown names raise ValueError (COST-2): a mistyped or empty preset must fail loudly,
+    never silently produce a cost-free backtest. Zero cost requires the explicit "zero".
+    """
+    try:
+        return _COST_PRESETS[name]()
+    except KeyError:
+        raise ValueError(
+            f"unknown --cost-model {name!r}; choose one of {sorted(_COST_PRESETS)}"
+        ) from None
