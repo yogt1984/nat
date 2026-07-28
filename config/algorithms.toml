@@ -210,3 +210,17 @@ ic_threshold = 0.03          # minimum |IC| for retention
 fdr_q = 0.05                 # BH-FDR significance level
 train_ratio = 0.60           # walk-forward split
 min_events = 100             # minimum n_e for stable SVD
+
+# ── Group K: Execution / VPIN-gated reversion ────────────────────
+
+[toxic_vwap_reversion]
+# GAP-03: fade the micro-VWAP deviation z-score only in low-toxicity states.
+# Direction from the deviation; permission (veto) from VPIN. See
+# docs/GAP__26_7_26.md/03_toxic_vwap_reversion.md.
+w_z = 96                     # z-score window for flow_vwap_deviation
+w_p = 288                    # percentile window for VPIN / spread gates
+k_entry = 2.0                # |z| entry threshold (fade beyond this)
+k_exit = 0.5                 # |z| exit threshold (position-side)
+theta_pct = 0.70             # gate OPEN when VPIN percentile < theta (stand aside above)
+spread_pct_max = 0.90        # skip when spread percentile >= this (no blown spreads)
+size_by_toxicity = true      # scale size by (1 - vpin_pct) within the gate
