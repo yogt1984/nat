@@ -26,13 +26,13 @@ from train_regime_gmm import (  # noqa: E402
 )
 
 
-# The real emitted schema names for the 5-D regime space (verified against parquet).
+# The real emitted schema names for the 5-D regime space (100%-finite, fast-warmup).
 REAL_NAMES = [
     "illiq_kyle_500",
     "toxic_vpin_50",
-    "regime_absorption_zscore",
+    "derived_regime_type_score",
     "trend_hurst_300",
-    "whale_flow_normalized_4h",
+    "vol_returns_5m",
 ]
 
 
@@ -85,6 +85,17 @@ class TestFeatureColumnResolution:
         self._write_parquet(tmp_path, REAL_NAMES[:-1])  # drop one required feature
         with pytest.raises(ValueError):
             load_features(tmp_path)
+
+    def test_drops_non_finite_rows(self, tmp_path):
+        # The Rust ingestor NaN-pads warmup; those rows must be dropped, not fed to sklearn.
+        n = 300
+        rng = np.random.default_rng(0)
+        data = {c: rng.standard_normal(n) for c in REAL_NAMES}
+        data[REAL_NAMES[0]][:50] = np.nan  # 50 warmup-style NaN rows in one feature
+        pl.DataFrame(data).write_parquet(tmp_path / "day.parquet")
+        X, _ = load_features(tmp_path)
+        assert np.isfinite(X).all()
+        assert X.shape[0] == 250  # the 50 NaN rows dropped
 
 
 if __name__ == "__main__":

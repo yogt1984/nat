@@ -36,10 +36,10 @@ book_levels = 10
 # Price buffer size (for volatility/entropy calculations)
 price_buffer_size = 1000
 
-# GMM regime classifier model path (optional)
-# When set, features will include regime classification (Accumulation/Distribution/etc)
-# Train with: make train_gmm
-# gmm_model_path = "models/regime_gmm.json"
+# GMM regime classifier model path (optional; relative paths resolve from rust/).
+# When set, the ingestor populates the gmm_classification feature category live.
+# Train with: python scripts/train_regime_gmm.py --data-dir data/features/<day>
+gmm_model_path = "../models/regime_gmm.json"
 
 # Trade-size whale flow detection
 # Classifies trades above threshold as whale activity, feeding 12 whale_flow features
