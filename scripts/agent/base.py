@@ -19,6 +19,14 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
 
+# BUG-2: make scripts/ importable so top-level modules like `logging_config` resolve when a
+# daemon runs as `python scripts/agent/<x>.py` (sys.path[0]=scripts/agent/). The editable
+# install exposes packages, not loose top-level modules. Idempotent.
+import sys
+_SCRIPTS_ROOT = str(Path(__file__).resolve().parent.parent)
+if _SCRIPTS_ROOT not in sys.path:
+    sys.path.insert(0, _SCRIPTS_ROOT)
+
 from .hypothesis import Hypothesis, GeneratorStats
 from .hypothesis_queue import HypothesisQueue
 from .state_machine import (
