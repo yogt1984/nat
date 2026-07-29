@@ -183,6 +183,32 @@ cascade_probability) — convolver's diagnosed cause: `bar_agg="mean"` dilutes a
 Tier-3 in May but ranked #1/#3 on Jun-1 (lookahead-fix commits `1470d9c`/`5a9aa79`, regime change,
 or single-day noise — unresolved). Single day: no statistical significance claimed.
 
+### 4.5 VWAP-reversion × VPIN gate (2026-07-29 — GAP-01/03, 58-day walk-forward, SSOT costs)
+
+*Source: `paper_trader_generic --cost-mode config`, `toxic_vwap_reversion` (GAP-03, VPIN-gated
+fade) vs `vwap_reversion` (GAP-01, ungated fade). Both trade their signed `_signal`, so the only
+difference is the gate. Costs from the unified SSOT (COST-1/2/3).*
+
+Net bps / Sharpe (58 days, BTC/ETH/SOL):
+
+| Algorithm | BTC | ETH | SOL |
+|---|---|---|---|
+| `vwap_reversion` (ungated) | −25566 / −15.1 | −41052 / −13.8 | −29929 / −8.3 |
+| `toxic_vwap_reversion` (gated) | −30958 / −8.1 | −32701 / −8.1 | −22651 / −6.1 |
+
+1. **Neither survives taker costs** — deeply net-negative on all three symbols (~50 trades/day ×
+   taker fees bleed the tick-derived edge dry). Reconfirms Spannung Phase B with the fixed cost model.
+2. **The VPIN gate is directionally validated** — `toxic_vwap_reversion` beats the ungated baseline on
+   **Sharpe on all three symbols** (BTC −8.1 vs −15.1; ETH −8.1 vs −13.8; SOL −6.1 vs −8.3) and on
+   total bps for ETH/SOL: the gate removes the adverse-selection loss tail exactly as theorised — but
+   the improvement is far too small to overcome taker fees. "Directionally correct but insufficient."
+3. **Tick-level IC ≠ tradeable edge:** ungated IC@50t (+0.1215) actually *exceeds* gated (+0.107); the
+   gate's value is a net-of-cost / Sharpe effect, invisible in raw IC.
+
+**Implication:** the taker path for VWAP-reversion is dead. The only viable route is maker / zero-fee
+execution — GAP-04 `microprice_maker_sim` (HF1) and GAP-05 Q2.6 OU-Kalman — which attack the
+fill-conditional collapse instead of paying taker fees. This is the Q5 decision structure.
+
 ## 5. Combination, gating & regime
 
 - **Hierarchical combiner** (2026-06-10; ⚠️ 2-day OOS 06-08→10, 4-fold, 100-bar embargo):
