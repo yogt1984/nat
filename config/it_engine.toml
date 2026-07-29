@@ -23,3 +23,11 @@ entropy_conditioning = [
 
 # Costs: loaded from config/costs.toml (override here if needed)
 # [it_engine.costs]
+
+# PROC-12: null-calibration (permutation-null baseline for every IT estimate).
+# Findings are reported as bits-above-null / z / p, not raw bits.
+[null_calibration]
+n_shuffles = 200          # permutation-null draws per estimate
+null_z_threshold = 3.0    # z >= this to call a finding informative
+i_min = 0.0               # minimum bits-above-null (additional effect-size gate)
+method = "shuffle"        # "shuffle" (i.i.d. permutation) | "circular" (preserves autocorr)
