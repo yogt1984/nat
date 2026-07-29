@@ -36,25 +36,29 @@ except ImportError:
     sys.exit(1)
 
 
-# Feature columns for the 5D regime space — REAL emitted schema names
-# (verified against names_all() / the parquet; BUG-3 blocker-1: the old names
-# `ill_kyle_lambda_300` / `tox_vpin_50` / `regime_absorption_zscore_300` /
-# `whale_net_flow_4h_norm` matched no column, so training raised "Missing features").
+# Feature columns for the 5D regime space — REAL, fully-populated schema names.
+# BUG-3: the original names (`ill_kyle_lambda_300`, `tox_vpin_50`,
+# `regime_absorption_zscore_300`, `whale_net_flow_4h_norm`) matched no column, so
+# training raised "Missing features". On real data, `regime_absorption_zscore` is
+# structurally always-NaN (a separate dead feature) and the whale-flow features are only
+# ~69% finite (position-tracker/window warmup, reset by restarts). To make the classifier
+# trainable AND robustly live-populated, the 5D space uses five 100%-finite, fast-warmup
+# axes: liquidity, informed-flow, regime-score, persistence, volatility.
 FEATURE_COLUMNS = [
-    "illiq_kyle_500",           # Kyle's Lambda (liquidity)
-    "toxic_vpin_50",            # VPIN (informed trading)
-    "regime_absorption_zscore", # Absorption ratio z-score
-    "trend_hurst_300",          # Hurst exponent (persistence)
-    "whale_flow_normalized_4h", # Whale net flow (institutional, normalized)
+    "illiq_kyle_500",            # Kyle's Lambda (liquidity / price impact)
+    "toxic_vpin_50",             # VPIN (informed-trading probability)
+    "derived_regime_type_score", # Regime/positioning score (accumulation <-> distribution)
+    "trend_hurst_300",           # Hurst exponent (trend persistence)
+    "vol_returns_5m",            # Realized volatility (regime intensity)
 ]
 
-# Alternative column names if the above aren't found (schema drift / partial data).
+# Alternative column names if a primary is absent (schema drift / partial data).
 FEATURE_ALTERNATIVES = {
-    "illiq_kyle_500": ["illiq_kyle_100", "regime_kyle_lambda", "illiq_composite"],
+    "illiq_kyle_500": ["illiq_kyle_100", "illiq_composite"],
     "toxic_vpin_50": ["toxic_vpin_10"],
-    "regime_absorption_zscore": ["regime_absorption_4h"],
+    "derived_regime_type_score": ["derived_regime_indicator"],
     "trend_hurst_300": ["trend_hurst_600"],
-    "whale_flow_normalized_4h": ["whale_net_flow_4h", "whale_flow_normalized_1h"],
+    "vol_returns_5m": ["vol_returns_1m"],
 }
 
 
@@ -127,9 +131,19 @@ def load_features(data_dir: Path, sample_frac: float = 1.0) -> Tuple[np.ndarray,
 
     # Select and drop nulls
     df_features = df.select(actual_columns).drop_nulls()
-    print(f"After dropping nulls: {len(df_features)} rows")
 
     X = df_features.to_numpy()
+    # Polars distinguishes null from float NaN; the Rust ingestor NaN-pads warmup and
+    # optional-category values, so also drop non-finite rows before fitting the GMM
+    # (sklearn's GaussianMixture rejects NaN).
+    finite = np.isfinite(X).all(axis=1)
+    n_dropped = int((~finite).sum())
+    X = X[finite]
+    print(f"After dropping nulls + {n_dropped} non-finite rows: {len(X)} rows")
+
+    if len(X) == 0:
+        raise ValueError("No finite rows remain after filtering — check feature population")
+
     return X, df
 
 
