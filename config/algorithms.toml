@@ -224,3 +224,10 @@ k_exit = 0.5                 # |z| exit threshold (position-side)
 theta_pct = 0.70             # gate OPEN when VPIN percentile < theta (stand aside above)
 spread_pct_max = 0.90        # skip when spread percentile >= this (no blown spreads)
 size_by_toxicity = true      # scale size by (1 - vpin_pct) within the gate
+
+[vwap_reversion]
+# GAP-01: ungated micro-VWAP mean-reversion (the control for toxic_vwap_reversion).
+z_window = 96                # z-score window for flow_vwap_deviation
+k_entry = 2.0                # |z| entry threshold (fade beyond this)
+k_exit = 0.5                 # |z| exit threshold (position-side)
+max_hold = 12                # max bars to hold (position-side)
