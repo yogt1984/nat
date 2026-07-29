@@ -38,6 +38,16 @@ class MicropriceMakerSim:
         self.timeout = timeout  # ticks a quote rests before it is pulled
         self.min_gap = min_gap  # min ticks between successive quote decisions
 
+    def quotes(self, center: float, spread: float, vol: float, inv: float) -> tuple[float, float]:
+        """(bid, ask) around an inventory-skewed reservation price.
+
+        reservation = center - eta * inv * vol   (long inventory -> quotes shift down)
+        half-width  = spread/2 + c_vol * vol      (spread floor + volatility cushion)
+        """
+        reservation = center - self.eta * inv * vol
+        delta = 0.5 * spread + self.c_vol * vol
+        return reservation - delta, reservation + delta
+
     def simulate(self, mid, center, spread, vol, gate_open) -> list[FillEvent]:
         """Replay two-sided quoting over a mid-price path; return the fills.
 
@@ -68,10 +78,7 @@ class MicropriceMakerSim:
                 i += 1
                 continue
 
-            reservation = center[i] - self.eta * inv * vol[i]
-            delta = 0.5 * spread[i] + self.c_vol * vol[i]
-            bid = reservation - delta
-            ask = reservation + delta
+            bid, ask = self.quotes(center[i], spread[i], vol[i], inv)
             post_bid = inv < self.i_max - 1e-9      # room to buy
             post_ask = inv > -self.i_max + 1e-9     # room to sell
             if not (post_bid or post_ask):
@@ -97,3 +104,25 @@ class MicropriceMakerSim:
             i = (filled_at + 1) if filled_at is not None else (order_tick + self.timeout)
 
         return fills
+
+    @staticmethod
+    def markout(fills, mid, horizons=(1, 5, 30, 100)) -> dict:
+        """Mean post-fill markout in bps, per horizon.
+
+        markout_h = (mid[fill_tick + h] - fill_price) / fill_price * direction * 1e4,
+        where direction = +1 for a buy, -1 for a sell. Positive => the mid moved in our
+        favour after the fill (edge captured); negative => adverse selection. Horizons
+        with no measurable fills return NaN.
+        """
+        mid = np.asarray(mid, dtype=np.float64)
+        n = len(mid)
+        out: dict[int, float] = {}
+        for h in horizons:
+            vals = []
+            for f in fills:
+                t = f.fill_tick + h
+                if t < n and np.isfinite(mid[t]):
+                    direction = 1.0 if f.side == "buy" else -1.0
+                    vals.append((mid[t] - f.fill_price) / f.fill_price * direction * 1e4)
+            out[int(h)] = float(np.mean(vals)) if vals else float("nan")
+        return out
