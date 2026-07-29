@@ -36,19 +36,25 @@ except ImportError:
     sys.exit(1)
 
 
-# Feature columns for 5D regime space
+# Feature columns for the 5D regime space — REAL emitted schema names
+# (verified against names_all() / the parquet; BUG-3 blocker-1: the old names
+# `ill_kyle_lambda_300` / `tox_vpin_50` / `regime_absorption_zscore_300` /
+# `whale_net_flow_4h_norm` matched no column, so training raised "Missing features").
 FEATURE_COLUMNS = [
-    "ill_kyle_lambda_300",      # Kyle's Lambda (liquidity)
-    "tox_vpin_50",              # VPIN (informed trading)
-    "regime_absorption_zscore_300",  # Absorption ratio z-score
+    "illiq_kyle_500",           # Kyle's Lambda (liquidity)
+    "toxic_vpin_50",            # VPIN (informed trading)
+    "regime_absorption_zscore", # Absorption ratio z-score
     "trend_hurst_300",          # Hurst exponent (persistence)
-    "whale_net_flow_4h_norm",   # Whale net flow (institutional)
+    "whale_flow_normalized_4h", # Whale net flow (institutional, normalized)
 ]
 
-# Alternative column names if the above aren't found
+# Alternative column names if the above aren't found (schema drift / partial data).
 FEATURE_ALTERNATIVES = {
-    "regime_absorption_zscore_300": ["abs_zscore_300", "absorption_zscore"],
-    "whale_net_flow_4h_norm": ["whale_flow_4h", "whale_net_flow"],
+    "illiq_kyle_500": ["illiq_kyle_100", "regime_kyle_lambda", "illiq_composite"],
+    "toxic_vpin_50": ["toxic_vpin_10"],
+    "regime_absorption_zscore": ["regime_absorption_4h"],
+    "trend_hurst_300": ["trend_hurst_600"],
+    "whale_flow_normalized_4h": ["whale_net_flow_4h", "whale_flow_normalized_1h"],
 }
 
 
