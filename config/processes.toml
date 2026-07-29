@@ -9,6 +9,9 @@ timeframe = "15min"
 price_col = "raw_midprice"
 max_memory_mb = 4000
 
+[fdr]                           # PROC-13: Benjamini–Hochberg over every sweep's cells
+alpha = 0.05                    # q; a cell is a discovery iff its BH q-value <= alpha
+
 [ic_horizon]
 fdr_alpha = 0.05
 min_ic = 0.015

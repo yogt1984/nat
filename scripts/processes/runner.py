@@ -36,6 +36,9 @@ from processes.base import (  # noqa: E402
 )
 from processes.registry import get_process, list_processes  # noqa: E402
 from processes import persistence  # noqa: E402
+from processes.fdr import (  # noqa: E402
+    DEFAULT_FDR_ALPHA, apply_process_fdr, default_ledger_path, record_sweep,
+)
 
 log = logging.getLogger(__name__)
 
@@ -97,6 +100,38 @@ def _data_fingerprint(data_dir: Path, start_date, end_date) -> str:
     for f in sorted(data_dir.glob("**/*.parquet")):
         h.update(f"{f.relative_to(data_dir)}:{f.stat().st_size}\n".encode())
     return h.hexdigest()[:16]
+
+
+def _fdr_and_ledger(res: ProcessResult, ctx: ProcessContext, cfg: dict, save: bool) -> None:
+    """PROC-13: BH-correct a sweep's cells in place, then (when persisting) ledger the run.
+
+    Composes onto every evaluation result so no argmax is ever surfaced without its BH
+    q-value, and the sweep is recorded in the program-level ledger for cross-run accounting.
+    A result with no p-valued findings (e.g. a transform) is a no-op.
+    """
+    if not res.findings:
+        return
+    alpha = float((cfg.get("fdr", {}) or {}).get("alpha", DEFAULT_FDR_ALPHA))
+    rep = apply_process_fdr(res, alpha=alpha)
+    if rep.n_pvalued == 0:
+        return
+    res.summary["fdr"] = {
+        "alpha": rep.alpha, "n_cells": rep.n_cells, "n_pvalued": rep.n_pvalued,
+        "n_discoveries": rep.n_discoveries, "argmax": rep.argmax,
+    }
+    res.summary["n_informative"] = sum(1 for f in res.findings if f.informative)
+    if save:
+        record_sweep(
+            default_ledger_path(),
+            process=res.process,
+            target=ctx.target_col or "forward_return",
+            n_tested=rep.n_pvalued,
+            git_sha=(res.provenance or {}).get("git_sha"),
+            alpha=rep.alpha,
+            n_discoveries=rep.n_discoveries,
+            symbol=ctx.symbol,
+            timeframe=ctx.timeframe,
+        )
 
 
 def _resolve_bar_price_col(columns, price_col: str) -> str:
@@ -196,6 +231,8 @@ def run_process(
         "n_bars": n_bars,
         "fingerprint": _data_fingerprint(data_dir, start_date, end_date),
     }
+    # PROC-13: FDR-correct the sweep + ledger the run (no-op for transforms).
+    _fdr_and_ledger(result, ctx, cfg, save)
 
     # An errored or empty transform produces nothing worth saving or scoring
     if derived_df is not None and (result.summary.get("error") or derived_df.empty
@@ -219,6 +256,7 @@ def run_process(
         score_result = scorer.evaluate(score_frame, ctx)
         score_result.provenance = result.provenance
         score_result.data = result.data
+        _fdr_and_ledger(score_result, ctx, cfg, save)
         if save:
             persistence.save_result(score_result, out_dir=out_dir, db_path=db_path)
         if result.derived is not None:
