@@ -57,6 +57,16 @@ COST_MODEL = COST_PRESETS["config"]
 # "high_long" = high z-score → long (e.g., momentum).
 # "low_long"  = low z-score → long (e.g., entropy surprise, mean-reversion).
 ALGO_CONFIG = {
+    "vwap_reversion": {
+        "primary": "alg_vwaprev_signal",
+        "polarity": "high_long",  # signed fade: +1 long / -1 short (GAP-01 baseline)
+        "bar_agg": "mean",
+    },
+    "toxic_vwap_reversion": {
+        "primary": "alg_txvr_signal",
+        "polarity": "high_long",  # VPIN-gated signed fade — gate baked in (GAP-03)
+        "bar_agg": "mean",
+    },
     "entropy_momentum": {
         "primary": "alg_entropy_gated_momentum",
         "polarity": "high_long",
