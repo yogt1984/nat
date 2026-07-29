@@ -296,24 +296,23 @@ impl MarketState {
 
             // Run GMM classification if classifier is available
             if let Some(ref classifier) = self.regime_classifier {
-                // Extract 5D features for GMM input:
-                // [kyle_lambda, vpin, absorption_zscore, hurst, whale_net_flow]
+                // 5D GMM input — MUST match scripts/train_regime_gmm.py FEATURE_COLUMNS
+                // (identity + order): kyle_500, vpin_50, derived regime score, hurst_300,
+                // vol_5m. Classify only when all inputs are finite; otherwise
+                // gmm_classification stays None (NaN-padded) through warmup.
                 let gmm_input = [
-                    features.illiquidity.kyle_lambda_100, // Kyle's Lambda (closest to 300)
-                    features.toxicity.vpin_50,            // VPIN
-                    regime_features.absorption_zscore,    // Absorption z-score
-                    features.trend.hurst_300,             // Hurst exponent
-                    features
-                        .whale_flow
-                        .as_ref()
-                        .map(|wf| wf.whale_net_flow_1h)
-                        .unwrap_or(0.0), // Whale net flow (0 if not available)
+                    features.illiquidity.kyle_lambda_500,
+                    features.toxicity.vpin_50,
+                    features.derived.regime_type_score,
+                    features.trend.hurst_300,
+                    features.volatility.returns_5m,
                 ];
-
-                let (regime, probs) = classifier.classify(&gmm_input);
-                features.gmm_classification = Some(GmmClassificationFeatures::from_classification(
-                    regime, &probs,
-                ));
+                if gmm_input.iter().all(|x| x.is_finite()) {
+                    let (regime, probs) = classifier.classify(&gmm_input);
+                    features.gmm_classification = Some(
+                        GmmClassificationFeatures::from_classification(regime, &probs),
+                    );
+                }
             }
 
             features.regime = Some(regime_features);

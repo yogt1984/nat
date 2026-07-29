@@ -14,9 +14,8 @@ use ing::alerts::{AlertConfig, AlertTracker};
 use ing::config::Config;
 use ing::dashboard::state::FeaturesSummary;
 use ing::dashboard::{run_dashboard_server, BroadcastLayer, DashboardState};
-use ing::features::{CrossSymbolState, Features};
+use ing::features::CrossSymbolState;
 use ing::metrics::Metrics;
-use ing::ml::regime::{GmmClassificationFeatures, RegimeClassifier};
 use ing::output::{ParquetWriter, TradeParquetWriter, TradeRecord};
 use ing::positions::{
     PositionTracker, PositionTrackerConfig, SharedPositionState, WalletDiscovery,
@@ -246,23 +245,6 @@ async fn main() -> Result<()> {
         };
 
     // Initialize market state for each symbol
-    // Load the GMM regime classifier once (shared, read-only). BUG-3: when
-    // config.features.gmm_model_path is set, per-emission classification populates the
-    // gmm_classification feature category (otherwise it stays NaN-padded).
-    let regime_classifier: Option<Arc<RegimeClassifier>> =
-        config.features.gmm_model_path.as_deref().and_then(|p| {
-            match RegimeClassifier::load(std::path::Path::new(p)) {
-                Ok(c) => {
-                    info!(path = %p, "Loaded GMM regime classifier");
-                    Some(Arc::new(c))
-                }
-                Err(e) => {
-                    error!(path = %p, ?e, "Failed to load GMM regime classifier — gmm features stay NaN");
-                    None
-                }
-            }
-        });
-
     let mut handles = Vec::new();
     let cross_symbol_state = CrossSymbolState::new();
 
@@ -279,7 +261,6 @@ async fn main() -> Result<()> {
         let shutdown_rx = shutdown_rx.clone();
         let position_state = shared_position_state.clone();
         let wallets_handle = tracker_wallets_handle.clone();
-        let regime_classifier = regime_classifier.clone();
 
         let handle = tokio::spawn(async move {
             run_symbol_ingestor(
@@ -295,7 +276,6 @@ async fn main() -> Result<()> {
                 shutdown_rx,
                 position_state,
                 wallets_handle,
-                regime_classifier,
             )
             .await
         });
@@ -395,7 +375,6 @@ async fn run_symbol_ingestor(
     mut shutdown_rx: watch::Receiver<bool>,
     position_state: Option<Arc<SharedPositionState>>,
     wallets_handle: Option<Arc<parking_lot::RwLock<Vec<String>>>>,
-    regime_classifier: Option<Arc<RegimeClassifier>>,
 ) -> Result<()> {
     info!(%symbol, "Starting ingestor");
 
@@ -474,25 +453,6 @@ async fn run_symbol_ingestor(
     let mut discovery_ticker =
         tokio::time::interval(tokio::time::Duration::from_secs(300));
     discovery_ticker.tick().await; // skip immediate first tick
-
-    // Precompute the flat-vector indices of the 5 regime features (once), so the GMM
-    // input is extracted by name — robust to schema layout, consistent with training.
-    let regime_feature_idx: Option<[usize; 5]> = regime_classifier.as_ref().map(|_| {
-        let names = Features::names_all();
-        let idx = |n: &str| {
-            names
-                .iter()
-                .position(|x| *x == n)
-                .unwrap_or_else(|| panic!("regime feature '{n}' missing from schema"))
-        };
-        [
-            idx("illiq_kyle_500"),
-            idx("toxic_vpin_50"),
-            idx("derived_regime_type_score"),
-            idx("trend_hurst_300"),
-            idx("vol_returns_5m"),
-        ]
-    });
 
     loop {
         tokio::select! {
@@ -599,24 +559,9 @@ async fn run_symbol_ingestor(
                     );
                 }
 
-                if let Some((mut features, alg_values)) = state.compute_features() {
+                if let Some((features, alg_values)) = state.compute_features() {
                     sequence_id += 1;
                     let timestamp_ms = chrono::Utc::now().timestamp_millis() as u64;
-
-                    // GMM regime classification: extract the 5D input by index, classify,
-                    // and populate gmm_classification (skipped/NaN if any input is non-finite).
-                    if let (Some(clf), Some(idx)) =
-                        (regime_classifier.as_ref(), regime_feature_idx.as_ref())
-                    {
-                        let v = features.to_vec();
-                        let x = [v[idx[0]], v[idx[1]], v[idx[2]], v[idx[3]], v[idx[4]]];
-                        if x.iter().all(|f| f.is_finite()) {
-                            let (regime, probs) = clf.classify(&x);
-                            features = features.with_gmm_classification(
-                                GmmClassificationFeatures::from_classification(regime, &probs),
-                            );
-                        }
-                    }
 
                     if !first_feature_logged {
                         first_feature_logged = true;
