@@ -33,6 +33,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
+# BUG-2: make scripts/ importable so top-level modules like `logging_config` resolve when
+# launched as `python scripts/agent/<x>.py`. Idempotent.
+import sys
+_SCRIPTS = str(ROOT / "scripts")
+if _SCRIPTS not in sys.path:
+    sys.path.insert(0, _SCRIPTS)
+
 from agent.hypothesis import GeneratorStats
 from agent.meta_portfolio import (
     compute_min_variance_weights,
