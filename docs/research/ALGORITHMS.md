@@ -1,13 +1,20 @@
 # Algorithm Catalogue
 
-**Last updated:** 2026-05-23
-**Test conditions:** Walk-forward OOS, 3-day training window, P20/P80 z-score entry, 100min horizon, 1.61 bps RT fee (Binance VIP9)
+> ⚠️ **PERFORMANCE CLAIMS REFUTED 2026-07-30** (Q4 kill gate — `FINDINGS.md` §4.6). The tier
+> assignments and P&L below were measured at the wrong venue cost (1.61 bps Binance VIP9;
+> Hyperliquid reality is ~11 bps all-in) through a harness that never ran each algorithm's own
+> entry logic. At SSOT cost every "Tier 1/2" algorithm is deeply net-negative; all five were
+> REJECTED in the signal lifecycle. The catalogue is retained as a mechanism/reference document —
+> treat every number as historical, not current.
+
+**Last updated:** 2026-07-30 (refutation banner; performance tables are the 2026-05-23 record)
+**Test conditions:** Walk-forward OOS, 3-day training window, P20/P80 z-score entry, 100min horizon, 1.61 bps RT fee (Binance VIP9 — **wrong venue, see banner**)
 **OOS window:** 13 dates (2026-05-07 to 2026-05-23)
 **Symbols:** BTC, ETH, SOL | **Bars:** 5min from 100ms ticks
 
 ---
 
-## Tier 1 — Deployable (net positive all 3 symbols)
+## Tier 1 — Deployable (net positive all 3 symbols) — **REFUTED, see banner**
 
 ### 1. jump_detector — Total +23,199 bps
 
@@ -89,7 +96,7 @@ Sequential hypothesis test for entry timing. Accumulates log-likelihood ratio un
 
 ---
 
-## Tier 2 — Symbol-specific alpha
+## Tier 2 — Symbol-specific alpha — **REFUTED, see banner**
 
 ### 5. surprise_signal — Total +3,505 bps
 

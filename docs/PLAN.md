@@ -31,13 +31,15 @@ clean streak completes.**
 2. **T0b cloud deploy (P0)** — provision the Hetzner box and deploy the redundant ingestor
    (`nat deploy cloud <ip> --dry-run` first). Removes single-point su-35 risk; the vehicle is ready
    (root `HETZNER_DEPLOYMENT_PLAN.md`).
-3. **Q4 — alpha-skeptic gate on existing data** — run adversarial refutation of the winners
-   *before* investing in ~90 clean days (see the tension note in §2).
+3. **Q4 — alpha-skeptic gate on existing data** — ✅ **DONE 2026-07-30, verdict 5/5 KILL**
+   (`FINDINGS.md` §4.6): all five "winners" were false discoveries (wrong-venue cost tier +
+   sweep harness never ran the algorithms' own logic); all REJECTED in the lifecycle. The
+   90-day spend it was guarding against is cancelled for these signals.
 4. **Conditional-IC > 0.15 (D1, ~Aug)** — the go/no-go for the whole trading business: IC≈0.45
    collapses to ~0.03 under realistic fills.
 
 **Actionable now (no data needed):** T0b provisioning; the D-branch (D1/D2/D3); the entire P-branch
-(P1→P5); a first Q4 skeptic pass on existing data; the open bugs below.
+(P1→P5); the maker line (GAP-04/HF1/A4 — the surviving execution path per Q4); the open bugs below.
 
 **Blocked on data/streak:** Q3 revalidation; the G1 alpha screen; `hierarchical_combiner`
 revalidation; combine → paper → live.
@@ -78,10 +80,12 @@ ingest box, then adversarially try to kill them. No live capital until paper pas
   `HETZNER_DEPLOYMENT_PLAN.md`). Removes single-point su-35 risk.
 - **Q2 — Longitudinal tool.** Generalize `nat oos30` → `nat oos --window <N>d` (walk-forward folds
   + deflated Sharpe, `--json`). Depends on Q0.
-- **Q3 — Extended revalidation** of the 5 winners (`3f_liquidity`, `jump_detector`,
-  `funding_reversion`, `optimal_entry`, `surprise_signal`) on ≥30 clean days. Blocked on Q1+Q2.
-- **Q4 — Adversarial kill gate.** Run each survivor through the `alpha-skeptic` agent before any
-  trust/paper decision. *"Q2/Q3 only matter if Q4 survives."*
+- **Q3 — Extended revalidation** of the 5 winners — **MOOT as scoped** (Q4 killed all five,
+  2026-07-30; nothing to revalidate). Q3's slot passes to whatever the maker line (GAP-04/HF1/A4)
+  + PROC discovery layer promote next.
+- **Q4 — Adversarial kill gate.** ✅ **DONE 2026-07-30: 5/5 KILL** (`FINDINGS.md` §4.6, lifecycle
+  REJECTED ×4 + surprise_signal never registered). *"Q2/Q3 only matter if Q4 survives"* — it did
+  not; the ~90-day revalidation spend is cancelled for these signals.
 
 **Sequencing:** Q0 → (Q1 ∥ Q2) → Q3 → Q4.
 **Tension to resolve:** `archive/tasks_22_6_26__2.md` argues Q4 should run *before* the Q1 data

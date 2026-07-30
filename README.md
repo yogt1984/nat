@@ -332,19 +332,25 @@ python scripts/ml_rollback.py rollback-model <algo>   # revert to previous model
 python scripts/ml_rollback.py list-models <algo>      # list model versions
 ```
 
-### Top Performer Algorithms — `nat oos30`
+### Top Performer Algorithms — `nat oos30` — ⚠️ REFUTED 2026-07-30
 
-These 5 algorithms are the validated winners from a 17-algorithm walk-forward paper trade sweep (Experiment Report 2). They are tested together via `nat oos30` on 30-day out-of-sample data. Walk-forward conditions: 5min bars, 100min horizon (20 bars), 3-day rolling training window, P20/P80 z-score entry, 1.61 bps round-trip fees.
+These 5 algorithms were claimed as validated winners from a 17-algorithm walk-forward sweep.
+**The Q4 alpha-skeptic kill gate refuted all five** (`docs/research/FINDINGS.md` §4.6): the sweep
+priced trades at 1.61 bps RT (Binance VIP9 — the wrong venue; Hyperliquid reality is ~11 bps
+all-in) and applied one generic P20/P80 entry to every candidate instead of each algorithm's own
+logic. At SSOT cost every one is deeply net-negative; all five were REJECTED in the signal
+lifecycle on 2026-07-30. The table is retained as the historical claim, not current truth:
 
-| Tier | Algorithm | Total P&L (bps) | BTC Sharpe | ETH Sharpe | SOL Sharpe |
-|------|-----------|-----------------|-----------|-----------|-----------|
-| **1 — Deployable** | `jump_detector` | **+23,199** | 1.6 | **6.2** | **6.2** |
-| **1 — Deployable** | `funding_reversion` | **+14,459** | 0.4 | **6.0** | 1.7 |
-| **1 — Deployable** | `optimal_entry` | **+13,679** | 1.1 | **5.2** | 1.0 |
-| **2 — Symbol-specific** | `surprise_signal` | +3,505 | -8.3 | 3.1 | **6.7** |
-| **Baseline** | `3f_liquidity` | — | **9.2** | **7.8** | 3.2 |
+| Tier (historical) | Algorithm | Total P&L (bps) | BTC Sharpe | ETH Sharpe | SOL Sharpe | Q4 verdict |
+|------|-----------|-----------------|-----------|-----------|-----------|-----------|
+| 1 | `jump_detector` | +23,199 | 1.6 | 6.2 | 6.2 | **KILL** |
+| 1 | `funding_reversion` | +14,459 | 0.4 | 6.0 | 1.7 | **KILL** |
+| 1 | `optimal_entry` | +13,679 | 1.1 | 5.2 | 1.0 | **KILL** |
+| 2 | `surprise_signal` | +3,505 | -8.3 | 3.1 | 6.7 | **KILL** |
+| Baseline | `3f_liquidity` | — | 9.2 | 7.8 | 3.2 | **KILL** |
 
-The algorithms are complementary: 3f dominates BTC, jump/optimal dominate ETH/SOL, surprise captures SOL microstructure.
+What survives is the mechanism record (VPIN-gate directionality, the conditional-IC
+adverse-selection barrier, maker-path economics) — see `docs/research/FINDINGS.md` §4.5–4.6.
 
 ---
 
@@ -382,7 +388,7 @@ Entry logic (percentile thresholds from training distribution):
 
 Exit: fixed 100-minute horizon (20 bars). P&L computed net of 1.61 bps round-trip fees.
 
-**Performance:** Sharpe 9.2 (BTC), 7.8 (ETH), 3.2 (SOL). Strongest single-symbol algorithm on BTC.
+**Performance:** ~~Sharpe 9.2 (BTC), 7.8 (ETH), 3.2 (SOL)~~ — **REFUTED** (Q4 kill gate: wrong-venue cost + not reproducible; −11.1 BTC at SSOT cost; `docs/research/FINDINGS.md` §4.6).
 
 ---
 
@@ -416,7 +422,7 @@ Interpretation: REV > 0 means price has reverted against the jump direction. The
 
 **Parameters:** window K = 100 ticks, significance c = 3.0, reversion horizon H = 50 ticks.
 
-**Performance:** +23,199 bps total. Sharpe 6.2 on both ETH and SOL. Strongest cross-symbol algorithm.
+**Performance:** ~~+23,199 bps total, Sharpe 6.2 ETH/SOL~~ — **REFUTED** (Q4 kill gate: c=3.0 threshold fires ~13,900×/day — a noise filter, not jump detection; fails G4 at any cost tier; `docs/research/FINDINGS.md` §4.6).
 
 **Reference:** Lee, S.S. & Mykland, P.A. (2008). Jumps in financial markets: a new nonparametric test and jump dynamics. *Review of Financial Studies*, 21(6), 2535-2563.
 
@@ -468,7 +474,7 @@ When S_n ≥ A: entry direction = sign(ν_t), S resets to 0. When S_n ≤ B: no 
 
 **Parameters:** OU theta = 0.1, process noise = 0.01, observation noise = 0.1, α = 0.05, β = 0.20.
 
-**Performance:** +13,679 bps total. Sharpe 5.2 (ETH). Especially strong at filtering noise from imbalance signals.
+**Performance:** ~~+13,679 bps total, Sharpe 5.2 (ETH)~~ — **REFUTED** (Q4 kill gate: sweep never ran the SPRT logic; fails G4 on stored data; `docs/research/FINDINGS.md` §4.6).
 
 **References:** Wald, A. (1947). *Sequential Analysis*. Wiley. Shiryaev, A.N. (1978). *Optimal Stopping Rules*. Springer.
 
@@ -505,7 +511,7 @@ The premium is scaled by 1/10 to bring it to a comparable magnitude with the z-s
 
 **Parameters:** z-score entry threshold = 2.0, momentum span = 100 ticks, premium weight = 0.3.
 
-**Performance:** +14,459 bps total. Sharpe 6.0 (ETH). Crypto-native signal with no traditional finance analogue.
+**Performance:** ~~+14,459 bps total, Sharpe 6.0 (ETH)~~ — **REFUTED** (Q4 kill gate: wrong-venue cost, n_eff≈84, one-sided funding regime; `docs/research/FINDINGS.md` §4.6).
 
 ---
 
@@ -1578,13 +1584,17 @@ nat/
 | OU half-life orders by liquidity | BTC 7.3s > ETH 5.3s > SOL 3.3s | Per-symbol refresh rates |
 | `_last` features replicate, `_mean`/`_std` don't | Instantaneous = KEEP, aggregated = DROP | Time-domain spectral confirmation |
 
-### Algorithm Sweep (17 Algorithms, 100min Horizon)
+### Algorithm Sweep (17 Algorithms, 100min Horizon) — ⚠️ REFUTED 2026-07-30
 
-- **3f liquidity**: Sharpe 9.2 BTC / 7.8 ETH — strongest single-symbol algorithm
-- **jump_detector**: +23,199 bps total — strongest cross-symbol algorithm
-- **optimal_entry**: +13,679 bps — SPRT-based entry timing
-- **funding_reversion**: +14,459 bps — crypto-native mean-reversion
-- **surprise_signal**: Sharpe 6.7 SOL — entropy regime transitions
+All five "winners" of this sweep were refuted by the Q4 alpha-skeptic kill gate
+(wrong-venue cost tier + a harness that never ran each algorithm's own logic; all
+REJECTED in the signal lifecycle — `docs/research/FINDINGS.md` §4.6). Historical claims:
+
+- ~~**3f liquidity**: Sharpe 9.2 BTC / 7.8 ETH~~ — KILL (−11.1 BTC at SSOT cost)
+- ~~**jump_detector**: +23,199 bps total~~ — KILL (threshold fires ~13,900×/day; noise filter)
+- ~~**optimal_entry**: +13,679 bps~~ — KILL (sweep never ran the SPRT logic)
+- ~~**funding_reversion**: +14,459 bps~~ — KILL (n_eff≈84; one-sided funding regime)
+- ~~**surprise_signal**: Sharpe 6.7 SOL~~ — KILL (87.6% of edge from one day)
 
 ### Hypothesis Suite (H1-H6)
 
