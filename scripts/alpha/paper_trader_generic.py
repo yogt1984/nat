@@ -137,6 +137,11 @@ ALGO_CONFIG = {
         "polarity": "low_long",  # negative post-jump → expecting reversion up
         "bar_agg": "mean",
     },
+    "jump_detector_v2": {
+        "primary": "alg_jd2_reversion",
+        "polarity": "low_long",  # same reversion semantics; EVT threshold + exact parity (QA-JD2)
+        "bar_agg": "mean",
+    },
     "funding_reversion": {
         "primary": "alg_funding_signal",
         "polarity": "high_long",
