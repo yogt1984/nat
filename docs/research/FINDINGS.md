@@ -209,6 +209,53 @@ Net bps / Sharpe (58 days, BTC/ETH/SOL):
 execution — GAP-04 `microprice_maker_sim` (HF1) and GAP-05 Q2.6 OU-Kalman — which attack the
 fill-conditional collapse instead of paying taker fees. This is the Q5 decision structure.
 
+### 4.6 Q4 alpha-skeptic kill gate (2026-07-30) — **the §4.1 winners table is refuted**
+
+*Five parallel adversarial passes (alpha-skeptic agents), one per "deployable winner", run on data
+in hand before the ≥90-day spend, exactly as `docs/TASKS.md` Q4 sequences it. **All five verdicts:
+KILL.** These supersede §4.1's Tier-1/Tier-2 claims and the "4 deployable" experiment-status
+summary. Per-run evidence: `.claude/agent-memory/alpha-skeptic/` verdict files.*
+
+| Algorithm | Verdict | Lethal findings (full evidence in the per-run records) |
+|---|---|---|
+| `3f_liquidity` | **KILL** | §4.1's Sharpe 9.2/7.8 was priced at **1.61 bps RT (Binance VIP9)**, not Hyperliquid (~11 bps all-in). At honest cost on 57 OOS dates (05-07→07-30): BTC **−11.1**, ETH −6.4, SOL −8.3. Original `mf_*` inputs no longer exist in the codebase; the registered implementation is a different construction that is negative even at 1.61 bps. `reports/rolling_3f_liquidity.json` (Jun-9) already showed ≈ −9.5 and sat unreconciled while the signal was promoted to VALIDATED (Jun-15). |
+| `funding_reversion` | **KILL** | Same cost tier bug; at realistic cost on 59–62 dates: BTC **−6.1**, ETH −3.4, SOL −3.1. P20/P80 harness enters on ~45% of bars with 95%-overlapping 100-min windows → n_eff ≈ 84, so the original claim was never significant. Funding was longs-crowded for the entire data history (no shorts-crowded stretch exists to test symmetry). The backtest never charged funding carry (gate column never created). |
+| `surprise_signal` | **KILL** | `paper_trader_surprise.py` hardcodes `binance_vip9_rt_bps()`; at real cost all 3 symbols negative on the original window. Extending 20→~60 days *at the cheap cost* alone: ETH 3.52→0.98, SOL 5.27→**0.19** (fails G4 0.5). **87.6% of ETH's original edge came from one day** (2026-05-23). BTC direction reproducibly wrong → "deploy ETH/SOL only" was post-hoc symbol selection. Look-ahead attack REFUTED — the entropy path is causal; failure is economic. Never entered the lifecycle DB. |
+| `optimal_entry` | **KILL** | §4.1's harness never ran the SPRT/Kalman logic — it applied a generic P20/P80 z-entry to every candidate (identical 1,678 trade counts across algos betray the fixed schedule). `run_batch()` hardcodes `sigma_process=0.01` (documented as a known bug 2026-06-12, still live) → backtest is blind to the parameter, backtest/live parity broken. Platform's own `nat oos --window 60d`: OOS Sharpe **−4.5 to −6.3**, maxDD 86–119%, DSR 0.03–0.06 — fails every G4 criterion on stored data. Sole input is `imbalance_qty_l1`, the documented 0.45→0.03 fill-collapse feature. |
+| `jump_detector` | **KILL** | Platform's own `nat oos --window 90d`: OOS Sharpe BTC **−3.0** / ETH −4.5 / SOL −5.2, DSR 0.036–0.095, maxDD 58–84× the gate — fails G4 on stored data at the *optimistic* cost. July rerun at SSOT cost: Sharpe −18.4/−8.5/−6.3; BTC gross edge negative **before** cost. The c=3.0 threshold at 10 Hz fires **~13,900×/day** (EVT-correct critical value ≈ 7.2, per v2's own docstring) with a symmetric up/down split — a generic large-return filter, not jump detection. `run_batch` embeds the current tick's return in its own bipower denominator (self-masking; conservative direction, but backtest≠live — v1's parity test can't see it, only v2 has rtol=1e-9 parity). 5-second native mechanism traded at 100-min holds (the §4.3 failure mode). Effective spread at jump ticks 1.57× baseline — costs are elevated exactly where it trades. |
+
+**Systemic root causes (each is a platform defect, not a per-algorithm accident):**
+
+1. **Wrong-venue cost default** — the sweep/eval harnesses default to `cost_mode="binance_vip9"`
+   (1.61 bps RT): `paper_trader_daily.py`, `cli/oos.py`, `cli/gauntlet.py`, `overnight_sweep.py`,
+   `mf_liquidity_backtest.py`, `mf_hypothesis_suite.py`, `it_multiday.py`; `paper_trader_surprise.py`
+   hardcodes the VIP9 helper call. NAT trades Hyperliquid (7 bps RT taker + ~2 bps/side slippage).
+   **Every historical backtest number produced through these paths is invalid until re-run.** The
+   COST-3 CI guard scans numeric literals, so wrong-preset *function calls* pass it.
+2. **Sweep harness didn't run the algorithms** — the §4.1 table came from one generic P20/P80
+   z-entry over each candidate's primary column, not from each algorithm's own decision logic.
+   Winners selected from ~26 candidates with **no algorithm-level FDR/DSR** (feature-level FDR only).
+3. **Governance**: two signals were promoted to VALIDATED (2026-06-15) while contradicting artifacts
+   existed in-repo, and one "deploy" recommendation lived only in prose. The lifecycle DB and the
+   empirical record drifted apart with no reconciliation step.
+
+**Verdict for Q5 planning:** the deployable-winners tier is **empty** as of 2026-07-30 — 5/5 KILL,
+with the wrong-venue cost tier confirmed on all five. The honest survivors of the record are the
+*mechanism* findings (VPIN gate directionality §4.5, conditional-IC barrier §2, maker-path economics
+GAP-04) — not any shipped taker algorithm. The path to Q5's conditional-IC > 0.15 runs through maker
+execution + the PROC discovery layer, exactly as §4.5 concluded. Two named revival candidates exist,
+both as NEW signals (REJECTED is terminal): `jump_detector_v2` (EVT threshold ≈7.2 + exact
+step/batch parity, not yet wired into the economics harness) and the GAP-04/HF1 maker path.
+
+Follow-ups filed: **COST-4** (flip every eval-harness default from `binance_vip9` to the Hyperliquid
+SSOT: `paper_trader_daily.py`, `cli/oos.py`, `cli/gauntlet.py`, `overnight_sweep.py`,
+`mf_liquidity_backtest.py`, `mf_hypothesis_suite.py`, `it_multiday.py`, `paper_trader_surprise.py`),
+**COST-5** (harden the CI guard to catch wrong-preset *calls*, not just literals), **BUG-4**
+(`optimal_entry` `sigma_process` hardcode → backtest/live parity), **BUG-5** (`jump_detector`
+`run_batch` self-masking bipower + weak parity test), **REV-1** (purge/re-run every §4.1-derived
+number still cited at SSOT costs), **QA-JD2** (wire `jump_detector_v2` into `paper_trader_generic`
+and re-run July at SSOT cost — the cheapest test of whether the Lee-Mykland family has any life).
+
 ## 5. Combination, gating & regime
 
 - **Hierarchical combiner** (2026-06-10; ⚠️ 2-day OOS 06-08→10, 4-fold, 100-bar embargo):
