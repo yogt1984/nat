@@ -142,6 +142,7 @@ class OptimalEntry(MicrostructureAlgorithm):
                  sprt_drift: float = 0.001,
                  alpha_error: float = 0.05, beta_error: float = 0.20):
         self._theta = theta
+        self._sigma_process = sigma_process   # BUG-4: was never stored — run_batch hardcoded 0.01
         self._sigma_obs = sigma_obs
         self._dt = dt
         self._sprt_drift = sprt_drift
@@ -235,7 +236,7 @@ class OptimalEntry(MicrostructureAlgorithm):
         evidence = np.full(n, np.nan)
 
         kf = OUKalmanFilter(
-            theta=self._theta, sigma_process=0.01,
+            theta=self._theta, sigma_process=self._sigma_process,
             sigma_obs=self._sigma_obs, dt=self._dt)
 
         S = 0.0
