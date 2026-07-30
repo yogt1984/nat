@@ -6,7 +6,7 @@ import argparse
 import sys
 import textwrap
 
-from cli.common import ROOT, PY, DATA_DEFAULT, BOLD, W, R, _json_mode, _output, _exec
+from cli.common import ROOT, PY, DATA_DEFAULT, BOLD, W, R, G, _json_mode, _output, _exec
 
 
 def cmd_process_help(args=None):
@@ -66,7 +66,7 @@ def cmd_process_run(args):
     cmd = f"-m processes.runner {args.name} --symbol {args.symbol}"
     if getattr(args, 'data', None):
         cmd += f" --data-dir {args.data}"
-    for flag in ('timeframe', 'start_date', 'end_date', 'features', 'score_with'):
+    for flag in ('timeframe', 'start_date', 'end_date', 'features', 'score_with', 'score_target'):
         val = getattr(args, flag, None)
         if val:
             cmd += f" --{flag.replace('_', '-')} {val}"
@@ -139,6 +139,58 @@ def cmd_process_show(args):
     print()
 
 
+def cmd_process_standing(args):
+    """List / audit / run standing evaluations (recurring process chains, e.g. the 3-bar
+    triple-barrier classifier). `audit` answers "has it ever actually run?"."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from dataclasses import asdict
+    from processes.standing import (
+        audit_standing_evals, list_standing_evals, run_standing_eval,
+    )
+    action = getattr(args, 'action', None) or 'audit'
+
+    if action == 'list':
+        evals = list_standing_evals()
+        if _json_mode(args):
+            _output({"standing_evals": [asdict(e) for e in evals]}, args)
+            return
+        print(f"\n  {'name':<20} {'chain':<38} {'symbols'}")
+        print(f"  {'-'*20} {'-'*38} {'-'*16}")
+        for e in evals:
+            chain = f"{e.transform or '(direct)'} -> {e.scorer}(target={e.target})"
+            print(f"  {e.name:<20} {chain:<38} {','.join(e.symbols)}")
+        print()
+        return
+
+    if action == 'audit':
+        rows = audit_standing_evals()
+        if _json_mode(args):
+            _output({"audit": rows}, args)
+            return
+        print(f"\n  {'name':<20} {'ever_run':>8} {'runs':>5} {'last_run':<28} {'symbols'}")
+        print(f"  {'-'*20} {'-'*8} {'-'*5} {'-'*28} {'-'*14}")
+        for r in rows:
+            ever = f"{G}yes{W}" if r["ever_run"] else f"{R}NO{W}"
+            last = str(r["last_run"] or "-")
+            print(f"  {r['name']:<20} {ever:>8} {r['n_runs']:>5} {last:<28} "
+                  f"{','.join(r['symbols_seen'])}")
+        print()
+        return
+
+    if action == 'run':
+        if not getattr(args, 'name', None):
+            print(f"  {R}usage:{W} nat process standing run <name> [--symbol SYM]")
+            return 1
+        res = run_standing_eval(
+            args.name, symbol=getattr(args, 'symbol', None),
+            save=not getattr(args, 'no_save', False),
+        )
+        s = getattr(res, 'summary', {}) or {}
+        print(f"  ran standing eval {BOLD}{args.name}{W}: "
+              f"tested={s.get('n_tested', 0)} informative={s.get('n_informative', 0)}")
+        return 0
+
+
 def register(sub):
     proc_p = sub.add_parser('process',
         help='Analytical processes (IC sweep, MI/TE, spectral, ML importance)')
@@ -171,6 +223,9 @@ def register(sub):
                     help='Process param override (repeatable)')
     pr.add_argument('--score-with', default=None,
                     help='Evaluation process chained onto transform output')
+    pr.add_argument('--score-target', default=None,
+                    help='Target column for the chained scorer (default: the transform\'s '
+                         'declared target, e.g. triple_barrier -> tb_label)')
     pr.add_argument('--no-save', action='store_true', help='Skip persistence')
     pr.add_argument('--json', action='store_true', help='Print full result JSON')
     pr.set_defaults(func=cmd_process_run)
@@ -185,7 +240,16 @@ def register(sub):
     psh.add_argument('--top', type=int, default=20, help='Findings rows to print')
     psh.add_argument('--json', action='store_true', help='JSON output')
     psh.set_defaults(func=cmd_process_show)
+    pst = procsub.add_parser('standing',
+        help='Standing (recurring) evaluations: list | audit | run <name>')
+    pst.add_argument('action', nargs='?', choices=['list', 'audit', 'run'], default='audit',
+                     help='list definitions, audit whether they have run, or run one')
+    pst.add_argument('name', nargs='?', default=None, help='standing eval name (for run)')
+    pst.add_argument('--symbol', default=None, help='symbol override (run)')
+    pst.add_argument('--no-save', action='store_true', help='Skip persistence (run)')
+    pst.add_argument('--json', action='store_true', help='JSON output')
+    pst.set_defaults(func=cmd_process_standing)
 
 
 __all__ = ["cmd_process_help", "cmd_process_list", "cmd_process_run",
-           "cmd_process_results", "cmd_process_show", "register"]
+           "cmd_process_results", "cmd_process_show", "cmd_process_standing", "register"]

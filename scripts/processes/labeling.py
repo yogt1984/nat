@@ -51,6 +51,9 @@ class TripleBarrierProcess(TransformProcess):
     def name(self) -> str:
         return "triple_barrier"
 
+    def target_column(self) -> str:
+        return "tb_label"  # the 3-bar classifier label a chained scorer should target
+
     def required_columns(self, available: list[str]) -> list[str]:
         return []  # consumes only the price column from the context
 

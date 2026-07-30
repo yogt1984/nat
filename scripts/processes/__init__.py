@@ -21,6 +21,13 @@ from .fdr import (
     read_ledger,
     record_sweep,
 )
+from .standing import (
+    StandingEval,
+    audit_standing_evals,
+    get_standing_eval,
+    list_standing_evals,
+    run_standing_eval,
+)
 
 # Import process modules so @register decorators fire
 from . import ic_horizon  # noqa: F401,E402
@@ -37,4 +44,6 @@ __all__ = [
     "partition_usable_columns",
     "register", "get_process", "list_processes", "list_processes_by_kind",
     "apply_process_fdr", "FdrReport", "record_sweep", "read_ledger", "default_ledger_path",
+    "StandingEval", "list_standing_evals", "get_standing_eval", "audit_standing_evals",
+    "run_standing_eval",
 ]
