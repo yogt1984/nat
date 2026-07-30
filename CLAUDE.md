@@ -174,7 +174,7 @@ class MyAlgorithm(MicrostructureAlgorithm):
 
 **Verification:** `pytest scripts/tests/test_bar_level_dispatch.py` (algorithm dispatch/conformance), then `nat algorithm evaluate --algorithm <name> --symbol BTC` on real data.
 
-**Current winners (tested via `nat oos30`):** `jump_detector` (Lee-Mykland), `optimal_entry` (SPRT/Kalman), `funding_reversion`, `surprise_signal` (entropy), `3f_liquidity` (composite).
+**Current winners: NONE.** The former five (`jump_detector`, `optimal_entry`, `funding_reversion`, `surprise_signal`, `3f_liquidity`) were all REFUTED by the Q4 alpha-skeptic kill gate on 2026-07-30 (wrong-venue cost tier + sweep harness defects; all REJECTED in the signal lifecycle — see `docs/research/FINDINGS.md` §4.6). They remain registered for research; treat any historical Sharpe/P&L citation for them as invalid. The surviving path is maker execution (GAP-04/HF1/A4) + the PROC discovery layer.
 
 ### Signal Lifecycle (Python)
 

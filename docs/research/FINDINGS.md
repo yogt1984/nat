@@ -128,6 +128,12 @@ The central negative result, `imbalance_qty_l1` @5 s:
 
 ### 4.1 Winners (13-date OOS 2026-05-07→23, 100 min horizon, 1.61 bps RT, P20/P80 z-entry)
 
+> ⚠️ **REFUTED 2026-07-30 — see §4.6.** Retained for provenance only. Every number below was
+> produced at the wrong venue cost (1.61 bps Binance VIP9 vs Hyperliquid ~11 bps all-in) by a
+> harness that applied one generic P20/P80 entry to every candidate instead of running each
+> algorithm's own logic. At SSOT cost all five are deeply net-negative; all were REJECTED in
+> the signal lifecycle on 2026-07-30.
+
 *Source: algorithms_report 2026-06-12.*
 
 | Algorithm | Total bps | BTC bps/tr · Sharpe | ETH | SOL | Note |
