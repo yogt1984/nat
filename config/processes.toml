@@ -53,4 +53,13 @@ vol_window = 96
 n_components = 5
 fit_frac = 0.7
 standardize = true
+
+[horizon_label_scan]            # PROC-7: MI surface over (horizon x geometry x regime)
+horizons = [4, 16, 48]          # vertical barriers in bars (15min bars -> 1h, 4h, 12h)
+geometries = [[2.0, 1.0], [1.0, 1.0]]
+n_buckets = 4
+n_shuffles = 100
+min_bucket_obs = 200
+max_cells = 5000                # grid cap; dropped features are logged, never silent
+# conditioning = ["..."]        # set a regime column to enable the regime axis
 min_obs = 100
