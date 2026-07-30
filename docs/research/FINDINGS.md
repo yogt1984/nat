@@ -328,6 +328,27 @@ HF5 economics claim: **couple `ASSim`'s fills to `QueueSim`** (post the A-S quot
 queue engine, fills only by depletion/price-through) so adverse selection enters the fill
 process itself. Sim-only; no live path; G8 + kill-switch gate any graduation.
 
+**HF5b addendum (same day): the coupling built and run — the honest instrument is NEGATIVE
+for textbook A-S spreads.** `ASQueueSim` (deterministic, no RNG: fills only by touch-zone
+FIFO depletion or price-through, conservative join `l1_fraction·depth` on every post,
+requoting resets priority, crossing quotes never placed). Same BTC window, γ=0.02, κ=20,
+τ=100, requote 1 s, HF4 gate:
+
+| center | pnl (bps) | fills | per-fill | mean q | liq cost |
+|---|---|---|---|---|---|
+| HF1 microprice | −6,015 | 3,187 | **−1.89 bps** | −0.04 | 10.6 |
+| mid (control) | −4,922 | 3,172 | **−1.55 bps** | +0.23 | 14.1 |
+
+Mechanism: risk-widened A-S quotes sit *behind* the touch for most of the tape, so their
+fills are dominated by price-throughs — adverse by construction. Bracketed with §4.7
+(touch-joined postings: marginally +EV, rebate-carried), the maker economics now point at a
+specific posture: **live at the touch, harvest the rebate, gate per posting on the A4 EV rule
+— not textbook A-S spread-widening at these vol parameters.** HF1's center consistently
+improves *inventory* (mean q ≈ 0, liquidation cost −25 % here, −40 % in the exogenous run)
+but has not yet shown a per-fill PnL edge. Proxy caveats of §4.7 apply (flow/depth proxies,
+one symbol, ~1 day). Next candidate experiment: touch-pegged quoting (GAP-04 posture) + HF1
+inventory skew + per-posting A4 EV gate, on multi-day data.
+
 ## 5. Combination, gating & regime
 
 - **Hierarchical combiner** (2026-06-10; ⚠️ 2-day OOS 06-08→10, 4-fold, 100-bar embargo):
