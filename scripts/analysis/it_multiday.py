@@ -349,7 +349,8 @@ def main():
     parser = argparse.ArgumentParser(description="IT Engine — Multi-Day Bar Analysis")
     parser.add_argument("--data-dir", default="data/features")
     parser.add_argument("--symbol", default="BTC")
-    parser.add_argument("--fee-model", choices=list(FEE_RT_BPS.keys()), default="binance_vip9")
+    parser.add_argument("--fee-model", choices=list(FEE_RT_BPS.keys()), default="hyperliquid",
+                        help="Fee tier (default: hyperliquid; binance_* opt-in only)")
     parser.add_argument("--ksg-k", type=int, default=5)
     parser.add_argument("--save", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
