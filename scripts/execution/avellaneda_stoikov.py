@@ -159,3 +159,119 @@ class ASSim:
             "taker_bps_used": taker_bps(),
             "maker_bps_used": maker_bps(),
         }
+
+
+@dataclass
+class _RestingOrder:
+    price: float
+    ahead: float
+
+
+class ASQueueSim:
+    """HF5b: the A-S quoter coupled to A4's conservative queue rules — deterministic.
+
+    §4.8 established that exogenous λ(d) fills carry no adverse selection, so
+    absolute ``ASSim`` PnL is fantasy. Here fills are EARNED from the tape:
+
+      through : the opposite best crossing the resting price fills it;
+      touch   : while the price sits in the touch zone (best_bid ≤ p < best_ask for
+                bids), side aggressor flow depletes ``ahead`` — initialized at
+                ``l1_fraction · depth`` on EVERY post, even inside the spread
+                (latent competition assumed: no "alone at the level" free lunch);
+      behind  : outside the touch zone nothing advances (cancellations never do);
+      requote : cancel + repost every ``requote_every`` ticks — priority is never
+                carried across posts; a quote that would cross at post time is NOT
+                placed (no fantasy taker fills).
+
+    Adverse selection therefore emerges structurally: a bid is consumed exactly by
+    the sell flow that tends to precede down-moves. No RNG — identical inputs give
+    identical episodes. Accounting: SSOT maker rebate per fill; terminal inventory
+    liquidated at the SSOT taker fee. Sim-only.
+    """
+
+    def __init__(self, params: ASParams, requote_every: int = 5,
+                 l1_fraction: float = 0.4):
+        self.params = params
+        self.quoter = ASQuoter(params)
+        self.requote_every = int(requote_every)
+        self.l1_fraction = float(l1_fraction)
+
+    def run(self, mid, best_bid, best_ask, sell_exec, buy_exec,
+            depth_bid, depth_ask, fair_dev_bps, sigma_bps, gate_open) -> dict:
+        n = len(mid)
+        cash = 0.0
+        q = 0.0
+        n_fills = 0
+        first_fill: Optional[int] = None
+        inv_path = np.empty(n)
+        rebate = maker_bps() * 1e-4
+        bid_o: Optional[_RestingOrder] = None
+        ask_o: Optional[_RestingOrder] = None
+
+        for t in range(n):
+            if t % self.requote_every == 0:
+                bid_o = ask_o = None                   # cancel: priority never carries
+                quotes = self.quoter.quotes_bps(
+                    float(fair_dev_bps[t]), q, float(sigma_bps[t]), bool(gate_open[t]))
+                if quotes.bid_bps is not None:
+                    p = mid[t] * (1.0 + quotes.bid_bps * 1e-4)
+                    if p < best_ask[t]:                # never place a crossing quote
+                        bid_o = _RestingOrder(p, self.l1_fraction * float(depth_bid[t]))
+                if quotes.ask_bps is not None:
+                    p = mid[t] * (1.0 + quotes.ask_bps * 1e-4)
+                    if p > best_bid[t]:
+                        ask_o = _RestingOrder(p, self.l1_fraction * float(depth_ask[t]))
+
+            if bid_o is not None:
+                if best_ask[t] <= bid_o.price:                      # price-through
+                    cash -= bid_o.price
+                    cash += rebate * bid_o.price
+                    q += 1.0
+                    n_fills += 1
+                    first_fill = t if first_fill is None else first_fill
+                    bid_o = None
+                elif best_bid[t] <= bid_o.price:                    # touch zone
+                    bid_o.ahead -= float(sell_exec[t])
+                    if bid_o.ahead <= 0.0:
+                        cash -= bid_o.price
+                        cash += rebate * bid_o.price
+                        q += 1.0
+                        n_fills += 1
+                        first_fill = t if first_fill is None else first_fill
+                        bid_o = None
+
+            if ask_o is not None:
+                if best_bid[t] >= ask_o.price:                      # price-through
+                    cash += ask_o.price
+                    cash += rebate * ask_o.price
+                    q -= 1.0
+                    n_fills += 1
+                    first_fill = t if first_fill is None else first_fill
+                    ask_o = None
+                elif best_ask[t] >= ask_o.price:                    # touch zone
+                    ask_o.ahead -= float(buy_exec[t])
+                    if ask_o.ahead <= 0.0:
+                        cash += ask_o.price
+                        cash += rebate * ask_o.price
+                        q -= 1.0
+                        n_fills += 1
+                        first_fill = t if first_fill is None else first_fill
+                        ask_o = None
+
+            inv_path[t] = q
+
+        mid_end = float(mid[-1])
+        liq_cost = abs(q) * mid_end * taker_bps() * 1e-4
+        pnl = cash + q * mid_end - liq_cost
+        mid0 = float(mid[0])
+        return {
+            "pnl_bps": pnl / mid0 * 1e4,
+            "n_fills": n_fills,
+            "first_fill_tick": first_fill,
+            "terminal_inventory": q,
+            "mean_inventory": float(inv_path.mean()),
+            "max_abs_inventory": float(np.abs(inv_path).max()),
+            "liquidation_cost_bps": liq_cost / mid0 * 1e4,
+            "taker_bps_used": taker_bps(),
+            "maker_bps_used": maker_bps(),
+        }
