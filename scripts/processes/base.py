@@ -199,6 +199,16 @@ class TransformProcess(Process):
     ) -> tuple[pd.DataFrame, ProcessResult]:
         ...
 
+    def target_column(self) -> Optional[str]:
+        """The primary derived column a chained scorer should target, if any.
+
+        Default None (the derived series are features, e.g. pca_combo's pc_*). A
+        transform whose output is a label (triple_barrier -> tb_label) overrides this so
+        the runner tells the scorer to evaluate the label as its target, not forward
+        returns. An explicit ``--score-target`` at the runner always wins.
+        """
+        return None
+
 
 def partition_usable_columns(
     df: pd.DataFrame,

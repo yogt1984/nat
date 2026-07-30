@@ -18,6 +18,7 @@ Standalone: python -m processes.runner ic_horizon --symbol BTC
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import hashlib
 import json
 import logging
@@ -102,6 +103,15 @@ def _data_fingerprint(data_dir: Path, start_date, end_date) -> str:
     return h.hexdigest()[:16]
 
 
+def _resolve_score_target(transform, explicit: Optional[str] = None) -> Optional[str]:
+    """The target a chained scorer should use: an explicit override, else the transform's
+    declared ``target_column()`` (e.g. triple_barrier -> tb_label)."""
+    if explicit:
+        return explicit
+    fn = getattr(transform, "target_column", None)
+    return fn() if callable(fn) else None
+
+
 def _fdr_and_ledger(res: ProcessResult, ctx: ProcessContext, cfg: dict, save: bool) -> None:
     """PROC-13: BH-correct a sweep's cells in place, then (when persisting) ledger the run.
 
@@ -153,6 +163,7 @@ def run_process(
     end_date: Optional[str] = None,
     params: Optional[dict] = None,
     score_with: Optional[str] = None,
+    score_target: Optional[str] = None,
     save: bool = True,
     out_dir: Path | str = persistence.DEFAULT_OUT_DIR,
     db_path: Path | str | None = persistence.DEFAULT_DB_PATH,
@@ -253,10 +264,14 @@ def run_process(
         score_frame = derived_df.copy()
         if resolved_price not in score_frame.columns and resolved_price in frame.columns:
             score_frame[resolved_price] = frame[resolved_price].to_numpy()
-        score_result = scorer.evaluate(score_frame, ctx)
+        # PROC-5: point the scorer at the transform's declared target (e.g. tb_label),
+        # so it evaluates the label rather than silently falling back to forward returns.
+        tgt = _resolve_score_target(proc, score_target)
+        score_ctx = dataclasses.replace(ctx, target_col=tgt) if tgt else ctx
+        score_result = scorer.evaluate(score_frame, score_ctx)
         score_result.provenance = result.provenance
         score_result.data = result.data
-        _fdr_and_ledger(score_result, ctx, cfg, save)
+        _fdr_and_ledger(score_result, score_ctx, cfg, save)
         if save:
             persistence.save_result(score_result, out_dir=out_dir, db_path=db_path)
         if result.derived is not None:
@@ -308,6 +323,9 @@ def main(argv=None) -> int:
                         help="Process param override (repeatable)")
     parser.add_argument("--score-with", default=None,
                         help="Evaluation process to chain onto transform output")
+    parser.add_argument("--score-target", default=None,
+                        help="Target column for the chained scorer (default: the "
+                             "transform's declared target, e.g. triple_barrier -> tb_label)")
     parser.add_argument("--no-save", action="store_true")
     parser.add_argument("--json", action="store_true", help="Print full result JSON")
     parser.add_argument("--top", type=int, default=15, help="Findings rows to print")
@@ -329,6 +347,7 @@ def main(argv=None) -> int:
         end_date=args.end_date,
         params=params,
         score_with=args.score_with,
+        score_target=args.score_target,
         save=not args.no_save,
     )
 

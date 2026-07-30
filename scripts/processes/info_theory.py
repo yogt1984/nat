@@ -44,6 +44,7 @@ from scipy import stats
 from scipy.stats import rankdata
 
 from it_engine.estimators import cmi, interaction_info, ksg_mi, ksg_te, linear_te, min_info_bits
+from it_engine.null_calibration import DEFAULT_NULL_Z_THRESHOLD, null_calibrate
 
 from alpha.screener import compute_forward_returns
 
@@ -108,6 +109,10 @@ class MutualInfoProcess(EvaluationProcess):
         "conditioning": ([], "column names Z for CMI I(f;r|Z) + interaction info"),
         "kurtosis_correction": (True, "scale I_min by realized kurtosis / 3 (fat tails)"),
         "fee_rt_bps": (None, "round-trip fee override; None = ctx.costs hyperliquid"),
+        "target_col": (None, "label column (e.g. tb_label) replacing forward returns — "
+                             "label mode gates via the PROC-12 null-calibration, not fees"),
+        "null_shuffles": (100, "permutation-null draws for the label-mode gate (PROC-12)"),
+        "seed": (0, "RNG seed for the label-mode null-calibration shuffles"),
     }
 
     def name(self) -> str:
@@ -123,6 +128,11 @@ class MutualInfoProcess(EvaluationProcess):
         min_obs = int(self.params["min_obs"])
         max_samples = int(self.params["max_samples"])
         k = int(self.params["ksg_k"])
+        target_col = self.params.get("target_col") or ctx.target_col
+        if target_col:
+            return self._evaluate_label(
+                bars, ctx, result, target_col, min_obs, max_samples, k, t0
+            )
         fee_rt = _fee_rt_bps(ctx, self.params["fee_rt_bps"])
         cond_cols = [c for c in (self.params["conditioning"] or []) if c in bars.columns]
 
@@ -195,6 +205,64 @@ class MutualInfoProcess(EvaluationProcess):
                     extras=extras,
                 ))
 
+        return result.finalize(time.time() - t0)
+
+    def _evaluate_label(
+        self, bars, ctx: ProcessContext, result: ProcessResult,
+        target_col: str, min_obs: int, max_samples: int, k: int, t0: float,
+    ) -> ProcessResult:
+        """Label mode: MI(feature; label), gated by the PROC-12 null-calibration.
+
+        A label (e.g. the 3-bar tb_label) is not a tradeable return, so the fee-based
+        i_min gate is meaningless here. Instead each MI is shuffle-null calibrated and
+        called informative iff it clears the null z-threshold — the project's honesty
+        standard. The target column and, for a barrier label, its sibling ``tb_*``
+        columns are excluded from the features (they leak the label trivially).
+        """
+        if target_col not in bars.columns:
+            return result.finalize(
+                time.time() - t0, error=f"target_col '{target_col}' not in data"
+            )
+        n_shuffles = int(self.params["null_shuffles"])
+        rng = np.random.default_rng(int(self.params["seed"]))
+        drop_tb = target_col.startswith("tb_")
+        label = bars[target_col].to_numpy(dtype=np.float64, na_value=np.nan)
+
+        cols = [
+            c for c in self.required_columns(list(bars.columns))
+            if not c.startswith(_PRICE_PREFIXES) and c != ctx.price_col
+            and c != target_col and not (drop_tb and c.startswith("tb_"))
+        ]
+        usable, skipped = partition_usable_columns(bars, cols, min_obs=min_obs)
+        result.features_tested = usable
+        result.features_skipped = skipped
+
+        for feat in usable:
+            x = bars[feat].to_numpy(dtype=np.float64, na_value=np.nan)
+            xs, ls = _subsample(x, label, max_samples=max_samples)
+            if len(xs) < min_obs or len(np.unique(ls)) < 2:
+                continue
+            xr, lr = _rank01(xs), _rank01(ls)
+            nr = null_calibrate(
+                lambda a, b: ksg_mi(a, b, k=k), xr, lr,
+                n_shuffles=n_shuffles, rng=rng,
+            )
+            result.findings.append(Finding(
+                feature=feat, horizon="label", metric="mi_bits",
+                value=round(nr.raw_bits, 6),
+                p_value=round(nr.p, 6),
+                threshold=DEFAULT_NULL_Z_THRESHOLD,
+                informative=bool(nr.informative(z_threshold=DEFAULT_NULL_Z_THRESHOLD)),
+                extras={
+                    "target": target_col,
+                    "gate": "null_z",
+                    "bits_above_null": round(nr.bits_above_null, 6),
+                    "z": round(nr.z, 3),
+                    "p": round(nr.p, 6),
+                    "null_mean": round(nr.null_mean, 6),
+                    "n_samples": len(xs),
+                },
+            ))
         return result.finalize(time.time() - t0)
 
 
