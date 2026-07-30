@@ -240,7 +240,14 @@ class MutualInfoProcess(EvaluationProcess):
         for feat in usable:
             x = bars[feat].to_numpy(dtype=np.float64, na_value=np.nan)
             xs, ls = _subsample(x, label, max_samples=max_samples)
-            if len(xs) < min_obs or len(np.unique(ls)) < 2:
+            if len(xs) < min_obs:
+                # jointly-valid rows with the label (its warmup/tail NaNs bite here)
+                result.features_skipped.append(
+                    {"feature": feat, "reason": f"joint_valid={len(xs)}<{min_obs}"})
+                continue
+            if len(np.unique(ls)) < 2:
+                result.features_skipped.append(
+                    {"feature": feat, "reason": "label_constant"})
                 continue
             xr, lr = _rank01(xs), _rank01(ls)
             nr = null_calibrate(

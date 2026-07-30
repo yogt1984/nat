@@ -103,6 +103,39 @@ def _data_fingerprint(data_dir: Path, start_date, end_date) -> str:
     return h.hexdigest()[:16]
 
 
+def _chain_load_columns(proc, scorer, available: list[str]) -> set[str]:
+    """Columns the loader must fetch for a (transform -> scorer) chain.
+
+    Pruning to the TRANSFORM's required_columns alone loads zero features for
+    triple_barrier (it needs only price) — the chained scorer then has nothing to
+    score. Load the union of both processes' needs instead.
+    """
+    cols = set(proc.required_columns(available))
+    if scorer is not None:
+        cols |= set(scorer.required_columns(available))
+    return cols
+
+
+def _build_score_frame(frame, derived_df, resolved_price: str, tgt: Optional[str]):
+    """The frame a chained scorer sees.
+
+    Label mode (tgt set): the ORIGINAL features plus the derived columns — scoring a
+    label against only its own tb_* siblings is vacuous (the scorer excludes them as
+    leakage, leaving nothing). Derived columns win on a name clash: they are freshly
+    computed. Feature mode (no tgt): the derived series alone, plus the price column
+    so the scorer can compute forward returns (pca_combo -> ic_horizon unchanged).
+    """
+    if tgt:
+        score_frame = frame.copy()
+        for c in derived_df.columns:
+            score_frame[c] = derived_df[c].to_numpy()
+        return score_frame
+    score_frame = derived_df.copy()
+    if resolved_price not in score_frame.columns and resolved_price in frame.columns:
+        score_frame[resolved_price] = frame[resolved_price].to_numpy()
+    return score_frame
+
+
 def _resolve_score_target(transform, explicit: Optional[str] = None) -> Optional[str]:
     """The target a chained scorer should use: an explicit override, else the transform's
     declared ``target_column()`` (e.g. triple_barrier -> tb_label)."""
@@ -164,6 +197,7 @@ def run_process(
     params: Optional[dict] = None,
     score_with: Optional[str] = None,
     score_target: Optional[str] = None,
+    score_params: Optional[dict] = None,
     save: bool = True,
     out_dir: Path | str = persistence.DEFAULT_OUT_DIR,
     db_path: Path | str | None = persistence.DEFAULT_DB_PATH,
@@ -182,9 +216,13 @@ def run_process(
 
     merged = {**cfg.get(name, {}), **(params or {})}
     proc = get_process(name, **merged)
+    scorer = (
+        get_process(score_with, **{**cfg.get(score_with, {}), **(score_params or {})})
+        if score_with else None
+    )
 
     available = _peek_schema_columns(data_dir)
-    required = proc.required_columns(available)
+    required = _chain_load_columns(proc, scorer, available)
     load_set = set(required) | {c for c in _META_LOAD if c in available}
     if price_col in available:
         load_set.add(price_col)
@@ -259,14 +297,12 @@ def run_process(
         }
 
     # Chain: score derived series with an evaluation process
-    if derived_df is not None and score_with:
-        scorer = get_process(score_with, **cfg.get(score_with, {}))
-        score_frame = derived_df.copy()
-        if resolved_price not in score_frame.columns and resolved_price in frame.columns:
-            score_frame[resolved_price] = frame[resolved_price].to_numpy()
+    if derived_df is not None and scorer is not None:
         # PROC-5: point the scorer at the transform's declared target (e.g. tb_label),
         # so it evaluates the label rather than silently falling back to forward returns.
+        # In label mode the scorer sees the ORIGINAL features + the derived label.
         tgt = _resolve_score_target(proc, score_target)
+        score_frame = _build_score_frame(frame, derived_df, resolved_price, tgt)
         score_ctx = dataclasses.replace(ctx, target_col=tgt) if tgt else ctx
         score_result = scorer.evaluate(score_frame, score_ctx)
         score_result.provenance = result.provenance
