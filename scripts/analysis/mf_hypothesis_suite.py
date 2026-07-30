@@ -726,7 +726,8 @@ def main():
     parser.add_argument("--data-dir", default="data/features")
     parser.add_argument("--symbols", nargs="+", default=["BTC", "ETH", "SOL"])
     parser.add_argument("--hypotheses", type=str, default="H1,H2,H3,H4,H5,H6")
-    parser.add_argument("--fee-model", choices=list(FEE_MODELS.keys()), default="binance_vip9")
+    parser.add_argument("--fee-model", choices=list(FEE_MODELS.keys()), default="hyperliquid",
+                        help="Fee tier (default: hyperliquid; binance_* opt-in only)")
     parser.add_argument("--save", action="store_true")
     args = parser.parse_args()
 

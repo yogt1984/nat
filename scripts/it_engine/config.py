@@ -46,7 +46,8 @@ class CostConfig:
 
     @property
     def default_fee_rt_bps(self) -> float:
-        return self.binance_vip9_rt_bps
+        # The venue NAT trades — never the VIP9 comparison tier (Q4, FINDINGS §4.6)
+        return self.hyperliquid_rt_bps
 
 
 @dataclass

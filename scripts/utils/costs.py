@@ -46,6 +46,20 @@ def round_trip_taker_bps() -> float:
     return load_costs().get("hyperliquid", {}).get("round_trip_taker_bps", 7.0)
 
 
+def slippage_bps() -> float:
+    """Hyperliquid one-way slippage assumption in bps."""
+    return load_costs().get("hyperliquid", {}).get("slippage_bps", 2.0)
+
+
+def realistic_taker_rt_bps() -> float:
+    """The honest all-in round-trip taker cost on the venue NAT trades:
+    Hyperliquid RT fee + slippage both ways (~11 bps). THE default for every
+    evaluation harness — the VIP9 tier below is explicit-opt-in only
+    (Q4 kill gate, FINDINGS §4.6: defaulting to it created 5/5 false winners)."""
+    return round_trip_taker_bps() + 2.0 * slippage_bps()
+
+
 def binance_vip9_rt_bps() -> float:
-    """Binance VIP9 round-trip fee in bps."""
+    """Binance VIP9 round-trip fee in bps. EXPLICIT OPT-IN comparison tier only —
+    never a harness default (wrong venue; see realistic_taker_rt_bps)."""
     return load_costs().get("binance", {}).get("vip9_round_trip_bps", 1.61)

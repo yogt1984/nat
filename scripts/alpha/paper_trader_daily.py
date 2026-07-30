@@ -66,9 +66,12 @@ MIN_HOURS = 4.0
 REPORTS_DIR = ROOT / "reports"
 DAILY_PREFIX = "6h__"
 
-# Default: Binance VIP9 taker (matches paper_trader_generic experiment reports)
+# Default: the venue NAT actually trades — Hyperliquid taker + slippage from the SSOT
+# (~11 bps RT). VIP9 (1.61 bps, Binance) is explicit-opt-in only: defaulting to it
+# created the 5/5 false "deployable winners" (Q4 kill gate, FINDINGS §4.6).
 from utils.costs import binance_vip9_rt_bps as _vip9_bps
-DEFAULT_COST = CostModel(fee_bps=_vip9_bps() / 2, slippage_bps=0.0)  # half RT, from config/costs.toml
+DEFAULT_COST = CostModel.from_config(role="taker")
+VIP9_COST = CostModel(fee_bps=_vip9_bps() / 2, slippage_bps=0.0)  # opt-in comparison tier
 
 
 # ── 3f liquidity signal (inline — avoids importing full paper_trader.py) ──
@@ -404,12 +407,13 @@ def main():
     parser.add_argument("--no-save", action="store_true",
                         help="Don't save report file")
     parser.add_argument("--cost-mode", choices=["binance_vip9", "taker", "maker", "config"],
-                        default="binance_vip9",
-                        help="Cost model (default: binance_vip9 = 1.61 bps RT)")
+                        default="config",
+                        help="Cost model (default: config = Hyperliquid SSOT ~11 bps RT; "
+                             "binance_vip9 is an explicit opt-in comparison tier)")
     args = parser.parse_args()
 
     cost_presets = {
-        "binance_vip9": DEFAULT_COST,
+        "binance_vip9": VIP9_COST,
         **COST_PRESETS,
     }
     cost_model = cost_presets[args.cost_mode]

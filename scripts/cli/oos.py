@@ -34,7 +34,7 @@ def cmd_daily(args):
         cmd += f" --date {date}"
     if getattr(args, 'no_save', False):
         cmd += " --no-save"
-    cost_mode = getattr(args, 'cost_mode', 'binance_vip9')
+    cost_mode = getattr(args, 'cost_mode', 'config')
     cmd += f" --cost-mode {cost_mode}"
 
     r = _py(cmd)
@@ -179,7 +179,9 @@ def register(sub):
     daily_p.add_argument('--symbols', nargs='+', default=['BTC', 'ETH', 'SOL'], help='Symbols to test')
     daily_p.add_argument('--no-save', action='store_true', help="Don't save report file")
     daily_p.add_argument('--cost-mode', choices=['binance_vip9', 'taker', 'maker', 'config'],
-                         default='binance_vip9', help='Cost model (default: binance_vip9 = 1.61 bps RT)')
+                         default='config',
+                         help='Cost model (default: config = Hyperliquid SSOT ~11 bps RT; '
+                              'binance_vip9 is explicit opt-in)')
     daily_p.set_defaults(func=cmd_daily)
 
 

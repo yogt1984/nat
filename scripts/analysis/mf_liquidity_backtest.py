@@ -243,7 +243,7 @@ def _aggregate_horizon(daily_results: list[dict], fee_bps: float) -> dict:
 def run_backtest(
     data_dir: Path,
     symbols: list[str],
-    fee_model: str = "binance_vip9",
+    fee_model: str = "hyperliquid",
     feature_modes: list[str] | None = None,
     horizons_bars: list[int] | None = None,
 ):
@@ -392,7 +392,9 @@ def main():
     parser.add_argument("--data-dir", default="data/features", help="Features directory")
     parser.add_argument("--symbols", nargs="+", default=["BTC", "ETH", "SOL"])
     parser.add_argument("--fee-model", choices=list(FEE_MODELS.keys()),
-                        default="binance_vip9")
+                        default="hyperliquid",
+                        help="Fee tier (default: hyperliquid = the venue NAT trades; "
+                             "binance_* are explicit opt-in comparison tiers)")
     parser.add_argument("--features", choices=["2", "3", "both"], default="both",
                         help="Feature set: 2 (spread+depth), 3 (+vwap_deviation), both")
     parser.add_argument("--horizons", nargs="+", type=int, default=None,

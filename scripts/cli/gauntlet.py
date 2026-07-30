@@ -16,7 +16,7 @@ def cmd_gauntlet_run(args):
 
     data_dir = getattr(args, 'data_dir', 'data/features')
     symbols = getattr(args, 'symbols', ['BTC', 'ETH', 'SOL'])
-    cost_mode = getattr(args, 'cost_mode', 'binance_vip9')
+    cost_mode = getattr(args, 'cost_mode', 'config')
 
     cmd = f"scripts/alpha/overnight_sweep.py run --data-dir {data_dir}"
     cmd += f" --symbols {' '.join(symbols)}"
@@ -96,9 +96,10 @@ def register(sub):
                        help='Only run these algorithms')
     g_run.add_argument('--exclude-algos', nargs='+', default=None,
                        help='Run all algorithms except these')
-    g_run.add_argument('--cost-mode', choices=['binance_vip9', 'taker', 'maker'],
-                       default='binance_vip9',
-                       help='Cost model (default: binance_vip9 = 1.61 bps RT)')
+    g_run.add_argument('--cost-mode', choices=['binance_vip9', 'taker', 'maker', 'config'],
+                       default='config',
+                       help='Cost model (default: config = Hyperliquid SSOT ~11 bps RT; '
+                            'binance_vip9 is explicit opt-in)')
     g_run.set_defaults(func=cmd_gauntlet_run)
 
     # gauntlet stop

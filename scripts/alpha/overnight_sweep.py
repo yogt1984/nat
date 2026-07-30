@@ -156,8 +156,10 @@ def cmd_run(args):
     """Run the full gauntlet sweep with incremental saves."""
     from algorithms import discover_all
     from alpha.paper_trader_daily import (
+        COST_PRESETS,
         DAILY_ALGOS,
         DEFAULT_COST,
+        VIP9_COST,
         run_3f_liquidity,
         run_algo_single_date,
     )
@@ -205,7 +207,9 @@ def cmd_run(args):
     excluded = sorted(set(DAILY_ALGOS + ["3f_liquidity"])
                       - set(active_algos) - ({"3f_liquidity"} if run_3f else set()))
 
-    cost_model = DEFAULT_COST
+    # Resolve the requested preset (previously this line ignored --cost-mode and always
+    # used the default — the mode was printed but never applied).
+    cost_model = {"binance_vip9": VIP9_COST, **COST_PRESETS}.get(args.cost_mode, DEFAULT_COST)
 
     # Write PID file
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -485,8 +489,9 @@ def main():
                        help="Only run these algorithms (names from DAILY_ALGOS / 3f_liquidity)")
     run_p.add_argument("--exclude-algos", nargs="+", default=None,
                        help="Run all algorithms except these")
-    run_p.add_argument("--cost-mode", choices=["binance_vip9", "taker", "maker"],
-                       default="binance_vip9")
+    run_p.add_argument("--cost-mode", choices=["binance_vip9", "taker", "maker", "config"],
+                       default="config",
+                       help="Cost model (default: config = Hyperliquid SSOT ~11 bps RT)")
     run_p.set_defaults(func=cmd_run)
 
     # stop
