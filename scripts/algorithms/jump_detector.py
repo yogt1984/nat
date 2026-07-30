@@ -208,17 +208,36 @@ class JumpDetector(MicrostructureAlgorithm):
 
         mid = df["raw_midprice"].values.astype(np.float64)
         n = len(df)
-        log_ret = np.diff(np.log(mid), prepend=np.nan)
-        log_ret[0] = np.nan
+        # log(mid_t / mid_{t-1}) exactly as step() — NOT diff(log(mid)): the two differ
+        # by ~1e-9 relative in float64, which breaks exact backtest/live parity.
+        log_ret = np.full(n, np.nan)
+        if n > 1:
+            log_ret[1:] = np.log(mid[1:] / mid[:-1])
         abs_ret = np.abs(log_ret)
 
-        # Rolling bipower vol (excluding current tick)
+        # Rolling bipower vol, STRICTLY past-only — exact mirror of step():
+        # step's buffer[:-1] uses returns r_{t-window+1}..r_{t-1}, whose consecutive
+        # products are c_{t-window+2}..c_{t-1}. cross[m] = |r_m|·|r_{m-1}| ends at the
+        # CURRENT tick, so it must be shifted by one before the rolling mean — the old
+        # unshifted window put |r_t| into its own denominator (BUG-5 self-masking: L
+        # understated at exactly the jumps this algorithm exists to detect, and
+        # backtest ≠ live). Window window-2 products, emit from 18 (= step's ≥20-return
+        # gate), max(bv, 1e-20) as in step.
         cross = abs_ret[1:] * abs_ret[:-1]
         cross = np.concatenate([[np.nan], cross])
-        bv_sq = pd.Series(cross).rolling(self._window - 1, min_periods=19).mean().values
-        bv = np.sqrt(np.pi / 2.0 * np.maximum(bv_sq, 1e-40))
+        cross_prev = np.concatenate([[np.nan], cross[:-1]])
+        # Fresh per-window np.mean (sliding_window_view), NOT pandas rolling: the
+        # running-sum rolling mean drifts ~1e-8 relative from step()'s np.mean and
+        # would break exact backtest/live parity. Full windows only — the sub-window
+        # head is warmup and NaN-blanked by the dispatch layer anyway.
+        w = self._window - 2
+        bv_sq = np.full(n, np.nan)
+        if n >= w:
+            from numpy.lib.stride_tricks import sliding_window_view
+            bv_sq[w - 1:] = sliding_window_view(cross_prev, w).mean(axis=1)
+        bv = np.maximum(np.sqrt(np.pi / 2.0 * bv_sq), 1e-20)
 
-        L = np.abs(log_ret) / (bv + 1e-20)
+        L = np.abs(log_ret) / bv
         detected = (L > self._significance).astype(np.float64)
         magnitude = np.where(detected > 0, log_ret, 0.0)
 

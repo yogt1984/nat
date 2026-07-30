@@ -70,13 +70,16 @@ class TestJumpDetector:
         Uses batch path for cleaner control. After a jump at index i,
         REV(i+k) = -ln(p_{i+k}/p_i) / r_i. If price reverts, REV > 0.
         """
+        # Small but NONZERO base volatility: a perfectly flat series has sigma=0, so
+        # every post-jump reversion tick is itself an infinite-sigma "jump" (step() has
+        # always behaved this way; the old batch path only masked it via the BUG-5
+        # self-masking window). Base noise 1σ=1e-4; jump = 100σ; reversion steps ≈ 2σ.
         n = 200
-        prices = np.full(n, 100.0)
-        # Inject a large upward jump at index 120
-        prices[120] = 101.0  # ~1% jump
-        # Price reverts partially over next ticks
-        for k in range(1, 30):
-            prices[120 + k] = 101.0 - 0.02 * k  # slowly reverts
+        rng = np.random.default_rng(0)
+        rets = 1e-4 * rng.standard_normal(n)
+        rets[120] = 0.01                       # ~1% upward jump
+        rets[121:140] = -2e-4                  # deterministic slow reversion (< 3σ)
+        prices = 100.0 * np.exp(np.cumsum(rets))
 
         df = pd.DataFrame({"raw_midprice": prices})
         jd = JumpDetector(window=100, significance=3.0, reversion_horizon=50)
