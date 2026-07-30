@@ -25,13 +25,18 @@ def cmd_process_help(args=None):
                                --features pfx,..., --param k=v, --score-with X)
     nat process results        Past runs from the index (--process, --symbol)
     nat process show RUN_ID    Full findings of one run
+    nat process standing       Standing (recurring) evals: list | audit | run NAME
 
   Evaluation processes (score existing features):
     ic_horizon        Expanding Spearman IC x horizon sweep, decay half-life, BH-FDR
     mi_ksg            KSG mutual information vs forward returns, cost-viability gate
+                      (or vs a label with target_col, null-calibrated)
     transfer_entropy  Directed information flow with reverse-direction control
     spectral          PSD / Hurst / OU half-life / frequency-band IC (tick-level)
     ml_importance     LightGBM walk-forward importance + confidence-filtered PnL
+    conditional_predictability  MI(f; label | Z=z) per regime bucket, null-calibrated
+    horizon_label_scan          MI surface over (horizon x barrier geometry x regime),
+                                BH-corrected argmax = best (target, horizon, regime)
 
   Transform processes (derive new evaluable series; chain with --score-with):
     triple_barrier    Lopez de Prado 3-barrier labels (tb_label/tb_ret/tb_hit_bars)
