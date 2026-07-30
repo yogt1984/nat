@@ -281,6 +281,28 @@ the reversion signal has no edge under the standard harness regardless of detect
 event-native maker execution at detected jumps — that residual idea belongs to the GAP-04 maker
 line, not to any taker deployment. Lee-Mykland revival via taker: closed.
 
+### 4.7 First queue-value maker replay (2026-07-30 — A4, HF1 anchor; BTC, ~29 h)
+
+*Source: `scripts/execution/queue_value.py` (`replay_from_frame`, conservative FIFO queue sim),
+BTC 2026-07-29→30, 1.06 M ticks, 5,288 postings/side at 200-tick cadence, 300-tick horizon,
+50-tick markout, costs via `load_costs()`.*
+
+| Side | fill rate | capture (½spread + rebate) | E[adverse \| fill] | **EV / posting** |
+|---|---|---|---|---|
+| BID | 0.583 | 0.078 + 0.20 = 0.278 bps | +0.217 bps | **+0.036 bps** |
+| ASK | 0.580 | 0.078 + 0.20 = 0.278 bps | +0.256 bps | **+0.013 bps** |
+
+**First marginally-+EV execution result on the platform** — and the structure is exactly what
+§4.5 predicted: the half-spread is nearly worthless (0.08 bps at BTC's tight touch); the maker
+rebate (0.20 bps) covers adverse selection with a sliver left. **Not a validated edge:** one
+symbol, ~1 day, and the replay's queue/volume inputs are PROXIES (exec volume from the rolling
+1 s flow window split by the 5 s aggressor ratio — likely overstates per-tick volume and hence
+fill rate; queue-ahead = 0.4·depth_5, an assumption; naive 5 s markout). The conservative
+cancel rule (cancellations never advance the queue) biases the other way. Next (HF5): condition
+postings on the HF1 microprice center (`alg_mp_dev_bps`, IC@50t +0.14/+0.24 gated) — quote the
+side the fair value favors, skew away from adverse flow — and test whether EV widens beyond
+the rebate sliver. Sim-only; no live path exists.
+
 ## 5. Combination, gating & regime
 
 - **Hierarchical combiner** (2026-06-10; ⚠️ 2-day OOS 06-08→10, 4-fold, 100-bar embargo):
