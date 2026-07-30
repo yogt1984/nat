@@ -256,6 +256,25 @@ SSOT: `paper_trader_daily.py`, `cli/oos.py`, `cli/gauntlet.py`, `overnight_sweep
 number still cited at SSOT costs), **QA-JD2** (wire `jump_detector_v2` into `paper_trader_generic`
 and re-run July at SSOT cost — the cheapest test of whether the Lee-Mykland family has any life).
 
+**COST-4/5 landed 2026-07-30** (commit d9f3c1c): all harness defaults now resolve to the SSOT
+(~11 bps RT); VIP9 is explicit-opt-in only; recurrence blocked by `test_cost_defaults.py` + the
+extended CI guard. Bonus fix: `overnight_sweep` printed `--cost-mode` but ignored it.
+
+**QA-JD2 answered 2026-07-30: the taker-path Lee-Mykland family is dead, v2 included.**
+`jump_detector_v2` (EVT threshold ≈7.2, exact step/batch parity) wired into
+`paper_trader_generic` and run side-by-side with v1 over the full 59-day window at SSOT cost:
+
+| net bps / Sharpe | BTC | ETH | SOL |
+|---|---|---|---|
+| `jump_detector_v2` | −43,928 / −5.3 | −36,709 / −3.3 | −41,713 / −4.1 |
+| `jump_detector` (v1) | −48,854 / −5.3 | −42,409 / −3.5 | −35,202 / −3.1 |
+
+Indistinguishable — v1's threshold miscalibration was *not* the binding failure; at taker cost
+the reversion signal has no edge under the standard harness regardless of detection quality.
+*Caveat:* this tests v2's continuous REV signal through the generic P20/P80 bar harness, not an
+event-native maker execution at detected jumps — that residual idea belongs to the GAP-04 maker
+line, not to any taker deployment. Lee-Mykland revival via taker: closed.
+
 ## 5. Combination, gating & regime
 
 - **Hierarchical combiner** (2026-06-10; ⚠️ 2-day OOS 06-08→10, 4-fold, 100-bar embargo):
