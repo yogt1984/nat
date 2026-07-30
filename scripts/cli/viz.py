@@ -434,6 +434,31 @@ def cmd_viz3d(args):
     return _py(cmd).returncode
 
 
+def cmd_viz_predictability(args):
+    """nat viz predictability — the PROC-8 surface: (combo × horizon × label × regime)
+    null-calibrated, FDR-corrected MI. Argmax always shown WITH its BH q."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from processes.surface import aggregate_from_index, load_surface, render_surface
+    if getattr(args, 'rebuild', False):
+        df, path = aggregate_from_index()
+        print(f"  rebuilt surface: {len(df)} cells -> {path}")
+    else:
+        df = load_surface()
+        if df.empty:
+            df, path = aggregate_from_index()   # first use: build it
+            if not df.empty:
+                print(f"  built surface: {len(df)} cells -> {path}")
+    symbol = getattr(args, 'symbol', None)
+    if symbol and not df.empty:
+        df = df[df["symbol"] == symbol].reset_index(drop=True)
+    if _json_mode(args):
+        _output({"n_cells": len(df), "cells": df.to_dict(orient="records")}, args)
+        return
+    print()
+    print(render_surface(df, top=getattr(args, 'top', 15)))
+    print()
+
+
 def register(sub):
     # ── viz (terminal-first per-unit visualization, T7/NAT3) ──
     viz_p = sub.add_parser('viz', help='Terminal-first visualization (features/algorithm/paper)')
@@ -481,6 +506,14 @@ def register(sub):
     vzpo.add_argument('--symbol', '-s', default='BTC')
     vzpo.add_argument('--json', action='store_true', help='JSON output')
     vzpo.set_defaults(func=cmd_viz_portfolio)
+    vzpr = vizsub.add_parser('predictability',
+                             help='PROC-8 surface: combo×horizon×label×regime MI, FDR-corrected')
+    vzpr.add_argument('--symbol', '-s', default=None, help='Filter by symbol (default: all)')
+    vzpr.add_argument('--top', type=int, default=15, help='Ranked cells to show')
+    vzpr.add_argument('--rebuild', action='store_true',
+                      help='Re-aggregate from persisted process runs first')
+    vzpr.add_argument('--json', action='store_true', help='JSON output')
+    vzpr.set_defaults(func=cmd_viz_predictability)
     vzr = vizsub.add_parser('render',
                             help='Paged PNG viewer at 1m/5m/15m (overview, or page INDEX)')
     vzr.add_argument('--tf', default='15m', choices=['1m', '5m', '15m'],

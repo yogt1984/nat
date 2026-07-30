@@ -28,6 +28,14 @@ from .standing import (
     list_standing_evals,
     run_standing_eval,
 )
+from .surface import (
+    SURFACE_COLUMNS,
+    aggregate_from_index,
+    build_surface,
+    load_surface,
+    render_surface,
+    save_surface,
+)
 
 # Import process modules so @register decorators fire
 from . import ic_horizon  # noqa: F401,E402
@@ -47,4 +55,6 @@ __all__ = [
     "apply_process_fdr", "FdrReport", "record_sweep", "read_ledger", "default_ledger_path",
     "StandingEval", "list_standing_evals", "get_standing_eval", "audit_standing_evals",
     "run_standing_eval",
+    "SURFACE_COLUMNS", "build_surface", "save_surface", "load_surface",
+    "aggregate_from_index", "render_surface",
 ]
