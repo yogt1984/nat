@@ -231,3 +231,10 @@ z_window = 96                # z-score window for flow_vwap_deviation
 k_entry = 2.0                # |z| entry threshold (fade beyond this)
 k_exit = 0.5                 # |z| exit threshold (position-side)
 max_hold = 12                # max bars to hold (position-side)
+
+[microprice]
+# HF1: Stoikov micro-price fair-value deviation — the maker-line center primitive.
+# Fitted g* (mp_micro_adj_bps column) used when present; else (I-0.5)*spread_bps.
+ema_alpha = 0.02             # z-score EMA mean/var recurrence
+dev_ema_alpha = 0.1          # quoting-center smoothing
+warmup = 50                  # ticks before outputs are trusted

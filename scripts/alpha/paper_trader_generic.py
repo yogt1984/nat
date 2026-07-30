@@ -142,6 +142,11 @@ ALGO_CONFIG = {
         "polarity": "low_long",  # same reversion semantics; EVT threshold + exact parity (QA-JD2)
         "bar_agg": "mean",
     },
+    "microprice": {
+        "primary": "alg_mp_signal",
+        "polarity": "high_long",  # micro-price above mid → upward pressure (HF1)
+        "bar_agg": "mean",
+    },
     "funding_reversion": {
         "primary": "alg_funding_signal",
         "polarity": "high_long",
