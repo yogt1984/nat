@@ -303,6 +303,31 @@ postings on the HF1 microprice center (`alg_mp_dev_bps`, IC@50t +0.14/+0.24 gate
 side the fair value favors, skew away from adverse flow — and test whether EV widens beyond
 the rebate sliver. Sim-only; no live path exists.
 
+### 4.8 Avellaneda–Stoikov composition + first calibrated episode (2026-07-30 — HF5, sim-first)
+
+*Source: `scripts/execution/avellaneda_stoikov.py` (ASQuoter/ASSim/calibrate_kappa), BTC
+2026-07-29→30, 1.07 M ticks; HF1 center (`alg_mp_dev_ema`), HF4 VPIN gate (70 % open),
+κ calibrated from crossing rates at 5 offsets, γ=0.02, τ=100 ticks, q_max=5, seed 42.*
+
+**What the episode validated:** the composition works mechanically — inventory hard-capped at
+±5 with mean ≈ 0, gate applied, reservation skew active. The **HF1 microprice center cut the
+terminal liquidation cost ~40 %** vs a mid-centered control (10.6 vs 17.7 bps) by leaning
+inventory away from adverse drift (mean q −0.56 vs +0.02).
+
+**What the episode refuted (about the instrument itself):** the exogenous λ(d) fill model is
+**not a valid economics instrument at these parameters.** The crossing-based calibration
+(fill rates 0.56→0.43 across 0.05→0.8 bps offsets ⇒ A=0.55/tick, κ=0.32/bps) measures *price
+volatility*, not queue consumption — at A=0.55 per tick the sim "fills" 291 k times and prints
+≈ +950 k bps for both centers: pure fantasy from fills uncorrelated with adverse flow. Absolute
+PnL from `ASSim` must never be cited as economics; only paired-comparison deltas (center vs
+center, skew vs no-skew) are meaningful, and even those are weak while fills are exogenous.
+
+**Standing verdict + next step:** the honest maker-economics instrument remains the A4 queue
+replay (§4.7, conservative FIFO, EV ≈ +0.01–0.04 bps/posting). The required upgrade before any
+HF5 economics claim: **couple `ASSim`'s fills to `QueueSim`** (post the A-S quotes into the
+queue engine, fills only by depletion/price-through) so adverse selection enters the fill
+process itself. Sim-only; no live path; G8 + kill-switch gate any graduation.
+
 ## 5. Combination, gating & regime
 
 - **Hierarchical combiner** (2026-06-10; ⚠️ 2-day OOS 06-08→10, 4-fold, 100-bar embargo):
