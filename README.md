@@ -56,6 +56,7 @@ NAT is a fully autonomous quantitative research platform that discovers tradeabl
 - [Multi-Machine Setup](#multi-machine-setup)
 - [Project Structure](#project-structure)
 - [Key Findings](#key-findings)
+- [Current Direction: Three-Class Maker System](#current-direction-three-class-maker-system)
 - [References](#references)
 
 ---
@@ -1599,6 +1600,50 @@ REJECTED in the signal lifecycle — `docs/research/FINDINGS.md` §4.6). Histori
 ### Hypothesis Suite (H1-H6)
 
 All six confirmed: directional, long-biased, no decay, 3-feature viable, maker viable.
+
+### Maker-Line Measurements (2026-07-30/31 — `docs/research/FINDINGS.md` §4.7–4.9)
+
+| Finding | Evidence | Implication |
+|---------|----------|-------------|
+| Microprice anchor is strong | HF1 `alg_mp_dev_bps` IC@50t +0.139 full / **+0.237 regime-gated** (11.7M ticks) | Fair-value center for all maker quoting |
+| Touch-joined postings are marginally +EV | A4 queue replay: capture 0.278 bps (rebate-carried) vs adverse 0.22–0.26 → EV +0.01–0.04 bps/posting | The rebate, not the spread, carries maker economics |
+| Wide A-S spreads are negative | Queue-coupled sim: −1.5 to −1.9 bps/fill (price-through-dominated) | Quote at the touch; width is never derived |
+| A4 EV gate works as a filter | Flips always-on touch per-fill −1.66 → **+0.67** (fills cut 55×) | Per-posting capture-vs-adverse gating validated |
+| No touch-maker config survives pre-registration | 8-cell × 173 day-symbol grid: all FAIL on day-consistency/concentration | Maker route unproven-not-disproven; blocked on fill data (L1 queue sizes / T0b shadow quoting) |
+
+---
+
+## Current Direction: Three-Class Maker System
+
+Post-Q4 (2026-07-30: all five legacy "winners" refuted and REJECTED in the lifecycle), the
+platform pivoted to a **maker-only doctrine** with a three-class architecture. Design
+authority: [`docs/specs/maker_system.md`](docs/specs/maker_system.md) (v2). Research
+program: [`docs/THREE_CLASS_RESEARCH_PROPOSAL.md`](docs/THREE_CLASS_RESEARCH_PROPOSAL.md)
+(16 pre-registered studies, four tracks).
+
+**Execution doctrine** — quotes are the only strategy; a taker order is an *emergency state
+transition* (inventory unwind timeout, kill-switch, episode end), never an alpha decision.
+Fee tiers (incl. the HYPE-staking discount) are SSOT state in `config/costs.toml`.
+
+**The three classes** (one regime router across them, hysteresis at every level):
+
+| Class | Monetizes | Core | Status |
+|---|---|---|---|
+| **1 — Directional bias makers** | *persistent* book pressure | touch-pegged quotes, HF1 microprice center, agreement-gated combiner, VPIN/entropy/A4-EV vetoes | signal layer buildable; economics blocked on fill data |
+| **2 — Oscillation harvesters** | *anti-persistent* amplitude | band ladder, geometry read off the spectral surface (never swept), admission by Hurst/band-power/OU-τ; LF7 is the founding member | admission + geometry studies in-hand |
+| **3 — Cross-sectional rotation** | *breadth* (IR ≈ IC·√breadth) | rank the **full perp universe** (~150+ pairs, REST 1m candles) by entropy/momentum/vol vs each pair's own history → top-k weighted allocation → route Classes 1/2 onto selected pairs | fully data-independent — leads the program |
+
+**Combiner feature contract** — one representative per measured orthogonal axis: fast
+direction (IC 0.40–0.47 @1–5s), slow bias (0.15–0.21 @30min–3h), reversion anchor
+(0.12–0.29 @10s–5min), carry tilt (hypothesis), three gates (VPIN / entropy / A4 EV), and
+volatility strictly for sizing (zero directional IC, measured). Agreement-gating is
+mandatory — the only structure with measured conditional-IC above unconditional.
+
+**Discipline** — every study pre-registers its criteria before results (per-fill EV > 0,
+positive-day share ≥ 0.55, max single-day ≤ 30 %, proxy-sensitivity stability); signal
+claims pass null-calibration (z ≥ 3) + BH-FDR (q ≤ .05) with a program-level FDR ledger;
+failures are recorded in `FINDINGS.md` with the same care as successes. **No live capital
+before G8 + healthy kill-switch**; `nat lifecycle approve` remains the sole human gate.
 
 ---
 
