@@ -349,6 +349,46 @@ but has not yet shown a per-fill PnL edge. Proxy caveats of §4.7 apply (flow/de
 one symbol, ~1 day). Next candidate experiment: touch-pegged quoting (GAP-04 posture) + HF1
 inventory skew + per-posting A4 EV gate, on multi-day data.
 
+### 4.9 Touch-maker experiment (2026-07-31 — pre-registered, multi-day): **all cells FAIL**
+
+*Source: `scripts/execution/touch_maker.py` + `touch_maker_experiment.py`; 173 day-symbol
+episodes (~58 days × BTC/ETH/SOL), 8 pre-registered cells (touch-pegged quoting × HF1
+side-selection × inventory skew × HF4 gate × A4 EV gate), criteria declared before the run:
+(a) pooled per-fill > 0, (b) positive-day share ≥ 0.55, (c) max single-day ≤ 30 % of total,
+(d) l1-fraction sensitivity. Artifact: `reports/touch_maker_experiment.json`.*
+
+| cell | fills | per-fill (bps) | pos-day % | max-day % | verdict |
+|---|---|---|---|---|---|
+| V1 touch both sides | 1,154,890 | −1.66 | 35 | 100 | FAIL(a,b,c) |
+| V1 + **EV gate** | 21,244 | **+0.67** | 47 | 118 | FAIL(b,c) |
+| V2 + HF1 side-select | 417,684 | +6.14 | 49 | 71 | FAIL(b,c) |
+| V2 + EV gate | 20,816 | +3.95 | 51 | 164 | FAIL(b,c) |
+| V3 skew only | 773,033 | −1.50 | 0 | 100 | FAIL(a,b,c) |
+| V4 all + EV | 18,570 | −1.52 | 38 | 100 | FAIL(a,b,c) |
+
+**What was learned (the experiment answered its question):**
+1. **Always-on touch quoting is bled dry by adverse selection** (−1.66/fill, 35 % positive
+   days) — §4.8's mechanism operates at the touch too, not only behind it.
+2. **The A4 EV gate is validated as a filter**: it flips V1's per-fill sign (−1.66 → +0.67)
+   while cutting fills 55×. Capture-vs-adverse gating works; it just doesn't produce
+   day-over-day consistency on this data.
+3. **HF1 side-selection prints large but non-maker PnL**: +6.1/fill on 418 k fills is
+   directional inventory riding trends (49 % positive days, 71 % single-day concentration) —
+   and implausible as maker income under the flow proxies. Treat as proxy artifact until
+   better data; the honest signal here is that HF1's direction has value, already known (§HF1
+   IC), not that a maker harvests it.
+4. **The binding failures everywhere are (b) day-consistency and (c) concentration** — the
+   two criteria that killed `surprise_signal` in §4.6. Pre-registration prevented shipping
+   another one-lucky-day discovery.
+
+**Conclusion for the maker line:** with snapshot proxies (rolling-window flow splits,
+depth-fraction queue joins), no touch-maker configuration clears the pre-registered bar. The
+maker route to Q5 remains **unproven, not disproven** — the decisive unblocker is data, not
+more sim variants: L1 queue sizes + per-tick side volume from the ingestor (a planned F-task
+schema change), or shadow quoting on the T0b box once it exists. Until then the maker line's
+validated assets are the instruments themselves (A4 EV gate, queue sims, HF1 center) and the
+posture knowledge (§4.7–4.9). Sim-only throughout; nothing here touches capital gates.
+
 ## 5. Combination, gating & regime
 
 - **Hierarchical combiner** (2026-06-10; ⚠️ 2-day OOS 06-08→10, 4-fold, 100-bar embargo):
