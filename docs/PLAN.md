@@ -158,6 +158,13 @@ data, and methodology. Decision gates:
 - **Process definitions:** `contracts/process.md` (contract) + `specs/process_layer.md` (the
   PROC-1..18 spec) + the `scripts/processes/` framework (7 shipped processes). (Original concept
   docs archived under `archive/in_progress/tasks_assigned_12_6_26/`.)
+- **Three-class research program:** `THREE_CLASS_RESEARCH_PROPOSAL.md` (2026-07-31, PROPOSAL) —
+  the research-first program over the three classes: 16 enumerated studies in four tracks
+  (XS-1..6 rotation scanner [data-independent, leads], A-1..3 Class-1 incl. combiner
+  revalidation, B-1..4 Class-2/LF7, X-1..3 execution research incl. staked fee tier + F-task
+  plan), shared OOS/pre-registration protocol, promotion gates, per-track kill criteria.
+  Paper/live phases specified but out of scope until their gates. Drains into TASKS.md rows
+  on approval.
 - **Maker system:** `specs/maker_system.md` (v2, 2026-07-31) — post-Q4 execution doctrine
   (maker-only, taker = emergency transition), the orthogonal combiner feature contract, **three
   algorithm classes** (directional bias makers / oscillation harvesters / cross-sectional
