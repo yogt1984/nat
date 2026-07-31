@@ -158,6 +158,11 @@ data, and methodology. Decision gates:
 - **Process definitions:** `contracts/process.md` (contract) + `specs/process_layer.md` (the
   PROC-1..18 spec) + the `scripts/processes/` framework (7 shipped processes). (Original concept
   docs archived under `archive/in_progress/tasks_assigned_12_6_26/`.)
+- **Docs improvement plan:** `DOCS_IMPROVEMENT_PLAN_PROPOSAL_V1.md` (2026-07-31, PROPOSAL) —
+  audit of PLAN/TASKS/specs after the Jul-30/31 sprint: ~25 stale rows, one ID collision
+  (COST-4), D1 naming clash, funding-carry gap, missing risk/capital + monitoring sections.
+  Remedies P1–P4 (ID-registry + same-branch-status conventions, TASKS reconciliation, PLAN §0
+  rewrite, spec v3). P1 blocked on the in-flight TASKS.md edit landing.
 - **Three-class research program:** `THREE_CLASS_RESEARCH_PROPOSAL.md` (2026-07-31, PROPOSAL) —
   the research-first program over the three classes: 16 enumerated studies in four tracks
   (XS-1..6 rotation scanner [data-independent, leads], A-1..3 Class-1 incl. combiner
