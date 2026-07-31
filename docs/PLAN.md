@@ -158,6 +158,11 @@ data, and methodology. Decision gates:
 - **Process definitions:** `contracts/process.md` (contract) + `specs/process_layer.md` (the
   PROC-1..18 spec) + the `scripts/processes/` framework (7 shipped processes). (Original concept
   docs archived under `archive/in_progress/tasks_assigned_12_6_26/`.)
+- **Maker system:** `specs/maker_system.md` (2026-07-31) — post-Q4 execution doctrine
+  (maker-only, taker = emergency transition), the orthogonal combiner feature contract, the two
+  algorithm classes (directional bias makers / regime-conditional oscillation harvesters), the
+  regime router, and the pre-registered acceptance criteria. Build order inside; fill-economics
+  claims blocked on the F-task (L1 queue sizes + side volume) or T0b shadow quoting.
 - **Empirical findings:** `research/FINDINGS.md` — the consolidated measured record (IC scans,
   conditional-IC adverse-selection result, OOS tiers, data audits), with provenance.
 - **CLI:** `commands.md`.
