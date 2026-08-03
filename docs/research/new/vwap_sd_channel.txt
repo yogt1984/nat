@@ -1,0 +1,88 @@
+VWAP-SD CHANNEL MAKER — UNIT BUILD SPEC (LF7)
+==============================================
+Status: SPEC (2026-07-28). Owner: Onat. Contract: docs/contracts/algorithm.md.
+Related: HF1 (microprice), HF4 (VPIN gate), A4 (queue-value), HF5 (A-S MM),
+FINDINGS.md §2 (adverse selection), §5 (entropy gate), lob preprint proposal Ch.2/3.
+
+1. IDEA
+-------
+Mean-reversion band channel at strategy timescale: midline = rolling VWAP (or MA)
+of mid over W minutes; band scale sigma = rolling std of the deviation
+(mid - midline)/midline; rest a limit BUY when deviation <= -k*sigma and a limit
+SELL when deviation >= +k*sigma; exit at midline (or opposite band, or +k_exit).
+This is the classical "regression channel / VWAP bands" idea, rebuilt under NAT
+discipline: the band multiple k is a SWEPT parameter judged by imported gates,
+never a number copied from folklore.
+
+2. WHY THE GENERIC "2 SD" ADVICE DOES NOT TRANSFER UNMODIFIED
+-------------------------------------------------------------
+(a) Fees. On Hyperliquid (config/costs.toml, via load_costs() ONLY):
+    maker = 0.2 bps REBATE per side -> a maker round trip EARNS ~0.4 bps.
+    The generic "cover 5-10 bps maker fees" break-even framing is void here.
+    The binding cost is ADVERSE SELECTION (FINDINGS.md §2: directional-fill
+    conditioning collapses IC 0.45 -> ~0.03), plus failure-to-revert tail risk.
+(b) Percent-scale folklore. "2 SD = 2.5-4% move" assumes 4H/daily channels.
+    At NAT's 60-min channel the measured sigma is ~15-19 bps (see §3), so band
+    distances are tens of bps, not percent. All arithmetic must be in bps.
+(c) The flow_vwap_deviation FEATURE is a 5-second VWAP (rust flow.rs) — it is
+    NOT this unit's channel. The channel is constructed at strategy timescale
+    from bars; the 5 s feature stays what it is (census axis #5).
+
+3. MEASURED PRIORS (single day 2026-07-17, 1-min bars, W=60 min, 30-min embargo,
+   band-touch price proxy, both sides folded; N per cell 4-31 => PRIORS ONLY,
+   nothing here is significant on its own)
+--------------------------------------------------------------------------------
+sigma of deviation: BTC 14.9 bps | ETH 18.5 bps | SOL 18.5 bps.
+Mean markout in reverting direction, bps (15 min / 60 min after touch):
+  k=1.0 : BTC -6.3/+0.2 | ETH -3.0/-2.3 | SOL -4.4/-2.1   <- ADVERSE
+  k=1.5 : BTC -4.9/-0.5 | ETH -4.0/+4.4 | SOL -1.3/+1.0   <- ADVERSE-to-flat
+  k=2.0 : BTC +3.6/+6.0 | ETH -2.2/-0.2 | SOL +7.2/+14.3
+  k=2.5 : BTC -0.8/+1.7 | ETH -6.1/+7.1 | SOL +14.9/+20.8
+  k=3.0 : BTC +1.7/+14.2| ETH -3.8/+7.5 | SOL +1.0/+53.4  (n=4-9, noise)
+Reading: shallow touches (k<=1.5) are continuation (the adverse-selection
+signature at channel scale); capture appears at k~2.0-2.5; SOL strongest,
+consistent with the SOL>ETH>BTC thin-book mean-reversion ordering. Event rate
+at k=2.0-2.5: ~12-20 embargoed touches/day/symbol.
+Break-even per filled round trip: markout_capture + 0.4 bps rebate must exceed
+0 net of the not-filled/queue reality — the touch-price proxy OVERSTATES fills
+(price must trade THROUGH the band to fill a resting order: worse entry, more
+adverse). Queue-fill simulation (A4 harness) is mandatory before any claim.
+
+4. DESIGN (two-block, per the orthogonality result)
+---------------------------------------------------
+- Sign block: band touch direction; optional microprice skew (HF1) for entry.
+- Veto/size block (volatility family): do not quote when hawkes_intensity /
+  toxic_effective_spread spike (HF4 gate when built); size by inverse vol.
+- Regime gate: ent_book_shape low-entropy quintile (the +22% lift, replicated).
+- Per-symbol k: liquidity ordering predicts k*_SOL < k*_BTC/ETH. Sweep, not set.
+- Exit: midline exit vs +/-k_exit sweep; time-stop at W; hard stop at channel
+  break (k_stop) — all swept.
+
+5. PARAMETERS (config/algorithms.toml [vwap_sd_channel]; sweep ranges to
+   config/swarm_ranges.toml when implemented)
+---------------------------------------------
+  bar_minutes = 1 | channel_window = 60 (bars) | k_entry = 2.0 (sweep 1.5-3.0)
+  k_exit = 0.0 (midline; sweep 0-1.0) | k_stop = 4.0 | time_stop_bars = 60
+  embargo_bars = 30 | use_entropy_gate = true | use_toxicity_veto = true
+
+6. VERIFICATION LADDER (non-negotiable order)
+---------------------------------------------
+  1. Planted test FIRST (planted-test-author): synthetic OU-around-VWAP series
+     with known band touches and reversion; contract 6-key output, alg_ prefix,
+     NaN discipline, step/run_batch parity.
+  2. /smoke on latest good real day.
+  3. Backtest on the stitched clean segments (Jun22-26, Jun29-Jul3, Jul8-12,
+     Jul16-17; segment boundaries = embargo points), costs via load_costs(),
+     BH-FDR across the k-sweep, deflated Sharpe per the existing Optuna guard
+     rails. Gates: imported from config/alpha.toml / agent.toml — no new numbers.
+  4. Queue-fill simulation on raw trades (data/trades/, A4) before any maker
+     profitability claim — the §2 result predicts the touch-proxy edge shrinks;
+     measuring HOW MUCH is the unit's real contribution.
+Kill criteria: imported gate thresholds; if queue-sim capture at best swept k
+is <= 0 net, the unit is retired to a documented negative result (which still
+feeds preprint Ch.3).
+
+7. MATURITY
+-----------
+SPEC (this document). PRELIM requires ladder steps 1-2; BETA requires step 3 on
+>=30 stitched clean days; PROVEN requires step 4 + Q3-class OOS.
