@@ -169,6 +169,7 @@ Institutional-GAP items cross-ref [`research/INSTITUTIONAL_ALGORITHMS.md`](resea
 | COST-2 | Remove zero-cost backtest fallback | TODO | P1 | S | in-hand | — | `CostModel(fee_bps=0)` at `:162/:101`. |
 | COST-3 | Purge hardcoded fee/slippage literals + CI grep guard | TODO | P1 | S | in-hand | — | 8.0/3.5 literals present; add a CI guard (guardrail: all costs via `load_costs()`). |
 | COST-4 | Wave-gate thresholds → config | TODO | P2 | S | in-hand | — | Gate literals in `evaluate_wave{1,2}_gate.py`. |
+| X-1 | `[hyperliquid_staked]` fee tier + reprice §4.7/§4.9 | WIP | P1 | S | in-hand | — | Ladder in `costs.toml` (wood 5 %→diamond 40 %, active tier `none`), tier-aware `utils/costs.py` + `tier_summary()` stamp, guards `tests/test_fee_tiers.py`. Repricing driver `execution/fee_tier_reprice.py` → `reports/fee_tier_reprice.json`. §4.7 EV is tier-invariant (staking discounts do not apply to maker rebates — venue docs); **§4.9 full-grid verdict pending the 70-day run** → FINDINGS §4.10. |
 | K3 | `regime_accumulation_score` constant (0.4429) | BLOCKED | P2 | XS | streak | BUG-3 | Likely auto-resolves with the GMM/K2 fix. |
 
 ## PROC — Process / IT discovery layer *(raise the ceiling on how NAT discovers edges)*

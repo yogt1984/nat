@@ -9,6 +9,31 @@ round_trip_taker_bps = 7.0  # taker_bps × 2
 slippage_bps = 2.0          # one-way slippage estimate
 funding_interval_hours = 8.0
 
+[hyperliquid_staked]
+# HYPE-staking fee discounts (X-1). Source: Hyperliquid docs "Fees" page, verified
+# 2026-08-03 — https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees
+#
+# The discount multiplies FEES PAID. Per the venue docs, staking discounts do NOT
+# apply to maker rebates — a rebate is income, not a fee, so a discount cannot
+# reduce it. `rebate_discount_applies` exists only to run the pessimistic
+# sensitivity (venue changes the rule); it is FALSE because that is the documented
+# behaviour, and flipping it is an explicit research choice.
+#
+# `tier` is the tier NAT actually holds. It stays "none" until HYPE is staked —
+# an unearned discount silently applied to every harness is the VIP9 bug
+# (FINDINGS §4.6) one level down. Override per-experiment with NAT_FEE_TIER.
+tier = "none"
+rebate_discount_applies = false
+
+[hyperliquid_staked.discounts]
+none = 0.0
+wood = 0.05       # >10 HYPE
+bronze = 0.10     # >100 HYPE
+silver = 0.15     # >1,000 HYPE
+gold = 0.20       # >10,000 HYPE
+platinum = 0.30   # >100,000 HYPE
+diamond = 0.40    # >500,000 HYPE
+
 [binance]
 vip0_round_trip_bps = 3.50
 vip9_round_trip_bps = 1.61
