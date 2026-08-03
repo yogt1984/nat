@@ -99,6 +99,7 @@ Institutional-GAP items cross-ref [`research/INSTITUTIONAL_ALGORITHMS.md`](resea
 | A2 | Macro/daily mean-reversion algorithm | TODO | P2 | S | in-hand | — | Premium/basis reversion on the settlement-clock feature. |
 | LF2 | OI-positioning-extremes algorithm | TODO | P2 | S | in-hand | — | `oi_divergence` failed; extreme-positioning variant not built. |
 | LF6 | HAR-RV sizing (non-directional) | WIP | P2 | S | in-hand | — | Feature `har_rv.py` done; sizing wiring into `meta_portfolio`/kill-switch unverified. |
+| LF7 | VWAP-SD channel maker (band mean-reversion) | TODO | P2 | M | in-hand | HF4,A4 | Spec `docs/research/new/vwap_sd_channel.txt`. k swept not fixed; single-day priors: k≤1.5 adverse, capture at k≈2.0–2.5, SOL-led; maker rebate +0.4bps RT, binding cost = adverse selection; queue-sim (A4) gates any profit claim. |
 | HF3 | Bivariate Hawkes intensity-imbalance algorithm | TODO | P2 | L | streak | F7 | Needs λ_buy/λ_sell + branching ratio (Rust feature F7). |
 | HF6 | Cross-symbol lead-lag scan (Hayashi-Yoshida) | TODO | P2 | XS | in-hand | — | Cheap scan; implement full algo only if lag>200ms survives (see PROC-9). |
 | LF3 | Liquidation-cascade reversion | BLOCKED | P2 | M | streak | Q-K2 | K2-gated; a depth-only prototype is possible now. |
