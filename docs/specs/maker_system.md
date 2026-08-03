@@ -31,6 +31,14 @@ signal; the fee-free-equivalent path is the maker rebate, and its enemy is adver
 `[hyperliquid_staked]` tier in `config/costs.toml`; every experiment reports which tier it
 priced. The maker margin (±0.01–0.04 bps/posting, §4.7) is decided by hundredths of a bp.
 
+*Shipped 2026-08-03 (X-1, `research/FINDINGS.md` §4.10).* The ladder is live
+(wood 5 % → diamond 40 %), tier `none` until HYPE is actually staked, `tier_summary()`
+stamped into every artifact. **The decisive venue mechanic: staking discounts apply to fees
+paid, not to maker rebates** ([venue docs](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees)) —
+so the discount cannot touch the maker line's income, only the taker legs. The maker
+economics are therefore *tier-invariant*, and the fee tier is no longer a live hypothesis
+for rescuing them.
+
 ## 2. Combiner feature contract — one representative per orthogonal axis
 
 Orthogonality is operational: different **mechanism × horizon × role**, verified by
