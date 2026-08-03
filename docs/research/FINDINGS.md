@@ -389,6 +389,78 @@ schema change), or shadow quoting on the T0b box once it exists. Until then the 
 validated assets are the instruments themselves (A4 EV gate, queue sims, HF1 center) and the
 posture knowledge (§4.7–4.9). Sim-only throughout; nothing here touches capital gates.
 
+### 4.10 Fee-tier repricing (2026-08-03 — X-1): **the maker line is fee-tier-invariant**
+
+*Source: `scripts/execution/fee_tier_reprice.py`; ladder in `config/costs.toml`
+`[hyperliquid_staked]`, taken from the [venue fee docs](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees)
+(wood 5 % · bronze 10 % · silver 15 % · gold 20 % · platinum 30 % · diamond 40 %), verified
+2026-08-03. Part A: the §4.7 A4 replay re-run on BTC 2026-07-29→30 (1.294 M ticks, 6,469
+postings/side). Part B: the §4.9 8-cell grid over 70 days × BTC/ETH/SOL = **179 day-symbol
+episodes**, §4.9 acceptance criteria **imported unchanged** — this study moves prices, never
+the bar. Artifact: `reports/fee_tier_reprice.json`; every cell stamped with `tier_summary()`.*
+
+**The mechanic that decides the whole study:** staking discounts apply to *fees paid*, and per
+the venue docs **not to maker rebates**. A resting quote's economics are half-spread + rebate −
+adverse selection; the discount reaches none of those. It reaches only the taker legs — which,
+under the §1 doctrine, a maker pays only when liquidating inventory.
+
+**A. §4.7 EV per posting** (measured, cost-free: fill 0.563/0.559, half-spread 0.0832 bps,
+E[adverse|fill] 0.228/0.242 bps — reproduces the §4.7 structure on a longer window):
+
+| tier | taker (bps) | rebate | EV BID | EV ASK | *if rebates were discounted too* |
+|---|---|---|---|---|---|
+| none | 3.50 | 0.200 | **+0.0313** | **+0.0228** | (same) |
+| gold | 2.80 | 0.200 | **+0.0313** | **+0.0228** | +0.0088 / +0.0004 |
+| diamond | 2.10 | 0.200 | **+0.0313** | **+0.0228** | **−0.0137 / −0.0219** |
+
+Identical at every rung. The pessimistic column runs the *wrong* way — it crosses zero between
+gold and platinum, i.e. if the venue ever discounted rebates, staking harder would make the
+maker line worse.
+
+**B. §4.9 grid — per-fill bps and verdicts** (base = tier `none`; the intermediate rungs
+interpolate monotonically and are in the artifact):
+
+| cell | fills | per-fill `none` | per-fill `diamond` | pos-day % | max-day % | verdict (all tiers) |
+|---|---|---|---|---|---|---|
+| V1 touch both sides | 1,168,018 | −1.787 | −1.738 | 35 | 100 | FAIL(a,b,c) |
+| V1 + **EV gate** | 21,596 | +0.390 | +0.540 | 48 | 201 | FAIL(b,c) |
+| V2 + HF1 side-select | 421,937 | +6.422 | +7.137 | 47 | 67 | FAIL(b,c) |
+| V2 + EV gate | 21,523 | +3.833 | +4.434 | 50 | 163 | FAIL(b,c) |
+| V3 skew only | 781,944 | −1.504 | −1.503 | 0 | 100 | FAIL(a,b,c) |
+| V3 skew + EV gate | 28,680 | −2.095 | −2.079 | 27 | 100 | FAIL(a,b,c) |
+| V4 all | 148,020 | −1.498 | −1.494 | 4 | 100 | FAIL(a,b,c) |
+| V4 all + EV | 19,230 | −1.497 | −1.465 | 37 | 100 | FAIL(a,b,c) |
+
+**No cell flips at any tier** — 8 cells × 7 rungs, plus the pessimistic sensitivity: 0 survivors.
+
+**What was learned:**
+1. **The fee tier is not a live hypothesis for the maker line.** The whole ladder moves per-fill
+   PnL by ≤ 0.72 bps (largest: V2 +6.42 → +7.14 at diamond, +11 %), while the binding failures
+   are criteria (b) day-consistency and (c) concentration — structural properties of the fill
+   distribution that no price level touches. §4.9's conclusion stands unchanged at every tier.
+2. **Where the discount does bite, it is not maker income.** Its only channel is terminal
+   liquidation, so the benefit scales with leftover inventory — largest exactly in V2, the cell
+   §4.9 already flagged as *directional inventory riding trends, not maker income*. The tier
+   subsidises the part of the P&L that isn't the strategy.
+3. **The pessimistic sensitivity is the informative one.** Discounting the rebate cuts fills
+   23 % (21,596 → 16,724 in V1+EV) because the A4 gate needs capture > adverse: a smaller
+   rebate closes the gate more often. Per-fill *rises* (+0.390 → +0.755) and pos-day share
+   reaches 0.547 — the closest any configuration has come to (b) — but still fails, and on
+   strictly less volume. Selectivity improves quality without producing consistency.
+4. **The base re-run reproduces §4.9** on 179 episodes vs 173 (V1 −1.79 vs −1.66, V1+EV +0.39
+   vs +0.67, V2 +6.42 vs +6.14, V4+EV −1.50 vs −1.52): the verdicts are stable to a 6-episode
+   data extension, which is a mild robustness datum for §4.9 itself.
+
+**The fee risk that actually matters is upstream of this study.** The SSOT prices a 0.2 bps
+maker *rebate*, which presumes a maker volume tier; the venue's base perp maker rate is a
++1.5 bps *fee*. At the base rate the §4.7 EV (+0.031 bps, carried entirely by a 0.20 bps
+rebate) is deeply negative — the maker line's survival rests on a volume-tier assumption
+that has never been tested, and unlike the staking discount it is not a rounding effect.
+Quantifying it is the next honest cost question (a `[hyperliquid_maker_tiers]` follow-up),
+not more staking arithmetic. Proxy caveats of §4.7 apply throughout; the final day of the
+window was still being written at run time. Sim-only; no live path; nothing here touches
+capital gates.
+
 ## 5. Combination, gating & regime
 
 - **Hierarchical combiner** (2026-06-10; ⚠️ 2-day OOS 06-08→10, 4-fold, 100-bar embargo):
