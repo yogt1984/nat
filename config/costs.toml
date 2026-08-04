@@ -9,6 +9,36 @@ round_trip_taker_bps = 7.0  # taker_bps × 2
 slippage_bps = 2.0          # one-way slippage estimate
 funding_interval_hours = 8.0
 
+[hyperliquid_maker_tiers]
+# Perp MAKER ladder (COST-5). Source: Hyperliquid docs "Fees", verified 2026-08-03 —
+# https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees
+#
+# SIGN CONVENTION matches `hyperliquid.maker_bps`: POSITIVE = rebate EARNED,
+# NEGATIVE = fee PAID. So base = -1.5 (you pay 0.015 %), zero_fee = 0.0, and the
+# rebate rungs are positive.
+#
+# Two different ladders at the venue:
+#   * volume tiers  — 14-day USD volume: 0.015 % → 0.012 % → 0.008 % → 0.004 % → 0.000 %
+#                     (zero at >$500M). These only ever reach ZERO, never negative.
+#   * rebate tiers  — share of venue-wide 14-day MAKER volume: >0.5 % / >1.5 % / >3.0 %
+#                     pay -0.001 % / -0.002 % / -0.003 %.
+#
+# `tier` is what NAT's numbers assume. It stays "rebate_t2" only because that is the
+# historical SSOT value (0.2 bps) that every pre-COST-5 result was priced at — it
+# presumes ≥1.5 % of ALL Hyperliquid maker volume and is UNTESTED. Override per
+# experiment with NAT_MAKER_TIER.
+tier = "rebate_t2"
+
+[hyperliquid_maker_tiers.rates_bps]
+base = -1.5        # 0.015 % fee — every account below $5M/14d
+vol_t1 = -1.2      # >$5M
+vol_t2 = -0.8      # >$25M
+vol_t3 = -0.4      # >$100M
+zero_fee = 0.0     # >$500M — the best rate reachable on volume alone
+rebate_t1 = 0.1    # >0.5 % of venue maker volume
+rebate_t2 = 0.2    # >1.5 %  ← the historical SSOT assumption
+rebate_t3 = 0.3    # >3.0 %
+
 [hyperliquid_staked]
 # HYPE-staking fee discounts (X-1). Source: Hyperliquid docs "Fees" page, verified
 # 2026-08-03 — https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees

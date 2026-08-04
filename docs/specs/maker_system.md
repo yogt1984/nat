@@ -174,8 +174,12 @@ tier (criteria declared before results, §4.9 discipline):
    **DONE 2026-08-03 (X-1, FINDINGS §4.10): no cell flips at any rung** — staking discounts
    do not reach maker rebates, so the maker line is tier-invariant. The live cost question it
    surfaced instead: the SSOT's 0.2 bps maker *rebate* presumes an untested volume tier, while
-   the venue's base perp maker rate is a +1.5 bps *fee* — quantify that before any maker
-   economics claim.
+   the venue's base perp maker rate is a +1.5 bps *fee*. **Quantified 2026-08-04 (COST-5,
+   FINDINGS §4.11):** breakeven maker rate at BTC's touch is +0.144/+0.159 bps, so the zero-fee
+   volume tier is still ~0.08 bps/posting under water and the whole maker line requires a rebate
+   tier NAT has not earned. No cell survives at any rung, and capture-gated cells are
+   **non-monotone** in the rate — a bigger rebate loosens the A4 gate and buys worse fills, so
+   the gate threshold is re-derived per fee tier, never inherited.
 2. **Class-3 Tier-W scanner** — *fully buildable now*: needs only REST candles (no ingestor,
    no streak, no fill data). `fetch_candles.py` universe extension + `xs_scan` + the three
    xs processes. The highest-value data-independent unit on the board.
