@@ -135,6 +135,65 @@ class TestExperimentsCanStampTheTier:
         assert s["rebate_discount_applies"] is False
 
 
+class TestMakerTierLadder:
+    """COST-5 — the maker rate is a tier, and the SSOT's rebate is an ASSUMPTION.
+
+    The venue's base perp maker rate is a +1.5 bps FEE; zero is the best rate volume
+    alone reaches (>$500M/14d); the negative rates need 0.5–3 % of venue-wide maker
+    volume. NAT's historical 0.2 bps rebate is rebate_t2 — recorded as such so it can
+    never again read as a fact.
+    """
+
+    LADDER = {"base": -1.5, "vol_t1": -1.2, "vol_t2": -0.8, "vol_t3": -0.4,
+              "zero_fee": 0.0, "rebate_t1": 0.1, "rebate_t2": 0.2, "rebate_t3": 0.3}
+
+    def test_ladder_matches_the_venue_doc(self):
+        from utils.costs import maker_tier_bps
+        for tier, rate in self.LADDER.items():
+            assert maker_tier_bps(tier) == pytest.approx(rate)
+
+    def test_default_reproduces_the_historical_ssot(self):
+        """No pre-COST-5 number may move: the default tier is still +0.2 bps."""
+        from utils.costs import load_costs, maker_bps, maker_tier
+        assert maker_tier() == "rebate_t2"
+        assert maker_bps() == pytest.approx(load_costs()["hyperliquid"]["maker_bps"])
+
+    def test_sign_convention_negative_is_a_fee(self):
+        from utils.costs import maker_bps, maker_tier_override
+        with maker_tier_override("base"):
+            assert maker_bps() == pytest.approx(-1.5)      # you PAY
+        with maker_tier_override("zero_fee"):
+            assert maker_bps() == 0.0
+        with maker_tier_override("rebate_t3"):
+            assert maker_bps() == pytest.approx(0.3)       # you EARN
+
+    def test_staking_discounts_a_maker_fee_but_not_a_rebate(self):
+        from utils.costs import fee_tier_override, maker_bps, maker_tier_override
+        with maker_tier_override("base"), fee_tier_override("diamond"):
+            assert maker_bps() == pytest.approx(-1.5 * 0.60)   # fee: discounted
+        with maker_tier_override("rebate_t2"), fee_tier_override("diamond"):
+            assert maker_bps() == pytest.approx(0.2)           # rebate: untouched
+
+    def test_unknown_maker_tier_raises(self):
+        from utils.costs import maker_tier_bps
+        with pytest.raises(ValueError, match="unknown maker tier"):
+            maker_tier_bps("rebate_t9")
+
+    def test_a_maker_fee_reaches_the_simulator(self):
+        """The sim must actually pay a negative rate, not silently treat it as income."""
+        import sys
+        sys.path.insert(0, str(SCRIPTS))
+        from execution.touch_maker import TouchMakerSim, TouchParams
+        from utils.costs import maker_tier_override
+        inputs = TestRepriceIdentityIsExact._planted_inputs()
+        with maker_tier_override("rebate_t2"):
+            rebated = TouchMakerSim(TouchParams(l1_fraction=0.4, requote_every=10)).run(**inputs)
+        with maker_tier_override("base"):
+            charged = TouchMakerSim(TouchParams(l1_fraction=0.4, requote_every=10)).run(**inputs)
+        assert charged["maker_bps_used"] == pytest.approx(-1.5)
+        assert charged["pnl_bps"] < rebated["pnl_bps"], "paying a maker fee must cost PnL"
+
+
 class TestRepriceIdentityIsExact:
     """Planted proof of the X-1 driver's shortcut (`fee_tier_reprice.reprice_grid`).
 

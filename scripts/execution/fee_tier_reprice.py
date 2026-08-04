@@ -113,6 +113,64 @@ def queue_value_reprice(verbose: bool = True) -> dict:
 
 
 # ── Part B: §4.9 touch-maker grid ────────────────────────────────────────────────
+def _maker_sweep_episode(task) -> tuple:
+    """One (day, symbol) episode × 8 cells, at one MAKER tier (COST-5 sweep).
+
+    Unlike the staking ladder, the maker rate is not repriceable: it enters the per-fill
+    cash AND the A4 EV gate's capture term, so every rung is genuinely re-simulated.
+    """
+    day, sym, l1_fraction, maker_tier = task
+    from cluster_pipeline.loader import load_parquet
+    from utils.costs import maker_tier_override
+    try:
+        df = load_parquet(str(DATA_DIR), symbols=[sym], start_date=day, end_date=day,
+                          columns=COLUMNS, max_memory_mb=2500)
+    except Exception:
+        return day, sym, 0, {}
+    if len(df) < MIN_TICKS:
+        return day, sym, len(df), {}
+    inputs = _episode_inputs(df)
+    recs = {}
+    with maker_tier_override(maker_tier):
+        for cname, flags in CELLS.items():
+            for suffix, ev in (("", False), ("_ev", True)):
+                p = TouchParams(l1_fraction=l1_fraction, requote_every=10,
+                                use_ev_gate=ev, **flags)
+                r = TouchMakerSim(p).run(**inputs)
+                recs[f"{cname}{suffix}"] = {
+                    "day": day, "pnl_bps": r["pnl_bps"], "n_fills": r["n_fills"],
+                    "n_postings": r["n_postings"], "max_q": r["max_abs_inventory"],
+                    "liq_cost_bps": r["liquidation_cost_bps"],
+                    "maker_bps_used": r["maker_bps_used"],
+                }
+    return day, sym, len(df), recs
+
+
+def maker_tier_sweep(days, symbols, tiers, workers=6) -> dict:
+    """Re-simulate the §4.9 grid at each maker tier. Criteria imported unchanged."""
+    from concurrent.futures import ProcessPoolExecutor
+    from utils.costs import maker_tier_bps
+    out = {}
+    for tier in tiers:
+        rate = maker_tier_bps(tier)
+        print(f"\n[M] maker tier {tier} ({rate:+.2f} bps "
+              f"{'rebate' if rate > 0 else 'fee' if rate < 0 else 'zero'})", flush=True)
+        grid = {f"{c}{s}": {sym: [] for sym in symbols} for c in CELLS for s in ("", "_ev")}
+        tasks = [(day, sym, 0.4, tier) for day in days for sym in symbols]
+        done = 0
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            for day, sym, n_ticks, recs in pool.map(_maker_sweep_episode, tasks, chunksize=1):
+                done += 1
+                if done % 15 == 0:
+                    print(f"  [{done}/{len(tasks)}] {day} {sym}", flush=True)
+                for cell, rec in recs.items():
+                    grid[cell][sym].append(rec)
+        stats = {cell: _cell_stats(recs) for cell, recs in grid.items()}
+        out[tier] = {"maker_bps": rate, "stats": stats,
+                     "verdicts": {c: verdict(s) for c, s in stats.items()}}
+    return out
+
+
 def _episode_cells(task) -> tuple:
     """One (day, symbol) episode × all 8 cells. Worker body — must stay picklable.
 
@@ -190,6 +248,66 @@ def verdict(stats: dict) -> str:
         return "NO DATA"
     fails = [k for k in ("a", "b", "c") if not stats[f"pass_{k}"]]
     return "SURVIVES(a-c; d pending)" if not fails else "FAIL(" + ",".join(fails) + ")"
+
+
+def main_maker_sweep(argv=None) -> int:
+    """COST-5 entry point: sweep the venue MAKER ladder (base fee → rebate tiers)."""
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--symbols", nargs="+", default=["BTC", "ETH", "SOL"])
+    ap.add_argument("--days", type=int, default=0)
+    ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--tiers", nargs="+",
+                    default=["base", "zero_fee", "rebate_t1", "rebate_t3"])
+    args = ap.parse_args(argv)
+
+    from utils.costs import maker_tier_bps
+    days = sorted(d.name for d in DATA_DIR.iterdir() if d.is_dir())
+    if args.days:
+        days = days[-args.days:]
+    print(f"COST-5 maker sweep · days {len(days)} ({days[0]}..{days[-1]}) · "
+          f"tiers {args.tiers}", flush=True)
+
+    # §4.7 EV is closed-form in the maker rate — priced for the full ladder, free.
+    qv = queue_value_reprice()
+    qv_by_maker = {}
+    for tier in ["base", "vol_t1", "vol_t2", "vol_t3", "zero_fee",
+                 "rebate_t1", "rebate_t2", "rebate_t3"]:
+        m = maker_tier_bps(tier)
+        qv_by_maker[tier] = {"maker_bps": m, **{
+            side: round(s["fill_rate"] * (s["half_spread_bps"] + m
+                                          - s["adverse_bps_given_fill"]), 5)
+            for side, s in qv["measured"].items()}}
+
+    sweep = maker_tier_sweep(days, args.symbols, args.tiers, workers=args.workers)
+
+    report = {"study": "COST-5 maker-tier sweep",
+              "criteria_imported_from": "FINDINGS §4.9 (pre-registered; unchanged)",
+              "queue_value_measured": qv["measured"], "queue_value_window": qv["window"],
+              "queue_value_ev_by_maker_tier": qv_by_maker,
+              "touch_maker_by_maker_tier": sweep}
+    out = REPORT.parent / "maker_tier_sweep.json"
+    out.write_text(json.dumps(report, indent=1, default=float))
+    print(f"\nartifact: {out}")
+
+    print("\n§4.7 EV per posting (bps) by maker tier")
+    print(f"{'tier':<12}{'maker':>8}{'BID':>10}{'ASK':>10}")
+    for t, v in qv_by_maker.items():
+        print(f"{t:<12}{v['maker_bps']:>8.2f}{v['bid']:>10.4f}{v['ask']:>10.4f}")
+
+    print("\n§4.9 cells — per-fill bps by maker tier")
+    cells = sorted(next(iter(sweep.values()))["stats"])
+    print(f"{'cell':<12}" + "".join(f"{t[:10]:>12}" for t in sweep))
+    for cell in cells:
+        print(f"{cell:<12}" + "".join(
+            f"{sweep[t]['stats'][cell]['per_fill_bps']:>12.3f}"
+            if sweep[t]['stats'].get(cell) else f"{'-':>12}" for t in sweep))
+    print(f"\n{'cell':<12}" + "".join(f"{t[:10]:>12}" for t in sweep) + "   (verdicts)")
+    for cell in cells:
+        print(f"{cell:<12}" + "".join(f"{sweep[t]['verdicts'][cell][:11]:>12}" for t in sweep))
+    survivors = sorted({f"{t}:{c}" for t, d in sweep.items()
+                        for c, v in d["verdicts"].items() if v.startswith("SURVIVES")})
+    print(f"\nSURVIVES at any maker tier: {survivors or 'NONE — every cell still FAILS'}")
+    return 0
 
 
 def main(argv=None) -> int:
@@ -271,4 +389,8 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
+    import sys as _sys
+    if "--maker-sweep" in _sys.argv:
+        _sys.argv.remove("--maker-sweep")
+        raise SystemExit(main_maker_sweep())
     raise SystemExit(main())

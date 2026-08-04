@@ -130,16 +130,60 @@ def taker_bps() -> float:
     return apply_fee_discount(base)
 
 
-def maker_bps() -> float:
-    """Hyperliquid one-way maker rebate in bps.
+def maker_tier() -> str:
+    """Active perp maker tier: ``NAT_MAKER_TIER`` env, else config, else the SSOT value."""
+    return (os.environ.get("NAT_MAKER_TIER")
+            or load_costs().get("hyperliquid_maker_tiers", {}).get("tier", "rebate_t2"))
 
-    Returned POSITIVE (a rebate earned). The staking discount does not touch it unless
-    ``rebate_discount_applies`` is explicitly on — see the module docstring.
+
+def maker_tier_bps(tier: str | None = None) -> float:
+    """Maker rate for ``tier`` in bps, POSITIVE = rebate earned, NEGATIVE = fee paid.
+
+    Falls back to ``hyperliquid.maker_bps`` when the ladder is absent (old configs).
     """
-    base = load_costs().get("hyperliquid", {}).get("maker_bps", 0.2)
-    if rebate_discount_applies():
-        return float(base) * (1.0 - staking_discount())
-    return float(base)
+    table = load_costs().get("hyperliquid_maker_tiers", {}).get("rates_bps")
+    if not table:
+        return float(load_costs().get("hyperliquid", {}).get("maker_bps", 0.2))
+    name = (tier if tier is not None else maker_tier()).strip()
+    if name not in table:
+        raise ValueError(
+            f"unknown maker tier {name!r}; choose one of {sorted(table)} "
+            "(config/costs.toml [hyperliquid_maker_tiers.rates_bps])"
+        )
+    return float(table[name])
+
+
+@contextmanager
+def maker_tier_override(tier: str):
+    """Price a block of code at a given maker tier (experiment scope only)."""
+    saved = os.environ.get("NAT_MAKER_TIER")
+    os.environ["NAT_MAKER_TIER"] = tier
+    try:
+        maker_tier_bps(tier)          # fail fast on a bad tier name
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop("NAT_MAKER_TIER", None)
+        else:
+            os.environ["NAT_MAKER_TIER"] = saved
+
+
+def maker_bps() -> float:
+    """Hyperliquid one-way maker rate in bps, at the active maker tier.
+
+    POSITIVE = rebate earned, NEGATIVE = fee paid. The default tier reproduces the
+    historical SSOT value (+0.2 bps) exactly, so no pre-COST-5 number moves.
+
+    The staking discount does not touch a rebate unless ``rebate_discount_applies`` is
+    explicitly on; it DOES discount a positive maker fee (a negative rate here), which
+    is the venue-documented behaviour.
+    """
+    rate = maker_tier_bps()
+    if rate < 0:                                   # a fee: the staking discount applies
+        return -apply_fee_discount(-rate)
+    if rebate_discount_applies():                  # explicit pessimistic sensitivity
+        return rate * (1.0 - staking_discount())
+    return rate
 
 
 def round_trip_taker_bps() -> float:

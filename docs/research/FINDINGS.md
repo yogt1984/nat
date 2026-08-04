@@ -461,6 +461,79 @@ not more staking arithmetic. Proxy caveats of §4.7 apply throughout; the final 
 window was still being written at run time. Sim-only; no live path; nothing here touches
 capital gates.
 
+### 4.11 Maker-ladder sweep (2026-08-04 — COST-5): **zero fees are not free money**
+
+*Source: `scripts/execution/fee_tier_reprice.py --maker-sweep`; ladder in `config/costs.toml`
+`[hyperliquid_maker_tiers]` from the [venue fee docs](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees)
+(verified 2026-08-04). Convention: **positive = rebate earned, negative = fee paid**. §4.9 grid
+re-simulated in full at each rung — 179 day-symbol episodes × 8 cells × 4 rungs — because the
+maker rate enters both the per-fill cash and the A4 gate's capture term and is therefore *not*
+repriceable. Criteria imported unchanged. Artifact: `reports/maker_tier_sweep.json`.*
+
+**The ladder NAT has been assuming.** The venue runs two ladders: volume tiers (0.015 % → 0.000 %
+at >$500 M/14 d — reaching **zero at best**) and rebate tiers (>0.5 % / >1.5 % / >3.0 % of
+venue-wide 14-day *maker* volume → −0.001 / −0.002 / −0.003 %). The SSOT's 0.2 bps rebate is
+**rebate tier 2 — it presumes ≥1.5 % of all Hyperliquid maker volume**, and every maker number in
+§4.7–§4.10 was priced at it.
+
+**A. §4.7 EV per posting, closed-form in the maker rate** (BTC 2026-07-29→30):
+
+| maker tier | rate (bps) | EV BID | EV ASK |
+|---|---|---|---|
+| base (0.015 % fee) | −1.50 | −0.925 | −0.928 |
+| vol_t3 (>$100M) | −0.40 | −0.306 | −0.313 |
+| **zero_fee (>$500M)** | **0.00** | **−0.081** | **−0.089** |
+| rebate_t1 (>0.5 %) | +0.10 | −0.025 | −0.033 |
+| rebate_t2 (>1.5 %) — the SSOT | +0.20 | +0.031 | +0.023 |
+| rebate_t3 (>3 %) | +0.30 | +0.088 | +0.079 |
+
+**Breakeven maker rate = E[adverse|fill] − half-spread = +0.144 bps (bid) / +0.159 bps (ask).**
+Zero fees leave a resting quote ~0.08 bps/posting *under water*: at BTC's touch the half-spread
+(0.083 bps) is roughly a third of the adverse selection (0.228/0.242 bps), so not-being-charged
+is not enough — the venue must **pay** you ~0.15 bps before a passive quote breaks even. Every
+positive maker number on this platform lives above rebate tier 1.
+
+**B. §4.9 grid, per-fill bps (fills)** — `rebate_t2` column from §4.10 for reference:
+
+| cell | base −1.5 | zero 0.0 | reb_t1 +0.1 | reb_t2 +0.2 | reb_t3 +0.3 |
+|---|---|---|---|---|---|
+| V1 touch both | −3.49 (1.17 M) | −1.99 (1.17 M) | −1.89 (1.17 M) | −1.79 (1.17 M) | −1.69 (1.17 M) |
+| V1 + EV gate | −3.64 (1 k) | +0.54 (12 k) | **+2.01 (15 k)** | +0.39 (22 k) | −0.84 (26 k) |
+| V2 + HF1 side | +4.79 (423 k) | +6.29 (423 k) | +6.39 (423 k) | +6.42 (422 k) | +6.59 (423 k) |
+| V2 + EV gate | −14.08 (0.4 k) | +8.92 (12 k) | +4.82 (16 k) | +3.83 (22 k) | +4.95 (27 k) |
+| V3 skew | −3.20 (784 k) | −1.70 (784 k) | −1.60 (784 k) | −1.50 (782 k) | −1.40 (784 k) |
+| V4 all + EV | −10.29 (0.4 k) | −1.28 (10 k) | −1.55 (13 k) | −1.50 (19 k) | −1.37 (26 k) |
+
+**No cell survives at any maker rate** — 8 cells × 4 rungs, 0 survivors, same binding failures
+(b) day-consistency and (c) concentration as §4.9/§4.10. At the *base* rate (a +1.5 bps fee, i.e.
+what an account below $5 M/14 d actually pays) the whole grid is deeply negative and the EV gate
+closes almost completely (1 k fills vs 22 k at tier 2).
+
+**What was learned:**
+1. **Un-gated cells are exactly linear in the maker rate** (V1: −3.49 → −1.69 across 1.8 bps of
+   ladder, i.e. 1.0 bps of rate ⇒ 1.0 bps/fill), which is the arithmetic sanity check that the
+   rate enters where it should and nowhere else.
+2. **EV-gated cells are NON-monotone** — V1+EV peaks at rebate_t1 (+2.01) and *falls* to −0.84 at
+   rebate_t3. Mechanism, visible in the fill counts: a larger rebate raises the gate's capture
+   term, so `capture > adverse` admits progressively more marginal postings (1 k → 12 k → 15 k →
+   22 k → 26 k fills). **A better fee tier loosens the filter and buys worse fills.** "Better fees
+   ⇒ better maker P&L" is false for any capture-gated strategy; the gate threshold must be
+   re-derived per fee tier, not inherited.
+3. **The fee tier NAT assumes is doing more work than any signal in the stack.** Moving from the
+   rate an ordinary account pays (−1.5) to the assumed one (+0.2) is worth ~1.7 bps/fill — larger
+   than every gating and side-selection effect measured in §4.7–§4.10 combined. This is the
+   single most load-bearing unvalidated assumption in the maker line.
+4. Combined with §4.10: **neither fee ladder rescues the maker line.** Staking cannot touch it
+   (rebates are exempt); the maker ladder moves the level but not the verdict, and its attainable
+   rung (zero, via volume) is below breakeven at BTC's touch.
+
+**Consequence for the research program.** Passive quoting at a touch this tight is structurally
+negative unless the venue pays a rebate NAT has no claim to. The untested surface is the other
+direction — **wider-spread pairs**, where the half-spread is a multiple of BTC's 0.083 bps and
+the breakeven rate is correspondingly easier. That is the Class-3 scanner's universe (~150 perps,
+REST candles, no ingestor and no streak dependency), and no maker experiment has ever been run
+outside the three tightest symbols on the venue. Sim-only; proxy caveats of §4.7 apply throughout.
+
 ## 5. Combination, gating & regime
 
 - **Hierarchical combiner** (2026-06-10; ⚠️ 2-day OOS 06-08→10, 4-fold, 100-bar embargo):
