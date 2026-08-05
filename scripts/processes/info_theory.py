@@ -50,6 +50,7 @@ from alpha.screener import compute_forward_returns
 
 from .base import EvaluationProcess, Finding, ProcessContext, ProcessResult, make_run_id, partition_usable_columns
 from .registry import register
+from .targets import TargetNotFound, feature_columns, resolve_target_col, resolve_targets
 
 _PRICE_PREFIXES = ("raw_midprice", "raw_microprice")
 
@@ -128,7 +129,7 @@ class MutualInfoProcess(EvaluationProcess):
         min_obs = int(self.params["min_obs"])
         max_samples = int(self.params["max_samples"])
         k = int(self.params["ksg_k"])
-        target_col = self.params.get("target_col") or ctx.target_col
+        target_col = resolve_target_col(self.params, ctx)   # PROC-17: one rule
         if target_col:
             return self._evaluate_label(
                 bars, ctx, result, target_col, min_obs, max_samples, k, t0
@@ -225,14 +226,16 @@ class MutualInfoProcess(EvaluationProcess):
             )
         n_shuffles = int(self.params["null_shuffles"])
         rng = np.random.default_rng(int(self.params["seed"]))
-        drop_tb = target_col.startswith("tb_")
-        label = bars[target_col].to_numpy(dtype=np.float64, na_value=np.nan)
+        try:
+            target = resolve_targets(bars, ctx, self.params)[0]
+        except TargetNotFound as exc:
+            return result.finalize(time.time() - t0, error=str(exc))
+        label = target.values(bars)
 
-        cols = [
+        cols = feature_columns(bars, [
             c for c in self.required_columns(list(bars.columns))
             if not c.startswith(_PRICE_PREFIXES) and c != ctx.price_col
-            and c != target_col and not (drop_tb and c.startswith("tb_"))
-        ]
+        ], target)
         usable, skipped = partition_usable_columns(bars, cols, min_obs=min_obs)
         result.features_tested = usable
         result.features_skipped = skipped
