@@ -554,6 +554,11 @@ outside the three tightest symbols on the venue. Sim-only; proxy caveats of §4.
   orderflow@5min passes predictive value** (KW p=3e-6 but η² = 0.057). Clusters exist
   geometrically; predictive power is minimal.
 
+- ⚠️ **SUPERSEDED 2026-08-05 by [`findings_4_8_26.md`](findings_4_8_26.md)** — the 152-episode
+  sweep places the BTC number below at the **89th percentile** (median 0.074, β drift 2.5 %), and
+  the control (`flow_vwap_deviation`, 0.093) drifts *more* than the cousins, so the effect is
+  general non-stationarity rather than cousin-specific redundancy. Read the sweep, not this bullet.
+
 - **Orthogonalization does not survive a holdout — first datum** (2026-08-05, PROC-15
   `processes/residualize.py`; BTC 2026-08-04, 246,037 rows, 70/30 prefix split).
   Residualizing `imbalance_qty_l5` against `imbalance_qty_l1` (`res_f = f − β'Z`, β fit on
