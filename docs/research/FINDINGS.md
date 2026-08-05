@@ -554,38 +554,50 @@ outside the three tightest symbols on the venue. Sim-only; proxy caveats of §4.
   orderflow@5min passes predictive value** (KW p=3e-6 but η² = 0.057). Clusters exist
   geometrically; predictive power is minimal.
 
-- ⚠️ **SUPERSEDED 2026-08-05 by [`findings_4_8_26.md`](findings_4_8_26.md)** — the 152-episode
-  sweep places the BTC number below at the **89th percentile** (median 0.074, β drift 2.5 %), and
-  the control (`flow_vwap_deviation`, 0.093) drifts *more* than the cousins, so the effect is
-  general non-stationarity rather than cousin-specific redundancy. Read the sweep, not this bullet.
+- **Orthogonality holds out of sample, with a fat tail — and one axis should be retired**
+  (2026-08-05; `exploration/orthogonality_sweep.py` over PROC-15 `residualize`; **152 episodes,
+  51 days 2026-05-18→08-04 × BTC/ETH/SOL**; artifact `reports/orthogonality_sweep.json`).
+  Per episode: fit `res_f = f − β'Z` on the leading 70 % with `Z = imbalance_qty_l1`, measure
+  `|corr(res, Z)|` on the untouched 30 %. Prefix correlation is 0 by OLS construction, so the
+  holdout number is the entire content. `flow_vwap_deviation` was carried as a **control** — §1
+  calls it a distinct axis, so a sound method should leave it clean while redundant cousins drift.
 
-- **Orthogonalization does not survive a holdout — first datum** (2026-08-05, PROC-15
-  `processes/residualize.py`; BTC 2026-08-04, 246,037 rows, 70/30 prefix split).
-  Residualizing `imbalance_qty_l5` against `imbalance_qty_l1` (`res_f = f − β'Z`, β fit on
-  the prefix only):
+  | target | median \|corr\| | p90 | frac > 0.10 | R²_fit | median β drift |
+  |---|---|---|---|---|---|
+  | `raw_bid_depth_5` / `raw_ask_depth_5` | 0.098 / 0.097 | 0.28 / 0.30 | 0.50 / 0.49 | 0.43 / 0.42 | 0.12 |
+  | `micro_queue_position_bid` | 0.096 | 0.520 | 0.49 | 0.048 | 0.377 |
+  | **`flow_vwap_deviation` — CONTROL** | **0.093** | 0.176 | 0.46 | 0.078 | 0.329 |
+  | `imbalance_orders_l5` | 0.083 | 0.242 | 0.44 | 0.789 | 0.052 |
+  | `imbalance_qty_l5` / `_notional_l5` | 0.074 | 0.196 | 0.34 | 0.788 | 0.036 |
+  | `cross_obi_mean` | 0.076 | 0.170 | 0.38 | 0.250 | 0.119 |
+  | `micro_obi_velocity` | 0.056 | 0.146 | 0.23 | 0.046 | 0.262 |
+  | `flow_aggressor_ratio_5s` | 0.029 | 0.091 | 0.07 | 0.021 | 0.208 |
+  | `ent_permutation_imbalance_16` | 0.021 | 0.054 | 0.01 | 0.030 | 0.120 |
 
-  | segment | \|corr(res, Z)\| | OLS β |
-  |---|---|---|
-  | prefix (fit) | 0.0000 | +0.8148 |
-  | holdout | **0.1919** | +0.7290 |
+  1. **The control is what makes this readable.** `flow_vwap_deviation` — the axis §1 calls
+     independent — drifts *more* (0.093) than the supposedly redundant `imbalance_qty_l5`
+     (0.074). The residual correlation is therefore **general non-stationarity across the split,
+     not cousin-specific redundancy**. Without the control the same numbers would have read as
+     "orthogonality is shaky everywhere" and been wrong in a way nothing downstream could catch —
+     the shape of the VIP9 and five-winners failures (§4.6).
+  2. **A single-day precursor was a tail, not a signal.** The first PROC-15 run (BTC 2026-08-04)
+     printed 0.192 with β drifting +0.815→+0.729; that value sits at the **89th percentile** here
+     (p10 0.017 · median 0.074 · p90 0.196 · max 0.564) and the drift is a BTC median of 2.5 %.
+     Recorded because the corrected reading is the finding.
+  3. **The axis contract mostly survives, and two axes are now measured rather than asserted:**
+     `ent_permutation_imbalance_16` (0.021, 1 % of episodes > 0.10) and `flow_aggressor_ratio_5s`
+     (0.029, 7 %) separate from book pressure on essentially every day.
+  4. **Retire "raw depth asymmetry" as a separate axis.** `raw_bid/ask_depth_5` are the worst
+     pairs (≈0.098, half the episodes > 0.10, p90 ≈ 0.29) — mechanical, since imbalance is *built*
+     from those depths. §1's eight-axis list should stop counting it as distinct.
+  5. **Respect the tail.** p90 0.17–0.30 and a third to a half of episodes above 0.10 for the
+     depth/imbalance block: decorrelation-based sizing should assume less diversification than the
+     full-sample number implies — §4.9's day-consistency lesson in another guise.
 
-  The prefix zero is OLS arithmetic, so the holdout number is the whole content: **β drifts
-  ~10 % inside a single day**, leaving ~0.19 residual correlation with the very variable it
-  was orthogonalized against. Same pass, `imbalance_depth_weighted | imbalance_qty_l1`:
-  holdout 0.183 (R²_fit 0.731). `flow_vwap_deviation | imbalance_qty_l1` is the control —
-  β ≈ 0, R²_fit 0.103, holdout 0.083 — i.e. the axis §1 calls mean-reverting really is
-  near-independent of book pressure, while the imbalance cousins are not stably separable from
-  each other.
-
-  **Why it matters:** §1's "eight independent signal axes" and the combiner contract's *one
-  representative per orthogonal axis* (`specs/maker_system.md` §2) are enforced today by
-  correlation dedup on **full-sample** statistics. This says those statistics do not hold on
-  a 70/30 split of one day — so "orthogonal" is currently a full-sample property being used
-  as if it were a forward one. **Not a verdict:** one symbol, one day, one linear method.
-  What would settle it is the same residualization swept across days × symbols × pairs
-  (cheap — it is an XS process), reporting holdout \|corr\| per pair; if the drift replicates,
-  either the axes need rolling re-fits or the orthogonality claim must be restated as
-  regime-local rather than structural.
+  *Limits:* one linear method, one conditioning variable, one split geometry (70/30, no rolling
+  re-fit); sample shaped by §7's gaps (64 of 216 episodes missing: 38 symbol-days absent, 23
+  sub-threshold, 3 from a malformed `2026-05-12-clean` directory). Measures separation only, never
+  predictive value. Extensions: rolling-β, and residualizing against a whole selected set (PROC-3).
 
 ## 6. Convolver & data-volume arithmetic
 
