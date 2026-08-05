@@ -554,6 +554,34 @@ outside the three tightest symbols on the venue. Sim-only; proxy caveats of §4.
   orderflow@5min passes predictive value** (KW p=3e-6 but η² = 0.057). Clusters exist
   geometrically; predictive power is minimal.
 
+- **Orthogonalization does not survive a holdout — first datum** (2026-08-05, PROC-15
+  `processes/residualize.py`; BTC 2026-08-04, 246,037 rows, 70/30 prefix split).
+  Residualizing `imbalance_qty_l5` against `imbalance_qty_l1` (`res_f = f − β'Z`, β fit on
+  the prefix only):
+
+  | segment | \|corr(res, Z)\| | OLS β |
+  |---|---|---|
+  | prefix (fit) | 0.0000 | +0.8148 |
+  | holdout | **0.1919** | +0.7290 |
+
+  The prefix zero is OLS arithmetic, so the holdout number is the whole content: **β drifts
+  ~10 % inside a single day**, leaving ~0.19 residual correlation with the very variable it
+  was orthogonalized against. Same pass, `imbalance_depth_weighted | imbalance_qty_l1`:
+  holdout 0.183 (R²_fit 0.731). `flow_vwap_deviation | imbalance_qty_l1` is the control —
+  β ≈ 0, R²_fit 0.103, holdout 0.083 — i.e. the axis §1 calls mean-reverting really is
+  near-independent of book pressure, while the imbalance cousins are not stably separable from
+  each other.
+
+  **Why it matters:** §1's "eight independent signal axes" and the combiner contract's *one
+  representative per orthogonal axis* (`specs/maker_system.md` §2) are enforced today by
+  correlation dedup on **full-sample** statistics. This says those statistics do not hold on
+  a 70/30 split of one day — so "orthogonal" is currently a full-sample property being used
+  as if it were a forward one. **Not a verdict:** one symbol, one day, one linear method.
+  What would settle it is the same residualization swept across days × symbols × pairs
+  (cheap — it is an XS process), reporting holdout \|corr\| per pair; if the drift replicates,
+  either the axes need rolling re-fits or the orthogonality claim must be restated as
+  regime-local rather than structural.
+
 ## 6. Convolver & data-volume arithmetic
 
 *Source: convolver_data_analysis 2026-06-03 (BTC, 12,059 60 s candles ≈ 8.4 days).*
