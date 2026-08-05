@@ -177,23 +177,28 @@ Institutional-GAP items cross-ref [`research/INSTITUTIONAL_ALGORITHMS.md`](resea
 ## PROC — Process / IT discovery layer *(raise the ceiling on how NAT discovers edges)*
 
 Detailed spec: [`specs/process_layer.md`](specs/process_layer.md). Critical path:
-`PROC-12 → PROC-6 → PROC-7 → PROC-8 → PROC-1`. **Start with PROC-12 + PROC-6.** All run on data in hand.
+`PROC-12 → PROC-6 → PROC-7 → PROC-8 → PROC-1` — **complete as of 2026-08-05** (Phase 0 + Phase 1 of
+the spec's roadmap, plus the compiler). The discovery loop now closes end to end: null-calibrated
+measurement → conditional predictability → surface → a registered algorithm. **Next on this layer:**
+`PROC-17` (targets as a first-class node, the substrate 5/6/7 currently work around), then `PROC-3`
+(synergy-aware combiner — the unit that actually tests the orthogonality assumption) and `PROC-4`
+(longitudinal MI stability, planted path runs now). All run on data in hand.
 *(The `process_signal_design` S1–S9 series is folded here: S1/S2→PROC-3, S3→PROC-9, S4→PROC-12/13,
 S5→PROC-4, S6→PROC-6, S9→PROC-8/11.)*
 
 | ID | Title | Status | Prio | Eff | Data | Dep | Notes |
 |----|-------|--------|------|-----|------|-----|-------|
-| PROC-12 | Null-calibration layer ⭐ | TODO | P0 | S | in-hand | — | Shuffle-null → bits-above-null / z-score, not raw bits. Foundation. (=S4 permutation_null) |
-| PROC-6 | `conditional_predictability` process ⭐ | TODO | P0 | M | in-hand | PROC-12 | `MI(f;label\|Z=z)` as a function of z; argmax = tradeable regime. (=S6) |
-| PROC-5 | Schedule the 3-bar classifier as standing eval | TODO | P0 | XS | in-hand | — | `triple_barrier → mi_ksg(target=tb_label)`; audit whether ever run. |
-| PROC-7 | Horizon/label MI-surface meta-process | TODO | P1 | M | in-hand | PROC-5,6,12 | Sweep `(horizon,geometry,regime)` → argmax. |
-| PROC-13 | FDR/DSR on the process layer + cross-run ledger | TODO | P1 | S | in-hand | PROC-12 | BH q per cell; program-level `(process,target,n_tested,git_sha)` ledger (=B3). |
+| PROC-12 | Null-calibration layer ⭐ | DONE | P0 | S | in-hand| —| `it_engine/null_calibration.py` + `tests/test_null_calibration.py` (c0673e8). Shuffle-null → bits-above-null / z / p; thresholds in `config/it_engine.toml`. |
+| PROC-6 | `conditional_predictability` process ⭐ | DONE | P0 | M | in-hand| PROC-12| `processes/conditional_predictability.py` + test (1d11990). `MI(f;label|Z=z)` per bucket; registered. |
+| PROC-5 | Schedule the 3-bar classifier as standing eval | DONE | P0 | XS | in-hand| —| `processes/standing.py` + `tests/test_standing_evals.py` (31bedc4). `barrier_3bar_mi` registered + `audit_standing_evals()`. |
+| PROC-7 | Horizon/label MI-surface meta-process | DONE | P1 | M | in-hand| PROC-5,6,12| `processes/horizon_label_scan.py` + test (3252581). (horizon × geometry × regime) sweep. |
+| PROC-13 | FDR/DSR on the process layer + cross-run ledger | DONE | P1 | S | in-hand| PROC-12| `processes/fdr.py` + `tests/test_process_fdr.py`. BH q per cell + append-only cross-run ledger. |
 | PROC-4 | Longitudinal MI tracker (`mi_stability`) | TODO | P1 | M | ≥10 days | PROC-12 | Cross-day MI stability (=S5); planted path runs now. |
-| PROC-8 | Predictability surface + viz | TODO | P1 | M | in-hand | PROC-6,7 | Central artifact `combo×horizon×label×regime→MI`; feeds D1. |
+| PROC-8 | Predictability surface + viz | DONE | P1 | M | in-hand| PROC-6,7| `processes/surface.py` + `tests/test_predictability_surface.py` (8850b14). `nat viz predictability`. |
 | PROC-10 | Predictability half-life | TODO | P1 | S | ≥30 days | PROC-4 | `MI(t)` decay; feeds Q4 + LOOP-3. |
 | PROC-3 | MI-maximizing nonlinear combiner (`cmi_select`+synergy) | TODO | P2 | L | in-hand | PROC-12,13 | Synergy-aware selection (=S1+S2), replaces myopic greedy. |
 | PROC-9 | Transfer-entropy causal graph (`lead_lag_te`) | TODO | P2 | M | in-hand | PROC-12 | Directed feature/symbol lead-lag (=S3); nonparametric Hasbrouck. Feeds HF6. |
-| PROC-1 | Process→algorithm compiler | TODO | P2 | L | in-hand | PROC-6,7,12,13 | Promoted finding → registered `MicrostructureAlgorithm`. |
+| PROC-1 | Process→algorithm compiler | DONE | P2 | L | in-hand| PROC-6,7,12,13| `agent/algo_synth.py` + `tests/test_algo_synth.py` (34 tests). Compiles ONLY null-calibrated (PROC-12 z) + FDR-passed (PROC-13 q) findings carrying an explicit polarity — MI is unsigned, so a direction is never guessed; identifier-validated, no shadowing, deterministic render, kinds threshold/regime_gated (combiner → PROC-3). |
 | PROC-11 | Two-stage regime-then-price system | TODO | P2 | L | in-hand | PROC-6 | Forecast regime → fire signal only in favorable regime. (=S9 signal_book) |
 | PROC-2 | Self-explaining edges + reading notes | TODO | P2 | M | in-hand | — | Mechanism annotation per edge + 5 paper reading notes. |
 | PROC-17 | Target as a first-class node (`targets.py`) | TODO | P1 | S | in-hand | — | Replace `target_col`; today only `ic_horizon`/`ml_importance` honor targets. Substrate for PROC-5/6/7. |
