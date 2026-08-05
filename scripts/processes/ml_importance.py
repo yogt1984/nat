@@ -35,6 +35,7 @@ from alpha.screener import compute_forward_returns
 
 from .base import EvaluationProcess, Finding, ProcessContext, ProcessResult, make_run_id, partition_usable_columns
 from .registry import register
+from .targets import TargetNotFound, feature_columns, resolve_target_col, resolve_targets
 
 _PRICE_PREFIXES = ("raw_midprice", "raw_microprice")
 
@@ -93,9 +94,14 @@ class MLImportanceProcess(EvaluationProcess):
             c for c in self.required_columns(list(bars.columns))
             if not c.startswith(_PRICE_PREFIXES) and c != ctx.price_col
         ]
-        target_col = self.params["target_col"] or ctx.target_col
+        target_col = resolve_target_col(self.params, ctx)
         if target_col:
-            cols = [c for c in cols if c != target_col and not c.startswith("tb_")]
+            # leakage set comes from the target node (PROC-17): the label plus every
+            # sibling column that jointly encodes its outcome
+            try:
+                cols = feature_columns(bars, cols, resolve_targets(bars, ctx, self.params)[0])
+            except TargetNotFound as exc:
+                return result.finalize(time.time() - t0, error=str(exc))
         usable, skipped = partition_usable_columns(bars, cols, min_obs=min_obs)
         result.features_tested = usable
         result.features_skipped = skipped

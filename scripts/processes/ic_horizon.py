@@ -49,6 +49,7 @@ from alpha.screener import (
 
 from .base import EvaluationProcess, Finding, ProcessContext, ProcessResult, make_run_id, partition_usable_columns
 from .registry import register
+from .targets import TargetNotFound, resolve_targets
 
 # Price columns are trivially correlated with returns — never score them
 _PRICE_PREFIXES = ("raw_midprice", "raw_microprice")
@@ -89,20 +90,15 @@ class ICHorizonProcess(EvaluationProcess):
         result.features_tested = usable
         result.features_skipped = skipped
 
-        # Targets: forward returns per horizon, or an explicit label column
-        target_col = self.params["target_col"] or ctx.target_col
-        if target_col:
-            if target_col not in bars.columns:
-                return result.finalize(time.time() - t0,
-                                       error=f"target_col '{target_col}' not in data")
-            tgt = bars[target_col].to_numpy(dtype=np.float64, na_value=np.nan)
-            targets = {"label": (0, tgt)}
-        else:
-            prices = bars[ctx.price_col].to_numpy(dtype=np.float64, na_value=np.nan)
-            targets = {
-                h_name: (h_bars, compute_forward_returns(prices, h_bars))
-                for h_name, h_bars in ctx.horizons.items()
-            }
+        # Targets: forward returns per horizon, or an explicit label column.
+        # Resolution, existence/usability checks and materialisation belong to the
+        # target node (PROC-17), not to each consumer.
+        try:
+            resolved = resolve_targets(bars, ctx, self.params)
+        except TargetNotFound as exc:
+            return result.finalize(time.time() - t0, error=str(exc))
+        targets = {tgt.horizon_name: (tgt.horizon_bars, tgt.values(bars))
+                   for tgt in resolved}
         vol_target = {
             h: float(np.nanstd(fr)) if np.isfinite(fr).sum() > 10 else 0.0
             for h, (_, fr) in targets.items()
