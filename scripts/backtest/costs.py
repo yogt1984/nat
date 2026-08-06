@@ -8,6 +8,10 @@ single source of truth (config/costs.toml via utils.costs) — never hardcode th
 from dataclasses import dataclass, field
 from typing import Literal
 
+#: A maker REBATE larger than this is a typo, not a fee tier (the venue's best rung is
+#: 0.3 bps). Keeps the non-negative guard's intent while allowing a real rebate through.
+MAX_REBATE_BPS = 5.0
+
 try:
     from utils.costs import maker_bps, taker_bps
 except ImportError:  # pragma: no cover - path bootstrap for direct/script imports
@@ -46,8 +50,13 @@ class CostModel:
     fill_probability: float = 1.0  # Probability an order fills (1.0 = always)
 
     def __post_init__(self):
-        if self.fee_bps < 0:
-            raise ValueError(f"fee_bps must be non-negative, got {self.fee_bps}")
+        # fee_bps is a COST, so a NEGATIVE value is a rebate (the venue pays you). That is
+        # a real tier, not a typo — but only within the range a venue actually offers, so
+        # the guard is relaxed to a floor rather than removed (COST-8).
+        if self.fee_bps < -MAX_REBATE_BPS:
+            raise ValueError(
+                f"fee_bps {self.fee_bps} implies a rebate larger than {MAX_REBATE_BPS} bps "
+                "— the venue's best rung is 0.3 bps, so this is a typo")
         if self.slippage_bps < 0:
             raise ValueError(f"slippage_bps must be non-negative, got {self.slippage_bps}")
         if not 0.0 < self.fill_probability <= 1.0:
@@ -68,7 +77,10 @@ class CostModel:
         from utils.costs import load_costs, maker_bps, taker_bps
 
         if venue == "hyperliquid":
-            fee = maker_bps() if role == "maker" else taker_bps()
+            # utils.costs uses POSITIVE = rebate earned; CostModel uses POSITIVE = cost.
+            # The negation is the whole point — booking a rebate as a charge is a 2x error
+            # on the maker leg (COST-8).
+            fee = -maker_bps() if role == "maker" else taker_bps()
         else:
             section = load_costs().get(venue, {})
             fee = section.get(f"{role}_bps", taker_bps())
@@ -264,14 +276,25 @@ def hyperliquid_taker() -> CostModel:
     return CostModel.from_config(role="taker")
 
 
+def _maker_fee_bps() -> float:
+    """Active maker rate as a COST (negative = rebate earned), from the SSOT ladder.
+
+    Sourced from `utils.costs.maker_bps()` so the `[hyperliquid_maker_tiers]` rung in
+    `config/costs.toml` ripples here instead of requiring an edit — the rate §4.11 names
+    the most load-bearing unvalidated assumption in the stack must never be a literal.
+    """
+    from utils.costs import maker_bps as _maker_bps
+    return -_maker_bps()
+
+
 def hyperliquid_maker() -> CostModel:
-    """Hyperliquid maker fees with realistic fill rate (~40%)."""
-    return CostModel(fee_bps=0.2, slippage_bps=0.5, fill_probability=0.4)
+    """Hyperliquid maker rate (SSOT tier) with a realistic fill rate (~40%)."""
+    return CostModel(fee_bps=_maker_fee_bps(), slippage_bps=0.5, fill_probability=0.4)
 
 
 def hyperliquid_maker_conservative() -> CostModel:
-    """Hyperliquid maker fees with conservative fill rate (~30%)."""
-    return CostModel(fee_bps=0.2, slippage_bps=0.5, fill_probability=0.3)
+    """Same rate, conservative fill rate (~30%)."""
+    return CostModel(fee_bps=_maker_fee_bps(), slippage_bps=0.5, fill_probability=0.3)
 
 
 def conservative() -> CostModel:

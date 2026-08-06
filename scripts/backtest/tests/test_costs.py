@@ -35,10 +35,14 @@ class TestCostModelBasics:
         model = CostModel(fee_bps=10.0, slippage_bps=0.0)
         assert abs(model.one_way_cost_fraction - 0.001) < 1e-10
 
-    def test_negative_fee_rejected(self):
-        """Negative fees should raise error."""
-        with pytest.raises(ValueError):
-            CostModel(fee_bps=-1.0)
+    def test_plausible_rebate_accepted_absurd_one_rejected(self):
+        """COST-8 relaxed this guard: fee_bps is a COST, so a small negative is a REBATE
+        (a real venue tier), while a large negative is still a typo. The rule became a
+        floor rather than a ban — the intent (catch fat fingers) is unchanged."""
+        from backtest.costs import MAX_REBATE_BPS
+        assert CostModel(fee_bps=-0.2).fee_bps == -0.2
+        with pytest.raises(ValueError, match="rebate"):
+            CostModel(fee_bps=-(MAX_REBATE_BPS + 1))
 
     def test_negative_slippage_rejected(self):
         """Negative slippage should raise error."""
