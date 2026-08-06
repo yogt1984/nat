@@ -606,6 +606,55 @@ outside the three tightest symbols on the venue. Sim-only; proxy caveats of §4.
   sub-threshold, 3 from a malformed `2026-05-12-clean` directory). Measures separation only, never
   predictive value. Extensions: rolling-β, and residualizing against a whole selected set (PROC-3).
 
+- **Bar-scale momentum is ANTI-persistent, and no band cell clears the bar — negative result**
+  (2026-08-06; `processes/persistence_stats.py` (PROC-20) via
+  `exploration/persistence_study.py`; **185 of 219 episodes, ~62 days × BTC/ETH/SOL × {1 min,
+  5 min}, 330 cells** at the config null budget; artifact `reports/persistence_study.json`).
+  Two families, one run: `P(continue | run length k)` against a **sign-permutation** null
+  (permuting the sign series and recomputing runs, so 0.5 is the null value), and `k·σ` band
+  touches from a rolling VWAP midline with an embargo, marked out in the reverting direction.
+
+  **A. Momentum does not persist here — the opposite does.** Excess over null at k=1:
+
+  | tf | BTC | ETH | SOL |
+  |---|---|---|---|
+  | 1 min | −0.0205 (z 10.5, n 18.6 k) | −0.0300 (z 8.6, n 19.6 k) | −0.0138 (z 6.5, n 19.9 k) |
+  | 5 min | −0.0263 (z 0.6) | −0.0293 (z 0.7) | −0.0093 (z 2.0) |
+
+  **34 of 36 cells negative**, growing to −0.12 at k=6. At 1 min the pooled z of 6–10 on ~19 k
+  events per symbol makes the sign unambiguous; at 5 min it is the same sign but unresolvable.
+  The tradeable structure at bar scale is *reversion*, not continuation — consistent with §5's
+  OU/spectral picture and with the bounce mechanics of §2.
+
+  **B. LF7's band priors partially replicate, none survive.** 5 min bars, 2 h horizon, markout
+  in the reverting direction (bps, n in brackets):
+
+  | sym | k=1.0 | k=1.5 | k=2.0 | k=2.5 | k=3.0 |
+  |---|---|---|---|---|---|
+  | BTC | +0.3 (199) | +14.3 (155) | +15.2 (111) | +22.6 (82) | +10.6 (60) |
+  | ETH | −4.8 (211) | −10.8 (165) | −9.0 (115) | +1.1 (91) | +31.0 (64) |
+  | SOL | −7.3 (220) | +12.0 (173) | +23.4 (124) | **+45.8 (93)** | +31.3 (68) |
+
+  LF7 (`research/new/vwap_sd_channel.txt`, single day, n = 4–31/cell) predicted adverse at
+  k ≤ 1.5, capture at k ≈ 2.0–2.5, and SOL > ETH > BTC. **Two of three hold** — capture does
+  concentrate at k ≈ 2.0–2.5 and SOL leads by a wide margin — but the ordering is
+  **SOL > BTC > ETH**, with ETH adverse across most of the grid. At 1 min/30 min almost every
+  cell is adverse, matching the shallow-touch continuation signature.
+
+  **The verdict: 0 of 330 cells are informative after FDR + day-durability.** SOL's headline
+  +45.8 bps is z = 2.87 with **BH q = 0.33** and `frac_days_informative = 0.00` — 93 events
+  across 62 days is ~1.5/day, so no day carries enough to be durable. The 1 min momentum cells
+  are the only ones with real pooled significance and they fail day-consistency (q ≈ 0.08–0.12).
+  **Nothing here is promotable**, and the grid's shape — 330 cells, thin per-cell counts, large
+  bps values — is precisely the one that manufactures headline numbers.
+
+  *Consequence for LF7:* its k-prior survives as a prior and nothing more; the missing
+  ingredient is **events per day**, not a better k. More events means lower k, more symbols, or
+  the wider-spread pairs `B-5` targets — which is the same conclusion §4.11 reached from the
+  cost side. *Limits:* touch price is a fill proxy that **overstates** fills (price must trade
+  through a resting order), so A4's queue sim gates any profit claim; markouts are gross of
+  fees and funding; 34 of 219 episodes lost to §7's gaps.
+
 ## 6. Convolver & data-volume arithmetic
 
 *Source: convolver_data_analysis 2026-06-03 (BTC, 12,059 60 s candles ≈ 8.4 days).*
