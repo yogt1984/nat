@@ -36,6 +36,15 @@ min_obs = 200
 min_band_ic = 0.05
 min_obs = 5000                  # tick-level; Welch needs ~2 full segments
 
+[persistence_stats]              # PROC-20: run-length continuation + band excursion
+max_run_length = 5
+vwap_window = 60                 # bars in the rolling midline / sigma window
+k_grid = [1.0, 1.5, 2.0, 2.5, 3.0]   # LF7's band multiples
+embargo_bars = 30                # minimum gap between counted touches
+min_events = 30
+min_fold_events = 10
+day_shuffles = 50                # per-day permutation draws (means, not KSG - cheap)
+
 [ml_importance]
 n_splits = 5
 top_k = 20
