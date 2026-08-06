@@ -1,7 +1,14 @@
 # Three-Class Research Program — Proposal
 
-**Status:** PROPOSAL (2026-07-31). On approval: rows drain into `TASKS.md`, `PLAN.md` §0
-refreshes, and studies execute in the order below. **Initially research only** — paper and
+**Status:** APPROVED & DRAINED (2026-08-06). The 16 rows now live in
+[`TASKS.md`](TASKS.md) § "R1 — Three-class research program" (IDs `XS-1..6`, `A-1..3`, `B-1..4`,
+`X-1..3`), and `PLAN.md` §0 has been refreshed to the R1 order — **`TASKS.md` is the execution
+record from here; this file remains the program's rationale and kill criteria.** `X-1` is DONE
+(§4.10). Sequencing amended by evidence since approval: `XS-1` leads outright because
+`B-5` (wider-spread maker viability, the one hypothesis §4.11 left alive) also depends on the
+candle universe.
+*(Original header: PROPOSAL, 2026-07-31. On approval: rows drain into `TASKS.md`, `PLAN.md` §0
+refreshes, and studies execute in the order below.)* **Initially research only** — paper and
 live phases are specified for completeness but explicitly out of scope until their gates.
 **Spec basis:** `specs/maker_system.md` v2. **Empirical basis:** `research/FINDINGS.md`.
 **Gates are imported, never invented** (Q5, G8, P6/§4.9 criteria, PROC null/FDR).

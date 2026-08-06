@@ -14,47 +14,55 @@ this plan holds the strategic gate-level view; `TASKS.md` holds the rows. Proces
 
 ---
 
-## 0. Current Focus  *(pinned — update this block as state changes)*
+## 0. Current Focus  *(pinned — update this block as state changes; refreshed 2026-08-06)*
 
-**Binding constraint:** data continuity. Every clean day appreciates all existing research; the
-whole Q-branch is gated on it.
+**Naming, fixed here:** the conditional-IC go/no-go is **`Q5`**, everywhere and only. It was
+previously also called "D1", which is the *viz* task in the D-branch. That collision is retired.
 
-**Master gate — a clean 7-day data streak.** The Jun-17 su-35 target was **missed** (Jun-19 check:
-window only 7–16 h/day, no complete day), so re-establishing a clean streak — most likely on the
-**T0b cloud box** — is now the gating objective, and the dedicated ingest box is the critical path.
-Verify current status with `nat gap status` / `/streak` (local read; does **not** contact su-35).
-A clean streak lifts the su-35 freeze and unblocks Q2/Q3. **Hard rule: zero su-35 contact until a
-clean streak completes.**
+**Where the record stands.** Three things are now settled and should not be re-litigated:
+the **taker path is arithmetically closed** (0.5–2 bps move vs ~11 bps RT, §2); **all five shipped
+"winners" are refuted** (Q4, 2026-07-30, 5/5 KILL — wrong-venue cost tier plus a sweep harness that
+never ran the algorithms' own logic, §4.6); and **passive quoting at BTC's touch is structurally
+negative at every reachable fee tier** — breakeven maker rate is +0.144 bps against a zero-fee best
+case (§4.10–4.11). The deployable tier is empty. What survives is the *instruments* (A4 EV gate,
+queue sims, HF1 center), the PROC discovery layer (complete end to end 2026-08-05), and the
+methodology that caught all of the above.
 
-**Do-now sequence:**
-1. **Q0** — verify the streak outcome.
-2. **T0b cloud deploy (P0)** — provision the Hetzner box and deploy the redundant ingestor
-   (`nat deploy cloud <ip> --dry-run` first). Removes single-point su-35 risk; the vehicle is ready
-   (root `HETZNER_DEPLOYMENT_PLAN.md`).
-3. **Q4 — alpha-skeptic gate on existing data** — ✅ **DONE 2026-07-30, verdict 5/5 KILL**
-   (`FINDINGS.md` §4.6): all five "winners" were false discoveries (wrong-venue cost tier +
-   sweep harness never ran the algorithms' own logic); all REJECTED in the lifecycle. The
-   90-day spend it was guarding against is cancelled for these signals.
-4. **Conditional-IC > 0.15 (D1, ~Aug)** — the go/no-go for the whole trading business: IC≈0.45
-   collapses to ~0.03 under realistic fills.
+**The binding constraint has moved.** It is no longer "clean days" in general — the R1 research
+program below runs entirely on data in hand. Data continuity now gates specifically **paper, live,
+and the fill-economics verdict (X-3)**. The su-35 freeze and the T0b deployment stand unchanged:
+**hard rule — zero su-35 contact until a clean streak completes**; verify with `nat gap status` /
+`/streak` (local read, does not contact su-35).
 
-**Actionable now (no data needed):** T0b provisioning; the D-branch (D1/D2/D3); the entire P-branch
-(P1→P5); the maker line (GAP-04/HF1/A4 — the surviving execution path per Q4); the open bugs below.
+**Do-now sequence** *(all of 1–4 are data-independent)*:
+1. **`XS-1` — universe candle backfill.** The unblocker: `data/candles/` does not exist, and both
+   `B-5` and all of Track C need it. `get_meta()` already parses the universe, so it is wiring.
+2. **`B-5` — maker viability on wider-spread pairs.** The one maker hypothesis §4.11 left alive:
+   breakeven scales with the half-spread, and every maker experiment so far ran on the three
+   *tightest* symbols on the venue. §4.9 criteria imported unchanged.
+3. **`A-2` — combiner revalidation.** The last unrefuted capital-relevant claim in the record
+   (§5's IC .18/.25/.36 on a **2-day** OOS with monotonically rising fold ICs). Settle it before
+   building on it.
+4. **`COST-8`** — stop hardcoding the 0.2 bps maker rebate; it is the most load-bearing
+   unvalidated number in the stack (§4.11), worth ~1.7 bps/fill.
 
-**Blocked on data/streak:** Q3 revalidation; the G1 alpha screen; `hierarchical_combiner`
-revalidation; combine → paper → live.
+**Ops track, in parallel:** `REL-4` (verify Telegram actually pages — the last open REL item) →
+`Q1` T0b provisioning (`nat deploy cloud <ip> --dry-run` first) → `Q0` streak verification.
 
-**Open bugs (P1):**
-- Retrain/revalidate the 3 ML algos (`mean_reversion_detector`, `meta_labeling`,
-  `regime_conditioned_lgbm`) against the current schema (artifacts date to 2026-06-08).
-- Fix `nat agent status` → `ModuleNotFoundError: logging_config` (blocks running agents, incl. on
-  the cloud box).
-- Fix + enable the GMM 5D regime classifier: correct `train_regime_gmm.py` column names, train,
-  enable. **Do NOT merge branch `936f7cb`** (it drops whale flow).
+**Blocked on data/streak:** `X-3` fill economics (the maker go/no-go), `PROC-10` half-life,
+`Q-K2` concentration verdict, `Q5` itself, and everything paper → live.
 
-**Dated milestones:** Jun-17 streak gate · D1 conditional-IC verdict + first G8 window ~Aug ·
+**Open bugs (P1):** `BUG-1` — the 3 ML algos are still unretrained *and* their artifacts live
+off-git (`models/` is gitignored), so the trained state is unauditable from a clean checkout.
+`REV-1` — §4.1-derived numbers fenced in FINDINGS but never swept from `reports/`/notebooks/
+`ALGORITHMS.md`. `COST-8` (above). *(REL-1/2/3, BUG-2/3/4/5, COST-1/2/3/6/7 all shipped Jul-26→30 —
+verified against merge SHAs 2026-08-06; see the TASKS reconciliation log.)*
+
+**Dated milestones:** `Q5` conditional-IC verdict + first G8 window — **slipped past the ~Aug
+target**, and honestly so: it now depends on the R1 program plus fill data that does not exist yet ·
 preprint camera-ready ~Aug, SSRN/arXiv ~Sep · D2 prof-interest checkpoint ~Nov · EPFL EDFI
-deadlines **Jan 15 / Mar 31 2027** · live capital Sep–Oct (only if D1 positive).
+deadlines **Jan 15 / Mar 31 2027** · live capital only if `Q5` is positive — no date is meaningful
+until X-3 has fill data.
 
 ---
 
@@ -75,11 +83,14 @@ deadlines **Jan 15 / Mar 31 2027** · live capital Sep–Oct (only if D1 positiv
 Aim: re-test the promising algorithms over a longer window with a dedicated tool and a dedicated
 ingest box, then adversarially try to kill them. No live capital until paper passes G8.
 
-- **Q0 — Verify the streak.** `nat gap status` / `/streak`. ⏳ do first; gating.
+- **Q0 — Verify the streak.** `nat gap status` / `/streak`. Gates paper/live and X-3 — **not** the
+  R1 research program, which runs on data in hand.
 - **Q1 — T0b Hetzner ingest box.** 24/7 ingestor + Telegram <5 min gap alert (per root
-  `HETZNER_DEPLOYMENT_PLAN.md`). Removes single-point su-35 risk.
-- **Q2 — Longitudinal tool.** Generalize `nat oos30` → `nat oos --window <N>d` (walk-forward folds
-  + deflated Sharpe, `--json`). Depends on Q0.
+  `HETZNER_DEPLOYMENT_PLAN.md`). Removes single-point su-35 risk. Unblocked but for `REL-4`
+  (REL-1/2/3 shipped as OPS-1/2/3, Jul-26/27).
+- **Q2 — Longitudinal tool.** ✅ **DONE** — `nat oos --window <N>d` with walk-forward folds,
+  deflated Sharpe and `--json` (`scripts/cli/oos.py:95,148,151`). The Q4 skeptics used it to kill
+  `optimal_entry` and `jump_detector` on stored data.
 - **Q3 — Extended revalidation** of the 5 winners — **MOOT as scoped** (Q4 killed all five,
   2026-07-30; nothing to revalidate). Q3's slot passes to whatever the maker line (GAP-04/HF1/A4)
   + PROC discovery layer promote next.
@@ -100,8 +111,8 @@ Most of the Jun-12 CLI plan already shipped. Remaining:
 
 - **D1 — Viz set + maturity tags.** `nat viz portfolio/paper/spectral/regime`; `[PROVEN] / [PRELIM]
   / [SPEC] / [LIVE]` tags. ~20h.
-- **D2 — Modularize the `nat` monolith** (5,113 lines) → `scripts/cli/*.py` with a `register()`
-  protocol. ~12h. Prerequisite for packaging.
+- ~~**D2 — Modularize the `nat` monolith**~~ ✅ **DONE** — ~50 `scripts/cli/*.py` + an `app.py`
+  assembler (NAT10). Was the prerequisite for packaging; D3 is now unblocked.
 - **D3 — Ship `nat` apt-installable.** Phased: (1) **relocatable paths** (XDG, `NAT_HOME`) — the
   real blocker, pairs with D2; (2) interim `pipx`/wheel; (3) native `.deb` + self-hosted apt repo
   (see `packaging/README.md`).
@@ -145,9 +156,13 @@ paper #2 (don't gate outreach behind more writing).
 
 The three branches compete for **time allocation**, not resources — they share infrastructure,
 data, and methodology. Decision gates:
-- **D1 (~Aug):** conditional-IC verdict — "is there a trading business?" (gates Q-branch live work).
-- **D2 (~Nov):** prof-interest checkpoint — "do professors want this?" (gates P-branch effort).
-- Live capital only after D1 positive **and** G8 **and** a healthy kill-switch.
+- **Q5:** conditional-IC verdict — "is there a trading business?" (gates Q-branch live work).
+  *Formerly also written "D1" — that name is retired; `D1` is the viz task only.* Date slipped
+  past ~Aug: it now consumes the R1 program and needs fill data (`X-2`/`X-3`).
+- **D2-decision (~Nov):** prof-interest checkpoint — "do professors want this?" (gates P-branch
+  effort). *Note: distinct from backlog row `D2` (CLI modularization, done) — decision points and
+  task IDs share a namespace here for historical reasons; see `GLOSSARY.md`.*
+- Live capital only after Q5 positive **and** G8 **and** a healthy kill-switch.
 
 ---
 
@@ -159,10 +174,13 @@ data, and methodology. Decision gates:
   PROC-1..18 spec) + the `scripts/processes/` framework (7 shipped processes). (Original concept
   docs archived under `archive/in_progress/tasks_assigned_12_6_26/`.)
 - **Docs improvement plan:** `DOCS_IMPROVEMENT_PLAN_PROPOSAL_V1.md` (2026-07-31, PROPOSAL) —
-  audit of PLAN/TASKS/specs after the Jul-30/31 sprint: ~25 stale rows, one ID collision
-  (COST-4), D1 naming clash, funding-carry gap, missing risk/capital + monitoring sections.
-  Remedies P1–P4 (ID-registry + same-branch-status conventions, TASKS reconciliation, PLAN §0
-  rewrite, spec v3). P1 blocked on the in-flight TASKS.md edit landing.
+  audit of PLAN/TASKS/specs after the Jul-30/31 sprint. **P3 + P1 + P2 executed 2026-08-06**
+  (conventions incl. the ID-registry rule; ~25 rows reconciled against merge SHAs; COST-4/5
+  collision resolved by erratum → COST-6/7; this §0 rewritten; D1/Q5 clash retired) — see the
+  reconciliation log at the foot of `TASKS.md`, which also records **three claims in the audit
+  that did not survive verification** (BUG-1, HF4, REV-1 are all still open). **P4 remains:**
+  `maker_system.md` v3 — risk/capital section, acceptance criterion (e) funding-inclusive
+  accounting, warm-up table, Class-3 weight discipline, standing-monitoring phase.
 - **Three-class research program:** `THREE_CLASS_RESEARCH_PROPOSAL.md` (2026-07-31, PROPOSAL) —
   the research-first program over the three classes: 16 enumerated studies in four tracks
   (XS-1..6 rotation scanner [data-independent, leads], A-1..3 Class-1 incl. combiner

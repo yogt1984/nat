@@ -6,9 +6,23 @@ planning docs after the Jul-30/31 sprint (Q4 kill gate → maker line → three-
 revealed that **the sprint itself broke the documentation system** — the single backlog no
 longer describes reality, and one ID collision entered the permanent record.
 
-On approval: P3 lands first (prevents recurrence), P1+P2 land as one reconciliation branch,
-P4 as a spec revision. P1 is blocked until the in-flight `TASKS.md` working-tree edit (LF7
-row) is committed.
+**Execution status (2026-08-06): P3 ✅ · P1 ✅ · P2 ✅ · P4 ⏳ remaining.** P3 (ID-registry +
+same-branch-status conventions), P1 (row reconciliation, COST-4/5 erratum → COST-6/7, missing
+done-records, three-class drain, execution-order rewrite) and P2 (PLAN §0 rewrite, D1/Q5 clash
+retired) landed together. **P4 — `maker_system.md` v3 — is still open:** risk/capital section,
+acceptance criterion (e) funding-inclusive accounting, warm-up table, Class-3 weight discipline,
+standing-monitoring phase.
+
+**Audit corrections found during execution** — three Part-I claims below did **not** survive
+verification against code and git, and the rows stayed open: **BUG-1** (listed DONE; no retrain
+commit, no artifact in the checkout, `models/` gitignored), **HF4** (listed DONE; exists only as a
+flag over an externally supplied gate array, not a registered unit), **REV-1** (never executed).
+The audit was also *understated* on the collision: the VIP9 purge consumed **both** COST-4 and
+COST-5, not COST-4 alone. Full record: `TASKS.md` § Reconciliation log.
+
+*(Original: on approval, P3 lands first (prevents recurrence), P1+P2 land as one reconciliation
+branch, P4 as a spec revision. P1 is blocked until the in-flight `TASKS.md` working-tree edit (LF7
+row) is committed.)*
 
 ---
 

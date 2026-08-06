@@ -266,6 +266,13 @@ and re-run July at SSOT cost — the cheapest test of whether the Lee-Mykland fa
 (~11 bps RT); VIP9 is explicit-opt-in only; recurrence blocked by `test_cost_defaults.py` + the
 extended CI guard. Bonus fix: `overnight_sweep` printed `--cost-mode` but ignored it.
 
+> **⚠️ ID erratum (added 2026-08-06).** The two follow-ups named "COST-4" and "COST-5" in this
+> section were minted against IDs **already in use** in `TASKS.md` (wave-gate thresholds; maker
+> volume-tier quantification). Their canonical IDs are now **COST-6** (harness VIP9-default purge)
+> and **COST-7** (CI-guard hardening). Commit subjects `d9f3c1c` / `1334d41` are immutable and still
+> read COST-4/COST-5 — this line is the pointer. The collision is what prompted the ID-registry
+> rule now in `TASKS.md` § Conventions: an ID exists when its row exists.
+
 **QA-JD2 answered 2026-07-30: the taker-path Lee-Mykland family is dead, v2 included.**
 `jump_detector_v2` (EVT threshold ≈7.2, exact step/batch parity) wired into
 `paper_trader_generic` and run side-by-side with v1 over the full 59-day window at SSOT cost:
