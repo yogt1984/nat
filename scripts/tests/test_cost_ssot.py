@@ -17,7 +17,10 @@ def test_from_config_taker_matches_ssot():
 
 
 def test_from_config_maker_matches_ssot():
-    assert CostModel.from_config(role="maker").fee_bps == maker_bps()
+    """COST-8: utils.costs reports a rebate as POSITIVE income; CostModel.fee_bps is a
+    COST. The two conventions are opposite, so the SSOT value is negated on the way in —
+    booking the rebate as a charge was a 2x error on the maker leg."""
+    assert CostModel.from_config(role="maker").fee_bps == -maker_bps()
 
 
 def test_cost_model_from_name_known_presets():
