@@ -11,6 +11,16 @@ Usage:
     python scripts/data/fetch_candles.py --symbol BTC --interval 1m --days 90
     python scripts/data/fetch_candles.py --symbol BTC ETH SOL --days 180
     python scripts/data/fetch_candles.py --symbol BTC --start 2026-01-01
+    python scripts/data/fetch_candles.py --universe --interval 1m --days 90   # XS-1
+
+XS-1 (universe backfill) adds `fetch_universe` + `backfill_universe`: enumerate every
+perp from the venue's `meta` endpoint and fetch them all. The roster is never hardcoded
+— a constant list rots on the next listing, and breadth that does not track the actual
+universe is not breadth. Symbol names are rendered into file paths, so anything that is
+not a plain ticker is rejected before it can reach the filesystem; one symbol's failure
+is recorded and the run continues (aborting 40 minutes in on an HTTP 500 loses the other
+149); and truncation via `--max-symbols` is reported rather than silent, because a
+partial sweep that reads as complete is how a coverage claim becomes false.
 """
 
 from __future__ import annotations
@@ -18,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 import time
 import urllib.error
@@ -33,6 +44,11 @@ API_URL = "https://api.hyperliquid.xyz/info"
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "candles"
 MAX_CANDLES_PER_REQUEST = 5000
 RATE_LIMIT_SLEEP = 0.25  # seconds between requests
+SYMBOL_DELAY = 0.5       # seconds between SYMBOLS in a universe sweep
+
+#: A ticker we are willing to turn into a filename. Hyperliquid uses forms like BTC,
+#: kPEPE, @107 — letters, digits, @ and _ only, never a separator or a dot component.
+SYMBOL_RE = re.compile(r"^[A-Za-z0-9@_]{1,32}$")
 
 INTERVAL_MS = {
     "1m": 60_000,
@@ -212,10 +228,107 @@ def fetch_candles(
     return df
 
 
-def main():
+# ── XS-1: universe enumeration + sweep ───────────────────────────────────────────
+def _info_request(payload: dict) -> object:
+    """POST one request to the info endpoint."""
+    req = urllib.request.Request(
+        API_URL, data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())
+
+
+def fetch_universe(info_fn=None, include_delisted: bool = False,
+                   return_excluded: bool = False):
+    """Every perp name the venue currently lists, in meta order.
+
+    `info_fn` is injected so this is testable offline. Raises on a malformed payload
+    rather than returning a short list: a truncated universe silently narrows every
+    downstream breadth claim, which is worse than a loud failure.
+    """
+    data = (info_fn or _info_request)({"type": "meta"})
+    if not isinstance(data, dict):
+        raise TypeError(f"meta payload must be an object, got {type(data).__name__}")
+    universe = data.get("universe")
+    if not isinstance(universe, list) or not universe:
+        raise ValueError("meta payload has no non-empty 'universe' list")
+
+    names, excluded = [], []
+    for entry in universe:
+        if not isinstance(entry, dict):
+            raise TypeError(f"universe entry is not an object: {entry!r}")
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"universe entry has no usable 'name': {entry!r}")
+        if entry.get("isDelisted") and not include_delisted:
+            excluded.append(name)
+            continue
+        names.append(name)
+
+    if not names:
+        raise ValueError("universe contained no listed symbols")
+    return (names, excluded) if return_excluded else names
+
+
+def backfill_universe(symbols, interval: str = "1m", days: int = 90,
+                      start: str | None = None, output_dir: Path = DATA_DIR,
+                      fetch_fn=None, delay: float = SYMBOL_DELAY,
+                      max_symbols: int | None = None) -> dict:
+    """Fetch `symbols` one at a time, surviving individual failures.
+
+    Returns a coverage report — `ok` / `failed` / `empty` / `rejected` / `truncated` —
+    which together account for every requested symbol exactly once. A sweep that cannot
+    say what it missed cannot support a breadth claim.
+    """
+    fetch = fetch_fn or fetch_candles
+    output_dir = Path(output_dir)
+    requested = list(symbols)
+
+    report = {"interval": interval, "n_requested": len(requested), "ok": [],
+              "failed": [], "empty": [], "rejected": [], "truncated": 0, "rows": {}}
+
+    safe = []
+    for s in requested:
+        if isinstance(s, str) and SYMBOL_RE.match(s):
+            safe.append(s)
+        else:
+            report["rejected"].append({"symbol": s, "reason": "not a plain ticker"})
+
+    if max_symbols is not None and len(safe) > max_symbols:
+        report["truncated"] = len(safe) - max_symbols
+        safe = safe[:max_symbols]
+
+    for i, symbol in enumerate(safe):
+        if i and delay:
+            time.sleep(delay)                    # be polite to the venue
+        try:
+            df = fetch(symbol, interval=interval, start=start, days=days,
+                       output_dir=output_dir)
+        except Exception as exc:                 # one symbol must not lose the rest
+            log.warning("%s failed: %s", symbol, exc)
+            report["failed"].append({"symbol": symbol, "error": str(exc)[:200]})
+            continue
+        if df is None or len(df) == 0:
+            report["empty"].append(symbol)
+            continue
+        report["ok"].append(symbol)
+        report["rows"][symbol] = int(len(df))
+
+    return report
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Fetch historical OHLCV candles from Hyperliquid",
     )
+    parser.add_argument("--universe", action="store_true",
+                        help="fetch EVERY listed perp (XS-1), enumerated from meta")
+    parser.add_argument("--include-delisted", action="store_true",
+                        help="also fetch delisted pairs (default: excluded, reported)")
+    parser.add_argument("--max-symbols", type=int, default=None,
+                        help="cap the sweep; the number dropped is reported, never silent")
+    parser.add_argument("--symbol-delay", type=float, default=SYMBOL_DELAY,
+                        help=f"seconds between symbols (default {SYMBOL_DELAY})")
     parser.add_argument("--symbol", nargs="+", default=["BTC"],
                         help="Symbols to fetch (default: BTC)")
     parser.add_argument("--interval", default="1m",
@@ -226,11 +339,33 @@ def main():
                         help="Start date (ISO format, overrides --days)")
     parser.add_argument("--output-dir", default=None,
                         help="Output directory (default: data/candles/)")
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     out_dir = Path(args.output_dir) if args.output_dir else DATA_DIR
+
+    if args.universe:
+        names, excluded = fetch_universe(include_delisted=args.include_delisted,
+                                         return_excluded=True)
+        print(f"universe: {len(names)} listed perps"
+              + (f" ({len(excluded)} delisted excluded: {', '.join(excluded[:8])}"
+                 f"{'...' if len(excluded) > 8 else ''})" if excluded else ""))
+        report = backfill_universe(
+            names, interval=args.interval, days=args.days, start=args.start,
+            output_dir=out_dir, delay=args.symbol_delay, max_symbols=args.max_symbols)
+        print(f"\ncoverage: ok={len(report['ok'])} failed={len(report['failed'])} "
+              f"empty={len(report['empty'])} rejected={len(report['rejected'])} "
+              f"truncated={report['truncated']} of {report['n_requested']} requested")
+        for f in report["failed"][:10]:
+            print(f"  FAILED {f['symbol']}: {f['error'][:80]}")
+        if report["empty"]:
+            print(f"  empty: {', '.join(report['empty'][:12])}")
+        return
 
     for symbol in args.symbol:
         fetch_candles(
