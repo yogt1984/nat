@@ -50,6 +50,11 @@ from . import persistence_stats  # noqa: F401,E402
 from . import residualize  # noqa: F401,E402
 from . import conditional_predictability  # noqa: F401,E402
 from . import horizon_label_scan  # noqa: F401,E402
+# XS-10: without these imports the @register decorators never fire, so the units are
+# invisible to `get_process` and every run must bypass the runner — which is exactly
+# why the PROC-13 ledger was empty despite 13 trials being spent.
+from . import xs_rank_predictability  # noqa: F401,E402
+from . import xs_persistence  # noqa: F401,E402
 
 __all__ = [
     "Process", "EvaluationProcess", "TransformProcess",

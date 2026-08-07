@@ -3192,6 +3192,137 @@
           "name": "-h"
         }
       ],
+      "help": "Class-3 cross-sectional layer [PRELIM]",
+      "name": "xs"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "",
+          "name": "--json"
+        }
+      ],
+      "help": "Candle archive + L2 sampler coverage [PRELIM]",
+      "name": "xs universe"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "10",
+          "help": "",
+          "name": "--min-snapshots",
+          "type": "int"
+        },
+        {
+          "help": "",
+          "name": "--min-notional",
+          "type": "float"
+        },
+        {
+          "default": "False",
+          "help": "",
+          "name": "--json"
+        }
+      ],
+      "help": "Tradability curve (XS-5) [PRELIM]",
+      "name": "xs capacity"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "",
+          "name": "--json"
+        }
+      ],
+      "help": "Rotation t-stat trajectory (XS-10) [PRELIM]",
+      "name": "xs trajectory"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "1h",
+          "help": "",
+          "name": "--interval"
+        },
+        {
+          "default": "False",
+          "help": "",
+          "name": "--no-save"
+        },
+        {
+          "default": "False",
+          "help": "",
+          "name": "--json"
+        }
+      ],
+      "help": "Rank-IC vs relative forward returns (XS-3) [PRELIM]",
+      "name": "xs rank"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "1h",
+          "help": "",
+          "name": "--interval"
+        },
+        {
+          "default": "False",
+          "help": "",
+          "name": "--no-save"
+        },
+        {
+          "default": "False",
+          "help": "",
+          "name": "--json"
+        }
+      ],
+      "help": "Rank autocorrelation half-life (XS-4) [PRELIM]",
+      "name": "xs persistence"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "",
+          "name": "--json"
+        }
+      ],
+      "help": "Program multiple-testing ledger (PROC-13)",
+      "name": "xs ledger"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
       "help": "Kill-switch daemon + halt control (T16)",
       "name": "risk"
     },
@@ -5903,5 +6034,5 @@
       "name": "it-engine status"
     }
   ],
-  "count": 333
+  "count": 340
 }
