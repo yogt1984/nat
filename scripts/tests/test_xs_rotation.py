@@ -90,3 +90,21 @@ def test_pairs_absent_early_do_not_break_the_run():
     w.iloc[:400, 0] = np.nan          # a late listing
     m = run_rotation(w, _costs(w.columns))
     assert m["n_periods"] > 5
+
+
+def test_a_hysteresis_band_changes_gross_not_only_cost():
+    """Holding different positions must produce a different gross return.
+
+    Regression for a real bug: gross was computed from the TARGET weights while the
+    portfolio held the band-adjusted ones, so adding a band showed cost falling with gross
+    untouched — free money, which is always a defect. Latent at band=0 where the two
+    coincide.
+    """
+    w = _panel()
+    base = run_rotation(w, _costs(w.columns), band=0.0)
+    banded = run_rotation(w, _costs(w.columns), band=0.02, band_mode="edge")
+    assert banded["mean_turnover"] < base["mean_turnover"], "the band did not reduce trading"
+    assert banded["gross_total_pct"] != base["gross_total_pct"], (
+        "gross is unchanged by a band that changed the held positions — gross is being "
+        "priced on target weights rather than held ones"
+    )
