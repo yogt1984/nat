@@ -1103,5 +1103,14 @@
         }
       }
     }
+  },
+  "_superseded": {
+    "status": "SUPERSEDED \u2014 do not cite as current",
+    "task": "REV-1",
+    "authority": "docs/research/FINDINGS.md \u00a74.6 (Q4 alpha-skeptic kill gate, 2026-07-30)",
+    "stamped_utc": "2026-08-07T12:09:12.487838+00:00",
+    "stamped_at_git_sha": "835e744",
+    "retained_because": "provenance: \u00a74.6's lesson is that unrecorded negatives return as false positives, and this file is a live input to analysis/mf_liquidity_backtest.py \u2014 deleting it would break a code path.",
+    "reason": "Carries THREE fee models (hyperliquid 7.0, binance_vip9 1.61, binance_vip0 3.5), so it is less wrong than its siblings \u2014 but selection and headline framing were made at the VIP9 tier. Read the hyperliquid column only, and re-derive any ranking from it."
   }
 }
