@@ -93,9 +93,15 @@ WantedBy=default.target
         f"{py} {fetch_script} --universe --interval {iv} --days {days}"
         for iv, days in zip(CANDLE_INTERVALS, (3, 17, 52, 90))
     )
+    # XS-10: after the candles land, re-measure the rotation and append a trajectory point.
+    # §7.8's conclusion is "~325 rebalances needed, 83 held"; without this the wait is a note
+    # someone has to remember rather than a measurement that takes itself.
+    nat_bin = root / "nat"
+    sweeps = sweeps + f" ; {py} {nat_bin} xs trajectory --record"
+
     candle = f"""\
 [Unit]
-Description=NAT daily candle refresh (XS-1/XS-7 universe sweep)
+Description=NAT daily candle refresh + rotation trajectory (XS-1/XS-7/XS-10)
 After=network-online.target
 Wants=network-online.target
 

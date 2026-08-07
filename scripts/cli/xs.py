@@ -85,9 +85,66 @@ def cmd_xs_capacity(args):
     return _output(data, args, _human)
 
 
+def _record_trajectory_point(args) -> dict:
+    """Re-run the rotation on the CURRENT archive and append one trajectory point.
+
+    This is what makes §7.8's "~325 rebalances needed, 83 held" self-measuring instead of a
+    note someone has to remember. Fires daily from the candle-refresh timer, after new
+    candles land.
+    """
+    _xs()
+    from processes.candles import available_candle_symbols, load_candles
+    from utils.costs import load_costs, taker_bps
+    from xs.capacity import admit, aggregate_l2, load_l2_snapshots
+    from xs.rotation import DEFAULTS, run_rotation
+    from xs.trajectory import (append_trajectory, default_trajectory_path,
+                               evaluate_criteria, power_status)
+
+    costs = load_costs()
+    agg = aggregate_l2(load_l2_snapshots(), min_snapshots=10)
+    admitted, _ = admit(agg, max_half_spread_bps=DEFAULTS["spread_ceiling_bps"])
+    frame = load_candles(available_candle_symbols(interval="1h"), "1h")
+    wide = frame.pivot_table(index="timestamp", columns="symbol",
+                             values="close", aggfunc="last").sort_index()
+    wide = wide[[c for c in wide.columns if c in admitted]]
+    # per-pair round trip: its own measured half-spread + the SSOT taker and slippage
+    cost_bps = agg.loc[list(wide.columns), "half_spread_bps"] + taker_bps() \
+        + float(costs["hyperliquid"]["slippage_bps"])
+
+    m = run_rotation(wide, cost_bps)
+    if not m.get("n_periods"):
+        return {"recorded": False, "reason": m.get("reason", "no periods")}
+
+    # criterion (f): sign stability under a 2x cost stress
+    stressed = run_rotation(wide, cost_bps, cost_stress=2.0)
+    m["sign_stable_2x"] = bool(
+        stressed.get("n_periods") and
+        (stressed["net_total_pct"] >= 0) == (m["net_total_pct"] >= 0))
+    m["dsr_p"] = None            # DSR needs the program trial count; ledger owns that
+
+    passed, failed = evaluate_criteria(m)
+    p = power_status(m["sharpe_net"], m["n_periods"])
+    row = append_trajectory(default_trajectory_path(), {
+        "construction": "beta_neutral_score_proportional",
+        **m, "passed": passed, "failed": failed,
+        "t_stat": round(p["t_stat"], 3),
+        "n_required_t2": (None if p["n_required_t2"] == float("inf")
+                          else round(p["n_required_t2"])),
+        "n_universe": len(wide.columns),
+    })
+    return {"recorded": True, **row}
+
+
 def cmd_xs_trajectory(args):
     _xs()
     from xs.trajectory import CRITERIA, default_trajectory_path, power_status, read_trajectory
+    if getattr(args, "record", False):
+        rec = _record_trajectory_point(args)
+        if not rec.get("recorded"):
+            print(f"  not recorded: {rec.get('reason')}")
+            return 1
+        print(f"  recorded: n={rec['n_periods']} SR={rec['sharpe_net']} "
+              f"t={rec['t_stat']} passed={rec['passed']} failed={rec['failed']}")
     rows = read_trajectory(default_trajectory_path())
     latest = rows[-1] if rows else None
     data = {"n_runs": len(rows), "latest": latest, "criteria": CRITERIA}
@@ -187,6 +244,8 @@ def register(sub):
     c.set_defaults(func=cmd_xs_capacity)
 
     t = s.add_parser('trajectory', help='Rotation t-stat trajectory (XS-10) [PRELIM]')
+    t.add_argument('--record', action='store_true',
+                   help='Re-run the rotation on the current archive and append a point')
     t.add_argument('--json', action='store_true')
     t.set_defaults(func=cmd_xs_trajectory)
 
