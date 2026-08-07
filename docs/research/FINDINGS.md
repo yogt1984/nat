@@ -674,7 +674,51 @@ outside the three tightest symbols on the venue. Sim-only; proxy caveats of §4.
 
 ## 7. Data-integrity record
 
-*Sources: data_inventory 2026-06-12 · korrektur audit 2026-06-10 · features_report.*
+*Sources: data_inventory 2026-06-12 · korrektur audit 2026-06-10 · features_report · candle
+universe backfill 2026-08-07.*
+
+### 7.1 The candle universe (XS-1, 2026-08-07) — complete, but shallow by venue design
+
+*Source: `scripts/data/fetch_candles.py --universe` on su-75; per-pair depth audit over the
+resulting parquet. 177 listed perps (55 delisted excluded) × {1m, 5m, 15m, 1h}.*
+
+**What was captured: 708 series, 3,059,200 candles, 98 MB, and every series is 100 % complete
+within its span — zero gaps anywhere.** That is a categorically better substrate than the tick
+record above (37 % of calendar days missing, 82 all-NaN columns), and it is the first dataset on
+the platform with no integrity caveat attached.
+
+**The constraint that matters more than the volume — a ~5000-bar retention cap per interval:**
+
+| interval | candles retained | span reachable | measured depth (177 pairs) |
+|---|---|---|---|
+| 1m | ~5,000 | ~3.5 d | **3.5 d** (0 pairs reach 7 d) |
+| 5m | ~5,000 | ~17 d | 17.4 d |
+| 15m | ~5,000 | ~52 d | 52 d (175/177 ≥ 30 d) |
+| 1h | ~5,000 | ~208 d | 90 d requested, 175/177 full |
+
+Measured, not inferred: a narrow 2 h window **4 days back at 1m returns zero candles**, while 1h
+at 89 days back returns normally. The cap is on bar *count*, so reachable history scales with bar
+size. The two 1h pairs short of 90 d (GRAM 36 d, CASHCAT 27 d) are recent listings, not gaps.
+
+**Three consequences:**
+
+1. **1m universe history cannot be backfilled — only accumulated.** `specs/maker_system.md` §5
+   specifies Tier-W as "REST 1 m candles for the full perp universe"; that is not achievable
+   retroactively and never will be. The 3.5 d captured on 2026-08-07 now exists *only* in our
+   parquet — the venue will drop it. Every day without a refresh cron is a permanently lost day of
+   1m breadth (task `XS-7`, promoted to P0 on this finding).
+2. **Cross-sectional work should start at 15m/1h, not 1m.** 52 d and 90 d respectively, versus
+   3.5 d. This agrees with §5's PROC-20 result from the opposite direction: 1m/5m momentum is
+   *anti*-persistent and the 5m cells were statistically unresolvable.
+3. **A "successful" sweep is not a complete one.** The backfill reported `ok=177 failed=0 empty=0`
+   for the 1m run that returned 4 % of the requested span — `ok` means "rows came back", not "the
+   requested window was satisfied". The gap was caught only by a separate depth audit. Any sweep
+   that reports coverage should compare **requested vs received span**, which is the §4.9 lesson
+   (a silent cap reads as "covered everything") reappearing in the data layer.
+
+*Minor:* two pairs returned empty once (ORDI 15m, REZ 5m) and both succeeded on immediate retry —
+the `empty` bucket conflates "venue has none" with a transient request failure; `XS-7` adds a retry
+pass.
 
 - **Inventory (as of 2026-06-12):** 9.4 GB total; `data/features/` 8.4 GB, 671 parquet files,
   34 date dirs over 54 calendar days (Apr 19 – Jun 12) → **20 days missing (~37 %)**; 22 good days

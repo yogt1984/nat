@@ -48,22 +48,26 @@ maker rate is **+0.144 bps** vs a zero-fee best case (§4.11). One maker hypothe
 **wider-spread pairs**, where the half-spread is a multiple of BTC's 0.083 bps.
 
 **1 — Now: the one live maker hypothesis + the universe that tests it** *(data-independent)*
-1. `XS-1` — universe candle backfill. The unblocker: `data/candles/` does not exist yet, and both
-   `B-5` and the whole Class-3 track need it. `HyperliquidClient.get_meta()` already parses
-   `universe`, so this is wiring, not new API work.
-2. `B-5` — maker viability on wider-spread pairs. The direct test of §4.11's open question; reuses
-   the §4.9 cell grid and criteria **unchanged** (this study moves the universe, never the bar).
-   Fold in criterion (e) funding accrual and re-derive the A4 gate threshold per fee tier.
-3. `COST-8` — `hyperliquid_maker()` hardcodes the 0.2 bps rebate that §4.11 names the most
-   load-bearing unvalidated assumption in the stack. Route it through `load_costs()` before any
-   further maker number is produced.
+1. ~~`XS-1`~~ ✅ **DONE 2026-08-07** — 708 series, 3.06 M candles, zero gaps. It also *changed the
+   plan*: the venue caps history at ~5000 bars/interval, so 1m reaches 3.5 d and **cannot be
+   backfilled further, ever** (FINDINGS §7).
+2. `XS-7` — **daily candle refresh cron.** Promoted to first place by that cap: 1m universe history
+   can only be *accumulated*, so every day without it is a permanently lost day. Cheap, urgent.
+3. `XS-8` — REST `l2Book` universe sampler. **`B-5` cannot proceed without it** (see below).
+4. `B-5a` → `B-5b` — maker viability on wider-spread pairs, now correctly split: the arithmetic
+   screen first (it can kill the hypothesis without a single simulation), the tick sim only after.
+5. ~~`COST-8`~~ ✅ **DONE 2026-08-06** — and it uncovered a sign inversion (a rebate booked as a
+   charge, 0.4 bps/side against a +0.144 bps breakeven).
 
 **2 — Class 3: the cross-sectional rotation track** *(data-independent; runs parallel to 1)*
-4. `XS-2` — bar-level xs feature library (planted tests first).
-5. `PROC-19` — `candles` data level + multi-symbol loading in the process runner (framework
+6. `XS-2` — bar-level xs feature library (planted tests first). **Start at 15m/1h, not 1m** — the
+   retention cap means 1m has 3.5 d while 15m has 52 d and 1h has 90 d. PROC-20 independently found
+   1m/5m momentum anti-persistent with 5m unresolvable, so the coarser bars are the right entry
+   anyway. Make the bar a parameter, not an assumption.
+7. `PROC-19` — `candles` data level + multi-symbol loading in the process runner (framework
    prerequisite for the three xs processes).
-6. `XS-3` / `XS-4` / `XS-5` — rank-predictability, persistence, capacity gate.
-7. `XS-6` — rotation OOS study, pre-registered. Promotes to lifecycle DISCOVERED iff it survives.
+8. `XS-3` / `XS-4` / `XS-5` — rank-predictability, persistence, capacity gate.
+9. `XS-6` — rotation OOS study, pre-registered. Promotes to lifecycle DISCOVERED iff it survives.
 
 **3 — Class 1 signal layer** *(data-independent)*
 8. `A-2` — combiner revalidation. §5's IC .18/.25/.36 rests on a **2-day** OOS with monotonically
@@ -215,7 +219,9 @@ Institutional-GAP items cross-ref [`research/INSTITUTIONAL_ALGORITHMS.md`](resea
 | BUG-5 | `jump_detector` `run_batch` self-masking bipower + weak parity test | DONE | P1 | S | in-hand | — | *(Retro-row, same merge `ba7b208` / `902ab1d`.)* Current tick's return no longer embedded in its own bipower denominator; exact step/batch parity. |
 | X-1 | `[hyperliquid_staked]` fee tier + reprice §4.7/§4.9 | DONE | P1 | S | in-hand | — | Ladder in `costs.toml` (wood 5 %→diamond 40 %, active tier `none`), tier-aware `utils/costs.py` + `tier_summary()` stamp, guards `tests/test_fee_tiers.py`, driver `execution/fee_tier_reprice.py`. **Verdict (FINDINGS §4.10): no cell flips** — 8 cells × 7 rungs × 179 episodes, 0 survivors; staking discounts don't reach maker rebates, so the maker line is fee-tier-invariant. |
 | COST-5 | Quantify the maker *volume*-tier assumption | DONE | P1 | S | in-hand | X-1 | `[hyperliquid_maker_tiers]` ladder + `maker_tier_override`; §4.9 re-simulated at 4 rungs (FINDINGS §4.11). **Breakeven maker rate = +0.144/+0.159 bps — zero fees are ~0.08 bps/posting under water**; SSOT's +0.2 bps is rebate_t2 (≥1.5 % of venue maker volume, unearned). No cell survives at any rate; EV-gated cells are non-monotone (a bigger rebate loosens the gate and buys worse fills). |
-| B-5 | Maker viability on wider-spread pairs | TODO | P1 | M | in-hand | XS-1 | The untested direction out of §4.11: breakeven maker rate scales with the half-spread, and every maker experiment so far ran on the 3 tightest symbols. Needs the Class-3 candle universe; no ingestor/streak dependency. |
+| B-5 | Maker viability on wider-spread pairs *(umbrella — see B-5a/B-5b)* | TODO | P1 | M | mixed | XS-8 | The untested direction out of §4.11: breakeven maker rate scales with the half-spread, and every maker experiment so far ran on the 3 tightest symbols. **Corrected 2026-08-07: "needs the Class-3 candle universe" was wrong.** The §4.9 harness consumes tick-level `raw_spread` / `imbalance_qty_l1` / depth from `data/features/` (`touch_maker_experiment.py:38`), and the ingestor covers only BTC/ETH/SOL — candles contain neither spread nor depth, so "swap the universe, keep the grid" is not executable. Split below. |
+| B-5a | Wide-pair breakeven **arithmetic screen** | TODO | **P1** | S | in-hand | XS-8 | The cheap kill-test, and it needs no simulation at all. Rank the 177 pairs by measured half-spread (from `XS-8`), then apply §4.11's own relation — breakeven maker rate = `E[adverse\|fill] − half_spread`. **If no pair's half-spread plausibly clears breakeven at an attainable fee tier, `B-5` dies on arithmetic**, exactly as the fee-tier hypothesis died in §4.10 without a new sim. Honest limit to state up front: `E[adverse\|fill]` is only measured for BTC/ETH/SOL, so wide-pair adverse selection must be bounded/assumed and the assumption declared, not hidden. |
+| B-5b | Wide-pair maker **simulation** | BLOCKED | P2 | L | streak | B-5a | Only for pairs surviving `B-5a`. Requires those symbols in `symbols.toml` (already arbitrary-N, `config.rs:195`) **and then collection time** — this is forward data accrual, not in-hand work, and it competes with the ingestor's capacity/streak. Do not start before `B-5a` returns a shortlist. |
 | K3 | `regime_accumulation_score` constant (0.4429) | BLOCKED | P2 | XS | streak | BUG-3 | Likely auto-resolves with the GMM/K2 fix. |
 
 ## PROC — Process / IT discovery layer *(raise the ceiling on how NAT discovers edges)*
@@ -270,8 +276,10 @@ one row per ID, per Conventions. Verdict: **no cell flips at any rung** (§4.10)
 
 | ID | Title | Status | Prio | Eff | Data | Dep | Notes |
 |----|-------|--------|------|-----|------|-----|-------|
-| XS-1 | Universe candle backfill | WIP | **P0** | S | in-hand | — | **The unblocker for `B-5` and all of Track C.** Code shipped 2026-08-06: `--universe` / `--include-delisted` / `--max-symbols` / `--symbol-delay` on `data/fetch_candles.py` (`fetch_universe` + `backfill_universe`), guarded by `tests/test_universe_backfill.py` (27 tests). Live enumeration: **177 listed perps, 55 delisted excluded**. *Two premises in the 2026-08-06 reconciliation were wrong: `data/candles/` already existed (BTC/ETH/SOL × 1m,15m) and the universe is 177, not ~150.* **Remaining: run the bulk backfill** (177 × ≥90 d) — that is what flips this DONE. |
-| XS-2 | Bar-level xs feature library | TODO | P1 | M | in-hand | XS-1 | `scripts/xs/features.py` (does not exist yet): permutation entropy, momentum slope×R², Hurst, vol percentile — **each vs the pair's own history** (rolling percentile/z), never cross-sectionally raw. Planted tests first. |
+| XS-1 | Universe candle backfill | DONE | **P0** | S | in-hand | — | **The unblocker for `B-5` and all of Track C.** Code shipped 2026-08-06: `--universe` / `--include-delisted` / `--max-symbols` / `--symbol-delay` on `data/fetch_candles.py` (`fetch_universe` + `backfill_universe`), guarded by `tests/test_universe_backfill.py` (27 tests). Live enumeration: **177 listed perps, 55 delisted excluded**. *Two premises in the 2026-08-06 reconciliation were wrong: `data/candles/` already existed (BTC/ETH/SOL × 1m,15m) and the universe is 177, not ~150.* **Backfill run 2026-08-07** (su-75): 177 pairs × {1m, 5m, 15m, 1h} = **708 series, 3,059,200 candles, 98 MB**, and **every series is 100 % complete within its span — zero gaps anywhere**, which is a categorically better substrate than the tick record (§7: 37 % of days missing). 1h reaches the full 90 d on 175/177 (GRAM 36 d and CASHCAT 27 d are recent listings). **But the headline requirement could not be met, and cannot be:** the venue caps candle history at **~5000 bars per interval**, so 1m reaches only **3.5 days** — measured, not inferred (a narrow 2 h window 4 d back returns zero while 1h at 89 d back returns fine). See FINDINGS §7. Depth by bar: 1m 3.5 d · 5m 17.4 d · 15m 52 d · 1h 90 d (208 d available). |
+| XS-7 | Daily candle refresh cron | TODO | **P0** | XS | in-hand | XS-1 | **Minted 2026-08-07, and it is urgent for a reason that only became visible when XS-1 ran.** The venue keeps ~5000 bars/interval, so the 1m universe archive can only be **accumulated** — today's 3.5 d snapshot exists solely in our parquet and the venue will drop it. Every day this does not run is a permanently lost day of 1m breadth that no future backfill can recover. Cron `fetch_candles --universe` for {1m, 5m, 15m, 1h} daily; the fetcher is already incremental. **Add a retry pass:** the 2026-08-07 sweep produced 2 spurious `empty` results (ORDI 15m, REZ 5m) that both succeeded on immediate retry — the `empty` bucket currently conflates "venue has none" with "one request hiccupped". **Add a requested-vs-received span check:** the same sweep reported `ok=177 failed=0` for a 1m run that returned 4 % of the requested window; `ok` currently means "rows came back". A depth audit caught it, the tool did not — and a cron that reports clean while collecting 4 % is worse than no cron. |
+| XS-8 | REST `l2Book` universe sampler | TODO | **P1** | S | in-hand | — | **Minted 2026-08-07 — the missing instrument, and `B-5a`'s hard dependency.** Candles carry no spread and no depth, so nothing in-hand can rank 177 pairs by half-spread. The venue's `info` endpoint serves `l2Book` per coin; the ingestor already subscribes to it over WebSocket (`ws/client.rs:104`) but only for the 3 symbols in `symbols.toml`, and nothing samples it via REST across the universe. Sample every ~5 min → per-pair **distributions** of half-spread and touch depth. Must be sampled over days: a single snapshot is an n=1 estimate, the exact error PROC-20 just corrected in LF7's priors. Also supplies `XS-5`'s spread ceiling / depth floor directly. |
+| XS-2 | Bar-level xs feature library | TODO | P1 | M | in-hand | XS-1 | `scripts/xs/features.py` (does not exist yet): permutation entropy, momentum slope×R², Hurst, vol percentile — **each vs the pair's own history** (rolling percentile/z), never cross-sectionally raw. Planted tests first. **Bar choice is now a measured constraint, not a preference:** 1m has only 3.5 d of history (retention cap, FINDINGS §7) — build on 15m (52 d) or 1h (90 d) and make the bar a parameter. |
 | XS-3 | `xs_rank_predictability` process | TODO | P1 | M | in-hand | XS-2,PROC-19 | Rank-IC of scores vs relative forward returns per rebalance interval; permutation null = **shuffled pair labels**; FDR across score variants. Verdict: is any score family significant at all? |
 | XS-4 | `xs_persistence` process | TODO | P1 | S | in-hand | XS-2,PROC-19 | Rank autocorrelation half-life per score. **Must exceed the rebalance cadence or the rotation is churn by construction** — this is the row that can kill the track cheaply. |
 | XS-5 | `xs_capacity_gate` process | TODO | P1 | S | in-hand | XS-1 | Spread/depth/volume floors from candle + `meta` data, SSOT-priced; admitted-universe list refreshed daily. Untradeable tails never reach ranking. |
