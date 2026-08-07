@@ -438,6 +438,7 @@ GAP_UNIT = "nat-gap-alert.service"
 # XS-7: a timer, not a daemon. Enable/disable the .timer — systemd pulls the .service.
 CANDLE_TIMER = "nat-candle-refresh.timer"
 CANDLE_UNIT = "nat-candle-refresh.service"
+L2_UNIT = "nat-l2-sampler.service"          # XS-8: a loop daemon, enabled directly
 
 
 def _user_unit_dir():
@@ -501,7 +502,7 @@ def cmd_service_install(args):
             pass
     time.sleep(2)
 
-    _systemctl("enable", "--now", INGESTOR_UNIT, GAP_UNIT, CANDLE_TIMER)
+    _systemctl("enable", "--now", INGESTOR_UNIT, GAP_UNIT, CANDLE_TIMER, L2_UNIT)
     time.sleep(3)
     _set_ingestion_paused(False)
 
@@ -517,9 +518,9 @@ def cmd_service_install(args):
 def cmd_service_uninstall(args):
     """Disable + remove the systemd units and restore the tmux+cron path."""
     _banner("Removing nat systemd --user services")
-    _systemctl("disable", "--now", INGESTOR_UNIT, GAP_UNIT, CANDLE_TIMER)
+    _systemctl("disable", "--now", INGESTOR_UNIT, GAP_UNIT, CANDLE_TIMER, L2_UNIT)
     udir = _user_unit_dir()
-    for name in (INGESTOR_UNIT, GAP_UNIT, CANDLE_UNIT, CANDLE_TIMER):
+    for name in (INGESTOR_UNIT, GAP_UNIT, CANDLE_UNIT, CANDLE_TIMER, L2_UNIT):
         p = udir / name
         if p.exists():
             p.unlink()
@@ -537,7 +538,7 @@ def cmd_service_status(args):
         "installed": installed,
         "linger": linger,
         "units": {u: {"active": _svc_active(u), "enabled": _svc_enabled(u)}
-                  for u in (INGESTOR_UNIT, GAP_UNIT, CANDLE_TIMER)} if installed else {},
+                  for u in (INGESTOR_UNIT, GAP_UNIT, CANDLE_TIMER, L2_UNIT)} if installed else {},
     }
 
     def _human(d):
@@ -555,13 +556,14 @@ def cmd_service_status(args):
 
 
 def cmd_service_restart(args):
-    """Restart a unit (ingestor|gap|candles|all)."""
+    """Restart a unit (ingestor|gap|candles|l2|all)."""
     if not _service_installed():
         _p("x", R, "systemd services not installed (nat service install)")
         return 1
     which = getattr(args, "target", "all")
     units = {"ingestor": [INGESTOR_UNIT], "gap": [GAP_UNIT], "candles": [CANDLE_UNIT],
-             "all": [INGESTOR_UNIT, GAP_UNIT, CANDLE_UNIT]}.get(which, [INGESTOR_UNIT, GAP_UNIT])
+             "l2": [L2_UNIT],
+             "all": [INGESTOR_UNIT, GAP_UNIT, CANDLE_UNIT, L2_UNIT]}.get(which, [INGESTOR_UNIT, GAP_UNIT])
     _systemctl("restart", *units)
     for u in units:
         _p("~", G if _svc_active(u) else R, f"{u}: {_systemctl('is-active', u).stdout.strip()}")
@@ -617,7 +619,7 @@ def register(sub):
     svcst.set_defaults(func=cmd_service_status)
     svcr = svcsub.add_parser('restart', help='Restart a unit')
     svcr.add_argument('target', nargs='?', default='all',
-                      choices=['ingestor', 'gap', 'candles', 'all'])
+                      choices=['ingestor', 'gap', 'candles', 'l2', 'all'])
     svcr.set_defaults(func=cmd_service_restart)
 
     # ── promotion daemon (T14) ──
@@ -656,7 +658,7 @@ def register(sub):
 __all__ = [
     # constants
     "RISK_SCRIPT", "GAP_SCRIPT", "PROMOTION_SCRIPT", "BRIDGE_SCRIPT",
-    "INGESTOR_UNIT", "GAP_UNIT", "CANDLE_UNIT", "CANDLE_TIMER",
+    "INGESTOR_UNIT", "GAP_UNIT", "CANDLE_UNIT", "CANDLE_TIMER", "L2_UNIT",
     # helpers (several referenced by nat's start/stop/status/doctor)
     "_risk_ks", "_gap_alerter", "_promotion", "_bridge", "_user_unit_dir",
     "_install_watchdog", "_remove_watchdog", "_cron_daemon_running",

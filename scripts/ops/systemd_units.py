@@ -22,6 +22,7 @@ INGESTOR_UNIT = "nat-ingestor.service"
 GAP_UNIT = "nat-gap-alert.service"
 CANDLE_UNIT = "nat-candle-refresh.service"
 CANDLE_TIMER = "nat-candle-refresh.timer"
+L2_UNIT = "nat-l2-sampler.service"
 
 #: Intervals the daily refresh sweeps. Ordered cheap→expensive so a truncated run still
 #: captures the perishable one first: the venue keeps ~5000 bars per interval, so 1m
@@ -125,8 +126,33 @@ Unit={CANDLE_UNIT}
 WantedBy=timers.target
 """
 
+    # XS-8 — L2 sampler. A long-lived loop, NOT a timer like the candle refresh: its
+    # product is the intraday *distribution* of half-spreads (a single book is n=1, the
+    # error PROC-20 corrected in LF7's priors), so a process that dies at 03:00 and waits
+    # for tomorrow leaves a hole in the very variation being measured. Hence Restart=always.
+    l2_script = root / "scripts" / "data" / "fetch_l2.py"
+    l2 = f"""\
+[Unit]
+Description=NAT L2 order-book sampler (XS-8 — universe half-spread distribution)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={root}
+ExecStart={py} -u {l2_script} --loop --every 300
+{_env_lines()}
+Restart=always
+RestartSec=30
+StartLimitIntervalSec=0
+
+[Install]
+WantedBy=default.target
+"""
+
     return {INGESTOR_UNIT: ingestor, GAP_UNIT: gap,
-            CANDLE_UNIT: candle, CANDLE_TIMER: candle_timer}
+            CANDLE_UNIT: candle, CANDLE_TIMER: candle_timer,
+            L2_UNIT: l2}
 
 
 def unit_dir() -> Path:
