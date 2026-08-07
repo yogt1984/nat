@@ -983,6 +983,63 @@ lifecycle DISCOVERED. *Limits:* 90 days is short — the 60/40 split leaves ~36 
 anywhere. A longer window is the one cheap thing that could change this verdict, and `XS-7`
 is already accumulating it.
 
+### 7.8 XS-6 post-mortem (XS-9, 2026-08-07) — **the breadth was an illusion; the beta was uncompensated**
+
+*Source: diagnostic decomposition of §7.7's portfolio, then a beta-neutral rebuild. Same
+119-pair universe, same 83 rebalances, same SSOT costs.*
+
+**The strategy was never 40 bets.** Within-basket pairwise correlation is **0.433** (long)
+and **0.323** (short), so 40 names behave as ≈ 40/(1+39·0.433) ≈ **2.2** effective bets.
+Long-basket beta 0.81 vs short-basket 1.14 gives the "market-neutral" portfolio a
+persistent **−0.33 beta tilt**, and its P&L is **0.802 correlated with a *static*
+low-beta-minus-high-beta position**. Daily rebalancing was rearranging a position that was
+80 % a standing factor bet — which is why IR = IC√BR overpredicted, why t = 0.49, and why
+one day carried 104 % of P&L. One bet, 83 observations, fat tails.
+
+**But that beta exposure earns nothing.** Measured over the same 83 rebalances:
+
+| test | mean IC | t |
+|---|---|---|
+| raw vol → relative return | −0.0715 | −4.08 |
+| **beta → relative return** | −0.0264 | **−1.01** |
+| **vol \| beta → beta-neutral return** | −0.0650 | **−5.48** |
+
+Beta does not predict relative returns, while the signal **survives neutralisation and
+sharpens** (t −5.48 vs −4.08 raw). So the tilt is pure uncompensated variance sitting on
+top of a real cross-sectional signal — an implementation defect, not a signal defect.
+*(A refuted alternative, recorded so it is not retried: swapping the score to idiosyncratic
+vol changes nothing, corr(total_vol, idio_vol) = 0.941.)*
+
+**Rebuilding beta-neutral and score-proportional** (Grinold-optimal weights rather than
+equal-weight top-k), criteria unchanged:
+
+| | §7.7 top-k raw | **beta-neutral** |
+|---|---|---|
+| net / gross / cost | +5.49 / +7.39 / 1.90 % | **+7.77 / +8.90 / 1.12 %** |
+| Sharpe (is / oos) | +1.06 (−0.42 / +4.79) | **+2.12 (+2.64 / +1.18)** |
+| t | +0.50 | **+1.01** |
+| positive share · max-day · turnover | 0.49 · 0.78 · 0.34 | **0.55 · 0.30 · 0.20** |
+| \|net beta\| | 0.406 | **0.000** |
+
+**4 of 6 pre-registered criteria now pass** — (a) Sharpe, (c) consistency, (d)
+concentration, (f) cost stress — against 0 of 6 before. It still **fails (b) DSR and (e)
+OOS/IS** (0.447), so **nothing promotes**. Note the failure changed character: IS Sharpe
+went from −0.42 to +2.64, so the strategy is now profitable in *both* halves and (e) fails
+in the ordinary overfit direction rather than the §7.7 regime-change direction.
+
+**The power arithmetic moves the most.** Doubling the Sharpe quarters the data requirement,
+since n ∝ 1/SR²: at SR 2.12 the daily Sharpe is 0.111, so t = 2 needs n = (2/0.111)² ≈
+**325 rebalances ≈ 0.89 years**, down from 2.55. We have 83, so ≈ 8 more months of the
+`XS-7` archive would settle it.
+
+**The honesty caveat, which is not small.** XS-9's construction was designed *after* seeing
+§7.7 fail, on the same 83 days. The mechanism is theory rather than search — beta does not
+predict (t −1.01), therefore hedge it — which is a far stronger position than a parameter
+sweep, and it cut turnover and cost too, which fitting does not usually do. But the
+*magnitude* of the improvement is measured in-sample with respect to that design choice and
+should be treated as an upper bound. The multiple-testing burden also rises: §7.7 declared
+12 trials, and this is a 13th on the same window. The clean test is the next 8 months.
+
 *Driver defect found and fixed mid-study:* the first version read costs with
 `costs.get("taker_bps", 4.5)` fallbacks. The SSOT is nested
 (`costs["hyperliquid"]["taker_bps"] = 3.5`), so the lookup missed and **hardcoded literals
