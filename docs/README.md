@@ -44,7 +44,7 @@ Docs are grouped by **what they are for** (a light [Diátaxis](https://diataxis.
 ### Reference — look *up* a fact
 | Document | Purpose |
 |---|---|
-| [`commands.md`](commands.md) | The `nat` CLI reference (~260 commands). |
+| [`commands.md`](commands.md) | The `nat` CLI reference (340 commands) — **generated** by `scripts/ops/gen_commands_doc.py`, do not hand-edit. |
 | [`../FEATURES.md`](../FEATURES.md) | Authoritative feature manifest (236 features, formulas, references). |
 | [`contracts/`](contracts/) | Per-unit contracts: [feature](contracts/feature.md) · [algorithm](contracts/algorithm.md) · [process](contracts/process.md) · [viz](contracts/viz.md). |
 | [`research/ALGORITHMS.md`](research/ALGORITHMS.md) | Implemented-algorithm catalogue with OOS results. |

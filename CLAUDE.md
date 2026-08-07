@@ -34,7 +34,7 @@ shipped, capital at risk). Sourced from `METHODOLOGY.md`, `MASTER_PLAN.md`, and 
 
 ## CLI
 
-The `nat` command is the primary interface (~260 commands). Run `nat help` for full docs,
+The `nat` command is the primary interface (**340 commands**, 72 groups — `docs/commands.md` is generated from the live parser, never hand-edited). Run `nat help` for full docs,
 `nat commands` for a structured list, `nat commands --json` for the machine-readable source of truth
 (don't trust hardcoded counts in prose — they drift; the CLI tree is authoritative).
 

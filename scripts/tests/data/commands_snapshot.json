@@ -3244,6 +3244,11 @@
         },
         {
           "default": "False",
+          "help": "Re-run the rotation on the current archive and append a point",
+          "name": "--record"
+        },
+        {
+          "default": "False",
           "help": "",
           "name": "--json"
         }
