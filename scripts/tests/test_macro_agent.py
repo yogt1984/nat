@@ -163,10 +163,18 @@ class TestMacroRunner:
         assert abs(runner._extract_ic_from_results() - 0.095) < 1e-6
 
     def test_register_signal_writes_to_macro_registry(self, tmp_path):
-        from agent.macro_runner import MacroRunner
+        """register_signal() must land in the macro agent's registry.
 
-        orig = MacroRunner.REGISTRY_PATH
-        MacroRunner.REGISTRY_PATH = tmp_path / "registry.json"
+        Rewritten 2026-08-07: the registry moved from a JSON file
+        (`MacroRunner.REGISTRY_PATH`) to SQLite (`store.append_signal`/`load_registry`,
+        one migration framework per CLAUDE.md). The assertion is the same claim against
+        the current mechanism — and the runner now needs a store, which is how the agent
+        constructs it in production.
+        """
+        from agent.macro_runner import MacroRunner
+        from data.state import StateStore
+
+        store = StateStore(tmp_path / "nat.db")
 
         h = Hypothesis.create(
             "ctx_funding_zscore predicts 1h returns",
@@ -175,24 +183,19 @@ class TestMacroRunner:
         h.status = "replicated"
         h.results = {"gate_results": [{"msg": "IC=0.095 PASS"}]}
 
-        runner = MacroRunner(h, {})
+        runner = MacroRunner(h, {}, store=store, agent="macro")
         sig = runner.register_signal()
 
         assert sig.hypothesis_id == h.id
         assert sig.horizon_s == 3600.0
 
-        with open(tmp_path / "registry.json") as f:
-            registry = json.load(f)
+        registry = store.load_registry(runner._agent)
         assert len(registry) == 1
         assert registry[0]["hypothesis_id"] == h.id
 
-        MacroRunner.REGISTRY_PATH = orig
-
     def test_register_signal_stores_1h_horizon(self, tmp_path):
         from agent.macro_runner import MacroRunner
-
-        orig = MacroRunner.REGISTRY_PATH
-        MacroRunner.REGISTRY_PATH = tmp_path / "registry.json"
+        from data.state import StateStore
 
         h = Hypothesis.create("test", "funding_meanrev",
                               ["cmd --data d --symbol BTC"], 1.0,
@@ -200,30 +203,35 @@ class TestMacroRunner:
         h.status = "replicated"
         h.results = {"gate_results": [{"msg": "IC=0.08 PASS"}]}
 
-        runner = MacroRunner(h, {})
+        runner = MacroRunner(h, {}, store=StateStore(tmp_path / "nat.db"),
+                             agent="macro")
         sig = runner.register_signal()
         assert sig.horizon_s == 3600.0
 
-        MacroRunner.REGISTRY_PATH = orig
-
     def test_load_registry_separate_from_micro_and_mf(self, tmp_path):
+        """The macro registry must not see micro/mf signals.
+
+        This is the property that matters and it survives the SQLite move intact:
+        registries are keyed per agent, so one agent's signals never leak into
+        another's ranking or dedup.
+        """
         from agent.macro_runner import MacroRunner
         from agent.hypothesis import Hypothesis
+        from data.state import StateStore
 
+        store = StateStore(tmp_path / "nat.db")
         h = Hypothesis(id="HYP-TEST-001", claim="test", generator="test",
                        priority=1.0, test_protocol=["echo ok"])
-        runner = MacroRunner(h, {})
-
-        orig = MacroRunner.REGISTRY_PATH
-        MacroRunner.REGISTRY_PATH = tmp_path / "macro_registry.json"
+        runner = MacroRunner(h, {}, store=store, agent="macro")
 
         assert runner._load_registry() == []
 
-        with open(tmp_path / "macro_registry.json", "w") as f:
-            json.dump([{"name": "macro_signal"}], f)
-        assert len(runner._load_registry()) == 1
+        store.append_signal("agent", {"name": "micro_signal"})
+        store.append_signal("agent_mf", {"name": "mf_signal"})
+        assert runner._load_registry() == [], "micro/mf signals leaked into macro"
 
-        MacroRunner.REGISTRY_PATH = orig
+        store.append_signal(runner._agent, {"name": "macro_signal"})
+        assert len(runner._load_registry()) == 1
 
     def test_timeframe_is_1h(self):
         from agent.macro_runner import MacroRunner

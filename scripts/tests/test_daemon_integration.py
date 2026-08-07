@@ -695,13 +695,19 @@ class TestMultiAgent:
 # Test: Config validation
 # ===========================================================================
 
+#: Every key `_REQUIRED_KEYS` (state_machine.py:119) demands, so a test that is about
+#: something else does not fail on validation before reaching its subject.
+_BASE_CFG = {"cycle_interval_s": 3600, "max_experiments_per_cycle": 10,
+             "generators_enabled": []}
+
+
 class TestConfigValidation:
     """Test config loading, inheritance, and validation."""
 
     def test_unknown_top_key_warns(self):
         """Unknown top-level keys produce warnings."""
         config = {
-            "cycle_interval_s": 3600,
+            **_BASE_CFG,
             "bogus_key": True,
             "another_bad": 42,
         }
@@ -713,7 +719,7 @@ class TestConfigValidation:
     def test_unknown_gate_key_warns(self):
         """Unknown gate keys produce warnings."""
         config = {
-            "cycle_interval_s": 3600,
+            **_BASE_CFG,
             "gates": {"min_ic": 0.10, "invalid_gate": 0.5},
         }
         warnings = validate_config(config, "agent")
@@ -723,12 +729,34 @@ class TestConfigValidation:
     def test_valid_config_no_warnings(self):
         """Well-formed config produces no warnings."""
         config = {
-            "cycle_interval_s": 3600,
-            "max_experiments_per_cycle": 10,
+            **_BASE_CFG,
             "gates": {"min_ic": 0.10, "min_dIC": 0.05, "fdr_q": 0.05},
         }
         warnings = validate_config(config, "agent")
         assert len(warnings) == 0
+
+    def test_symbols_as_a_toml_array_is_accepted(self, tmp_path):
+        """`symbols = [...]` must load — it is the idiom config/symbols.toml itself uses.
+
+        Regression for a latent crash in load_agent_config: the canonical-symbol
+        injection tested `"primary" not in merged.get("symbols", {})`, which on a LIST
+        is a membership test that quietly returns True, and the next line did
+        `merged["symbols"]["primary"] = ...` on a list -> TypeError. Production dodged it
+        only because config/agent.toml happens to omit `symbols` entirely, so anyone
+        following the repo's own convention would have hit it.
+        """
+        path = tmp_path / "agent.toml"
+        path.write_bytes(b'[agent]\nsymbols = ["BTC", "ETH"]\n')
+
+        cfg = load_agent_config(path, "agent", _BASE_CFG)
+        assert cfg["symbols"]["primary"] == ["BTC", "ETH"]
+
+    def test_symbols_as_a_table_is_preserved(self, tmp_path):
+        path = tmp_path / "agent.toml"
+        path.write_bytes(b'[agent]\n[agent.symbols]\nprimary = ["SOL"]\n')
+
+        cfg = load_agent_config(path, "agent", _BASE_CFG)
+        assert cfg["symbols"]["primary"] == ["SOL"]
 
     def test_load_config_missing_file(self, tmp_path):
         """Missing config file falls back to base config."""
@@ -745,6 +773,8 @@ class TestConfigValidation:
 [defaults]
 cycle_interval_s = 7200
 symbols = ["BTC", "ETH", "SOL"]
+generators_enabled = []
+max_experiments_per_cycle = 10
 
 [agent]
 max_experiments_per_cycle = 15
@@ -759,12 +789,13 @@ cycle_interval_s = 14400
         cfg = load_agent_config(config_path, "agent", {"cycle_interval_s": 3600})
         assert cfg["cycle_interval_s"] == 7200  # from defaults
         assert cfg["max_experiments_per_cycle"] == 15  # from [agent]
-        assert cfg["symbols"] == ["BTC", "ETH", "SOL"]  # from defaults
+        # normalised from the TOML array to {"primary": [...]} by load_agent_config
+        assert cfg["symbols"]["primary"] == ["BTC", "ETH", "SOL"]  # from defaults
 
         # MF section overrides defaults
         cfg_mf = load_agent_config(config_path, "agent_mf", {"cycle_interval_s": 3600})
         assert cfg_mf["cycle_interval_s"] == 14400  # overridden
-        assert cfg_mf["symbols"] == ["BTC", "ETH", "SOL"]  # inherited
+        assert cfg_mf["symbols"]["primary"] == ["BTC", "ETH", "SOL"]  # inherited
 
     def test_load_config_nested_gates_merge(self, tmp_path):
         """Nested [gates] subsection merges correctly."""
@@ -782,7 +813,8 @@ min_ic = 0.08
         config_path = tmp_path / "agent.toml"
         config_path.write_bytes(config_content)
 
-        cfg = load_agent_config(config_path, "agent_mf", {})
+        # _BASE_CFG supplies the required keys; this test is about gate merging.
+        cfg = load_agent_config(config_path, "agent_mf", _BASE_CFG)
         # min_ic overridden, min_dIC inherited
         assert cfg["gates"]["min_ic"] == 0.08
         assert cfg["gates"]["min_dIC"] == 0.05

@@ -27,6 +27,7 @@ import numpy as np
 import pytest
 
 from alpha.alpha_pipeline import (
+    _make_state,
     Phase,
     STEP_PHASES,
     GATE_NAMES,
@@ -59,14 +60,22 @@ def tmp_state(tmp_path):
 
 @pytest.fixture
 def sample_config(tmp_path):
-    """Minimal valid config dict matching config/alpha.toml structure."""
+    """Minimal valid config dict matching config/alpha.toml structure.
+
+    `state_file` is deliberately nested one directory deep. `_make_state` derives the
+    SQLite path as `state_file.parent.parent / "nat.db"`, so a flat `tmp_path/state.json`
+    would put every test's database in the SHARED pytest tmp root and let tests see each
+    other's pipeline state. One extra level makes it `tmp_path/nat.db` — per-test.
+    """
+    state_dir = tmp_path / "data"
+    state_dir.mkdir(parents=True, exist_ok=True)
     return {
         "pipeline": {
             "data_dir": "data/features",
             "timeframe": "15min",
             "symbols": ["BTC", "ETH", "SOL"],
             "primary_symbol": "BTC",
-            "state_file": str(tmp_path / "state.json"),
+            "state_file": str(state_dir / "state.json"),
             "log_file": str(tmp_path / "alpha_pipeline.log"),
             "report_dir": str(tmp_path / "reports"),
         },
@@ -562,7 +571,7 @@ class TestRunPipelineFullPass:
         """Execute run_pipeline with all modules mocked."""
         import logging
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
         log = logging.getLogger("test_pipeline")
         log.setLevel(logging.WARNING)  # suppress output during tests
 
@@ -644,7 +653,7 @@ class TestGateFailure:
         mock_screen.screen_features.return_value = _mock_screen_result(n_significant=0, total_tests=200)
         mock_screen.save_results.return_value = str(tmp_path / "screen.json")
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
         log = logging.getLogger("test_g1_fail")
         log.setLevel(logging.WARNING)
 
@@ -683,7 +692,7 @@ class TestGateFailure:
         )
         mock_combine.run_combine.return_value = (np.zeros(100), bad_cr)
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
         log = logging.getLogger("test_g1_weak")
         log.setLevel(logging.WARNING)
 
@@ -735,7 +744,7 @@ class TestForceGates:
         mock_loader = MagicMock()
         mock_loader.load_parquet.side_effect = FileNotFoundError("no data")
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
         log = logging.getLogger("test_force")
         log.setLevel(logging.WARNING)
 
@@ -765,7 +774,7 @@ class TestResume:
         """Pipeline resumed at COMBINING should skip screening and evaluate G2."""
         import logging
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
         ps.transition(Phase.COMBINING)
         ps.set_artifact("screen", str(tmp_path / "screen.json"))
 
@@ -792,7 +801,7 @@ class TestResume:
 
     def test_force_gate_resume_advances_past_failed(self, tmp_path, sample_config):
         """cmd_resume with --force-gate should advance past GATE_FAILED."""
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
         ps.transition(Phase.SCREENING)
         ps.record_gate("G1", "FAIL", {"n_significant": 0})
         ps.transition(Phase.GATE_FAILED, "G1 FAIL")
@@ -814,7 +823,7 @@ class TestResume:
 
     def test_force_gate_last_step_goes_to_done(self, tmp_path, sample_config):
         """Force-gate on the last step (DEPLOYING/G9) should go to DONE."""
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
         ps.transition(Phase.DEPLOYING)
         ps.record_gate("G9", "FAIL", {"overall_ready": False})
         ps.transition(Phase.GATE_FAILED, "G9 FAIL")
@@ -930,7 +939,7 @@ class TestCLI:
         import argparse
 
         # Write state file so it can be loaded
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
 
         with patch("alpha.alpha_pipeline.load_config", return_value=sample_config):
             args = argparse.Namespace(config="config/alpha.toml")
@@ -942,7 +951,7 @@ class TestCLI:
     def test_cmd_gates_runs(self, tmp_path, sample_config, capsys):
         import argparse
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
 
         with patch("alpha.alpha_pipeline.load_config", return_value=sample_config):
             args = argparse.Namespace(config="config/alpha.toml")
@@ -955,7 +964,7 @@ class TestCLI:
         """cmd_start from a terminal state (DONE) resets and starts fresh."""
         import argparse
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
         ps.transition(Phase.DONE)  # Terminal state — start is allowed
 
         mock_screen = MagicMock()
@@ -968,7 +977,7 @@ class TestCLI:
             cmd_start(args)
 
         # Reload to check
-        ps2 = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps2 = _make_state(sample_config)
         # Should have started from IDLE (reset) and advanced to at least SCREENING
         history = ps2.get("history")
         assert history[0]["from"] == "IDLE"
@@ -977,7 +986,7 @@ class TestCLI:
         """start should refuse if pipeline is in a non-terminal phase."""
         import argparse
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
         ps.transition(Phase.VALIDATING)
 
         with patch("alpha.alpha_pipeline.load_config", return_value=sample_config):
@@ -988,7 +997,7 @@ class TestCLI:
     def test_cmd_resume_refuses_when_idle(self, tmp_path, sample_config):
         import argparse
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
 
         with patch("alpha.alpha_pipeline.load_config", return_value=sample_config):
             args = argparse.Namespace(config="config/alpha.toml", force_gate=False)
@@ -998,7 +1007,7 @@ class TestCLI:
     def test_cmd_run_step_invalid_step(self, tmp_path, sample_config):
         import argparse
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
 
         with patch("alpha.alpha_pipeline.load_config", return_value=sample_config):
             args = argparse.Namespace(config="config/alpha.toml", step=0)
@@ -1008,7 +1017,7 @@ class TestCLI:
     def test_cmd_run_step_too_high(self, tmp_path, sample_config):
         import argparse
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
 
         with patch("alpha.alpha_pipeline.load_config", return_value=sample_config):
             args = argparse.Namespace(config="config/alpha.toml", step=10)
@@ -1116,7 +1125,7 @@ class TestEdgeCases:
         import logging
         import polars as pl
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
         ps.transition(Phase.VALIDATING)
         ps.set_artifact("signal_npy", str(tmp_path / "signal.npy"))
         ps.set_output("screen", {"n_tested": 200})
@@ -1156,7 +1165,7 @@ class TestEdgeCases:
             args = argparse.Namespace(config="config/alpha.toml")
             cmd_start(args)
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
         assert ps.current == Phase.ERROR
         assert "kaboom" in ps.get("error", "")
 
@@ -1164,7 +1173,7 @@ class TestEdgeCases:
         """G9 FAIL when deployer says not ready."""
         import logging
 
-        ps = AlphaPipelineState(sample_config["pipeline"]["state_file"])
+        ps = _make_state(sample_config)
         ps.transition(Phase.DEPLOYING)
         ps.set_artifact("paper", str(tmp_path / "paper.json"))
 

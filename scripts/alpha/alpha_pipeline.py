@@ -158,7 +158,12 @@ class AlphaPipelineState:
 
     def save(self) -> None:
         if self._store:
-            self._store.save_state(self.AGENT, self._data)
+            # `history` lives in its own table (append_history/load_history); keeping it
+            # out of the state blob avoids storing it twice and unbounded blob growth.
+            self._store.save_state(
+                self.AGENT,
+                {k: v for k, v in self._data.items() if k != "history"},
+            )
         else:
             with open(self.state_file, "w") as f:
                 json.dump(self._data, f, indent=2, default=str)
@@ -175,9 +180,16 @@ class AlphaPipelineState:
         self._data["phase"] = phase.value
         now = datetime.now(timezone.utc).isoformat()
         if self._store:
-            self._store.append_history(self.AGENT, {
-                "from": old, "to": phase.value, "at": now, "msg": message,
-            })
+            entry = {"from": old, "to": phase.value, "at": now, "msg": message}
+            self._store.append_history(self.AGENT, entry)
+            # Mirror into the in-memory copy. Without this the two backends disagree:
+            # the JSON path keeps `_data["history"]` current while the SQLite path left
+            # it at [] until the object was reconstructed, so `get("history")` returned
+            # a full list or an empty one depending purely on the backend. `save()`
+            # drops the key again, so SQLite still holds history in exactly one place.
+            self._data["history"].append(entry)
+            if len(self._data["history"]) > 200:
+                self._data["history"] = self._data["history"][-100:]
         else:
             self._data["history"].append({
                 "from": old, "to": phase.value,
