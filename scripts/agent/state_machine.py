@@ -165,6 +165,16 @@ def load_agent_config(config_path: Path, section: str,
     merged = _deep_merge(dict(base_config), defaults)
     merged = _deep_merge(merged, section_cfg)
 
+    # Normalise `symbols` before touching it. TOML can express it two ways and both
+    # occur in this repo: a table (`[agent.symbols] primary = [...]`) and a bare array
+    # (`symbols = ["BTC", ...]`, which is exactly how config/symbols.toml — the SSOT —
+    # writes it). The array form used to crash here: `"primary" not in merged["symbols"]`
+    # is a *membership* test on a list, so it returned True, and the injection below then
+    # did `list["primary"] = ...`. Production only escaped because config/agent.toml
+    # omits `symbols` entirely; anyone following the repo's own convention hit a TypeError.
+    if isinstance(merged.get("symbols"), (list, tuple)):
+        merged["symbols"] = {"primary": list(merged["symbols"])}
+
     # Inject canonical symbols if not provided by TOML
     if "symbols" not in merged or "primary" not in merged.get("symbols", {}):
         try:

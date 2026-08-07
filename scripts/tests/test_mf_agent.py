@@ -187,11 +187,17 @@ class TestMFRunner:
         assert abs(runner._extract_ic_from_results() - 0.120) < 1e-6
 
     def test_register_signal_writes_to_mf_registry(self, tmp_path):
-        from agent.mf_runner import MediumFrequencyRunner
+        """register_signal() must land in the MF agent's registry.
 
-        # Point registry to tmp via class attr
-        orig = MediumFrequencyRunner.REGISTRY_PATH
-        MediumFrequencyRunner.REGISTRY_PATH = tmp_path / "registry.json"
+        Rewritten 2026-08-07: the registry moved from a JSON file
+        (`REGISTRY_PATH`) to SQLite (`store.append_signal`/`load_registry`). Same claim,
+        current mechanism; the runner is constructed as MediumFrequencyAgent.create_runner
+        does it (mf_daemon.py:51) — with a store AND its agent identity.
+        """
+        from agent.mf_runner import MediumFrequencyRunner
+        from data.state import StateStore
+
+        store = StateStore(tmp_path / "nat.db")
 
         h = Hypothesis.create(
             "trend_momentum_300 predicts 5min returns",
@@ -200,47 +206,34 @@ class TestMFRunner:
         h.status = "replicated"
         h.results = {"gate_results": [{"msg": "IC=0.150 PASS"}]}
 
-        runner = MediumFrequencyRunner(h, {})
+        runner = MediumFrequencyRunner(h, {}, store=store, agent="medium_freq")
         sig = runner.register_signal()
 
         assert sig.hypothesis_id == h.id
         assert sig.horizon_s == 300.0
 
-        # Check file was written
-        with open(tmp_path / "registry.json") as f:
-            registry = json.load(f)
+        registry = store.load_registry("medium_freq")
         assert len(registry) == 1
         assert registry[0]["hypothesis_id"] == h.id
 
-        MediumFrequencyRunner.REGISTRY_PATH = orig
-
     def test_load_registry_separate_from_micro(self, tmp_path):
+        """The MF registry must not see micro signals — registries are keyed per agent."""
         from agent.mf_runner import MediumFrequencyRunner
         from agent.hypothesis import Hypothesis
+        from data.state import StateStore
 
+        store = StateStore(tmp_path / "nat.db")
         h = Hypothesis(id="HYP-TEST-001", claim="test", generator="test",
                        priority=1.0, test_protocol=["echo ok"])
-        runner = MediumFrequencyRunner(h, {})
+        runner = MediumFrequencyRunner(h, {}, store=store, agent="medium_freq")
 
-        orig = MediumFrequencyRunner.REGISTRY_PATH
-        MediumFrequencyRunner.REGISTRY_PATH = tmp_path / "mf_registry.json"
-
-        # MF registry should be empty (no file)
         assert runner._load_registry() == []
 
-        # Write something to it
-        with open(tmp_path / "mf_registry.json", "w") as f:
-            json.dump([{"name": "mf_signal"}], f)
+        store.append_signal("agent", {"name": "micro_signal"})
+        assert runner._load_registry() == [], "micro signals leaked into the MF registry"
+
+        store.append_signal("medium_freq", {"name": "mf_signal"})
         assert len(runner._load_registry()) == 1
-
-        MediumFrequencyRunner.REGISTRY_PATH = orig
-
-
-# ===========================================================================
-# Agent tests
-# ===========================================================================
-
-class TestMFAgent:
     def test_is_research_agent_subclass(self):
         from agent.mf_daemon import MediumFrequencyAgent
         assert issubclass(MediumFrequencyAgent, ResearchAgent)
