@@ -12,7 +12,7 @@ from processes import (
     list_processes_by_kind,
     partition_usable_columns,
 )
-from processes.base import make_run_id
+from processes.base import VALID_DATA_LEVELS, make_run_id
 from processes.synthetic import make_planted_frame
 
 
@@ -43,7 +43,7 @@ def test_describe_shape():
         spec = get_process(name).describe()
         assert spec["name"] == name
         assert spec["kind"] in ("evaluation", "transform")
-        assert spec["data_level"] in ("bars", "ticks")
+        assert spec["data_level"] in VALID_DATA_LEVELS
         assert isinstance(spec["doc"], str) and spec["doc"]
         assert isinstance(spec["params"], dict)
         for pspec in spec["params"].values():
