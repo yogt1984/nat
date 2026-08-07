@@ -214,3 +214,25 @@ def test_refresh_service_is_oneshot_and_sweeps_the_universe(monkeypatch, tmp_pat
     # directive is not. A oneshot sweep must wait for the next timer window rather
     # than hammer the venue in a restart loop.
     assert not any(ln.startswith("Restart=") for ln in svc.splitlines())
+
+
+# ── XS-8: the L2 sampler runs as a supervised loop, not a timer ───────────
+
+def test_l2_sampler_unit_is_a_restarting_daemon(monkeypatch, tmp_path):
+    """Unlike the candle refresh (a oneshot timer), the sampler is a long-lived loop.
+
+    Its product is a DISTRIBUTION of half-spreads, so a process that dies at 03:00 and
+    waits for tomorrow leaves a hole in exactly the intraday variation being measured.
+    Restart=always is the point of difference.
+    """
+    systemd_units = pytest.importorskip("ops.systemd_units")
+    monkeypatch.setenv("NAT_INSTALL_ROOT", str(tmp_path / "install"))
+    monkeypatch.setenv("NAT_HOME", str(tmp_path / "home"))
+
+    svc = systemd_units.render_units(python="/usr/bin/python3")["nat-l2-sampler.service"]
+
+    assert "Type=simple" in svc
+    assert "Restart=always" in svc
+    assert "fetch_l2.py" in svc
+    assert "--loop" in svc
+    assert "WantedBy=default.target" in svc
