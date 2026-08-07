@@ -468,6 +468,26 @@ def cmd_help(args=None):
               backtest|cluster|pipeline|pipeline-runner|dashboard|
               serving|eamm|scan|viz]
 
+  {BOLD}Ingestor (explicit group; the bare `nat start/stop/status/log` aliases these){W}
+    nat ing start                   Start ingestor locally
+    nat ing stop                    Stop ingestor + daemons
+    nat ing status                  Ingestor + data health
+    nat ing log                     Tail the latest ingestor log
+
+  {BOLD}Service (systemd --user supervision){W}
+    nat service install             Install + enable units (ingestor, gap-alert,
+                                    candle-refresh timer); replaces tmux+cron
+    nat service uninstall           Remove units, restore the tmux+cron path
+    nat service status              Unit active/enabled + linger state
+    nat service restart [target]    Restart ingestor|gap|candles|all
+
+  {BOLD}Metrics (the measurement dictionary){W}
+    nat metrics ls                  List all metrics (name/category/definition)
+    nat metrics show <name>         One metric: formula + estimator docstring
+
+  {BOLD}Package{W}
+    nat package deb                 Build the nat .deb (packaging/build_deb.sh)
+
   {BOLD}Docker{W}
     nat docker build [-v] [svc...]  Build images (--verbose for full output)
     nat docker up [svc...]          Start services

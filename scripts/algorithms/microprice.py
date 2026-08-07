@@ -146,4 +146,17 @@ class Microprice(MicrostructureAlgorithm):
             "alg_mp_dev_ema": dev_ema,
             "alg_mp_signal": z,
         }, index=df.index)
+
+        # NaN-out the warmup period, matching `MicrostructureAlgorithm.run_batch`
+        # (base.py:108-111) — the default path every other algorithm inherits. Until the
+        # EMA has absorbed `warmup` ticks its output reflects its initialisation, not the
+        # book, and nothing downstream can tell those apart.
+        #
+        # The recurrence above deliberately runs over the FULL series first: this hides
+        # the warmup OUTPUT, it does not skip the warmup COMPUTATION. Starting the loop
+        # late instead would leave a fresh EMA at tick `warmup` and shift every later
+        # value — including the HF1 centre used in the §4.7-§4.9 maker experiments.
+        warmup = self.warmup
+        if 0 < warmup < n:
+            out.iloc[:warmup] = np.nan
         return out

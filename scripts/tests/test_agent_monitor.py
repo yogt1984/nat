@@ -30,10 +30,16 @@ def agent_dirs(tmp_path, monkeypatch):
     data_dir = tmp_path / "data" / "features" / "2026-05-12"
     data_dir.mkdir(parents=True)
 
+    import agent.base as base_mod
     import agent.daemon as daemon_mod
     import agent.runner as runner_mod
-    # Redirect ROOT so all path properties (state_path, registry_path, etc.) resolve to tmp
-    monkeypatch.setattr(daemon_mod, "ROOT", tmp_path)
+    # Redirect the project root so all path properties (state_path, registry_path, ...)
+    # resolve under tmp. The daemon consolidation replaced the module-level
+    # `daemon.ROOT` with an overridable `ResearchAgent.root` property ("subclass
+    # overrides for testability", base.py:468), so the seam is the property now.
+    monkeypatch.setattr(base_mod.ResearchAgent, "root",
+                        property(lambda self, _p=tmp_path: _p))
+    monkeypatch.setattr(daemon_mod, "ROOT", tmp_path, raising=False)
     monkeypatch.setattr(daemon_mod, "STATE_PATH", state_dir / "agent_state.json")
     monkeypatch.setattr(daemon_mod, "STATS_PATH", state_dir / "generator_stats.json")
     monkeypatch.setattr(runner_mod, "REGISTRY_PATH", state_dir / "registry.json")
