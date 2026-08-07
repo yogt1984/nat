@@ -66,12 +66,20 @@ def _round_trip_cost_bps(half_spread_bps: pd.Series, costs: dict,
     """Per-unit-turnover cost of crossing, per pair, from the SSOT.
 
     A rotation is a TAKER strategy: it crosses the spread to rebalance. Cost per side is
-    the pair's own half-spread plus the SSOT taker fee and slippage — never a hardcoded
-    number (guardrail: all costs via load_costs()).
+    the pair's own measured half-spread plus the SSOT taker fee and slippage.
+
+    **No default literals.** The SSOT is nested (`costs["hyperliquid"]["taker_bps"]`) and
+    the first version of this function used `.get(..., 4.5)` fallbacks — which silently
+    supplied hardcoded fees when the key lookup missed, exactly the guardrail violation
+    (`all costs via load_costs()`) behind §4.6's wrong-venue pricing. A missing key now
+    raises rather than inventing a number.
     """
-    taker_bps = float(costs.get("taker_bps", costs.get("taker_fee_bps", 4.5)))
-    slip_bps = float(costs.get("slippage_bps", 2.0))
-    return (half_spread_bps + taker_bps + slip_bps) * stress
+    from utils.costs import taker_bps as ssot_taker_bps
+
+    hl = costs["hyperliquid"]                       # KeyError if the SSOT changes shape
+    taker = float(ssot_taker_bps())                 # accessor applies the staking tier
+    slip = float(hl["slippage_bps"])
+    return (half_spread_bps + taker + slip) * stress
 
 
 def _sharpe(r: np.ndarray, periods_per_year: float = 365.0) -> float:
@@ -171,7 +179,9 @@ def main() -> int:
                              values="close", aggfunc="last").sort_index()
 
     print(f"universe admitted at <= {SPREAD_CEILING} bps: {len(admitted)} pairs")
-    print(f"costs: taker {costs.get('taker_bps')} bps, slippage {costs.get('slippage_bps')} bps\n")
+    from utils.costs import taker_bps as ssot_taker_bps, tier_summary
+    print(f"costs (SSOT): taker {ssot_taker_bps()} bps, "
+          f"slippage {costs['hyperliquid']['slippage_bps']} bps, tier {tier_summary()}\n")
 
     results = []
     for k in K_VALUES:

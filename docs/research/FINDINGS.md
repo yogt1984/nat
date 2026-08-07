@@ -931,6 +931,66 @@ P&L. *Limits:* spread from ~3 h of one day (the sampler is still accruing), 1 %
 participation is a convention not a measurement, and ADV itself is elevated for pairs in
 the middle of a move.
 
+### 7.7 Rotation OOS study (XS-6, 2026-08-07) — **0 of 6 survive; it fails on durability, not cost**
+
+*Source: `exploration/xs_rotation_study.py`, **pre-registered** (criteria committed in
+`f3eea78` before the run). 119 pairs admitted at ≤2 bps, daily top-k rotation on `vol`
+rank, walk-forward 60/40, costs = each pair's measured half-spread + SSOT taker + slippage
+via `load_costs()`. Artifact: `reports/xs_rotation_study.json`.*
+
+| config | gross | cost | **net** | SR | SR_is | SR_oos | pos share | max-day |
+|---|---|---|---|---|---|---|---|---|
+| k=10 long-only | −19.47 % | 1.20 | −20.67 % | −3.02 | | | 0.48 | 0.32 |
+| k=20 long-only | −19.05 % | 1.01 | −20.06 % | −2.60 | | | 0.47 | 0.37 |
+| k=20 long-short | +8.73 % | 2.42 | **+6.31 %** | 0.85 | **−0.54** | +4.20 | 0.49 | **1.04** |
+| k=40 long-short | +8.46 % | 1.91 | **+6.55 %** | 1.25 | **−0.27** | +5.04 | 0.49 | 0.66 |
+
+**Verdict: NONE.** Every configuration fails the criteria declared beforehand.
+
+**Three things this establishes, none of them the obvious one.**
+
+1. **Cost is not the killer — and that is a genuine, validated prediction.** §7.5 said
+   `vol`'s ≥30-day rank half-life implies low turnover; measured turnover is **0.17–0.49**
+   against a theoretical maximum of 2.0, and costs consume only 1–2.7 % against 8.5 % gross.
+   Every strategy refuted in §4.6 died paying full cost against a seconds-to-minutes signal;
+   this one genuinely doesn't. The mechanism worked. It just isn't profitable.
+2. **Long-only measures market beta, not the signal.** Its −19.5 % gross is the universe
+   falling over the window; the cross-sectional signal only appears market-neutral
+   (long-short +8.7 % gross). Any future rotation must be constructed neutral.
+3. **The "OOS Sharpe 5.0" is the most misleading number in this document.** Read alone it
+   looks outstanding. But **IS Sharpe is negative in every configuration** (−1.79 / −0.54 /
+   −0.27) — the strategy lost money over the first 60 % of its own backtest and made
+   everything in the last 40 %. That is a regime change, not validation, and criterion (e)
+   catches it only because it tests the *ratio* (negative: −0.39, −7.75, −19.0) rather than
+   the OOS level. Pre-registration is what stopped this from being written up as a win.
+
+Supporting failures: positive-period share **0.49** (a coin flip) and single-day P&L
+concentration up to **104 % of the total** — remove one day and the edge is gone. That is
+`surprise_signal`'s §4.6 failure (87.6 % of edge from one day) reproduced on an unrelated
+strategy.
+
+**A cross-cutting pattern now visible.** §4.9's touch-maker grid failed on criteria (b)
+day-consistency and (c) concentration. §7.4's `hurst` died to window overlap. XS-6 fails on
+exactly (b), (c) and IS/OOS. **NAT's candidate strategies keep failing *durability*, not
+edge size and not cost.** That suggests consistency should be the primary design objective
+of the next candidate rather than a check applied at the end.
+
+**Track C status:** the signal is real (§7.4), persistent (§7.5) and capacity-viable at
+small notional (§7.6) — and still **not tradeable** on this evidence. Nothing promotes to
+lifecycle DISCOVERED. *Limits:* 90 days is short — the 60/40 split leaves ~36 in-sample and
+~24 out-of-sample rebalances, so a regime change between halves is unsurprising and §6's
+6–24-month arithmetic applies. Funding accrual on held inventory is still not modelled
+anywhere. A longer window is the one cheap thing that could change this verdict, and `XS-7`
+is already accumulating it.
+
+*Driver defect found and fixed mid-study:* the first version read costs with
+`costs.get("taker_bps", 4.5)` fallbacks. The SSOT is nested
+(`costs["hyperliquid"]["taker_bps"] = 3.5`), so the lookup missed and **hardcoded literals
+supplied the fees** — the exact guardrail violation behind §4.6's wrong-venue pricing,
+reproduced by me in a new file. Now uses the `taker_bps()` accessor with no fallback: a
+missing key raises. Costs were *overstated* by 1 bps/side, so the negative verdict was
+conservative, and the corrected numbers are the ones tabled above.
+
 - **Inventory (as of 2026-06-12):** 9.4 GB total; `data/features/` 8.4 GB, 671 parquet files,
   34 date dirs over 54 calendar days (Apr 19 – Jun 12) → **20 days missing (~37 %)**; 22 good days
   (>200 MB); expected full day ≈ 500–680 MB. Longest clean streak **May 18–29 (12 days)**.
