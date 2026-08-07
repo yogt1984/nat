@@ -889,6 +889,48 @@ technically passes at 1.4 d against a 1 d cadence while having no disjoint-windo
 all, so the meaningful quantity is the **ratio** (`vol` 37×, `momentum` 1.4×) and, more
 honestly, ρ at a disjoint lag.
 
+### 7.6 Capacity (XS-5, 2026-08-07) — **breadth and size trade off directly**
+
+*Source: `xs/capacity.py` over 32 XS-8 sweeps × 177 pairs (~3 h of one day), joined to
+30 days of candle dollar-volume. Spread figures are intraday-limited; ADV is not.*
+
+**Touch notional is the wrong instrument for a daily rotation, and using it would have
+produced a false verdict.** At an L1 floor of $10 k only **3 pairs** qualify — BTC, ETH,
+SOL, i.e. exactly the three symbols the ingestor already covers, which would have read as
+"Class-3 breadth is impossible". But L1 is resting size at one instant; a daily rebalance
+works orders against a whole day's volume. Median touch across the universe is a few
+hundred dollars while median **ADV is $330 k** (p95 $15.7 M).
+
+Pairs supporting a given per-pair daily trade at **1 % participation of ADV**:
+
+| size / pair | ≤1 bps | ≤2 bps | ≤5 bps | any spread |
+|---|---|---|---|---|
+| $1,000 | 49 | **117** | 156 | 162 |
+| $10,000 | 37 | **52** | 57 | 58 |
+| $100,000 | 10 | 10 | 11 | 12 |
+| $1,000,000 | 5 | 5 | 5 | 5 |
+
+**This is the Class-3 thesis meeting its constraint quantitatively.** The premise is
+IR ≈ IC·√breadth — 150 pairs at modest IC beating 3 at high IC. That holds at **small
+notional and nowhere else**: ~$1 k/pair keeps 117 pairs (≈$117 k deployed), $10 k/pair
+keeps 52 (≈$520 k), and by $100 k/pair breadth has collapsed to 10 and the √N advantage
+with it. Track C is capacity-viable, but as a small-notional wide-breadth strategy — which
+is the appropriate shape for a first deployment in any case.
+
+**The surviving score does not solve capacity for you.** `vol` (§7.4–7.5) correlates with
+*spread* — corr(vol, half-spread) = **+0.397**, low-vol pairs median 0.601 bps vs high-vol
+2.632 — which helps, since a rotation crosses the spread. But corr(vol, touch notional) =
+**−0.092**: volatility says essentially nothing about depth. The low-vol cohort runs from
+ETH at $365 k of touch to ICP at $13. So the liquidity gate has to be applied explicitly;
+tilting to low vol does not implicitly select tradeable pairs.
+
+*Design note:* this module deliberately mints **no thresholds** — the guardrail is "gates
+imported, not invented", and there is no measured economics yet from which a spread ceiling
+could be derived. It reports the curve; `XS-6` picks the operating point against measured
+P&L. *Limits:* spread from ~3 h of one day (the sampler is still accruing), 1 %
+participation is a convention not a measurement, and ADV itself is elevated for pairs in
+the middle of a move.
+
 - **Inventory (as of 2026-06-12):** 9.4 GB total; `data/features/` 8.4 GB, 671 parquet files,
   34 date dirs over 54 calendar days (Apr 19 – Jun 12) → **20 days missing (~37 %)**; 22 good days
   (>200 MB); expected full day ≈ 500–680 MB. Longest clean streak **May 18–29 (12 days)**.
