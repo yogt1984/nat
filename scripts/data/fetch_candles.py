@@ -270,22 +270,50 @@ def fetch_universe(info_fn=None, include_delisted: bool = False,
     return (names, excluded) if return_excluded else names
 
 
+def span_days(df, interval_ms: int) -> float:
+    """Calendar days actually covered by a candle frame (first→last inclusive)."""
+    if df is None or len(df) == 0 or "timestamp" not in getattr(df, "columns", []):
+        return 0.0
+    ts = pd.to_datetime(df["timestamp"], utc=True)
+    span_ms = (ts.max() - ts.min()).total_seconds() * 1000.0 + interval_ms
+    return span_ms / 86_400_000.0
+
+
 def backfill_universe(symbols, interval: str = "1m", days: int = 90,
                       start: str | None = None, output_dir: Path = DATA_DIR,
                       fetch_fn=None, delay: float = SYMBOL_DELAY,
-                      max_symbols: int | None = None) -> dict:
+                      max_symbols: int | None = None, retries: int = 2,
+                      short_tolerance: float = 0.9) -> dict:
     """Fetch `symbols` one at a time, surviving individual failures.
 
-    Returns a coverage report — `ok` / `failed` / `empty` / `rejected` / `truncated` —
-    which together account for every requested symbol exactly once. A sweep that cannot
-    say what it missed cannot support a breadth claim.
+    Returns a coverage report — `ok` / `failed` / `empty` / `rejected` / `truncated` /
+    `short` — which together account for every requested symbol exactly once. A sweep
+    that cannot say what it missed cannot support a breadth claim.
+
+    Two guards added by XS-7, both paid for by the 2026-08-07 sweep:
+
+    `retries` — that run reported two `empty` symbols (ORDI 15 m, REZ 5 m) which both
+    succeeded on immediate retry. `empty` therefore conflated "the venue has none" with
+    "one request hiccupped", and for 1 m candles — which expire at the source within
+    ~3.5 days (FINDINGS §7.1) — a transient miss is a *permanent* hole. Both exceptions
+    and empty frames are retried; a genuine outage still lands in `failed`.
+
+    `short` — the same run reported `ok=177 failed=0 empty=0` for a 1 m sweep that
+    returned **4 % of the requested span**, because `ok` only ever meant "rows came
+    back". `short` compares received span against requested and flags anything under
+    `short_tolerance`. It is an *annotation on a successful fetch*, not a bucket, so the
+    totals still reconcile. Note that a short result is often not a defect — a pair
+    listed 3 weeks ago cannot return 90 days, and the venue's per-interval retention cap
+    means 1 m *never* will — so this flags for inspection, it does not fail the run.
     """
     fetch = fetch_fn or fetch_candles
     output_dir = Path(output_dir)
     requested = list(symbols)
+    interval_ms = INTERVAL_MS[interval]
 
     report = {"interval": interval, "n_requested": len(requested), "ok": [],
-              "failed": [], "empty": [], "rejected": [], "truncated": 0, "rows": {}}
+              "failed": [], "empty": [], "rejected": [], "truncated": 0, "rows": {},
+              "short": {}, "days_requested": days}
 
     safe = []
     for s in requested:
@@ -301,18 +329,37 @@ def backfill_universe(symbols, interval: str = "1m", days: int = 90,
     for i, symbol in enumerate(safe):
         if i and delay:
             time.sleep(delay)                    # be polite to the venue
-        try:
-            df = fetch(symbol, interval=interval, start=start, days=days,
-                       output_dir=output_dir)
-        except Exception as exc:                 # one symbol must not lose the rest
-            log.warning("%s failed: %s", symbol, exc)
-            report["failed"].append({"symbol": symbol, "error": str(exc)[:200]})
+
+        df, err = None, None
+        for attempt in range(retries + 1):
+            if attempt and delay:
+                time.sleep(delay)                # back off before a retry
+            try:
+                df = fetch(symbol, interval=interval, start=start, days=days,
+                           output_dir=output_dir)
+                err = None
+            except Exception as exc:             # one symbol must not lose the rest
+                df, err = None, exc
+            if df is not None and len(df) > 0:
+                break                            # got data — stop retrying
+            if attempt < retries:
+                log.info("%s %s attempt %d/%d yielded %s — retrying", symbol, interval,
+                         attempt + 1, retries + 1, "an error" if err else "no rows")
+
+        if err is not None:
+            log.warning("%s failed after %d attempt(s): %s", symbol, retries + 1, err)
+            report["failed"].append({"symbol": symbol, "error": str(err)[:200]})
             continue
         if df is None or len(df) == 0:
             report["empty"].append(symbol)
             continue
+
         report["ok"].append(symbol)
         report["rows"][symbol] = int(len(df))
+
+        got = span_days(df, interval_ms)
+        if days and got < days * short_tolerance:
+            report["short"][symbol] = (round(got, 2), days)
 
     return report
 

@@ -20,6 +20,14 @@ except ImportError:  # pragma: no cover
 
 INGESTOR_UNIT = "nat-ingestor.service"
 GAP_UNIT = "nat-gap-alert.service"
+CANDLE_UNIT = "nat-candle-refresh.service"
+CANDLE_TIMER = "nat-candle-refresh.timer"
+
+#: Intervals the daily refresh sweeps. Ordered cheap→expensive so a truncated run still
+#: captures the perishable one first: the venue keeps ~5000 bars per interval, so 1m
+#: history expires in ~3.5 days and is the only one that can be lost permanently
+#: (FINDINGS §7.1). 1h/15m can always be re-fetched later; 1m cannot.
+CANDLE_INTERVALS = ("1m", "5m", "15m", "1h")
 
 
 def _env_lines(extra: dict[str, str] | None = None) -> str:
@@ -76,7 +84,49 @@ StartLimitIntervalSec=0
 WantedBy=default.target
 """
 
-    return {INGESTOR_UNIT: ingestor, GAP_UNIT: gap}
+    # XS-7 — daily candle refresh. A oneshot sweep, not a daemon: it runs, reports, exits.
+    fetch_script = root / "scripts" / "data" / "fetch_candles.py"
+    # 1m first (see CANDLE_INTERVALS); `;` not `&&` so one interval's failure does not
+    # cancel the rest — a 5m outage must not cost the perishable 1m pull.
+    sweeps = " ; ".join(
+        f"{py} {fetch_script} --universe --interval {iv} --days {days}"
+        for iv, days in zip(CANDLE_INTERVALS, (3, 17, 52, 90))
+    )
+    candle = f"""\
+[Unit]
+Description=NAT daily candle refresh (XS-1/XS-7 universe sweep)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory={root}
+ExecStart=/bin/sh -c "{sweeps}"
+{_env_lines()}
+# No Restart= : a oneshot sweep that failed should wait for the next timer window
+# rather than hammer the venue in a loop.
+TimeoutStartSec=7200
+"""
+
+    candle_timer = f"""\
+[Unit]
+Description=NAT daily candle refresh timer
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+# The venue keeps only ~5000 bars per interval, so 1m candles expire in ~3.5 days and
+# a missed window is data no backfill can recover (FINDINGS §7.1). Persistent=true runs
+# the sweep on next boot if the box was off when it was due.
+Persistent=true
+RandomizedDelaySec=300
+Unit={CANDLE_UNIT}
+
+[Install]
+WantedBy=timers.target
+"""
+
+    return {INGESTOR_UNIT: ingestor, GAP_UNIT: gap,
+            CANDLE_UNIT: candle, CANDLE_TIMER: candle_timer}
 
 
 def unit_dir() -> Path:
