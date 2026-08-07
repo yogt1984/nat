@@ -42,6 +42,13 @@ META_COLUMNS = {
 DEFAULT_MIN_OBS = 50
 
 
+#: The data levels the runner knows how to feed. Declared once, so a test cannot re-list
+#: them and drift: PROC-19 added "candles" while `test_describe_shape` still enumerated
+#: ("bars", "ticks"), and that mismatch only surfaced when XS-10 made the new processes
+#: discoverable to the registry — i.e. the test could not see the units it was validating.
+VALID_DATA_LEVELS = ("bars", "ticks", "candles")
+
+
 @dataclass(frozen=True)
 class ProcessContext:
     """Immutable run context handed to every process.
