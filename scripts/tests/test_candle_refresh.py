@@ -236,3 +236,20 @@ def test_l2_sampler_unit_is_a_restarting_daemon(monkeypatch, tmp_path):
     assert "fetch_l2.py" in svc
     assert "--loop" in svc
     assert "WantedBy=default.target" in svc
+
+
+def test_refresh_unit_also_records_the_rotation_trajectory(monkeypatch, tmp_path):
+    """XS-10: the daily sweep must re-measure the rotation, not just fetch candles.
+
+    §7.8's only conclusion is that the question needs ~325 rebalances against 83. If nothing
+    appends a trajectory point as the archive grows, that conclusion is a note someone has to
+    remember — and the first automated run already showed the numbers move (7 pairs of
+    admitted-universe churn shifted gross by 8% relative).
+    """
+    systemd_units = pytest.importorskip("ops.systemd_units")
+    monkeypatch.setenv("NAT_INSTALL_ROOT", str(tmp_path / "install"))
+    monkeypatch.setenv("NAT_HOME", str(tmp_path / "home"))
+    svc = systemd_units.render_units(python="/usr/bin/python3")["nat-candle-refresh.service"]
+    assert "xs trajectory --record" in svc
+    # `;` not `&&`: a failed candle interval must not cancel the measurement, and vice versa
+    assert "--record" in svc.split("ExecStart=")[1].split("\n")[0]

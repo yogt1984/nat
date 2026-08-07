@@ -1040,6 +1040,20 @@ sweep, and it cut turnover and cost too, which fitting does not usually do. But 
 should be treated as an upper bound. The multiple-testing burden also rises: §7.7 declared
 12 trials, and this is a 13th on the same window. The clean test is the next 8 months.
 
+**First automated re-measurement (2026-08-07, XS-10) already moved the numbers.** The
+trajectory tracker's first scheduled run re-derived the admitted universe from 2.4x more L2
+data (14,165 snapshot rows vs ~4,700) and re-ran the same construction on the same 83
+rebalances. **7 pairs churned** in and out of the >=2 bps admission (120 -> 119 admitted;
+`INIT`/`MOVE`/`ZETA`/`ZORA` out, `DYDX`/`STX`/`SUPER` in), which moved gross **+8.90% ->
++8.175%**, Sharpe **2.12 -> 2.00**, and flipped criterion (d) from pass (0.300) to fail
+(0.333) — so the tally is now **3 of 6**, not 4.
+
+That is not a code change; it is the same strategy on a better-measured universe. It says
+the §7.8 figures were sensitive to an admission set itself estimated from ~3 hours of
+spread data, and it arrived on the tracker's *first* automated run — which is the argument
+for having built it rather than leaving the re-run to memory. Treat 2.12 as the optimistic
+end of a range whose lower end is not yet known.
+
 *Driver defect found and fixed mid-study:* the first version read costs with
 `costs.get("taker_bps", 4.5)` fallbacks. The SSOT is nested
 (`costs["hyperliquid"]["taker_bps"] = 3.5`), so the lookup missed and **hardcoded literals
