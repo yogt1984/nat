@@ -2962,6 +2962,10 @@
           "name": "--score-with"
         },
         {
+          "help": "Target column for the chained scorer (default: the transform's declared target, e.g. triple_barrier -> tb_label)",
+          "name": "--score-target"
+        },
+        {
           "default": "False",
           "help": "Skip persistence",
           "name": "--no-save"
@@ -3029,6 +3033,40 @@
       ],
       "help": "Show one run record",
       "name": "process show"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "help": "list definitions, audit whether they have run, or run one",
+          "name": "action",
+          "positional": true
+        },
+        {
+          "help": "standing eval name (for run)",
+          "name": "name",
+          "positional": true
+        },
+        {
+          "help": "symbol override (run)",
+          "name": "--symbol"
+        },
+        {
+          "default": "False",
+          "help": "Skip persistence (run)",
+          "name": "--no-save"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "Standing (recurring) evaluations: list | audit | run <name>",
+      "name": "process standing"
     },
     {
       "args": [
@@ -3677,6 +3715,36 @@
           "name": "-h"
         },
         {
+          "help": "Filter by symbol (default: all)",
+          "name": "--symbol"
+        },
+        {
+          "default": "15",
+          "help": "Ranked cells to show",
+          "name": "--top",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "Re-aggregate from persisted process runs first",
+          "name": "--rebuild"
+        },
+        {
+          "default": "False",
+          "help": "JSON output",
+          "name": "--json"
+        }
+      ],
+      "help": "PROC-8 surface: combo\u00d7horizon\u00d7label\u00d7regime MI, FDR-corrected",
+      "name": "viz predictability"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
           "default": "15m",
           "help": "Time granularity / page width (default: 15m)",
           "name": "--tf"
@@ -3974,8 +4042,8 @@
           "name": "--no-save"
         },
         {
-          "default": "binance_vip9",
-          "help": "Cost model (default: binance_vip9 = 1.61 bps RT)",
+          "default": "config",
+          "help": "Cost model (default: config = Hyperliquid SSOT ~11 bps RT; binance_vip9 is explicit opt-in)",
           "name": "--cost-mode"
         }
       ],
@@ -4032,8 +4100,8 @@
           "name": "--exclude-algos"
         },
         {
-          "default": "binance_vip9",
-          "help": "Cost model (default: binance_vip9 = 1.61 bps RT)",
+          "default": "config",
+          "help": "Cost model (default: config = Hyperliquid SSOT ~11 bps RT; binance_vip9 is explicit opt-in)",
           "name": "--cost-mode"
         }
       ],
@@ -5835,5 +5903,5 @@
       "name": "it-engine status"
     }
   ],
-  "count": 331
+  "count": 333
 }

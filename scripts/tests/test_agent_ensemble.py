@@ -236,10 +236,15 @@ def daemon_dirs(tmp_path, monkeypatch):
     state_dir = tmp_path / "data" / "agent"
     state_dir.mkdir(parents=True)
 
+    import agent.base as base_mod
     import agent.daemon as daemon_mod
     import agent.runner as runner_mod
     import agent.hypothesis_queue as hq_mod
-    monkeypatch.setattr(daemon_mod, "ROOT", tmp_path)
+    # See test_agent_monitor: the daemon consolidation replaced module-level
+    # `daemon.ROOT` with the overridable `ResearchAgent.root` property.
+    monkeypatch.setattr(base_mod.ResearchAgent, "root",
+                        property(lambda self, _p=tmp_path: _p))
+    monkeypatch.setattr(daemon_mod, "ROOT", tmp_path, raising=False)
     monkeypatch.setattr(daemon_mod, "STATE_PATH", state_dir / "agent_state.json")
     monkeypatch.setattr(daemon_mod, "STATS_PATH", state_dir / "generator_stats.json")
     monkeypatch.setattr(runner_mod, "REGISTRY_PATH", state_dir / "registry.json")

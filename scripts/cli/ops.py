@@ -555,7 +555,7 @@ def cmd_service_status(args):
 
 
 def cmd_service_restart(args):
-    """Restart a unit (ingestor|gap|all)."""
+    """Restart a unit (ingestor|gap|candles|all)."""
     if not _service_installed():
         _p("x", R, "systemd services not installed (nat service install)")
         return 1
@@ -616,7 +616,8 @@ def register(sub):
     svcst.add_argument('--json', action='store_true', help='JSON output')
     svcst.set_defaults(func=cmd_service_status)
     svcr = svcsub.add_parser('restart', help='Restart a unit')
-    svcr.add_argument('target', nargs='?', default='all', choices=['ingestor', 'gap', 'all'])
+    svcr.add_argument('target', nargs='?', default='all',
+                      choices=['ingestor', 'gap', 'candles', 'all'])
     svcr.set_defaults(func=cmd_service_restart)
 
     # ── promotion daemon (T14) ──
