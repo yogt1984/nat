@@ -696,5 +696,14 @@
         }
       ]
     }
+  },
+  "_superseded": {
+    "status": "SUPERSEDED \u2014 do not cite as current",
+    "task": "REV-1",
+    "authority": "docs/research/FINDINGS.md \u00a74.6 (Q4 alpha-skeptic kill gate, 2026-07-30)",
+    "stamped_utc": "2026-08-07T12:09:12.487838+00:00",
+    "stamped_at_git_sha": "835e744",
+    "retained_because": "provenance: \u00a74.6's lesson is that unrecorded negatives return as false positives, and this file is a live input to analysis/mf_liquidity_backtest.py \u2014 deleting it would break a code path.",
+    "reason": "fee_model is binance_vip9 (1.61 bps round trip). Produced by it_multiday.py, one of the harnesses COST-6 re-pointed at the SSOT."
   }
 }

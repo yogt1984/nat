@@ -1,3 +1,9 @@
+> ⚠️ **SUPERSEDED — do not cite as current** (REV-1, stamped 2026-08-07 at 835e744).
+> Results below are priced at Binance VIP9 (1.61 bps round trip); NAT trades
+> Hyperliquid at ~11 bps all-in. See `docs/research/FINDINGS.md` §4.6 — the Q4 kill
+> gate found the wrong-venue cost tier invalidated every number produced this way.
+> Retained for provenance, not reference.
+
 # Best Signal: Medium-Frequency Liquidity Composite
 
 **Generated**: 2026-05-20
