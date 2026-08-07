@@ -793,6 +793,64 @@ across the universe. The estimator is kept — it is correct and matches the Rus
 implementation (`ing-features/src/entropy.rs:373`), where it may still separate — but it
 is not a Class-3 score. Cheap to have learned before building a ranking process on it.
 
+### 7.4 Cross-sectional rank predictability (XS-3, 2026-08-07) — **Track C survives its kill test**
+
+*Source: `processes/xs_rank_predictability.py` on the XS-1 archive — 177 perps × 90 days of
+1h candles, 168-bar lookback, 83 **non-overlapping** daily rebalances, mean universe 175.6
+pairs, 200 within-cross-section label permutations, BH-FDR across the three score families.
+A signal result, filed here to keep the XS thread together.*
+
+`THREE_CLASS_RESEARCH_PROPOSAL.md` §9 made this terminal: *"Track C stops if XS-3 finds no
+score family significant after FDR."* It did not stop.
+
+| score | rank-IC (1 d) | z | BH q | verdict |
+|---|---|---|---|---|
+| `xs_vol` | **−0.0690** | −8.37 | 0.007 | informative |
+| `xs_momentum` | **−0.0387** | −4.56 | 0.007 | informative |
+| `xs_hurst` | −0.0216 | −2.47 | 0.015 | fails z ≥ 3 |
+
+**Both survivors are NEGATIVE, and the signs are the finding.** Low-volatility pairs
+outperform high-volatility ones cross-sectionally, and recent winners *underperform* — the
+"momentum" score is a cross-sectional **mean-reversion** signal with its sign inverted.
+That independently reproduces §5's PROC-20 result, which found bar-scale momentum
+*anti*-persistent in 34 of 36 cells by a completely different method. Two instruments,
+one conclusion.
+
+**Two alternative explanations were tested and one of them killed a result:**
+
+1. **Return skew / Jensen — ruled out.** Re-running on log returns reproduces every IC to
+   four decimals (−0.0387 / −0.0216 / −0.0690), as it must: Spearman is invariant to
+   monotone transforms. The vol ranking is not an artifact of simple returns being
+   right-skewed for volatile assets.
+2. **Overlapping windows — a real defect, and it removed `hurst`.** A first 7-day pass
+   spaced rebalances 24 h apart, so consecutive windows shared 86 % of their data. It
+   reported `xs_hurst` at z −3.48, "informative". Re-spaced to non-overlapping (11
+   windows), the same score gives **z −0.59, q 0.82** — nothing. This is precisely the
+   defect that invalidated `funding_reversion` in §4.6 (95 %-overlapping windows,
+   n_eff ≈ 84), reproduced and caught. `xs_vol` survives the same correction at z −3.76.
+   **The headline 1 d results are non-overlapping by construction** (24 h horizon at 24 h
+   spacing) and unaffected.
+
+**What this does NOT establish**, and no one should read into it:
+
+- **No costs.** Rank-IC is signal-level. A daily rotation across this universe crosses a
+  median half-spread of 1.37 bps (§7.2) — ~2.7 bps round trip against an IC of 0.069 — so
+  whether anything survives fees is `XS-6`'s question, not this one, and the taker
+  arithmetic in §2 is not encouraging.
+- **No capacity.** §7.2: the widest-spread pairs are nearly empty at the touch (XAI $20).
+- **Survivorship, and it runs *against* the finding.** The archive holds currently-listed
+  perps; the 55 delisted are absent, and failed coins are disproportionately high-vol. So
+  the high-vol cohort here is missing its worst members, which biases *toward* zero — the
+  true low-vol effect should be stronger, not weaker.
+- **One 90-day window, one regime.** §6's arithmetic still applies: across-regime
+  validation needs 6–24 months.
+
+*Process defect found and fixed by this run:* `informative` was tested one-sided
+(`z >= threshold`), inherited from the MI processes where the statistic is unsigned. Rank-IC
+is signed, so every one of these results was initially reported as non-informative despite
+z = −8.4. Now two-sided in |z|, with the direction carried as an explicit `polarity` — which
+is also what PROC-1's compiler requires before it will emit an algorithm.
+
 - **Inventory (as of 2026-06-12):** 9.4 GB total; `data/features/` 8.4 GB, 671 parquet files,
   34 date dirs over 54 calendar days (Apr 19 – Jun 12) → **20 days missing (~37 %)**; 22 good days
   (>200 MB); expected full day ≈ 500–680 MB. Longest clean streak **May 18–29 (12 days)**.
