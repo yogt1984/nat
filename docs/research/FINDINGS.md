@@ -851,6 +851,44 @@ is signed, so every one of these results was initially reported as non-informati
 z = −8.4. Now two-sided in |z|, with the direction carried as an explicit `polarity` — which
 is also what PROC-1's compiler requires before it will emit an algorithm.
 
+### 7.5 Rank persistence (XS-4, 2026-08-07) — **only `vol` has any**
+
+*Source: `processes/xs_persistence.py` on the same panel — 177 perps, scores recomputed
+every 24 h from a 168-bar (7-day) trailing window, rank autocorrelation to lag 30
+rebalances (= 30 days).*
+
+XS-3's ICs are necessary, not sufficient: a ranking that reshuffles before the next
+rebalance is churn, paying the full spread to chase a signal already gone.
+
+| score | ρ(1 d) | **ρ(7 d)** | ρ(30 d) | fitted half-life |
+|---|---|---|---|---|
+| `vol` | 0.968 | **0.691** | **0.509** | ~37.7 d |
+| `momentum` | 0.879 | **−0.003** | 0.022 | 1.4 d |
+| `hurst` | 0.615 | 0.018 | −0.007 | 1.5 d |
+
+**The short-lag column is an artifact and must not be read as persistence.** Scores use a
+168-bar lookback, so consecutive daily scores share 6/7 of their input. `momentum`'s
+ρ(1 d) = 0.879 is *window overlap*, not memory. **Lag 7 is the first lag at which the two
+windows are disjoint**, and it separates the scores completely: `vol` retains 0.691 and is
+still at 0.509 after 30 days, while `momentum` and `hurst` sit at zero.
+
+**Conclusion: `vol` is the only Class-3 score with genuine rank persistence, and it wins on
+both axes** — the larger |IC| (0.069 vs 0.039, §7.4) *and* a ranking that survives weeks
+rather than one overlapping window. A vol-ranked rotation would trade rarely, which is what
+makes the cost question (`XS-6`) answerable at all; `momentum` has the smaller edge and no
+memory once its window turns over, so a daily momentum rotation is churn by construction —
+exactly the failure mode `XS-4` was specified to catch.
+
+*Caveats:* the 37.7 d half-life for `vol` is an **extrapolation** — its autocorrelation
+never actually crossed 0.5 inside the 30-lag window (`crossing=inf`), so read it as
+"≥30 days, fitted 37.7". `vol`'s persistence is also the least surprising result in this
+document: volatility clustering is the most robust stylised fact in finance, and finding it
+is a sanity check on the instrument as much as a discovery about the venue. The criterion
+as specified in `TASKS.md` — "half-life > cadence" — is necessary but weak: `momentum`
+technically passes at 1.4 d against a 1 d cadence while having no disjoint-window memory at
+all, so the meaningful quantity is the **ratio** (`vol` 37×, `momentum` 1.4×) and, more
+honestly, ρ at a disjoint lag.
+
 - **Inventory (as of 2026-06-12):** 9.4 GB total; `data/features/` 8.4 GB, 671 parquet files,
   34 date dirs over 54 calendar days (Apr 19 – Jun 12) → **20 days missing (~37 %)**; 22 good days
   (>200 MB); expected full day ≈ 500–680 MB. Longest clean streak **May 18–29 (12 days)**.
