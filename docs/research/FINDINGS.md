@@ -762,6 +762,37 @@ exactly the admission test `XS-5` exists to apply.
 quoted spreads are not fill economics — they say what a resting order could earn, never
 what it would be filled against. Sim and adverse-selection work still gate any claim.
 
+### 7.3 Permutation entropy does not rank this universe (XS-2, 2026-08-07) — negative
+
+*Source: `scripts/xs/features.py` on the XS-1 candle archive — 177 pairs, 1h log returns
+(≈2,160 bars each), repeated at orders 3/4/5/6 and on 15m.*
+
+`specs/maker_system.md` §5 lists permutation entropy as one of Tier-W's per-pair scores.
+Measured, **it carries no cross-sectional information at bar scale**:
+
+| order | min | median | max | **IQR** |
+|---|---|---|---|---|
+| 3 | 0.9980 | 0.9996 | 1.0000 | **0.0005** |
+| 4 | 0.9953 | 0.9985 | 0.9995 | 0.0008 |
+| 5 | 0.9768 | 0.9941 | 0.9960 | 0.0013 |
+| 6 | 0.8970 | 0.9719 | 0.9757 | 0.0025 |
+
+An IQR of 0.0005–0.0025 means the middle half of the universe is indistinguishable, and
+a rank built on it is noise. **Raising the order does not rescue it** — it substitutes a
+different defect: 6! = 720 patterns against ~2,156 windows is 3 windows per pattern, so
+the estimate is undersampled and biased *downward* for pairs with less history. At order
+6 the score would rank partly by history length, which on a universe with recent listings
+is exactly the wrong thing to rank by. 15m behaves the same (IQR 0.0004 at order 3).
+
+This is coherent with §5's PROC-20 result rather than surprising: bar-scale returns are
+ordinally near-random for every pair, which is what an entropy near 1.0 says.
+
+**Consequence:** `XS-3` should rank on `hurst_rs` (0.454–0.608, median 0.530),
+`momentum_strength` (−0.21 to +1.11) and `realized_vol` (0.0015–0.0512), which do spread
+across the universe. The estimator is kept — it is correct and matches the Rust tick-level
+implementation (`ing-features/src/entropy.rs:373`), where it may still separate — but it
+is not a Class-3 score. Cheap to have learned before building a ranking process on it.
+
 - **Inventory (as of 2026-06-12):** 9.4 GB total; `data/features/` 8.4 GB, 671 parquet files,
   34 date dirs over 54 calendar days (Apr 19 – Jun 12) → **20 days missing (~37 %)**; 22 good days
   (>200 MB); expected full day ≈ 500–680 MB. Longest clean streak **May 18–29 (12 days)**.
