@@ -187,10 +187,76 @@ def _resolve_bar_price_col(columns, price_col: str) -> str:
     )
 
 
+
+def _run_candles_process(*, proc, name, symbols, interval, data_dir, start_date,
+                         end_date, cfg, save, out_dir, db_path, t0):
+    """Execute a cross-sectional process over the candle archive (PROC-19).
+
+    Differs from the tick/bar path in three ways that all matter: the source is
+    `data/candles/` rather than `data/features/`, the frame is long over MANY symbols
+    rather than one, and the price column is `close` (bars have no mid).
+    """
+    from processes.candles import (CANDLE_PRICE_COL, DEFAULT_CANDLE_DIR,
+                                   available_candle_symbols, load_candles)
+    from utils.costs import load_costs
+
+    candle_dir = Path(data_dir)
+    if not candle_dir.exists() or candle_dir == Path(DEFAULT_DATA_DIR):
+        candle_dir = DEFAULT_CANDLE_DIR
+
+    universe = list(symbols) if symbols else available_candle_symbols(candle_dir, interval)
+    if not universe:
+        raise FileNotFoundError(f"no candle symbols at {interval} under {candle_dir}")
+
+    frame, load_report = load_candles(
+        universe, interval=interval, data_dir=candle_dir,
+        start_date=start_date, end_date=end_date, return_report=True,
+    )
+    if load_report["missing"] or load_report["empty"]:
+        # Named, never silent: a rank over 140 pairs believing it covered 177 is biased
+        # by whatever the missing 37 had in common.
+        log.warning("candles: %d requested, %d loaded (missing=%s empty=%s)",
+                    len(universe), len(load_report["loaded"]),
+                    load_report["missing"][:8], load_report["empty"][:8])
+
+    ctx = ProcessContext(
+        symbol=(universe[0] if len(universe) == 1 else "UNIVERSE"),
+        timeframe=interval,
+        price_col=CANDLE_PRICE_COL,
+        horizons=DEFAULT_HORIZONS.get(interval, {"1d": 24, "7d": 168}),
+        costs=load_costs(),
+        data_dir=str(candle_dir),
+        start_date=start_date,
+        end_date=end_date,
+        symbols=load_report["loaded"],
+    )
+
+    result = proc.evaluate(frame, ctx)
+    result.provenance = get_provenance()
+    result.data = {
+        "dir": str(candle_dir),
+        "interval": interval,
+        "start_date": start_date,
+        "end_date": end_date,
+        "n_rows": len(frame),
+        "n_symbols_requested": len(universe),
+        "n_symbols_loaded": len(load_report["loaded"]),
+        "symbols_missing": load_report["missing"],
+        "symbols_empty": load_report["empty"],
+    }
+    _fdr_and_ledger(result, ctx, cfg, save)
+    result.runtime_s = round(time.time() - t0, 2)
+    if save:
+        persistence.save_result(result, out_dir=out_dir, db_path=db_path)
+    return result
+
+
 def run_process(
     name: str,
     symbol: str = "BTC",
     data_dir: str | Path = DEFAULT_DATA_DIR,
+    symbols: Optional[list] = None,
+    interval: str = "1h",
     timeframe: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -220,6 +286,16 @@ def run_process(
         get_process(score_with, **{**cfg.get(score_with, {}), **(score_params or {})})
         if score_with else None
     )
+
+    # PROC-19 — the `candles` data level: a MULTI-symbol long frame from the XS-1
+    # archive, for cross-sectional (Class-3) processes. Routed before the tick/bar path
+    # because the source, the shape and the price column all differ.
+    if proc.data_level == "candles":
+        return _run_candles_process(
+            proc=proc, name=name, symbols=symbols, interval=interval,
+            data_dir=data_dir, start_date=start_date, end_date=end_date,
+            cfg=cfg, save=save, out_dir=out_dir, db_path=db_path, t0=t0,
+        )
 
     available = _peek_schema_columns(data_dir)
     required = _chain_load_columns(proc, scorer, available)

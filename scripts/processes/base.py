@@ -61,6 +61,11 @@ class ProcessContext:
     end_date: Optional[str] = None
     sample_rate_hz: float = 10.0      # tick-level sampling rate (100ms ticks)
     target_col: Optional[str] = None  # alternative target (e.g. tb_label)
+    #: PROC-19: the universe present in a cross-sectional run. Empty for single-symbol
+    #: runs, where `symbol` is the whole story. A process should read this rather than
+    #: re-deriving the universe from the frame, so "which pairs were requested" and
+    #: "which pairs had data" stay distinguishable.
+    symbols: list[str] = field(default_factory=list)
     extra_sources: dict[str, Any] = field(default_factory=dict)
 
 
@@ -128,7 +133,9 @@ class Process(ABC):
     """
 
     kind: str = "evaluation"          # set by intermediate ABCs
-    data_level: str = "bars"          # "bars" | "ticks" — what the runner feeds
+    data_level: str = "bars"          # "bars" | "ticks" | "candles" — what the runner feeds
+    #: "candles" (PROC-19) feeds a MULTI-symbol long frame from the XS-1 archive, for
+    #: cross-sectional (Class-3) processes. "bars"/"ticks" stay single-symbol.
     PARAMS: dict[str, tuple] = {}
 
     def __init__(self, **kwargs):
