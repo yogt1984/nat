@@ -720,6 +720,48 @@ size. The two 1h pairs short of 90 d (GRAM 36 d, CASHCAT 27 d) are recent listin
 the `empty` bucket conflates "venue has none" with a transient request failure; `XS-7` adds a retry
 pass.
 
+### 7.2 The universe's spreads (XS-8, first reading 2026-08-07) — **n = 1, recorded as a prior**
+
+*Source: `scripts/data/fetch_l2.py` (XS-8), one `l2Book` sweep of all 177 listed perps at
+08:40 UTC, 177/177 OK, 0 degenerate, 0 failed. **This is a single snapshot.** The sampler
+exists because half-spread moves all day and one book is an n=1 estimate — the error PROC-20
+corrected in LF7's priors. Nothing below is a verdict; it is the first datum in an
+accumulating distribution.*
+
+Half-spread, bps of mid:
+
+| p0 | p5 | p25 | **p50** | p75 | p95 | p100 |
+|---|---|---|---|---|---|---|
+| 0.056 | 0.084 | 0.750 | **1.372** | 2.239 | 6.904 | 26.810 |
+
+**NAT has been studying the extreme tight tail of its own venue.** BTC sits at 0.0776 bps
+(an independent cross-check of §4.11's 0.083, measured by a different instrument on a
+different day). The universe median is **17.7× wider**, and **169 of 177 pairs are wider
+than BTC**. SOL — one of the three symbols every maker experiment has used — ranks in the
+**tightest five** (ALGO 0.056, DOT 0.061, SOL 0.069, FIL 0.072, DOGE 0.072). §4.11 inferred
+this sampling bias from the cost side; it is now measured.
+
+**The conditional that B-5a must resolve.** §4.11's relation is
+`breakeven_maker_rate = E[adverse|fill] − half_spread`. *If* adverse selection stayed at
+BTC's measured 0.228 bps, then 156 of 177 pairs would cover it on half-spread alone —
+before any rebate, at zero fees. That "if" is carrying the entire result and is almost
+certainly false in the helpful direction: spreads are wide *because* market makers price
+inventory and toxicity risk into them, so `E[adverse|fill]` should scale with the spread.
+If it scales proportionally, the ratio is unchanged and nothing improves. **E[adverse|fill]
+is measured only for BTC/ETH/SOL**, so B-5a must bound it for wide pairs and state the
+bound, not bury it.
+
+**Capacity is the other blade, and it cuts the opposite way.** The widest pairs are
+nearly empty at the touch: XAI 12.94 bps with **$20** of bid notional, DYM 7.17 bps with
+$613, HMSTR 26.81 bps with $3,326. MEME ($10.3 k) and BOME ($12.5 k) are the exceptions.
+A large per-fill edge on $20 of size is not a business, so the joint requirement — wide
+enough *and* deep enough — is far more restrictive than either margin alone. This is
+exactly the admission test `XS-5` exists to apply.
+
+*Limits:* one sweep, one moment (08:40 UTC), no intraday or weekday variation, and
+quoted spreads are not fill economics — they say what a resting order could earn, never
+what it would be filled against. Sim and adverse-selection work still gate any claim.
+
 - **Inventory (as of 2026-06-12):** 9.4 GB total; `data/features/` 8.4 GB, 671 parquet files,
   34 date dirs over 54 calendar days (Apr 19 – Jun 12) → **20 days missing (~37 %)**; 22 good days
   (>200 MB); expected full day ≈ 500–680 MB. Longest clean streak **May 18–29 (12 days)**.
