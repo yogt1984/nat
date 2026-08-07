@@ -1078,6 +1078,42 @@ conservative, and the corrected numbers are the ones tabled above.
   rolling IC 12/30 · HMM (60 d) 22/60 · full confidence (90 d) ETA ~Sep. All ETAs assumed
   uninterrupted ingestion — an assumption the K5/Jul-5 recurrences broke.
 
+### 7.9 Hysteresis bands (A5, 2026-08-07) — **cost saving real, net effect undecidable**
+
+*Source: `execution/rebalance.py` applied to the §7.8 rotation; 83 rebalances, 119 pairs.
+"edge" = trade to the no-trade boundary (Constantinides), "full" = trade fully or not at all.*
+
+| band | mode | gross | cost | net | SR | turnover |
+|---|---|---|---|---|---|---|
+| 0.000 | — | 8.10 | 1.10 | 6.99 | 1.98 | 0.199 |
+| 0.002 | edge | 7.25 | 0.67 | 6.58 | 1.91 | 0.121 |
+| 0.005 | edge | 7.39 | 0.43 | 6.96 | 2.02 | 0.078 |
+| 0.010 | edge | 10.13 | 0.23 | 9.90 | 2.07 | 0.041 |
+| 0.010 | full | 12.58 | 0.48 | 12.10 | **2.99** | 0.087 |
+| 0.020 | edge | 10.53 | 0.10 | 10.42 | 2.37 | 0.018 |
+
+**The cost saving is real, mechanical and monotone**: turnover falls 0.199 → 0.018 and cost
+1.10 % → 0.10 %, exactly as intended. **The net effect is not decidable on this data.** A
+band changes *which positions are held*, and gross swings 7.25 → 12.58 — non-monotone, and
+several times larger than the ~1 pp of cost being saved. At 83 rebalances that variation is
+noise, so **selecting a band here would be fitting it**, which is why the apparent winner
+(band 0.010 "full", SR 2.99) is reported and **not adopted**: 7 configurations on one window
+is the §4.6 pattern. The band must come from cost/edge a priori, not from this table.
+
+*Two defects of mine, found by disbelieving a good number.* The first table showed cost
+falling with **gross unchanged at 8.10 across every band** — free money, therefore a bug:
+`run_rotation` priced gross on the *target* weights while the portfolio held the
+band-adjusted ones. Identical when band = 0, so it stayed latent until A5 and is now
+regression-tested. The second: `band_from_cost` returns a **dimensionless** cost/edge ratio
+(~1.4 at NAT's costs), not a position band; applied directly to a unit-gross book of ~120
+names whose typical weight is ~0.008, it means *never trade* — a units error that would
+present as a strategy mysteriously ceasing to rebalance. It now takes `position_scale`.
+
+**TWAP/VWAP slicing ships as a primitive with no performance claim.** Slicing exists to
+reduce market impact; NAT's cost model is spread + fee + slippage per unit turnover with
+**no impact term**, so it measures as exactly zero here. That is not a win being left on the
+table — it is unpriceable until `X-3` has fill data.
+
 ## 8. Platform & hypothesis-suite metrics
 
 *Source: project_state_report 2026-06-09.*

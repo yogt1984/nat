@@ -45,7 +45,8 @@ def _sharpe(r: np.ndarray, periods_per_year: float) -> float:
 
 def run_rotation(wide: pd.DataFrame, cost_bps: pd.Series, *, lookback: int = 168,
                  rebalance: int = 24, is_frac: float = 0.6,
-                 periods_per_year: float = 365.0, cost_stress: float = 1.0) -> dict:
+                 periods_per_year: float = 365.0, cost_stress: float = 1.0,
+                 band: float = 0.0, band_mode: str = "edge") -> dict:
     """Run the beta-neutral rotation over a (timestamp x symbol) close matrix.
 
     Args:
@@ -87,10 +88,21 @@ def run_rotation(wide: pd.DataFrame, cost_bps: pd.Series, *, lookback: int = 168
         wts = wts / gross_abs
 
         full = wts.reindex(cols).fillna(0.0)
+        if band > 0:
+            # A5 hysteresis: skip drifts too small to pay for themselves. "edge" is the
+            # proportional-cost optimum (trade to the boundary, not the target).
+            from execution.rebalance import no_trade_band, trade_to_edge
+            fn = trade_to_edge if band_mode == "edge" else no_trade_band
+            full = fn(full, prev, band)
         turn = (full - prev).abs()
         cost = float((turn * cost_bps.reindex(turn.index).fillna(
             cost_bps.median())).sum()) * 1e-4 * cost_stress
-        gross = float((wts * pd.Series(fwd, index=live)).sum())
+        # Gross must be priced on the weights actually HELD, not the target. With a
+        # hysteresis band these differ, and using `wts` here reported falling cost with
+        # unchanged gross — free money, and therefore a bug. Identical when band == 0,
+        # which is why it stayed latent until A5.
+        held = full.reindex(live).fillna(0.0)
+        gross = float((held * pd.Series(fwd, index=live)).sum())
         rows.append({"gross": gross, "cost": cost, "net": gross - cost,
                      "turnover": float(turn.sum()),
                      "net_beta": float((wts * bser).sum())})
