@@ -100,10 +100,22 @@ own history**, rank cross-sectionally, and allocate to the top pairs — Class 3
 150 pairs × modest xs-IC beats 3 pairs × high IC.
 
 **Two-tier architecture (no schema changes — verified against the codebase):**
-- **Tier W (wide, cheap):** REST 1 m candles for the **full Hyperliquid perp universe**
-  (~150+ pairs) via the existing `scripts/data/fetch_candles.py` (multi-symbol, incremental,
-  → `data/candles/`). Per pair, bar-level: permutation entropy of 1 m returns, momentum
-  strength (slope × R², Hurst), vol regime — each as percentile/z vs the pair's own history.
+- **Tier W (wide, cheap):** REST candles for the **full Hyperliquid perp universe** via the
+  existing `scripts/data/fetch_candles.py` (multi-symbol, incremental, → `data/candles/`).
+  Per pair, bar-level: permutation entropy of returns, momentum strength (slope × R², Hurst),
+  vol regime — each as percentile/z vs the pair's own history.
+
+  > **Corrected 2026-08-07 (XS-1, `research/FINDINGS.md` §7.1).** This clause originally read
+  > "REST **1 m** candles … (~150+ pairs)". Both halves were wrong. The universe is **177 listed
+  > perps** (55 delisted). And the venue retains only **~5000 bars per interval**, so 1 m reaches
+  > **3.5 days** — measured, not inferred — which no backfill can extend. **Tier W's working bar is
+  > 15 m (52 d) or 1 h (90 d+)**; 1 m breadth exists only as far back as we have been *accumulating*
+  > it (task `XS-7`). Depth measured 2026-08-07: 1 m 3.5 d · 5 m 17.4 d · 15 m 52 d · 1 h 90 d,
+  > 708 series, 3.06 M candles, zero gaps.
+  >
+  > Consequently **Tier W cannot rank pairs by spread at all** — candles carry no spread and no
+  > depth. That instrument is `XS-8` (REST `l2Book` sampler), and it is a hard dependency of any
+  > wide-pair maker claim (`B-5a`).
 - **Tier D (deep, existing):** the 100 ms tick stack + Class 1/2 execution runs only on the
   selected pairs. `symbols.toml` is already arbitrary-N (`config.rs:195`, `main.rs:251`);
   each deep symbol costs ~170–225 MB/day + one WS connection. Rotation = editing the SSOT
