@@ -140,7 +140,207 @@ All implementations in `scripts/algorithms/*.py`. Generic paper trader: `scripts
 
 ## Portfolio Notes
 
+> ⚠️ Historical, and **refuted** — see the banner. Retained because the *correlation
+> structure* is a mechanism observation independent of the mispriced P&L.
+
 - **Complementarity:** 3f_liquidity dominates BTC (Sharpe 9.2), jump_detector dominates ETH/SOL (Sharpe 6.2). Near-zero Spearman correlation between jump_detector and funding_reversion — ideal for blending.
 - **Full mathematical derivations:** `reports/algo_mathematical_foundations.md`
 - **Verification tests:** `scripts/algorithms/tests/test_winning_algos.py` (25 tests, all passing)
 - **Detailed results:** `reports/experiment_report_2.md`, `reports/algo_paper_trade_comparison.json`
+
+---
+
+## Mathematical formulations
+
+*Relocated from `README.md` on 2026-08-08. The derivations below are correct and were never
+in question — it is the **P&L claims** attached to them that the Q4 kill gate refuted. They
+live here so the root README does not lead with 200 lines of math for five rejected
+algorithms, and so the mechanism record survives intact.*
+
+### 1. `3f_liquidity` — three-feature liquidity composite
+
+Constructs a composite liquidity score from spread, depth, and VWAP deviation, then
+z-scores it over a rolling training window. Extreme z-scores (P20/P80) trigger
+mean-reversion entries: wide spreads and thin depth revert as liquidity providers refill.
+
+Given 5-minute bars, the three inputs are:
+
+```
+  f₁ = raw_spread_bps       (bid-ask spread in basis points)
+  f₂ = raw_ask_depth_5      (ask-side volume, levels 1-5)
+  f₃ = flow_vwap_deviation  (price deviation from volume-weighted average)
+```
+
+Each is z-scored over a rolling W-day training window, and the composite is their sum:
+
+```
+  z_i(t) = ( f_i(t) − μ_i ) / σ_i          μ_i, σ_i from the training window
+  C(t)   = z₁(t) + z₂(t) + z₃(t)
+```
+
+Entry logic, with percentile thresholds from the training distribution:
+
+```
+  Long   if  C(t) ≤ P₂₀(C_train)     (liquidity stress → reversion expected)
+  Short  if  C(t) ≥ P₈₀(C_train)     (excess liquidity → reversion expected)
+  Flat   otherwise
+```
+
+Exit: fixed 100-minute horizon (20 bars).
+
+**Refuted:** −11.1 BTC at SSOT cost, and not reproducible (`FINDINGS.md` §4.6).
+
+---
+
+### 2. `jump_detector` — Lee-Mykland nonparametric jump detection
+
+Detects intraday price jumps by comparing each log-return against a locally-estimated
+diffusion volatility that is robust to other jumps in the window, then trades the post-jump
+mean-reversion.
+
+Let r_t = ln(p_t / p_{t−1}). Local volatility via bipower variation (robust to jumps, unlike
+standard deviation):
+
+```
+  σ̂_BV(t) = √( (π/2) · mean_{i=2}^{K} |r_{t−i}| · |r_{t−i+1}| )
+```
+
+The constant π/2 = 1/μ₁² corrects for the expected product of adjacent half-normal variables
+(μ₁ = E[|Z|] = √(2/π) for Z ~ N(0,1)). The test statistic is:
+
+```
+  L(t) = |r_t| / σ̂_BV(t)
+```
+
+A jump is declared when L(t) > c. The exact critical value follows a Gumbel distribution
+under continuous-record asymptotics — which the legacy fixed c = 3.0 ignores, and which
+`jump_detector_v2` implements properly (≈7.2 at 1-day blocks).
+
+After a detected jump at tick t_J with return r_J and price p_J:
+
+```
+  REV(t) = − ln(p_t / p_J) / r_J       for 0 < t − t_J ≤ H
+```
+
+The negation makes +1 = "fully reverted", so a positive signal directly indicates reversion.
+
+**Parameters (v1):** window K = 100 ticks, significance c = 3.0, reversion horizon H = 50 ticks.
+
+**Refuted:** at c = 3.0 the threshold fires ~13,900×/day — a noise filter, not jump
+detection. Fails G4 at every cost tier (`FINDINGS.md` §4.6).
+
+**Reference:** Lee, S.S. & Mykland, P.A. (2008). Jumps in financial markets: a new
+nonparametric test and jump dynamics. *Review of Financial Studies*, 21(6), 2535-2563.
+
+---
+
+### 3. `optimal_entry` — SPRT on Kalman innovation
+
+A Sequential Probability Ratio Test (Wald 1947) on the innovation sequence of a Kalman
+filter tracking an OU process on order-book imbalance. The SPRT minimizes expected sample
+size for a given error rate, so it provides statistically optimal entry timing.
+
+A Kalman filter tracks latent OU dynamics on `imbalance_qty_l1`; the one-step-ahead
+innovation is ν_t = z_t − ẑ_{t|t−1}. The SPRT tests:
+
+```
+  H₀: ν_t ~ N(0, σ̂²)         (no signal — noise only)
+  H₁: ν_t ~ N(μ, σ̂²)         (drift present — entry opportunity)
+```
+
+with μ = 0.001 the minimum detectable drift and σ̂² an EMA estimate of innovation variance:
+
+```
+  σ̂²(t) = α · ν_t² + (1 − α) · σ̂²(t−1)        α = 0.02
+```
+
+The per-tick log-likelihood-ratio increment (closed-form Gaussian ratio) and its cumulative
+statistic:
+
+```
+  Λ_t = (μ / σ̂²) · ν_t  −  μ² / (2σ̂²)
+  S_n = S_{n−1} + Λ_t
+```
+
+Wald's optimal decision boundaries:
+
+```
+  A = log((1 − β) / α) ≈  2.77     (accept H₁ — fire entry signal)
+  B = log(β / (1 − α)) ≈ −1.55     (accept H₀ — no entry)
+```
+
+When S_n ≥ A the entry direction is sign(ν_t) and S resets to 0; when S_n ≤ B, no signal and
+S resets.
+
+**Parameters:** OU theta = 0.1, process noise = 0.01, observation noise = 0.1, α = 0.05, β = 0.20.
+
+**Refuted:** the sweep never ran the SPRT logic at all — it applied a generic P20/P80 entry.
+Fails G4 on stored data (`FINDINGS.md` §4.6).
+
+**References:** Wald, A. (1947). *Sequential Analysis*. Wiley. Shiryaev, A.N. (1978).
+*Optimal Stopping Rules*. Springer.
+
+---
+
+### 4. `funding_reversion` — funding-rate mean reversion
+
+Perpetual funding rates mean-revert: when funding is extremely positive (longs pay shorts),
+the rate tends toward zero, creating a predictable price movement. Premium divergence — the
+gap between spot and futures price — acts as a confirming signal.
+
+Given funding z-score z_t and premium p_t (bps), the entry activates only when funding is
+extreme (|z| ≥ z_entry, default 2.0):
+
+```
+  signal(t) = −sign(z_t) · min(|z_t| / z_entry, 3) / 3       if |z_t| ≥ z_entry
+            = 0                                               otherwise
+```
+
+Contrarian by construction: short when funding is extremely positive (crowded longs), long
+when extremely negative; magnitude clamped to [−1, 1] by the min/3 normalization.
+
+Funding momentum tracks the EMA of the raw rate, and premium divergence combines the two:
+
+```
+  EMA(t) = α · rate(t) + (1 − α) · EMA(t−1)       α = 2/(span+1), span = 100
+  D(t)   = (1 − w) · z_t + w · (p_t / 10)         w = 0.3
+```
+
+The premium is scaled by 1/10 to bring it to a magnitude comparable with the z-score.
+
+**Parameters:** z-entry = 2.0, momentum span = 100 ticks, premium weight = 0.3.
+
+**Refuted:** wrong-venue cost, n_eff ≈ 84, and a one-sided funding regime over the test
+window (`FINDINGS.md` §4.6).
+
+---
+
+### 5. `surprise_signal` — entropy regime-transition detection
+
+Markets alternate between disordered (high-entropy) and ordered (low-entropy) states. A
+sudden entropy drop signals a transition from noise to structure. This algorithm computes
+the rate-of-change of a composite entropy measure and z-scores it.
+
+```
+  E(t)   = 0.5 · ent_book_shape(t) + 0.5 · ent_tick_5s(t)
+  ROC(t) = Ē₅(t) − Ē₅(t − W)                    Ē₅ = 5-tick moving average of E
+```
+
+The surprise z-score normalizes ROC against its own recent distribution (rolling 2W window,
+min 20 observations), and the transition probability applies a sigmoid:
+
+```
+  surprise(t)     = (ROC(t) − μ_ROC) / σ_ROC
+  P_transition(t) = 1 / (1 + exp(−|surprise(t)| + τ))       τ = 2.0
+```
+
+The sign of surprise indicates direction: negative surprise (entropy dropping) = market
+ordering = potential trend formation.
+
+**Parameters:** ROC window = 50 ticks, transition threshold τ = 2.0.
+
+**Refuted:** 87.6 % of the claimed edge came from a single day (`FINDINGS.md` §4.6).
+
+**References:** Bandt, C. & Pompe, B. (2002). Permutation entropy. *Physical Review
+Letters*, 88(17), 174102. Schreiber, T. (2000). Measuring information transfer. *Physical
+Review Letters*, 85(2), 461-464.
