@@ -1,0 +1,616 @@
+\documentclass[11pt,a4paper]{article}
+
+% ------------------------------------------------------------------
+% House layout, shared with the sibling preprints in docs/research/:
+% 11pt a4, 2.5cm margins, Computer Modern, \maketitle front matter,
+% abstract + keywords + JEL codes, numbered sections, table of contents.
+% ------------------------------------------------------------------
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{array}
+
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{remark}{Remark}[section]
+\newtheorem{proposition}{Proposition}[section]
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}{Lemma}[section]
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\corr}{\operatorname{corr}}
+\newcommand{\sgn}{\operatorname{sign}}
+\DeclareMathOperator{\IC}{IC}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+% booktabs unavailable in this distribution — plain equivalents
+\newcommand{\toprule}{\hline\hline}
+\newcommand{\midrule}{\hline}
+\newcommand{\bottomrule}{\hline\hline}
+% natbib for the author-year bibliography (this paper cites inline)
+\usepackage[round]{natbib}
+
+\newcommand{\feat}[1]{\texttt{#1}}
+\newcommand{\pending}[1]{\emph{[Pending: #1]}}
+
+\begin{document}
+
+% ============================================================
+
+\title{\textbf{Predictive Structure of the Perpetual-Futures\\[3pt]
+Limit Order Book}\\[6pt]
+\large Universality, Orthogonality, and the Execution Boundary}
+
+\author{Yigit Onat\thanks{Working paper, preliminary draft --- comments
+welcome. The out-of-time replication study
+(Section~\ref{sec:replication}) is in progress; all other estimates are
+from the internal empirical record consolidated 2026-07-25. Please do
+not cite specific numbers without checking for a newer version.}\\
+\textit{Independent Researcher}\\
+\texttt{yionat@gmail.com}}
+\date{July 2026}
+\maketitle
+
+% ============================================================
+\begin{abstract}
+Using a 236-feature representation of the limit order book computed at
+100\,ms cadence on BTC, ETH and SOL perpetual futures (2.17 million
+ticks per symbol), we document the predictive structure of the book at
+horizons of one second to one hundred minutes. Directional information
+is large (rank information coefficient up to $0.47$ at 1--5\,s),
+universal across symbols and volatility regimes, concentrated in eight
+independent feature axes led by order-book imbalance, and spectrally
+localized in the 0.005--0.1\,Hz band with an Ornstein--Uhlenbeck
+half-life of 5--7\,s. Volatility information (peak IC $0.35$) resides
+in a disjoint feature family --- arrival intensity, activity counts,
+toxicity --- and the two channels are empirically orthogonal:
+directional features carry no volatility information and vice versa,
+on all three symbols. The signal decays toward efficiency in real time
+(its half-life shortening as spreads tighten) and is sharply bounded
+at execution: conditioning on directionally-consistent maker fills
+collapses the IC to ${\approx}\,0.03$, while conditioning on the
+presence of any fill \emph{raises} it to $0.52$, isolating adverse
+selection --- rather than signal decay --- as the binding constraint.
+An out-of-time replication on an independent month of data is in
+progress. We discuss implications: two-block (sign $\times$ size)
+forecasting architectures, entropy-gated conditioning, and
+execution-timing overlays for slower strategies.
+\end{abstract}
+
+\smallskip
+\noindent\textbf{Keywords:} limit order book, market microstructure, cryptocurrency, perpetual
+futures, information coefficient, adverse selection, spectral analysis
+
+\smallskip
+\noindent\textbf{JEL Classification:} C58, G12, G14
+
+\tableofcontents
+\bigskip
+
+% ============================================================
+\section{Introduction}
+% ==================================================================
+
+That order-book imbalance predicts short-horizon price moves is
+well established: \citet{cont2014} document the linear price impact of
+order-book events in equities, and a large subsequent literature
+confirms the result across venues and with increasingly flexible
+models. This paper does not re-claim that finding. Instead, we use a
+purpose-built measurement platform --- 236 features computed every
+100\,ms from the full depth, trade flow, and funding state of three
+cryptocurrency perpetual-futures books --- to establish four facts
+that are, to our knowledge, new.
+
+\begin{enumerate}
+\item \textbf{Orthogonality (the factorization result).} The
+directional and volatility channels of the book are carried by
+\emph{disjoint} feature families. Imbalance-family features predict
+the sign of returns (IC up to $0.47$) and carry zero volatility
+information; intensity-family features predict magnitude (IC up to
+$0.35$) and carry zero directional information. This holds feature by
+feature, on all three symbols. Sign and size of short-horizon returns
+are independently predictable --- a factorization with direct
+architectural consequences (Section~\ref{sec:orthogonality}).
+\item \textbf{Universality at scale.} A census of 207 live features
+across six horizons and three symbols, with bootstrap confidence
+intervals, compresses to eight independent directional axes whose IC
+ordering is preserved across symbols
+(Section~\ref{sec:directional}).
+\item \textbf{Spectral localization and real-time efficiency drift.}
+The entire directional IC lives in the 0.005--0.1\,Hz band; the
+imbalance process has an Ornstein--Uhlenbeck half-life of 5--7\,s; and
+between two measurement windows six weeks apart the 5\,s IC decayed
+from $0.45$ to $0.29$ while the 1\,s IC held --- the signal's
+half-life is shortening as the venue's spreads tighten
+(Section~\ref{sec:spectral}).
+\item \textbf{The execution boundary.} Conditioning the IC on
+directionally-consistent maker fills collapses it from $0.45$ to
+${\approx}\,0.03$; conditioning on \emph{any} fill raises it to
+$0.52$. The decomposition locates the loss at fill selection, not at
+signal decay, and isolates adverse selection in the sense of
+\citet{glosten1985} as the binding mechanism
+(Section~\ref{sec:boundary}). Regime conditioning on a book-shape
+entropy measure recovers part of the boundary (+22\% IC in the
+low-entropy quintile).
+\end{enumerate}
+
+The perspective throughout is measurement-first: we report what the
+book knows, where in frequency it knows it, how the two channels
+factorize, and precisely where the information stops being capturable.
+Section~\ref{sec:replication} pre-registers an out-of-time replication
+of every estimate on an independent month of data.
+Section~\ref{sec:implications} discusses implications for forecasting
+architecture and execution design.
+
+% ==================================================================
+\section{Data and Measurement Platform}\label{sec:data}
+% ==================================================================
+
+\paragraph{Venue and instruments.} We study BTC, ETH and SOL perpetual
+futures on Hyperliquid, a high-throughput decentralized derivatives
+venue. Perpetual futures are the dominant crypto trading instrument
+and carry a funding-rate mechanism whose pricing theory is developed
+in \citet{ackerer2025}.
+
+\paragraph{Feature computation.} A Rust ingestion engine subscribes to
+the full order-book and trade stream and emits a 236-dimensional
+feature vector per symbol every 100\,ms, spanning 21 categories: book
+imbalance at multiple depths, raw depth, microstructure dynamics
+(queue position, imbalance velocity), trade flow and aggressor ratios,
+VWAP deviation, entropy measures (permutation entropy, book-shape
+entropy), Hawkes-type arrival intensity, realized and range-based
+volatility, spread and toxicity proxies, funding/open-interest state,
+and cross-symbol imbalance aggregates. End-to-end feature latency is
+below 80\,ms at the 99th percentile.
+
+\paragraph{Census window.} The headline census uses three contiguous
+days (2026-05-19 to 2026-05-21), 2.17 million ticks per symbol at
+100\,ms cadence. Rank (Spearman) ICs against future mid-price returns
+are computed at six horizons (1\,s, 5\,s, 30\,s, 1\,m, 5\,m, 15\,m;
+selected features also at 100\,m) on ${\sim}21{,}708$ subsampled
+points per symbol (one per ${\sim}10$\,s to control overlap), with
+significance at $p<0.01$ and multiplicity handled by
+Benjamini--Hochberg false-discovery control \citep{benjamini1995}.
+Of 236 computed features, 207 were live in the census window.
+The fill-conditioning study (Section~\ref{sec:boundary}) uses a longer
+window: 31 calendar dates (2026-04-19 to 2026-06-04), of which 23
+passed data-quality gates.
+
+\paragraph{Honest accounting.} Two limitations are flagged here rather
+than discovered later. First, the census window is short; temporal
+out-of-sample stability initially \emph{failed} our own validation
+matrix (Section~\ref{sec:robustness}), which is precisely what the
+replication study addresses. Second, the platform's data-continuity
+record over April--June contains gaps; all estimates are computed on
+gap-audited clean days only.
+
+% ==================================================================
+\section{The Directional Channel}\label{sec:directional}
+% ==================================================================
+
+Table~\ref{tab:directional} reports peak rank ICs for the leading
+directional features. Order-book imbalance dominates: at 1--5\,s
+horizons the level-1 quantity imbalance reaches IC $+0.45$ to $+0.47$
+depending on symbol, with the level-5 and notional variants
+essentially tied. The ordering of features is preserved across all
+three symbols --- the hierarchy is structural, not asset-specific.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Leading directional features: peak rank IC by symbol
+(census window 2026-05-19/21; horizons 1--5\,s unless noted).}
+\label{tab:directional}
+\begin{tabular}{lrrrl}
+\toprule
+Feature & BTC & ETH & SOL & Axis \\
+\midrule
+\feat{imbalance\_qty\_l1}        & $+0.453$ & $+0.447$ & $+0.466$ & book imbalance \\
+\feat{imbalance\_qty\_l5}        & $+0.456$ & $+0.431$ & $+0.453$ & book imbalance \\
+\feat{imbalance\_notional\_l5}   & $+0.456$ & $+0.431$ & $+0.453$ & book imbalance \\
+\feat{imbalance\_orders\_l5}     & $+0.435$ & $+0.438$ & $+0.455$ & book imbalance \\
+\feat{imbalance\_depth\_weighted}& $+0.434$ & $+0.410$ & $+0.425$ & book imbalance \\
+\feat{raw\_bid\_depth\_5}        & $+0.420$ & $+0.405$ & $+0.406$ & depth asymmetry \\
+\feat{raw\_ask\_depth\_5}        & $-0.424$ & $-0.404$ & $-0.415$ & depth asymmetry \\
+\feat{cross\_obi\_mean}          & $+0.354$ & $+0.334$ & $+0.331$ & cross-symbol \\
+\feat{micro\_queue\_position\_bid}& $+0.307$ & $+0.282$ & $+0.291$ & queue dynamics \\
+\feat{flow\_vwap\_deviation} (1\,s) & $-0.287$ & $-0.206$ & $-0.188$ & VWAP reversion \\
+\feat{micro\_obi\_velocity} (1\,s)  & $+0.192$ & $+0.181$ & $+0.208$ & imbalance momentum \\
+\feat{ent\_permutation\_imbalance\_16} (1\,s) & $-0.170$ & $-0.173$ & $-0.177$ & imbalance entropy \\
+\feat{flow\_aggressor\_ratio\_5s}   & $+0.112$ & $+0.109$ & $+0.111$ & aggressor flow \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Eight independent axes.} The ${\sim}29$ fast-directional
+features are heavily cross-correlated. They compress into eight
+axes with approximate standalone IC:
+(1) book imbalance ${\sim}0.45$;
+(2) raw depth asymmetry ${\sim}0.42$;
+(3) cross-symbol imbalance ${\sim}0.35$;
+(4) queue dynamics ${\sim}0.31$;
+(5) VWAP deviation, mean-reverting ${\sim}0.25$;
+(6) imbalance velocity ${\sim}0.19$;
+(7) imbalance entropy ${\sim}0.17$;
+(8) aggressor flow ${\sim}0.11$.
+
+\paragraph{Decay.} Table~\ref{tab:decay} traces the peak directional
+IC across horizons. The half-life is ${\sim}30$\,s for BTC,
+${\sim}20$\,s for ETH and ${\sim}15$\,s for SOL --- the thinner the
+book, the faster the decay --- and by five minutes roughly 80\% of the
+signal is gone. A distinct \emph{slow} family grows with horizon
+instead (e.g.\ a 1-hour divergence measure reaching IC $0.21$ at
+100\,m), but its analysis is outside this paper's scope.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Peak directional IC by horizon (census window).}
+\label{tab:decay}
+\begin{tabular}{lrrrrrr}
+\toprule
+Symbol & 1\,s & 5\,s & 30\,s & 1\,m & 5\,m & 15\,m \\
+\midrule
+BTC & $0.447$ & $0.456$ & $0.261$ & $0.187$ & $0.090$ & $0.056$ \\
+ETH & $0.447$ & $0.438$ & $0.219$ & $0.160$ & $0.074$ & $0.031$ \\
+SOL & $0.466$ & $0.412$ & $0.190$ & $0.135$ & $0.056$ & $0.036$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ==================================================================
+\section{The Volatility Channel}\label{sec:volatility}
+% ==================================================================
+
+Table~\ref{tab:volatility} reports the leading predictors of
+short-horizon volatility (absolute-return magnitude) at 5\,s. The
+family is entirely different in character: self-excitation of trade
+arrivals (a Hawkes-type intensity), realized and range-based
+volatility over trailing windows, raw activity counts, and an
+effective-spread toxicity proxy in the spirit of the flow-toxicity
+literature \citep{easley2012}.
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Leading volatility features: rank IC vs.\ future absolute
+return at 5\,s (census window).}
+\label{tab:volatility}
+\begin{tabular}{lrrr}
+\toprule
+Feature & BTC & ETH & SOL \\
+\midrule
+\feat{hawkes\_intensity}       & $+0.345$ & $+0.281$ & $+0.247$ \\
+\feat{vol\_returns\_5m}        & $+0.328$ & $+0.326$ & $+0.293$ \\
+\feat{vol\_parkinson\_5m}      & $+0.318$ & $+0.312$ & $+0.281$ \\
+\feat{flow\_count\_30s}        & $+0.318$ & $+0.281$ & $+0.253$ \\
+\feat{illiq\_trade\_count}     & $+0.318$ & $+0.286$ & $+0.261$ \\
+\feat{toxic\_effective\_spread}& $+0.291$ & $+0.279$ & $+0.254$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Notably, VPIN-style measures and tick-sequence entropy carry
+magnitude information only --- they have no directional IC at any
+horizon tested, on any symbol.
+
+% ==================================================================
+\section{Orthogonality: The Factorization Result}
+\label{sec:orthogonality}
+% ==================================================================
+
+The paper's central positive finding is the clean separation between
+the two channels. Every feature in Table~\ref{tab:directional} has
+volatility-IC indistinguishable from zero, and every feature in
+Table~\ref{tab:volatility} has directional IC indistinguishable from
+zero --- consistently across BTC, ETH and SOL. Direction and
+volatility of short-horizon returns are predictable \emph{from
+disjoint measurements of the same order book}.
+
+Three consequences follow. First, architecturally: a forecasting
+system can be built as two independent blocks --- a sign block driven
+by the imbalance family and a size/veto block driven by the intensity
+family --- with no interaction terms to estimate and hence no
+interaction terms to overfit. Second, econometrically: the
+factorization licenses separate estimation and separate validation of
+the two blocks, halving the effective multiple-testing burden. Third,
+economically: it suggests the two channels reflect different
+underlying processes --- resting-liquidity positioning (direction)
+versus aggressive-flow clustering (magnitude) --- rather than a single
+latent state observed twice. \pending{formal independence tests
+(distance correlation / HSIC) beyond IC-level orthogonality, on the
+replication month.}
+
+% ==================================================================
+\section{Spectral Localization and Efficiency Drift}
+\label{sec:spectral}
+% ==================================================================
+
+\paragraph{Localization.} Frequency-domain analysis of the level-1
+imbalance process shows a red spectrum with slope $-1.86$
+(Hurst exponent $H = 0.43$, mildly anti-persistent). The predictive
+content is not spread across the spectrum: essentially the
+\emph{entire} directional IC is carried by the 0.005--0.1\,Hz band
+(periods of 10--200\,s). Fitting an Ornstein--Uhlenbeck process to the
+imbalance yields a half-life of 5--7\,s, and the dominant
+cross-coherence between imbalance and subsequent returns sits at
+${\sim}68$\,s. A practical corollary that we verified directly:
+time-domain smoothing (exponentially weighted averaging) of the
+imbalance \emph{reduces} IC --- naive aggregation destroys exactly the
+band that predicts.
+
+\paragraph{Drift.} Between the May census window (05-19/21) and a
+June window (06-02/04), the 5\,s IC on BTC declined from $+0.45$ to
+$+0.29$ --- on all symbols in the same direction --- while the 1\,s IC
+was stable or improved (BTC $+0.447 \to +0.502$). Over the same
+period, quoted spreads tightened from ${\sim}0.1$ to 0.2--0.3\,bps
+levels shifted regime. The signal is not disappearing; its
+\emph{half-life is shortening}: price discovery is accelerating as the
+venue matures. To our knowledge, real-time measurement of a
+microstructure signal's decay toward efficiency in a young venue has
+not been reported at this granularity. \pending{third time-point from
+the July replication month.}
+
+% ==================================================================
+\section{Robustness}\label{sec:robustness}
+% ==================================================================
+
+Per-day rolling IC at 5\,s is $+0.433 \pm 0.061$ (BTC),
+$+0.400 \pm 0.098$ (ETH), $+0.355 \pm 0.071$ (SOL); the bootstrap 95\%
+confidence interval for \feat{imbalance\_qty\_l1} on BTC is
+$[0.442, 0.465]$ (1{,}000 resamples). The signal is present around the
+clock with no dead zones (weakest 12--16 UTC, strongest 04--08 UTC)
+and in both volatility regimes under a median split (low-vol
+$+0.458/+0.435/+0.391$ vs.\ high-vol $+0.422/+0.394/+0.342$ across
+BTC/ETH/SOL). Feature rank ordering is preserved across symbols and
+subwindows.
+
+We report the validation matrix honestly: BTC passes 7 of 8 cells,
+ETH and SOL 6 of 8. The systematic failure is temporal out-of-sample
+drift (IC delta $-0.17$ across a six-week gap, against a $0.10$
+tolerance) --- partially attributable to the efficiency drift of
+Section~\ref{sec:spectral}, and the direct motivation for the
+pre-registered replication in Section~\ref{sec:replication}.
+
+% ==================================================================
+\section{The Execution Boundary}\label{sec:boundary}
+% ==================================================================
+
+The census ICs are mid-price statements. The economically relevant
+question is what survives at the point of execution. Two boundaries
+are quantified.
+
+\paragraph{Taker arithmetic.} The expected 1--5\,s move conditional on
+a strong signal is 0.5--2\,bps; round-trip taker cost on the venue is
+${\sim}11$\,bps. Aggressive capture of the short-horizon channel is
+arithmetically impossible, independent of modeling choices.
+
+\paragraph{Maker fills and adverse selection.} The subtler boundary
+concerns passive execution. Table~\ref{tab:conditional} conditions
+the 5\,s IC of \feat{imbalance\_qty\_l1} on fill events of a resting
+order at the touch (mid-cross fill model, 23 gap-audited dates,
+2026-04-19 to 06-04).
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{Fill-conditioning decomposition: rank IC of
+\feat{imbalance\_qty\_l1} at 5\,s under fill conditioning.}
+\label{tab:conditional}
+\begin{tabular}{lrrr}
+\toprule
+Conditioning & BTC & ETH & SOL \\
+\midrule
+Unconditional            & $+0.453$ & $+0.438$ & $+0.412$ \\
+Any fill event           & $+0.526$ & $+0.516$ & $+0.460$ \\
+Buy fill (signal long)   & $+0.032$ & $-0.061$ & $-0.032$ \\
+Sell fill (signal short) & $-0.047$ & $-0.027$ & $-0.021$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The decomposition is the point. Conditioning on the \emph{presence} of
+a fill raises the IC above its unconditional level (ticks near fills
+carry larger imbalance). Conditioning on the \emph{directionally
+consistent} fill --- the one a signal-following market maker actually
+receives --- annihilates it, on all three symbols. The mechanism: the
+signal says buy; the bid is placed; the fill requires the mid to fall
+to the bid, an adverse move; at fill time the prediction is already
+spent. This is adverse selection in the classical sense
+\citep{glosten1985,kyle1985}, made visible as a conditional-IC
+statement, and it locates the monetization loss at \emph{fill
+selection}, not at signal decay. Fill prevalence rises from 20.8\%
+(BTC) to 30.8\% (SOL) of ticks, and profitability worsens in the same
+order: more fills mean more adverse selection, not more edge. The
+result complements \citet{collindufresne2015}: information plainly
+visible in the book need not be extractable through the act of trading
+on it.
+
+\paragraph{Partial recovery by regime conditioning.} Conditioning on a
+book-shape entropy measure recovers part of the boundary: in the
+low-entropy (structured-book) quintile, the imbalance IC rises from
+$0.45$ to $0.55$ (single condition) and to $0.63$--$0.67$ in
+combination --- a $+22\%$ lift replicated across symbols. Structured
+books appear to correspond to states where resting-order information
+is less contested. \pending{fill-conditional version of the entropy
+gate on the replication month --- the decisive test of whether regime
+conditioning survives at execution.}
+
+% ==================================================================
+\section{Out-of-Time Replication (Pre-Registered)}
+\label{sec:replication}
+% ==================================================================
+
+At the time of writing, an independent month of data (July 2026) is in
+final collection. The following analyses are pre-registered and will
+replace this section in the next version:
+
+\begin{enumerate}
+\item Full census re-estimation (Tables~\ref{tab:directional},
+\ref{tab:volatility}, \ref{tab:decay}) on the new month; the
+temporal-OOS validation cell re-scored.
+\item Fill-conditioning decomposition (Table~\ref{tab:conditional})
+re-estimated on the independent window.
+\item Orthogonality re-tested, including formal independence measures.
+\item A third time-point for the efficiency-drift trajectory.
+\item Entropy-gate lift re-estimated unconditionally and
+fill-conditionally.
+\end{enumerate}
+
+All tests run under Benjamini--Hochberg false-discovery control across
+the full battery, with embargoed walk-forward splits where model
+fitting is involved; transaction-cost parameters come from a single
+audited configuration source. Kill criteria are stated in advance: a
+claim that fails replication is removed, not re-tuned.
+
+% ==================================================================
+\section{Implications and Future Work}\label{sec:implications}
+% ==================================================================
+
+\paragraph{Two-block architectures.} The factorization of
+Section~\ref{sec:orthogonality} suggests forecasting and trading
+systems in which a directional block (imbalance family) sets the sign
+and a volatility block (intensity family) sets the size and the veto
+--- e.g.\ reservation-price skew and spread width in an
+Avellaneda--Stoikov market maker \citep{avellaneda2008,gueant2013},
+with quoting disarmed when toxicity predictors fire
+\citep{cartea2018}. The microprice of \citet{stoikov2018} is the
+natural implementation of the sign block at the quote level.
+
+\paragraph{The queue-priority question.} The fill-conditioning
+collapse of Section~\ref{sec:boundary} is a property of
+\emph{reactive} limit orders. Whether orders placed ex ante ---
+holding queue priority, whose fills sample noise flow rather than only
+adverse flow \citep{moallemi2016} --- retain positive fill-time IC is,
+in our view, the central open question this measurement program poses.
+A queue-position fill simulation on recorded raw trade data is in
+progress.
+
+\paragraph{Execution overlays.} Even absent standalone monetization,
+a 0.45-IC seconds-horizon predictor can time the entries of slower,
+independently-validated strategies, converting forecast into
+execution-cost reduction that fill-selection effects cannot reach
+(the trader chooses when to cross, never resting). Quantifying the
+recovered basis points per trade is left to companion work.
+
+\paragraph{Efficiency dynamics.} The drift result invites a
+market-design reading: a young venue's order book becoming
+informationally efficient in measurable real time. Longer histories
+will support formal tests of convergence rates.
+
+% ==================================================================
+\section{Conclusion}\label{sec:conclusion}
+% ==================================================================
+
+The perpetual-futures order book carries two large, orthogonal
+predictive channels: a directional channel led by book imbalance
+(IC up to $0.47$ at seconds horizons, universal across symbols,
+spectrally localized at 10--200\,s periods) and a volatility channel
+led by arrival intensity (IC up to $0.35$), with no measurable
+cross-talk between the two families. The directional channel is
+bounded at execution by adverse selection --- visible as a
+fill-conditioning decomposition that raises IC on fill presence and
+annihilates it on fill direction --- and partially recovered by
+book-entropy regime conditioning. The signal's half-life is shortening
+as the venue matures. What the book knows, where it knows it, and
+where that knowledge stops being capturable can all be measured; this
+paper is an attempt to do so honestly.
+
+% ==================================================================
+% REFERENCES
+% ==================================================================
+\begin{thebibliography}{99}
+\setlength{\itemsep}{2pt}
+
+\bibitem[Ackerer et al.(2025)]{ackerer2025}
+Ackerer, D., Hugonnier, J., and Jermann, U. (2025).
+Perpetual futures pricing. \emph{Mathematical Finance}, forthcoming.
+
+\bibitem[Avellaneda and Stoikov(2008)]{avellaneda2008}
+Avellaneda, M., and Stoikov, S. (2008).
+High-frequency trading in a limit order book.
+\emph{Quantitative Finance}, 8(3), 217--224.
+
+\bibitem[Benjamini and Hochberg(1995)]{benjamini1995}
+Benjamini, Y., and Hochberg, Y. (1995).
+Controlling the false discovery rate: a practical and powerful
+approach to multiple testing.
+\emph{Journal of the Royal Statistical Society B}, 57(1), 289--300.
+
+\bibitem[Cartea et al.(2018)]{cartea2018}
+Cartea, \'A., Donnelly, R., and Jaimungal, S. (2018).
+Enhancing trading strategies with order book signals.
+\emph{Applied Mathematical Finance}, 25(1), 1--35.
+
+\bibitem[Collin-Dufresne and Fos(2015)]{collindufresne2015}
+Collin-Dufresne, P., and Fos, V. (2015).
+Do prices reveal the presence of informed trading?
+\emph{Journal of Finance}, 70(4), 1555--1582.
+
+\bibitem[Cont et al.(2014)]{cont2014}
+Cont, R., Kukanov, A., and Stoikov, S. (2014).
+The price impact of order book events.
+\emph{Journal of Financial Econometrics}, 12(1), 47--88.
+
+\bibitem[Easley et al.(2012)]{easley2012}
+Easley, D., L\'opez de Prado, M., and O'Hara, M. (2012).
+Flow toxicity and liquidity in a high-frequency world.
+\emph{Review of Financial Studies}, 25(5), 1457--1493.
+
+\bibitem[Glosten and Milgrom(1985)]{glosten1985}
+Glosten, L., and Milgrom, P. (1985).
+Bid, ask and transaction prices in a specialist market with
+heterogeneously informed traders.
+\emph{Journal of Financial Economics}, 14(1), 71--100.
+
+\bibitem[Gu\'eant et al.(2013)]{gueant2013}
+Gu\'eant, O., Lehalle, C.-A., and Fernandez-Tapia, J. (2013).
+Dealing with the inventory risk: a solution to the market making
+problem. \emph{Mathematics and Financial Economics}, 7(4), 477--507.
+
+\bibitem[Kyle(1985)]{kyle1985}
+Kyle, A. (1985).
+Continuous auctions and insider trading.
+\emph{Econometrica}, 53(6), 1315--1335.
+
+\bibitem[Moallemi and Yuan(2016)]{moallemi2016}
+Moallemi, C., and Yuan, K. (2016).
+The value of queue position in a limit order book.
+Working paper, Columbia Business School.
+
+\bibitem[Stoikov(2018)]{stoikov2018}
+Stoikov, S. (2018).
+The micro-price: a high-frequency estimator of future prices.
+\emph{Quantitative Finance}, 18(12), 1959--1966.
+
+\end{thebibliography}
+
+% ==================================================================
+\appendix
+\section{Reproducibility}\label{app:repro}
+% ==================================================================
+
+\begin{itemize}
+\item \textbf{Code revision:} git SHA \texttt{[stamp at submission]}
+of the research platform (Rust ingestion engine + Python analysis).
+\item \textbf{Census window:} 2026-05-19 to 2026-05-21;
+2.17\,M ticks/symbol at 100\,ms cadence; 21{,}708 subsampled IC
+points per symbol; horizons 1\,s--15\,m.
+\item \textbf{Fill-conditioning window:} 2026-04-19 to 2026-06-04;
+23 of 31 dates pass gap audit; mid-cross fill model at the touch.
+\item \textbf{Drift windows:} 2026-05-19/21 vs.\ 2026-06-02/04.
+\item \textbf{Replication month:} July 2026 (in collection at draft
+time); pre-registered battery in Section~\ref{sec:replication}.
+\item \textbf{Multiplicity:} Benjamini--Hochberg FDR across each
+reported battery; significance $p<0.01$ for census entries.
+\item \textbf{Costs:} all cost statements from a single audited fee
+configuration (taker round-trip ${\sim}11$\,bps at study time).
+\end{itemize}
+
+Data samples and analysis scripts are available from the author on
+request.
+
+\end{document}
