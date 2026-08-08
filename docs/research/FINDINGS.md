@@ -7,6 +7,9 @@ the market, and its own code. Merged from the Tier-A finding reports (per
 each block states its test window. Nothing here is a plan — plans live in [`PLAN.md`](../PLAN.md) /
 [`TASKS.md`](../TASKS.md).
 
+**One-page overview:** [`FINDINGS_SUMMARY.md`](FINDINGS_SUMMARY.md) — every row links back here;
+this file is the source when the two disagree.
+
 *Consolidated 2026-07-25. Companion catalogues (living, not merged):
 [`ALGORITHMS.md`](ALGORITHMS.md) (implemented algos + OOS), [`../../FEATURES.md`](../../FEATURES.md)
 (feature manifest), [`INSTITUTIONAL_ALGORITHMS.md`](INSTITUTIONAL_ALGORITHMS.md) (gap audit).*
