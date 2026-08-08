@@ -1,0 +1,161 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage{onepager}
+
+\begin{document}
+\footnotesize
+
+\ophead{Exact or Nothing}
+{Gate-Governed Measurement of the Liquidation Map on a Transparent Perpetual-Futures Venue}
+{\code{nat2_exact_map_preprint.tex} $\cdot$ 11pp $\cdot$ Aug 2026 $\cdot$ code: \code{~/nat2} (separate repo)
+ $\cdot$ numbers: \code{nat2/data/ledger.jsonl}}
+
+\begin{multicols}{2}
+
+\opsec{Thesis}
+Cascade research is normally done on an \emph{estimated} liquidation map (aggregate OI $\times$ assumed
+leverage mix). On Hyperliquid it need not be: per-position \code{liquidationPx} is published, mark comes
+from a published oracle, any address's fills are public. Refuse estimation entirely and see what the
+programme looks like — and what becomes visible that estimation hid.
+
+\opsec{The two rules (enforced in code, not prose)}
+\begin{opitems}
+\item \textbf{Exact or nothing.} An unobserved position is \emph{absent} and enters the coverage deficit;
+      it is never imputed. Asymmetry: an 80\%-right approximation gives a confidently wrong backtest; an
+      acknowledged hole gives a coverage number, and a number can gate a decision.
+\item \textbf{Gates before models.} \code{feed} $\to$ \code{map} $\to$ \code{magnet} $\to$
+      \code{persistence} $\to$ \code{decay}. Each may end its branch; two may end the project. The
+      refusal is the product.
+\end{opitems}
+
+\opsec{Substrate}
+\kv{Two clocks.}{Every record carries $t^{\mathrm{event}}$ (venue) and $t^{\mathrm{ingest}}$ (first
+knowable). Causal readable set $\mathcal{F}_T=\{r: t^{\mathrm{ingest}}(r)\le T\}$; a replay audit fails on
+any diff. Lookahead becomes \emph{queryable}, not a code-review hope.}
+\kv{WORM store.}{Hourly rotation, sha256 into a manifest on close, never reopened. Restart mid-hour
+$\Rightarrow$ new part, so a changed digest always means corruption, never a bounced daemon. Per-stream
+\code{seq} survives restarts $\Rightarrow$ a hole means records \emph{lost}.}
+\kv{Ledger.}{$h_i=\mathrm{SHA256}(\mathrm{enc}(i,\tau_i,\kappa_i,\pi_i,h_{i-1}))$, $h_{-1}=0^{64}$.
+Threat model is not an attacker — it is the researcher. The 14 variants tried before the one that worked
+stay on the record.}
+\kv{Admissibility.}{Run iff $V(g)$ exists $\wedge$ $\mathrm{pass}(g)=1$ $\wedge$ $t-\tau(g)\le\Delta$
+($\Delta=24$h). Without the freshness clause a gate that passed once becomes a permanent licence.}
+
+\opsec{Coverage, and the factor of two}
+\[
+  \widehat{\rho}_t=\frac{N_t}{s\cdot \mathrm{OI}_t},\qquad s\in\{1,2\}
+\]
+OI counts each contract once, but a wallet registry sees both sides $\Rightarrow$ outstanding notional is
+$2\,\mathrm{OI}$. $s{=}2$ is conservative, is printed on every map, and is an \emph{open verify item}:
+being wrong here is a factor of two on the one number the map is judged by.
+
+\opsec{Measured (ledger, with dates)}
+\begin{opfacts}
+\code{gate feed}            & \textsf{PASS}, 20 checks, 0 failed \\
+\code{gate map}             & \textsf{FAIL} on \code{predictive} \\
+Coverage $s{=}2$            & BTC .315 / ETH .380 / SOL .247 (floor .25) \\
+Derivation exact ($<10^{-4}$) & 40.8\% of 2,926 positions \\
+\quad median / p90 rel err  & 0.152 / 0.921 \\
+\quad no-isolated-margin    & 58\% of 1,074 cross positions \\
+Registry                    & 3,596 wallets; sweep $\approx$5 min $=$ whole 1,200/min IP budget \\
+Leaderboard probe 08-07     & 41,392 wallets; equity-2k $=$ 61\% OI / 28\% active; volume-2k $=$ 39\% / 46\%; union 69\% \\
+\end{opfacts}
+\caution{The 69\% probe is \emph{not} the coverage number. Its ratio to the ledger's 25--38\% is $\approx s$
+itself — plausibly one-sided, unresolved. Report both, never the flattering one.}
+
+\opsec{The finding (negative, and general)}
+Of 48 observed liquidations the equity-seeded registry held
+\[
+  \mathbf{2.9\%}\ \text{of liquidated \emph{wallets}},\qquad
+  \mathbf{21.9\%}\ \text{of liquidated \emph{notional}}
+\]
+($\$223{,}491$, 35 wallets; re-read next cycle 2.8\% / 21.9\% over 49). Mass and events are carried by
+\emph{different populations}: the map wants whoever holds size, but whoever gets liquidated is small and
+levered. So the OI rescaling of the heatmap paper cannot repair it — that correction assumes uniform
+thinning, and this is biased in \emph{shape}. Generalises to any venue where positions are sampled rather
+than enumerated: a single notional-denominated coverage scalar reports the flattering half.
+
+\opsec{Why the headline is not believable yet}
+Mapped notional fraction reads $0.0\%$ — and that is \emph{confounded, not informative}: a liquidated
+wallet no longer holds the position, so a snapshot taken after the event has nothing to have predicted.
+Cannot yet separate ``different populations'' from ``we looked too late''.
+
+\opsec{The discriminating experiment (pre-stated in the ledger)}
+\code{nat2 cycle --snapshot-every 6h --scan-every 1h}, one overlap reading appended per pass; needs
+$\sim$a day.
+\begin{opnums}
+\item mapped frac climbs off 0 $\Rightarrow$ per-position scoring works, instrument stands.
+\item mapped pinned at 0, notional holds $\approx$22\% $\Rightarrow$ we see the right wallets but never
+      \emph{before} they blow up $\Rightarrow$ demote to cluster-level scoring (weaker, still falsifiable).
+\item notional frac collapses too $\Rightarrow$ seed a third registry by \emph{liquidation risk}
+      (margin ratio / distance-to-liq), computable from data already held.
+\end{opnums}
+Only (1) validates as specified. The discriminating variable is calendar time under capture — hence
+capture runs while the rest is built; a point-in-time series cannot be recovered later.
+
+\opsec{Where liquidations are observable}
+Public tape carries no marker. \code{userFills} does, twice: the liquidated wallet's own \code{dir}
+string, and — far more abundantly — the \emph{counterparty's} fill, a \code{liquidation} object naming
+\code{liquidatedUser}, \code{markPx}, method. Measured 08-08 over 117,485 fills / 70 wallets: exactly
+\emph{one} self-side \code{dir}, but 16/70 wallets had taken the other side. Efficient observer set is a
+handful of high-volume MMs, not the registry. REST has no per-user cap (WS caps at 15).
+Scoring drops events predating their snapshot and reports the count: 24 of the first 48.
+
+\opsec{Venue-native quantities with no CEX analogue}
+$\pi_t=(p^{\mathrm{mark}}-p^{\mathrm{oracle}})/p^{\mathrm{oracle}}$ replaces a second-venue sidecar (no
+second clock/cost model) $\cdot$ hourly funding is first-order at cascade horizons $\cdot$
+$\Delta^{\mathrm{HLP}}$ \emph{measures} unabsorbed cascade flow (exhaustion observed, not inferred)
+$\cdot$ one address's perp+spot+vault visible $\Rightarrow$ intra-venue hedges detectable.
+
+\opsec{Open / unverified (treated as live defects)}
+$s$ convention $\cdot$ liq-formula residual (size-tiered maintenance margin prime suspect) $\cdot$ mark
+construction \& which price triggers $\cdot$ funding clamp/cadence $\cdot$ rate-limit table (stamped,
+warns at 90d) $\cdot$ WS connections per IP $\cdot$ node-data cost (sizes M3).
+Gaps: \code{l2book} 45 records/70s across 3 coins (sparser than hinted); clock skew flipped
+$-196$ms$\to+395$ms, within 2s tolerance but unexplained.
+
+\opsec{Layers (calls go downward only)}
+\code{L-1} capture (WORM, dual-stamped, daemon) $\cdot$ \code{L0} features (pure bar$\to$vector, causality
+contract) $\cdot$ \code{L1} experts (calibrated $p$ or score) $\cdot$ \code{L2} meta (Hedge / fixed-share
+over net-of-cost expert PnL) $\cdot$ \code{L3} allocate (vol target $\to$ capacity cap $\to$
+\code{maxLeverage} cap $\to$ liq-distance floor) $\cdot$ \code{L4} execute (simulator $|$ testnet $|$
+mainnet, flag-gated off) $\cdot$ \code{L5} ledger. Downward-only is what lets simulator and live path share
+code honestly.
+
+\opsec{Milestones — each ends at a gate}
+\code{M0} client + capture + WORM $\to$ \code{gate feed} \textbf{done} $\cdot$ \code{M1} reconstruction +
+map + coverage $\to$ \code{gate map} \textbf{built, FAIL} $\cdot$ \code{M2} labels + magnet experts +
+purged WFO $\to$ \code{gate magnet} $\cdot$ \code{M3} node backfill + vault tagging $\to$
+\code{gate persistence} (\emph{go/no-go for smart money}) $\cdot$ \code{M4} cohort flow + decay study $\to$
+\code{gate decay} $\cdot$ \code{M5} meta + sizer + simulator + testnet $\cdot$ \code{M6} TUI.
+M3/M4 precede M5 deliberately: each is $\sim$a week and each may end its branch.
+
+\opsec{Expert contract}
+\code{fit} / \code{predict} / \textbf{\code{baseline()} mandatory} — GBDT-vs-$\sgn(\mathrm{imb})$ and
+clone-vs-raw-flow are the same rule, written once, enforced for every expert by \code{nat2 eval}. Must
+clear $\text{edge} > 2(\text{fees}+\text{funding}+\text{slippage})/\sigma$ net, or it does not enter the
+pool. LightGBM depth 3 (short history punishes variance; value is in features and labels). Purged
+walk-forward, embargo $h$, isotonic calibration on OOS folds only. Two-barrier race (Stage A), triple
+barrier on touch (Stage B), uniqueness weights — cascade episodes overlap heavily. Barriers evaluate on
+\emph{mark}, because that is what the position experiences.
+
+\opsec{Named risks}
+Reconstruction drift (continuous sampled reconcile; drift \textsf{FAIL}s \code{gate feed}) $\cdot$
+cross/isolated modelled wrong (both diffed vs HL's own \code{liquidationPx}) $\cdot$ overlapping-cascade
+overfit $\cdot$ \textbf{crowding — the exact map is exact for hunters too} (edge is the conditional odds
+\emph{after} the touch; fixed-share demotes decayed experts; our own liq distance is watched by the same
+code that builds the map) $\cdot$ oracle-manipulation tail, JELLY-style $\cdot$ short history (wider
+embargo, smaller models, \emph{never} pad with CEX data) $\cdot$ single-venue operational risk, accepted
+explicitly.
+
+\opsec{Siblings}
+\#3 heatmap supplies the model, this supplies the instrument (and revises \#3's obstacle) $\cdot$ \#2/\#7
+supply the adverse-selection barrier the execution layer is built around $\cdot$ \#6 process is the same
+gate discipline one level up.
+
+\end{multicols}
+
+\opfoot{One-pager for personal use. Every figure re-read from \code{nat2/data/ledger.jsonl} on 2026-08-08 —
+re-read it rather than citing this card. \code{gate map} was \textsf{FAIL} at time of writing; no
+performance figures exist anywhere in this work.}
+
+\end{document}

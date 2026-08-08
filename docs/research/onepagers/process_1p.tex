@@ -1,0 +1,113 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage{onepager}
+
+\begin{document}
+\small
+
+\ophead{The Process: A First-Class Analytical Unit}
+{Conditional-Information Signal Selection and the Effective Degrees of Freedom of an Alpha Book}
+{\code{process_preprint.tex} $\cdot$ 14pp $\cdot$ Jul 2026 $\cdot$ renamed from \code{process_related}
+ 2026-08-08 $\cdot$ methods/framework paper, empirics stated as future work}
+
+\begin{multicols}{2}
+
+\opsec{Thesis}
+A microstructure feed produces hundreds of features, most mutually redundant. The operative question is
+therefore \textbf{not} whether feature $X$ predicts, but \textbf{how much non-redundant information the
+set carries in aggregate}, and \textbf{how many statistically independent bets that supports}.
+
+\opsec{The unit}
+Beside the \textbf{feature} (what is computed) and the \textbf{algorithm} (how it trades), place a third
+first-class unit: the \textbf{process} — a typed, registry-bound analytical contract that certifies
+whether a feature, or a derivative/combination of features, carries information about a
+\emph{precisely specified} target. Every process ships behind a mandatory planted-signal conformance gate.
+
+\opsec{Why information, not correlation}
+Mutual information as the currency of prediction, justified by \textbf{Fano's inequality} — information is
+a hard \emph{lower bound} on achievable error. A feature with zero MI about the target cannot be traded by
+any model, however clever; correlation gives no such guarantee.
+
+\opsec{The central quantity}
+Fundamental law of active management:
+\[
+  \boxed{\ \IR \approx \ICbar\sqrt{\Neff}\ },\qquad
+  \Neff=\frac{N}{1+(N-1)\rhobar}
+\]
+\textbf{The binding quantity is the stress-regime correlation, not the calm-regime one.} A book of 20
+signals with $\rhobar=0.1$ in calm and $0.8$ in stress has $\Neff\approx6.9$ when nothing is happening and
+$\Neff\approx1.2$ exactly when it matters. Reporting calm-regime breadth is the standard way to lie to
+yourself about diversification.
+
+\opsec{Five orthogonalization mechanisms, each a process}
+\begin{opnums}
+\item \textbf{Conditional-MI greedy selection} — the core extractor. Add the feature maximising
+      $\MI(X;Y\mid S)$ given what is already selected.
+\item \textbf{Interaction-information synergy mining} — finds pairs that carry jointly what neither
+      carries alone (negative interaction information); the thing greedy marginal screens structurally
+      cannot see.
+\item \textbf{Training-prefix residualization} — pure-innovation extraction, fit on the prefix only so
+      the residual is causal.
+\item \textbf{Marchenko--Pastur-denoised PCs} — separates real factors from the eigenvalue bulk that
+      pure noise produces at finite $T/N$. Tells you how many factors are \emph{real}.
+\item \textbf{Capstone: a decorrelated signal book that reports its own honest $\Neff$.}
+\end{opnums}
+
+\opsec{Making ``price action'' explicit}
+An aspect $\times$ horizon target taxonomy — a process must name \emph{which} aspect (sign, magnitude,
+volatility, timing) at \emph{which} horizon it certifies. Half the ambiguity in feature research is a
+target that was never written down.
+
+\opsec{Minting new degrees of freedom}
+A derivative-operator layer creates new feature DoF from existing ones: fractional differentiation
+(memory-preserving stationarity), leaky integration, causal spectral features — all under a
+\textbf{program-level FDR ledger}, because minting features is exactly how a search silently multiplies
+its own multiple-testing burden.
+
+\opsec{Estimation hygiene}
+Keeping the breadth estimate honest is its own section: $\Neff$ computed from a noisy $\hat\rho$ is
+biased upward, so the paper treats the estimate itself as something requiring a gate rather than a
+formula you evaluate once and quote.
+
+\opsec{Implementation status (NAT)}
+PROC critical path complete 2026-07-30: null-calibration, \code{conditional_predictability}, standing
+3-bar eval, process-FDR + cross-run ledger, \code{horizon_label_scan}, predictability surface
+(\code{nat viz predictability}).
+\caution{First real surface: 284 BTC cells, argmax $z=13.2$ but $q=0.56$ $\Rightarrow$ correctly
+\textsf{[SPEC]}, \textbf{0 discoveries}. BH at the 100-shuffle $p$-floor over 284 cells \emph{cannot}
+pass — real discoveries need deeper nulls ($n_{\text{shuffles}}\gtrsim m/\alpha$) on focused candidate
+sets, or more clean data. The zero is a power problem, not a verdict on the features.}
+
+\opsec{The two kinds (they share registry, CLI, persistence)}
+\textbf{Evaluation process} — scores existing columns, produces no new series:
+\[
+  \mathcal{E}:(\mathbf{D},\mathcal{C})\longmapsto\mathcal{R},\qquad \mathbf{D}\in\R^{T\times p}
+\]
+\textbf{Transform process} — mints $m$ new series on the input index (PCs, residuals, fractional
+differences):
+\[
+  \mathcal{T}:(\mathbf{D},\mathcal{C})\longmapsto(\mathbf{D}',\mathcal{R}),\qquad \mathbf{D}'\in\R^{T\times m}
+\]
+Context $\mathcal{C}$ carries symbol, timeframe, price column, horizon set, cost parameters, target, and
+auxiliary sources. Identified by unique name, registered by decorator, parameterized by a config section
+keyed to that name, persisted through \emph{one} result schema. The uniformity is the point: a new
+analysis is a registry entry, not a new script.
+
+\opsec{The planted-signal discipline}
+Every unit ships behind a mandatory planted (synthetic) conformance gate \textbf{written before the
+implementation}. Not a style preference — three estimator bugs in Stage 1 were caught only this way, and
+nothing else would have caught them, because on real data a subtly wrong estimator still returns
+plausible numbers.
+
+\opsec{Why this is a paper and not just infrastructure}
+It supplies the theory that says what the other papers' numbers \emph{mean}: \#2's five gates are a
+special case of a process contract, \#7's eight independent axes are an $\Neff$ claim, \#5's whole
+argument for an exogenous signal is an $\Neff$ argument, and \#8's gate ladder is this discipline applied
+one level down, to data rather than signals.
+
+\end{multicols}
+
+\opfoot{One-pager for personal use. The sentence to remember: \emph{the binding correlation is the
+stress-regime correlation}. Everything else here is machinery for measuring it honestly.
+Detail: \code{docs/specs/process_layer.md} (PROC-1..18).}
+
+\end{document}

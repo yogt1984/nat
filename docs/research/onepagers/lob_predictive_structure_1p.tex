@@ -1,0 +1,126 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage{onepager}
+
+\begin{document}
+\small
+
+\ophead{Predictive Structure of the Perpetual-Futures Limit Order Book}
+{Universality, Orthogonality, and the Execution Boundary}
+{\code{lob_predictive_structure_preprint.tex} $\cdot$ 8pp $\cdot$ Jul 2026 $\cdot$ measurement-first
+ sharpening of \#2 $\cdot$ the only paper in the set that cites inline (natbib)}
+
+\begin{multicols}{2}
+
+\opsec{Thesis}
+A 236-feature census of the book at 100\,ms cadence (2.17\,M ticks/symbol, BTC/ETH/SOL), horizons
+1\,s--100\,min. The book carries \textbf{two empirically orthogonal predictive channels}, and their
+monetization is sharply bounded at the point of execution.
+
+\opsec{The factorization result (the headline)}
+\begin{opfacts}
+\textbf{Directional channel} & rank $\IC$ up to $\mathbf{0.47}$ at 1--5\,s \\
+\quad carried by & imbalance family, 8 independent axes \\
+\quad volatility info & \textbf{zero} \\[2pt]
+\textbf{Volatility channel} & peak $\IC$ $\mathbf{0.35}$ at 5\,s \\
+\quad carried by & arrival intensity, activity counts, toxicity \\
+\quad directional info & \textbf{zero} \\
+\end{opfacts}
+Disjoint feature families, on all three symbols. \textbf{Sign and magnitude of short-horizon returns are
+independently predictable from disjoint feature sets} — which is what licenses a two-block
+(sign $\times$ size) forecasting architecture instead of one joint model.
+
+\opsec{Spectral localization}
+The entire directional IC lives in the $0.005$--$0.1$\,Hz band. OU half-life $5$--$7$\,s. Dominant
+cross-coherence at $68$\,s. \textbf{Time-domain aggregation destroys the signal} — if you bar it up, you
+have thrown the alpha away before you started.
+
+\opsec{Efficiency drift, measured in real time}
+Half-life \emph{shortens} May$\to$June as spreads tighten in a maturing venue: 5\,s IC $0.45\to0.29$ while
+1\,s holds or improves. Not a stationary edge — a decaying one, and the decay is observable while it
+happens. Anything built on the 5\,s horizon has a shelf life.
+
+\opsec{The execution boundary}
+\[
+  \IC \;=\; 0.45
+  \;\;\xrightarrow{\text{cond.\ on directionally-consistent \emph{maker} fill}}\;\; 0.03
+\]
+\[
+  \IC \;=\; 0.45
+  \;\;\xrightarrow{\text{cond.\ on the presence of \emph{any} fill}}\;\; \mathbf{0.52}
+\]
+The second line is the one that matters and is unique to this paper. Any-fill conditioning \emph{raises}
+IC; directional-fill conditioning collapses it. That pair isolates \textbf{adverse selection} — not signal
+decay, not estimation noise — as the binding constraint. Regime gating on \code{ent_book_shape} partially
+reopens it ($+22\%$).
+
+\opsec{Novelty ledger (write related-work from this)}
+Known, must cite, do not re-claim: imbalance/OFI predicts short-horizon returns (Cont--Kukanov--Stoikov
+2014; deep-LOB literature). New here:
+\begin{opnums}
+\item Orthogonality factorization across 3 symbols.
+\item Universality at scale — 207-feature census, 6 horizons, 3 symbols, bootstrap CIs, compressing to
+      8 independent directional axes.
+\item Spectral localization + OU half-life.
+\item Efficiency drift measured in real time.
+\item The execution boundary as a \emph{mechanism} section, not the headline.
+\end{opnums}
+
+\opsec{Status}
+\caution{Out-of-time replication on an independent month is \textbf{in progress}, not done. The paper says
+so in an author footnote and in the abstract; do not let a reader infer otherwise. All other estimates
+come from the internal empirical record consolidated 2026-07-25 (\code{FINDINGS.md}).}
+
+\opsec{Implications the paper states}
+Two-block (sign $\times$ size) forecasting $\cdot$ entropy-gated conditioning $\cdot$ execution-timing
+overlays for \emph{slower} strategies — i.e.\ use the fast signal to time entries for something that
+isn't fast, since the fast thing itself cannot be filled profitably.
+
+\opsec{Format note (fixed 2026-08-08)}
+Shipped with the retired author identity (Onat Yılmaz / yogt1984@) and a 12pt/1in titlepage layout; both
+normalized to the house shell in \code{903264b}. Keeps natbib + \code{thebibliography} — it is the only
+paper in the set with inline citations, so author-year stays.
+
+\opsec{Measurement platform}
+Rust ingestion engine on the full book + trade stream, \textbf{236-dim feature vector per symbol every
+100\,ms}, 21 categories: book imbalance at multiple depths, raw depth, microstructure dynamics (queue
+position, imbalance velocity), trade flow / aggressor ratios, VWAP deviation, entropy (permutation,
+book-shape), Hawkes-type arrival intensity, realized \& range volatility, spread and toxicity proxies,
+funding/OI state, cross-symbol aggregates. \textbf{End-to-end feature latency $<80$\,ms at p99.}
+
+\opsec{Census window}
+Three contiguous days, 2026-05-19 to 05-21. 2.17\,M ticks/symbol at 100\,ms. Spearman rank IC vs future
+mid returns at six horizons (1\,s, 5\,s, 30\,s, 1\,m, 5\,m, 15\,m; selected features also 100\,m) on
+$\sim$21,708 subsampled points/symbol — \textbf{one per $\sim$10\,s, deliberately, to control overlap}.
+Overlapping samples are how this kind of census inflates its own significance; the subsampling is the
+defence.
+
+\opsec{Robustness detail}
+\begin{opfacts}
+Per-day rolling IC @5\,s & BTC $+0.433\pm0.061$ \\
+ & ETH $+0.400\pm0.098$ \\
+ & SOL $+0.355\pm0.071$ \\
+Bootstrap 95\% CI (BTC, \code{imbalance_qty_l1}) & $[0.442,\,0.465]$, 1,000 resamples \\
+Time of day & no dead zones; weakest 12--16 UTC, strongest 04--08 UTC \\
+Vol regime (median split) & low $+.458/+.435/+.391$ vs high $+.422/+.394/+.342$ \\
+\end{opfacts}
+Feature rank ordering preserved across symbols and subwindows — this is what ``universal'' means
+operationally.
+
+\opsec{The one systematic failure}
+\caution{Validation matrix: BTC 7/8, ETH 6/8, SOL 6/8. The failing cell is the \emph{same} one every
+time — \textbf{temporal out-of-sample drift}: IC delta $-0.17$ across a six-week gap against a $0.10$
+tolerance. Partially attributable to the efficiency drift documented above, i.e.\ the failure and one of
+the findings may be the same phenomenon. Do not report 7/8 without naming which cell fails.}
+
+\opsec{Siblings}
+\#2 is the apparatus paper this sharpens (cross-cite both ways; pick \emph{one} as lead per supervisor)
+$\cdot$ \#6 supplies the breadth mathematics for the 8 axes $\cdot$ \#8 is the venue instrument built
+around the same barrier.
+
+\end{multicols}
+
+\opfoot{One-pager for personal use. The two numbers to remember: $0.03$ (maker-fill conditioned) and
+$0.52$ (any-fill conditioned). Their \emph{difference} is the whole argument.
+Source: the preprint; novelty ledger + working titles in the proposal under \code{docs/ideas/}.}
+
+\end{document}

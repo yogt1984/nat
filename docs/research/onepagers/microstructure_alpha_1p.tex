@@ -1,0 +1,134 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage{onepager}
+
+\begin{document}
+\small
+
+\ophead{Autonomous Microstructure Alpha Discovery under False-Discovery Control}
+{Order-Book Imbalance, Conditional ICs, and the Adverse-Selection Barrier in Hyperliquid Perps}
+{\code{microstructure_alpha_preprint.tex} $\cdot$ 12pp $\cdot$ Jun 2026 $\cdot$ lead preprint for the
+ EPFL/SFI + Bühlmann/Farkas/Kuhn/Acciaio track}
+
+\begin{multicols}{2}
+
+\opsec{Thesis}
+The gap between statistical predictability and economic exploitability, measured rather than asserted.
+236 engineered features, 100\,ms cadence, BTC/ETH/SOL perps, horizons 1\,s--15\,min. \textbf{The central
+result is negative}, and it is the reason the whole programme pivoted to execution.
+
+\opsec{The headline pair}
+\[
+  \IC_{\text{uncond}} \approx 0.45
+  \;\;\longrightarrow\;\;
+  \IC_{\text{cond}} \approx 0.03
+\]
+\vspace{-4pt}
+\begin{center}
+{\scriptsize condition on states where a directionally-correct passive (mid-cross) fill occurs}
+\end{center}
+Holds on all three symbols. This is a \emph{structural adverse-selection barrier}, not an estimation
+artifact: the states in which you get filled are systematically the states in which you were wrong.
+\textbf{Execution, not signal quality, is the binding constraint.}
+
+\opsec{Signal structure}
+\begin{opitems}
+\item Order-book imbalance dominates directionally; $\IC\approx0.45$ at 1--5\,s, decaying to $\approx0$
+      by 5\,min.
+\item Same feature hierarchy across BTC/ETH/SOL — universality, not a per-symbol fit.
+\item Clean directional/volatility orthogonality (developed fully in \#7).
+\item Robustness: 7 of 8 checks pass for BTC, 6 of 8 for ETH and SOL.
+\end{opitems}
+
+\opsec{The five-gate replication protocol}
+Every candidate passes all five or lands in a documented graveyard \emph{with its rejection reason}.
+\begin{opitems}
+\item[\textbf{G1}] \textbf{Discovery} — rank IC over an adaptive threshold \emph{and} incremental
+      $\mathrm{dIC}\ge0.05$ beyond already-registered signals.
+\item[\textbf{G2}] \textbf{Cost} — gross return/trade $\ge 0.1$\,bps. Kills statistically real signals
+      too small to pay for themselves.
+\item[\textbf{G3}] \textbf{Temporal} — IC holds on $\ge1$ further date (White-2000 reality check in
+      spirit).
+\item[\textbf{G4}] \textbf{Cross-symbol} — IC holds on $\ge1$ other symbol.
+\item[\textbf{G5}] \textbf{Correlation dedup} — $\rho<0.7$ against every registered signal. Enforces
+      breadth, not just strength.
+\end{opitems}
+
+\opsec{Multiple-testing machinery}
+BH-FDR at $q=0.05$ across all tests each cycle: order $p_{(1)}\le\dots\le p_{(m)}$, take
+$j^*=\max\{j:p_{(j)}\le jq/m\}$. Threshold \emph{adapts} as the registry strengthens:
+\[
+  \mathrm{minIC}(t)=\max\bigl(\text{floor},\ \operatorname{median}\{\IC_i: i\in R(t)\}\times0.8\bigr)
+\]
+plus continuous decay monitoring on registered signals. The apparatus exists to suppress the
+multiple-testing bias that pervades empirical asset pricing — a discovery platform that tests
+thousands of hypotheses \emph{needs} this or it manufactures winners.
+
+\opsec{The hierarchical combiner}
+Three layers: slow directional bias gates fast microstructure timing. Recovers positive cost-adjusted
+OOS $\IC$ of $0.18/0.25/0.36$ (BTC/ETH/SOL).
+\caution{On a \textbf{thin window} — the paper says so, and it is the one number here to distrust. The
+five algorithms that carried this claim were all REFUTED by the Q4 alpha-skeptic kill gate 2026-07-30
+(wrong-venue cost tier + sweep-harness defects). Re-check before P1 camera-ready; the conditional-IC
+result above is unaffected.}
+
+\opsec{What is actually new}
+\begin{opnums}
+\item A reproducible methodology for FDR-controlled microstructure research (the apparatus is the
+      contribution, not any one signal).
+\item Direct evidence that a strong, universal, robust predictor can be \emph{economically inert}
+      under realistic passive execution.
+\end{opnums}
+Known and not re-claimed: that imbalance/OFI predicts short-horizon returns (Cont--Kukanov--Stoikov
+2014, deep-LOB literature).
+
+\opsec{Why the negative result is the valuable one}
+It converts an open-ended search (``find a better signal'') into a bounded engineering problem
+(``get filled without adverse selection''), and it explains why every naive backtest on this data
+looks spectacular and every honest one does not. Everything downstream — maker execution, GAP-04/HF1/A4,
+the conditional-IC gate as the D1 go/no-go — descends from this section.
+
+\opsec{Siblings}
+\#7 sharpens this into a measurement-first paper (and adds: conditioning on \emph{any} fill \emph{raises}
+IC to 0.52, which isolates adverse selection rather than decay) $\cdot$ \#6 generalises the gate
+discipline to a typed analytical unit $\cdot$ \#5 asks what an exogenous signal adds to a book bounded
+this way $\cdot$ \#8 is the venue instrument built on the conclusion.
+
+\opsec{Data \& apparatus}
+Hyperliquid BTC/ETH/SOL at 100\,ms; Rust ingestor on the L2 WS feed $\to$ 236-dim vector/symbol/100\,ms
+$\to$ columnar storage. Discovery window 2026-05-19..21 (3 full days, $\approx$2.17\,M ticks/symbol);
+robustness spans \textbf{31 dates 04-19..06-04, of which 23 are sufficiently complete} — the gap is
+itself a data-quality statement.
+\caution{Of 236 schema features only \textbf{207 are populated}; the rest depend on a
+position-attribution pipeline outside the paper's scope. Quote 207, not 236, when describing what was
+actually tested.}
+Fifteen feature categories: raw book state, imbalance, trade flow, realized/range volatility,
+permutation \& tick entropy, exchange context (funding, OI), trend \& Hurst, illiquidity (Kyle, Amihud,
+Roll), toxicity (VPIN, effective/realized spread), composites.
+
+\opsec{The loop}
+\begin{center}
+Ingest (Rust) $\to$ Discover (agents) $\to$\\
+Replicate (5 gates) $\to$ Deploy (paper)
+\end{center}
+with a feedback path that \emph{retires} decayed signals. Four agents at different timescales — tick,
+minute-to-hour, hour-to-day, and a cross-agent orchestrator. The apparatus, not any signal, is the
+contribution.
+
+\opsec{The eight checks}
+Seven confirmatory, the eighth decisive. Per-day IC stable across 23 valid dates; present 24/7 with no
+dead zone (dip 12--16 UTC, strongest 04--08 UTC); above $0.34$ in \emph{both} volatility regimes on all
+symbols under a median split — \textbf{slightly stronger in low vol}, i.e.\ imbalance is more informative
+when the book is not being disrupted. The eighth check is the conditional IC, and it is the one that
+fails.
+
+\opsec{Reading order for a supervisor}
+\#2 (this) for the apparatus + the barrier $\to$ \#7 for the measurement census $\to$ \#6 for the
+theory of breadth. \#2 and \#7 cross-cite; do not send both without saying which is the lead.
+
+\end{multicols}
+
+\opfoot{One-pager for personal use. Distrust the combiner numbers (see \textbf{[!]}); trust the
+conditional-IC collapse — it replicated on three symbols and is the finding the platform is built around.
+Source: \code{docs/research/microstructure_alpha_preprint.tex}, kill-gate context in \code{FINDINGS.md} §4.6.}
+
+\end{document}

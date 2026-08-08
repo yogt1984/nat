@@ -1,0 +1,115 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage{onepager}
+
+\begin{document}
+\small
+
+\ophead{From Narrative to Alpha}
+{Exogenous Perception Pressure as an Orthogonal Signal in an Autonomous Microstructure Alpha Book:
+ Timescale Separation, Effective Breadth, and the Adverse-Selection Barrier}
+{\code{prism_signal_preprint.tex} $\cdot$ 9pp $\cdot$ Jul 2026 $\cdot$ theory + protocol,
+ \textbf{no performance figures by design}}
+
+\begin{multicols}{2}
+
+\opsec{The problem it names}
+A book built entirely from order-book microstructure is powerful but \textbf{structurally narrow}:
+\begin{opitems}
+\item one information source (order flow),
+\item one band of timescales (sub-second to minutes),
+\item jointly capped by an adverse-selection barrier that collapses a large unconditional IC once you
+      condition on the states where a passive fill actually occurs (\#2, \#7).
+\end{opitems}
+Question: what does \emph{a single exogenous signal from a different information domain} contribute to
+such a book? Answered at the level of methodology, not measured performance.
+
+\opsec{Integration architecture (source-agnostic)}
+A narrative series is aligned to market bars by a \textbf{point-in-time as-of join} and then scored by
+\emph{the same} IC, MI, and five-gate replication machinery as any endogenous feature. The exogenous
+signal gets no privileges — that is the design's credibility.
+
+\opsec{Three reasons it can help without being individually strong}
+\textbf{I. Timescale separation.} Narrative momentum lives in a spectral band essentially disjoint from
+the $0.005$--$0.1$\,Hz band that carries order-book-imbalance predictability (\#7). The two are close to
+orthogonal \emph{by construction}, not by luck.
+
+\textbf{II. Effective breadth.} Under the fundamental law,
+\[
+  \IR\approx\ICbar\sqrt{\Neff},\qquad \Neff=\frac{N}{1+(N-1)\rhobar}
+\]
+appending a \emph{low-correlation} signal raises $\Neff$ more than appending another correlated
+microstructure signal \emph{of equal strength}. This is the quantitative core: a weak orthogonal signal
+can beat a strong redundant one, and the formula says by how much.
+
+\textbf{III. Partial evasion of the adverse-selection barrier.} A slow exogenous signal is harvested by
+\emph{patient} execution over its own horizon rather than by reactive spread-crossing, so its coupling to
+the fillable-state indicator — the mechanism that destroys microstructure edge — is weaker. Its
+conditional IC need not collapse the same way.
+
+\opsec{Status of each claim}
+\caution{All three are stated as \textbf{hypotheses with explicit, leakage-controlled, FDR-corrected
+tests}. The paper reports \textbf{no performance figures}. Reason III in particular is an argument about
+a mechanism, not a measurement — it is the one most likely to be attacked, and the one worth testing
+first.}
+
+\opsec{What ``more complete'' means}
+The contribution is a theory and a protocol for making an autonomous microstructure research platform
+\emph{more complete}: a decorrelated, multi-domain alpha book \textbf{that reports its own honest
+effective breadth}, admitting narrative as a first-class, gated signal source rather than an ad-hoc
+overlay.
+
+\opsec{Why this matters strategically}
+It is the argument for why the platform should not just keep mining order-flow features. Adding the
+$n{+}1$-th imbalance variant moves $\Neff$ almost not at all once $\rhobar$ is high; adding one genuinely
+exogenous input moves it materially. If the microstructure edge is execution-bounded (and \#2/\#7 say it
+is), \textbf{breadth is the remaining lever}.
+
+\opsec{The honest weak point}
+$\Neff$ gains are computed with $\rhobar$ estimated in-sample and in calm conditions. \#6 makes the
+matching argument that \textbf{the binding correlation is the stress-regime one} — narrative and
+microstructure may correlate precisely during the events that matter. Any test must estimate $\rhobar$
+conditional on stress, or the breadth gain is an artifact.
+
+\opsec{The feature-source contract}
+Design principle: \textbf{the exogenous signal must be indistinguishable, to the scoring machinery, from
+an endogenous feature} — held to the same standard, no special pleading. A source exposes
+\code{load(symbol, start, end)} returning a frame indexed by UTC timestamp, one column per narrative
+component. The process runner merges onto market bars; thereafter a narrative column is scored by
+\code{ic_horizon} and \code{mi_ksg} exactly as an order-book column is. \textbf{Processes operate on
+columns and never learn a column's origin} — narrative is first-class because it is admitted by the type
+system, not by a bespoke code path.
+Alignment is a \textbf{backward as-of join}: a bar sees only narrative stamped at or before its close.
+
+\opsec{Evaluation protocol — each with its kill criterion}
+\begin{opnums}
+\item \textbf{Orthogonality.} Volatility-regime-conditional $\rho_x$ between narrative momentum and the
+      incumbent imbalance signal, plus cross-spectral coherence. \emph{Kill:} if $\rho_x$ is not small
+      \textbf{in stress regimes}, the breadth argument does not apply at all.
+\item \textbf{Incremental content.} $\MI(r_{t\to t+h};\dot P_t \mid \text{price}_t,\text{volume}_t)$ at
+      narrative horizons, $k$NN estimator, block-permutation null, BH across concepts and horizons.
+      \emph{Kill:} not significantly positive after FDR $\Rightarrow$ narrative adds nothing beyond price
+      and volume.
+\item \textbf{Breadth realization.} Book $\Neff$ and OOS IR with and without the signal, walk-forward.
+      \emph{Kill:} neither rises on inclusion.
+\item \textbf{Execution realizability.} Schedule-based execution. \emph{Kill:} conditional IC collapses
+      the way the microstructure signals' does.
+\end{opnums}
+Note the discipline: \textbf{the kill criteria are written before any number exists}, which is what
+stops (3) from becoming an exercise in finding a window where $\Neff$ went up.
+
+\opsec{Siblings}
+\#4 defines $P(K,t)$ and the Prism system that produces it (read first) $\cdot$ \#6 supplies the $\Neff$
+mathematics and the estimation-hygiene caveat above $\cdot$ \#2 and \#7 supply the barrier this paper
+proposes to partially evade.
+
+\opsec{Send-with}
+Pair with \#4 for Leippold (UZH/SFI). Alone it reads as theory without an instrument; \#4 alone reads as
+an instrument without a purpose.
+
+\end{multicols}
+
+\opfoot{One-pager for personal use. One line to keep: \emph{appending a low-correlation signal raises
+$\Neff$ more than appending a correlated one of equal strength} — that is the whole paper, and the rest
+is the protocol that would make it a measurement instead of an argument.}
+
+\end{document}
