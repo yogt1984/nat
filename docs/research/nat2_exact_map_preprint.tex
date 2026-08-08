@@ -1,0 +1,671 @@
+\documentclass[11pt,a4paper]{article}
+
+% ------------------------------------------------------------------
+% House layout, shared with the sibling preprints in docs/research/:
+% 11pt a4, 2.5cm margins, Computer Modern, \maketitle front matter,
+% abstract + keywords + JEL codes, numbered sections, table of contents.
+% ------------------------------------------------------------------
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{array}
+
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{remark}{Remark}[section]
+\newtheorem{proposition}{Proposition}[section]
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}{Lemma}[section]
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\ind}{\mathbf{1}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\inner}[2]{\langle #1,\, #2 \rangle}
+\newcommand{\corr}{\operatorname{corr}}
+\newcommand{\sgn}{\operatorname{sign}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\DeclareMathOperator*{\argmax}{arg\,max}
+
+% ============================================================
+\begin{document}
+
+\title{\textbf{Exact or Nothing}\\[6pt]
+\large Gate-Governed Measurement of the Liquidation Map\\
+on a Transparent Perpetual-Futures Venue}
+
+\author{Yigit Onat\\
+\textit{Independent Researcher}\\
+\texttt{yionat@gmail.com}}
+\date{August 2026}
+\maketitle
+
+% ============================================================
+\begin{abstract}
+Research on liquidation cascades is usually conducted on a liquidation map that has been
+\emph{estimated}---from aggregate open interest, an assumed leverage distribution, and a reconstructed
+population of positions. We ask what becomes possible, and what becomes visible, when the map is
+instead \emph{observed}: on Hyperliquid, per-position liquidation prices are published, the mark price
+is built from an oracle the venue itself publishes, and any address's fill history is public. We
+describe an instrument built on two rules---\emph{exact or nothing} (a quantity that cannot be had
+exactly is not computed, because the approximation is what makes a backtest lie) and \emph{gates
+before models} (every command downstream of a validation gate refuses to run when that gate is
+missing, stale, or failing, and the refusal is the product). The instrument's substrate is a
+write-once capture store in which every record carries both an event timestamp and an ingest
+timestamp, making lookahead a queryable property rather than a code-review hope, and a hash-chained
+ledger in which a failed verdict cannot quietly leave the record. We then report what the instrument
+measured. Its feed gate passes twenty checks; its map gate does not pass, and we explain why that is
+the informative outcome. Registry coverage is $24.7$--$38.0\%$ of venue open interest by symbol under
+a conservative side convention; the derived liquidation price reproduces the venue's published value
+to within $10^{-4}$ for $40.8\%$ of $2{,}926$ positions, with an unexplained residual we decline to
+model away. The central finding is negative and, we believe, general to any venue where positions must
+be sampled: of $48$ observed liquidations, the notional-seeded registry contained $2.9\%$ of the
+liquidated \emph{wallets} but $21.9\%$ of the liquidated \emph{notional}. Mass and events are carried
+by different populations, so a sampling scheme optimized for one is mis-specified for the other, and
+no shape-preserving rescaling repairs the difference. We report that the mapped fraction is currently
+$0.0\%$, show that this figure is confounded by snapshot ordering rather than informative, and specify
+the scheduled experiment that discriminates among the three explanations. We present no performance
+figures; the contribution is an instrument, a discipline of refusal, and four measurements that
+change what the observational obstacle is understood to be.
+\end{abstract}
+
+\smallskip
+\noindent\textbf{Keywords:} market microstructure, liquidation cascade, perpetual futures,
+decentralized exchange, measurement, research infrastructure, causality, reproducibility, coverage
+bias, sampling
+
+\smallskip
+\noindent\textbf{JEL Classification:} C55, C81, G14, G17
+
+\tableofcontents
+\bigskip
+
+% ============================================================
+\section{Introduction}
+\label{sec:intro}
+% ============================================================
+
+A leveraged perpetual-futures position carries a deterministic liquidation price. In aggregate these
+prices form a spatial field---a \emph{liquidation map}---and the structural claim, developed
+formally in the companion paper [10], is that when price reaches a dense region of this
+field, forced market liquidations impose impact that can carry price to the next dense region,
+producing a self-reinforcing cascade. The claim is intuitive, mechanically plausible, and hard to
+test, for a reason that is observational rather than theoretical: on most venues the map cannot be
+seen. Position-level data is private; what is published is aggregate open interest. The map is
+therefore reconstructed by assuming a leverage distribution over that aggregate, and every
+downstream result inherits the assumption.
+
+This paper reports on an instrument built to remove the assumption rather than refine it.
+Hyperliquid is, to our knowledge, the venue where the fewest such assumptions are necessary: it
+publishes a liquidation price per position, it liquidates against a mark price built from an oracle
+it also publishes, funding is settled hourly and observable, its backstop vault's inventory is
+visible, and the fill history of any address can be read by anyone. On such a venue, the interesting
+question is not how to estimate the map better. It is what the map---and the research programme
+built on it---looks like when estimation is refused outright.
+
+\subsection{Two rules}
+
+The instrument is organized around two rules, and both are enforced in code rather than intended in
+prose.
+
+\paragraph{Exact or nothing.} Where a quantity cannot be obtained exactly, it is not computed. A
+position that is not observed is absent from the map and enters the reported coverage deficit; it is
+not imputed. There are no estimated maps, no assumed leverage mixes, and no aggregator history. The
+justification is asymmetric: an approximation that is 80\% right yields a backtest that is
+confidently wrong, whereas an acknowledged hole yields a coverage number, and a coverage number can
+gate a decision.
+
+\paragraph{Gates before models.} The research programme is expressed as a small set of experiments
+that are each \emph{allowed to end the project}. Each is a command that writes a \textsf{PASS} or
+\textsf{FAIL} verdict to an append-only ledger, and every command downstream of a gate refuses to
+run while that gate is missing, stale, or failed. The refusal is not a safety feature bolted onto a
+research tool; it is the primary output. A system that will happily produce a Sharpe ratio from data
+whose integrity check failed has not produced a Sharpe ratio.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}l l l@{}}
+\hline\hline
+Gate & Question & What a \textsf{FAIL} kills \\
+\hline
+\code{feed}        & is the captured data intact and causal?                & everything \\
+\code{map}         & does the map predict the venue's own liquidations?     & the map branch \\
+\code{magnet}      & does the cluster pull, net of costs, beat a baseline?  & the magnet experts \\
+\code{persistence} & does skill in $[t-90d,\,t]$ predict $(t,\,t+30d]$?     & the smart-money branch \\
+\code{decay}       & does cohort-flow alpha survive past minutes?           & copyability \\
+\hline\hline
+\end{tabular}
+\caption{The gate ladder. Each gate is permitted to terminate the branch beneath it; two of them are
+permitted to terminate the project. Ordering them before the modelling work is deliberate.}
+\label{tab:gates}
+\end{table}
+
+\subsection{Contributions}
+
+\begin{enumerate}
+  \item A capture and validation substrate in which \emph{lookahead is queryable}: every record
+        carries the venue's event clock and our ingest clock, and a replay audit fails on any feature
+        that read a record it could not have known (Section~\ref{sec:capture}).
+  \item A refusal protocol built on a hash-chained ledger, with the property that a failed verdict
+        cannot be quietly re-run away, and a formal statement of the condition under which a
+        downstream command is permitted to execute (Section~\ref{sec:gates}).
+  \item A liquidation map whose coverage is a first-class, printed, gate-thresholded quantity rather
+        than an unstated assumption, together with the side-convention question that makes it a
+        factor of two (Section~\ref{sec:map}).
+  \item Four measurements, of which the important one is negative: the population that holds notional
+        and the population that gets liquidated are different, and the gap between them is an order
+        of magnitude (Sections~\ref{sec:measurements}--\ref{sec:mismatch}).
+\end{enumerate}
+
+We report no trading performance. The instrument's map gate does not currently pass, and under the
+second rule that fact bars the downstream work rather than being reported alongside it.
+
+% ============================================================
+\section{Why a Single Transparent Venue}
+\label{sec:venue}
+% ============================================================
+
+Restricting to one venue is usually a limitation. Here it is load-bearing, and the reason is that
+the alternative silently reintroduces the estimation the first rule exists to forbid.
+
+A cross-venue design would supply global price pressure from a large centralized exchange and
+liquidation geometry from the decentralized one. That design requires a second clock, a second cost
+model, and an alignment assumption between them. The single-venue design does not, because the venue
+publishes the oracle price against which it constructs its own mark price. The premium
+\begin{equation}
+  \pi_t \;=\; \frac{p^{\text{mark}}_t - p^{\text{oracle}}_t}{p^{\text{oracle}}_t}
+  \label{eq:premium}
+\end{equation}
+is then a native, exactly observable measure of exactly the global pressure a second-venue sidecar
+would have been introduced to supply---and the causal arrow points the right way, since global price
+drives liquidations against a map we observe directly rather than infer.
+
+Three further quantities have no clean analogue elsewhere and materially shape what is measurable.
+First, funding is settled \emph{hourly}, which at cascade horizons is a first-order carry term rather
+than a rounding error. Second, the venue operates a backstop liquidity vault whose inventory change,
+$\Delta_t^{\text{HLP}}$, is public; when forced flow overwhelms the resting book the vault absorbs
+it, so $\Delta_t^{\text{HLP}}$ \emph{measures} the portion of a cascade the book failed to absorb.
+Absorption exhaustion, which elsewhere must be inferred from price behaviour, is here directly
+observed. Third, a single address's perpetual, spot, and vault activity are all visible together, so
+an intra-venue hedge is detectable rather than an unmodelled confound in any flow-following study.
+
+What is given up, and we state it rather than minimize it: liquidation density on other venues (only
+ever an estimate, which the first rule rejects in any case); a long history spanning many regimes,
+which is handled with wider embargoes and smaller models and never by borrowing history from another
+venue; the thin-alt cascade tail; and the operational risk of depending on one venue, which is
+accepted explicitly.
+
+% ============================================================
+\section{Capture: Making Lookahead Queryable}
+\label{sec:capture}
+% ============================================================
+
+Every result downstream depends on the claim that a feature computed for time $T$ used only
+information available at $T$. That claim is normally defended by code review. We make it a property
+of the data.
+
+\subsection{Two clocks}
+
+Each captured record carries two timestamps: $t^{\text{event}}$, the venue's clock, and
+$t^{\text{ingest}}$, the first moment at which we could have known the record. The causality
+contract is then a filter rather than a convention.
+
+\begin{definition}[Causal readable set]
+\label{def:causal}
+For a bar closing at time $T$, the admissible input set is
+\[
+  \mathcal{F}_T \;=\; \bigl\{\, r \;:\; t^{\text{ingest}}(r) \le T \,\bigr\},
+\]
+and a feature is \emph{causal} if it is measurable with respect to $\mathcal{F}_T$.
+\end{definition}
+
+Definition~\ref{def:causal} is enforced by replay: the audit recomputes features under the filter and
+fails on any difference from the production value. The distinction from $t^{\text{event}} \le T$
+matters precisely when it is most dangerous---a record the venue stamped before $T$ but which reached
+us after $T$ is exactly the kind of input that inflates a backtest while looking defensible.
+
+\subsection{A write-once store}
+
+Raw records are appended to per-stream files that rotate on the UTC hour. When a file closes it is
+hashed and an entry is written to a manifest; the file is never reopened. A restart inside the same
+hour begins a \emph{new part} rather than appending to the closed one, which gives the store a useful
+property: a changed digest always means corruption or tampering and never merely a bounced daemon. A
+per-stream sequence number continues across restarts, resumed from the manifest, so a hole in the
+sequence means records were \emph{lost} rather than that the process died.
+
+The feed gate audits this structure directly. Its checks include manifest integrity (every closed
+file still hashes to its recorded digest), orphan detection (an unmanifested file older than two
+hours indicates a writer that died without closing, so its tail may be truncated), per-stream
+sequence continuity, ingest monotonicity, gap detection at $60\times$ the stream's cadence hint,
+staleness at $20\times$, and a staleness check on the rate-limit constant table itself---each limit
+is recorded with the date a human last verified it against the venue's documentation, and the gate
+warns once that stamp exceeds ninety days. A limit that moved without anyone noticing is exactly the
+failure that stamp exists to surface.
+
+\subsection{Reconstruct, do not poll}
+
+The registry cannot be maintained by polling. Measured on 2026-08-07, a full sweep of clearinghouse
+state across $3{,}596$ wallets takes approximately five minutes and consumes the entire per-IP
+request-weight budget of $1{,}200$ units per minute, leaving nothing for the trade tape. Polling
+frequency would therefore \emph{become} the map's time resolution---an infrastructural constraint
+silently determining a scientific one.
+
+Positions are instead maintained between snapshots by reconstruction from the public fill stream,
+with polling demoted to reconciliation on a rotating sample, and drift beyond tolerance failing the
+feed gate. Cross-margined and isolated-margined positions take separate paths, because a
+cross-margined account liquidates as a unit: one position's move relocates that account's entire
+contribution to the map. The bootstrap limitation is stated plainly---the tape supplies
+\emph{changes} while snapshots supply \emph{levels}, so a wallet is reconstructable only from its
+most recent snapshot forward.
+
+% ============================================================
+\section{The Gate Protocol and the Refusal Ledger}
+\label{sec:gates}
+% ============================================================
+
+\subsection{The ledger}
+
+Gate verdicts, specification freezes, run records, and periodic observations are appended to a
+hash-chained log. Writing $e_i = (i,\, \tau_i,\, \kappa_i,\, \pi_i)$ for the $i$-th entry's sequence
+number, timestamp, kind, and payload, the chain is
+\begin{equation}
+  h_i \;=\; \mathrm{SHA\text{-}256}\bigl( \mathrm{enc}(i,\, \tau_i,\, \kappa_i,\, \pi_i,\, h_{i-1}) \bigr),
+  \qquad h_{-1} = 0^{64},
+  \label{eq:chain}
+\end{equation}
+with $\mathrm{enc}$ a canonical (key-sorted, separator-fixed) JSON encoding so that the digest is
+reproducible. Verification walks the chain and reports the first index at which the sequence, the
+predecessor link, or the recomputed digest disagrees.
+
+The construction is standard [5,,8] and the threat model is not an adversary.
+It is the researcher. Equation~\eqref{eq:chain} makes deletion of an inconvenient result detectable,
+so the fourteen variants tried before the one that worked remain on the record. This is the
+mechanism by which multiple-testing discipline becomes structural rather than remembered---a concern
+developed at length for the feature and process layers in [11,\,13].
+
+\subsection{The refusal predicate}
+
+\begin{definition}[Admissibility]
+\label{def:admissible}
+Let $V(g)$ denote the most recent verdict for gate $g$, with fields $\mathrm{pass}(g) \in \{0,1\}$
+and timestamp $\tau(g)$. A command depending on $g$ may execute at time $t$ if and only if
+\[
+  V(g) \text{ exists}
+  \;\wedge\;
+  \mathrm{pass}(g) = 1
+  \;\wedge\;
+  t - \tau(g) \le \Delta,
+\]
+with $\Delta$ a freshness limit defaulting to $24$ hours. Otherwise the command raises a refusal
+naming which of the three conditions failed.
+\end{definition}
+
+The third clause is the one that is easy to omit and expensive to omit. A verdict describes the data
+as it stood when the gate ran; past some age it says nothing about the data about to be used. Without
+a freshness bound, a gate that passed once becomes a permanent licence.
+
+\begin{remark}[A gate that cannot be evaluated must not pass]
+\label{rem:unevaluable}
+Some criteria are unanswerable on demand. The map gate's predictive criterion requires map snapshots
+\emph{followed by} observed liquidations, so it is unanswerable until capture has accumulated both.
+The gate reports insufficient history and \textsf{FAIL}s. Treating an unevaluable criterion as
+passing---or as not applicable---is the single most convenient error available in this design, and it
+would convert the whole protocol into decoration.
+\end{remark}
+
+Remark~\ref{rem:unevaluable} is why the results in Section~\ref{sec:measurements} include a failing
+gate and no performance numbers. That is the protocol operating as designed, not a gap in the work.
+
+% ============================================================
+\section{The Map and Its Coverage}
+\label{sec:map}
+% ============================================================
+
+The map bins observed positions by liquidation price relative to the current mark, recording notional
+per bucket, the cross-margined share separately, and position counts; band aggregates
+$L^{\uparrow}(b)$ and $L^{\downarrow}(b)$ are taken over $b \in \{0.5, 1, 2, 5\}\%$. The geometry and
+the cascade mechanics built on it are the subject of [10]; here we are concerned with the
+number that qualifies the field.
+
+\begin{definition}[Coverage]
+\label{def:coverage}
+For coin $c$ at time $t$, with $N_t$ the total notional of observed positions and
+$\mathrm{OI}_t$ the venue's reported open interest,
+\begin{equation}
+  \widehat{\rho}_t \;=\; \frac{N_t}{s \cdot \mathrm{OI}_t},
+  \qquad s \in \{1, 2\},
+  \label{eq:coverage}
+\end{equation}
+where $s$ is the side convention.
+\end{definition}
+
+The convention deserves its own sentence because it is a factor of two on the one quantity by which
+the map is judged. Under the standard one-sided reading, an exchange counts each contract once in
+$\mathrm{OI}_t$; but every long has a matching short, and a registry that tracks wallets sees both
+sides. Total position notional outstanding is then $2\,\mathrm{OI}_t$, and the conservative choice is
+$s=2$. We take it, print it on every map alongside the coverage figure, and list it as an open
+verification item rather than resolving it by preference.
+
+A map without its coverage number is, in the design's own phrasing, a lie with a chart on it. The
+number is not decoration: the map gate thresholds on it at $\widehat{\rho} \ge 0.25$.
+
+\subsection{Observing realized liquidations}
+
+Scoring the map requires realized liquidation events, and finding them is less obvious than it
+appears. The public trade tape carries no liquidation marker. The venue's fill records carry one in
+two places: on the liquidated wallet's own fill, in a direction string, and---far more usefully---on
+the \emph{counterparty's} fill, as a structured object naming the liquidated user, the mark price,
+and the method (market or backstop).
+
+The asymmetry between the two is extreme. Measured on 2026-08-08 over $117{,}485$ fills from $70$
+wallets, exactly \emph{one} fill carried the liquidated-side direction string, while $16$ of the $70$
+wallets had taken the other side of somebody's liquidation. The efficient observer set is therefore
+not the registry at all: it is a handful of high-volume market makers, because whoever absorbs forced
+flow sees it. Since the fill endpoint has no per-user cap over the request interface---unlike the
+streaming interface's limit of fifteen users per connection---this scales with the weight budget
+rather than with connection count.
+
+\begin{remark}[The lookahead trap in scoring]
+\label{rem:lookahead}
+An event that predates the position snapshot it is scored against is not a prediction; it is a
+memory. Scoring drops such events, and reports the number dropped rather than absorbing it silently.
+Of the first $48$ events observed, $24$ predated the snapshot and were correctly excluded on these
+grounds---a figure worth reporting precisely because a scorer without this check would have counted
+them.
+\end{remark}
+
+% ============================================================
+\section{Measurements}
+\label{sec:measurements}
+% ============================================================
+
+All figures below are read from the instrument's ledger and are reported with the date on which the
+verdict or observation was appended. Nothing in this section is a backtest.
+
+\begin{table}[t]
+\centering
+\begin{tabular}{@{}l l l@{}}
+\hline\hline
+Quantity & Value & Provenance \\
+\hline
+\code{gate feed} verdict     & \textsf{PASS}, $20$ checks, $0$ failed        & ledger, 2026-08-07 \\
+\code{gate map} verdict      & \textsf{FAIL} on \code{predictive}            & ledger, 2026-08-08 \\
+Coverage, BTC                & $0.315$                                       & ledger, $s=2$ \\
+Coverage, ETH                & $0.380$                                       & ledger, $s=2$ \\
+Coverage, SOL                & $0.247$                                       & ledger, $s=2$ \\
+Derivation exact fraction    & $0.408$ of $2{,}926$ positions                & rel.\ err.\ $<10^{-4}$ \\
+Derivation median rel.\ err. & $0.152$ (p90: $0.921$)                        & vs.\ published value \\
+Liquidated wallets in registry & $2.9\%$ of $35$ wallets                     & ledger observation \\
+Liquidated notional in registry & $21.9\%$ of $\$223{,}491$                  & ledger observation \\
+Mapped notional fraction     & $0.0\%$ \emph{(confounded, Section~\ref{sec:mismatch})} & ledger observation \\
+\hline\hline
+\end{tabular}
+\caption{Measurements to date. The map gate fails; under Remark~\ref{rem:unevaluable} this is the
+correct verdict rather than a missing result.}
+\label{tab:measurements}
+\end{table}
+
+\subsection{Coverage}
+
+A leaderboard exposes $41{,}392$ wallets with equity and windowed volume---roughly forty times the
+population that trade-stream discovery reaches, which is what makes a seeded registry a different
+regime rather than a larger version of the same one. The two natural seeds behave differently, and
+the difference turns out to matter more than the levels (probe of 2026-08-07): the top $2{,}000$
+wallets \emph{by equity} span $61\%$ of venue open interest but only $28\%$ hold any position at a
+given moment, while the top $2{,}000$ \emph{by weekly volume} span $39\%$ with $46\%$ active. Their
+union reaches $69\%$. Accordingly the map registry seeds by equity, since it wants whoever holds
+size, and the skill cohort seeds by volume, since it wants whoever trades.
+
+The operational registry's realized coverage under Definition~\ref{def:coverage} with $s=2$ is $0.315$
+for BTC, $0.380$ for ETH, and $0.247$ for SOL. We note without resolving it that the ratio between
+these figures and the $69\%$ scoping probe is close to $s$ itself, which is consistent with the probe
+having been computed one-sided; the convention remains an open verification item, and we report both
+numbers rather than adopting the more flattering one.
+
+\subsection{Fidelity of the derived liquidation price}
+
+The venue publishes a liquidation price per position, and that published value is the source of
+truth. A derived value is needed only for positions whose size changed since the last snapshot and
+which therefore have no current published number. Deriving is thus an approximation with a measured
+error, not a replacement---and measuring the error is the point.
+
+Diffed against the published field over $2{,}926$ positions: median relative error $0.152$, ninetieth
+percentile $0.921$, and agreement to within $10^{-4}$ for $40.8\%$. Restricted to accounts holding no
+isolated margin, agreement rises to $58\%$ over $1{,}074$ cross positions. The residual is
+unexplained. Size-tiered maintenance margin on large positions is the leading suspect, and the map
+gate declines to fail on fidelity alone---the derivation is a maintenance approximation, not the
+primary source---but it does fail on a \emph{collapse} below $20\%$, which would indicate that the
+venue's margin rules had moved while the fill-maintained map continued blind.
+
+We draw attention to this as a small instance of the first rule paying for itself. A design that
+derived liquidation prices unconditionally would have shipped a map that is materially wrong for
+roughly three positions in five, with nothing in the system able to say so.
+
+% ============================================================
+\section{The Population Mismatch}
+\label{sec:mismatch}
+% ============================================================
+
+Measuring coverage was expected to close the observational problem posed in [10]. It did
+not. It exposed a second problem, different in kind, and the paper's central finding is that the
+second one is not repairable by the standard remedy for the first.
+
+\subsection{Two distinct biases}
+
+The usual correction for partial observation assumes the observed field is a uniform thinning of the
+true one, so that rescaling by $\mathrm{OI}_t / N_t$ restores magnitude while leaving every ratio
+feature untouched. The assumption is that the sampling is unbiased in \emph{shape}. That is what
+fails here, and it fails for a structural reason:
+
+\begin{quote}
+The registry is seeded by equity, because the map wants whoever holds size. But the wallets that get
+liquidated are small and highly leveraged. Sampling proportional to notional is precisely \emph{not}
+sampling proportional to liquidation events.
+\end{quote}
+
+Of $48$ liquidations observed and appended to the ledger, the registry contained $2.9\%$ of the
+liquidated \emph{wallets} ($35$ distinct addresses) and $21.9\%$ of the liquidated \emph{notional}
+($\$223{,}491$). A second reading one cycle later gave $2.8\%$ and $21.9\%$ over $49$ events. The
+order-of-magnitude gap between the two percentages is the second bias stated quantitatively, and it
+is invisible to any coverage figure of the form \eqref{eq:coverage}, which is denominated in notional
+and therefore reports the flattering one of the two.
+
+The finding cuts both ways, and we resist collapsing it to either. Cascades are driven by notional,
+and catching a fifth of liquidated notional is not nothing; per-position scoring is not obviously
+dead. What the field is poor at is seeing the long tail of small forced exits---which matters exactly
+to the extent that those small exits are what \emph{initiates} a chain rather than what continues one.
+
+\begin{remark}[Coverage of what?]
+\label{rem:coverage_of_what}
+The generalizable form of this result is that ``insufficient coverage'' is an incomplete diagnosis.
+Coverage is a ratio, and a field can be simultaneously adequate for the mass that sustains a cascade
+and inadequate for the events that start one. Any venue on which positions must be sampled rather
+than enumerated is exposed to this, and a single coverage scalar will not reveal it. We now report
+coverage both by notional and by event count for that reason.
+\end{remark}
+
+\subsection{Why the reading cannot yet be believed}
+
+Both readings show $0.0\%$ of liquidated notional \emph{mapped}---attributable to a position the map
+had marked in advance. Taken at face value this is a refutation of the instrument. It should not be
+taken at face value, and stating why is more useful than the number.
+
+A liquidated wallet no longer holds the position. A registry snapshot taken \emph{after} a
+liquidation therefore shows nothing that could have predicted it, and the current snapshot cadence
+does not reliably precede the events being scored. The measurement consequently cannot distinguish
+\emph{``different populations''} from \emph{``we looked too late''}. Reporting the zero without the
+confound would be the more striking result and the less honest one.
+
+\subsection{The experiment that discriminates}
+
+A scheduled snapshot-then-observe cycle---sweep the registry, then scan for liquidations, appending
+an overlap reading to the ledger each pass---converts a single confounded reading into a series, and
+the series separates the hypotheses. Because sweeps are expensive (Section~\ref{sec:capture}), the
+cycle persists last-run times so that a restart does not re-trigger a sweep and a job never overlaps
+itself; the cadence is roughly six-hourly snapshots against hourly scans.
+
+\begin{enumerate}
+  \item \textbf{Mapped notional fraction climbs off zero.} Per-position scoring works; the map gate's
+        predictive criterion becomes evaluable as specified, and the instrument stands.
+  \item \textbf{Mapped fraction pinned at zero, notional fraction holding near $22\%$.} The registry
+        sees the right wallets but never \emph{before} they are liquidated. Validation must move from
+        per-position to cluster-level scoring---did liquidations land in the price buckets the map
+        marked, regardless of whose positions they were. A weaker claim, but answerable with the
+        registry as it stands.
+  \item \textbf{Notional fraction collapses as well.} Neither; the registry needs a third seed drawn
+        by \emph{liquidation risk}---margin ratio, or distance to liquidation price, both computable
+        from data already held---which targets the population that actually fires, at the cost of
+        another sweep.
+\end{enumerate}
+
+Only the first outcome validates the instrument as specified. None of the three is obtainable from
+further analysis: the discriminating variable is calendar time under capture, which is why capture
+runs while the rest is built and why day one of capture is the project's real start date. A
+point-in-time series cannot be recovered later.
+
+% ============================================================
+\section{Relation to the Companion Papers}
+\label{sec:companions}
+% ============================================================
+
+This paper is the measurement layer beneath a set of related results, and the division is worth
+stating explicitly.
+
+[10] supplies the \emph{model}: the density field, the eight scale-invariant geometric
+features, the closed-form domino condition, and the absorption damper. It named the
+sample-to-population problem as its binding obstacle and proposed an open-interest rescaling.
+Sections~\ref{sec:map}--\ref{sec:mismatch} of the present paper are the first measurements against
+that obstacle, and they revise it: the sampling rate is now known, and the rescaling is now known to
+be insufficient, for a reason the earlier paper did not anticipate.
+
+[11] establishes, on a different venue and feature set, that a strong and universal predictor
+can be economically inert once one conditions on the states in which a passive fill actually
+occurs---an adverse-selection barrier that bounds monetization independently of signal quality. That
+result is why the present instrument treats execution as a first-class layer with its own simulator
+and cost hash rather than as a post-processing step.
+
+[13] develops the analytical contract---the \emph{process} as a unit that certifies whether
+a feature carries information about a specified target---and the orthogonality mathematics for
+counting a signal book's effective degrees of freedom. The gate ladder of Table~\ref{tab:gates} is
+the same discipline applied one level lower, to the data rather than to the signals.
+
+[12] documents the predictive structure of the order book itself, including the finding that
+conditioning on directionally-consistent maker fills collapses the information coefficient while
+conditioning on the presence of any fill raises it. Together with [11] it establishes the
+execution boundary this instrument's allocation and execution layers are designed around.
+
+% ============================================================
+\section{Limitations and Open Verification Items}
+\label{sec:limits}
+% ============================================================
+
+We list what is unverified with the same prominence as what is measured, because the design treats an
+unverified constant as a live defect rather than a footnote.
+
+\paragraph{Load-bearing constants not yet confirmed.} The side convention $s$ in
+\eqref{eq:coverage}---a factor of two on the headline number. The liquidation formula's residual: the
+derivation reproduces the published value for $40.8\%$ of positions, with size-tiered maintenance
+margin the prime suspect for the rest. The precise construction of the mark price and which price
+triggers liquidation. The funding formula, cadence, and clamp. The rate-limit weight table, which
+carries a verification stamp that goes stale at ninety days. The streaming connection limit per IP,
+which bounds any future per-user subscription work. Node-data format, retention, and access cost,
+which sizes the historical-backfill milestone and therefore the persistence gate.
+
+\paragraph{Known measurement gaps.} The order-book stream's cadence is sparser than its documented
+hint implies---$45$ records over $70$ seconds across three coins---so any depth-dependent feature
+must wait on a proper cadence measurement. Clock skew flipped sign between capture runs ($-196$\,ms
+then $+395$\,ms); both are within the two-second tolerance, but a $\sim$$600$\,ms shift over minutes
+is unexplained, and the candidates (NTP discipline versus the venue's timestamp semantics) have
+different implications for Definition~\ref{def:causal}.
+
+\paragraph{Structural risks.} Reconstruction may drift from truth between reconciliations; drift
+beyond tolerance fails the feed gate, which converts the risk into a detection problem rather than
+removing it. Cascade episodes overlap heavily, so any downstream model is exposed to the usual
+overlapping-label pathologies and requires purging, embargoing, and uniqueness weighting
+[7], with a mandatory naive baseline per model. Crowding is sharper here than
+elsewhere for the reason that motivates the whole design: an exactly observable map is exactly
+observable to hunters too. Finally, the venue's short history is handled with wider embargoes and
+smaller models, never by padding with another venue's data---the first rule again.
+
+% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+% ============================================================
+
+We have described an instrument for studying liquidation cascades on a venue where the liquidation
+map is observed rather than estimated, and reported what it measured. Two design commitments do the
+work. \emph{Exact or nothing} converts unobserved positions into a reported coverage deficit instead
+of an imputation, which is what makes the deficit measurable at all. \emph{Gates before models}
+converts validation into a refusal that binds every downstream command, which is what makes a failing
+verdict survive contact with the desire for a result.
+
+The measurements are these. The feed gate passes twenty integrity and causality checks. Registry
+coverage is $24.7$--$38.0\%$ of venue open interest by symbol under the conservative side convention.
+The derived liquidation price reproduces the venue's published value to within $10^{-4}$ for $40.8\%$
+of $2{,}926$ positions, with an unexplained residual we report rather than model away. And the map
+gate fails, because its predictive criterion cannot yet be evaluated and an unevaluable criterion is
+not permitted to pass.
+
+The finding we regard as general is the population mismatch. A registry seeded to capture notional
+captured $21.9\%$ of liquidated notional but only $2.9\%$ of liquidated wallets, and the gap between
+those numbers is invisible to a coverage statistic denominated in notional. Sampling optimized for
+mass is mis-specified for events, and no shape-preserving rescaling repairs the difference, because
+the sampling is biased in shape rather than merely thinned. We further report that the mapped
+fraction is currently zero, and that this figure is confounded by snapshot ordering rather than
+informative---a distinction that a scheduled snapshot-then-observe series will resolve in one of three
+specified directions, only one of which leaves the instrument's claims intact. We state the
+discriminating experiment in advance, in the ledger, so that whichever way it resolves, the record
+will show that it was specified before it was run.
+
+% ============================================================
+\section*{References}
+\addcontentsline{toc}{section}{References}
+% ============================================================
+
+\begin{enumerate}
+    \item Ackerer, D., Hugonnier, J.\ \& Jermann, U.\ (2025). Perpetual
+          futures pricing. \textit{Mathematical Finance}, forthcoming.
+
+    \item Brunnermeier, M.\ K.\ \& Pedersen, L.\ H.\ (2009). Market liquidity and funding
+          liquidity. \textit{Review of Financial Studies}, 22(6), 2201--2238.
+
+    \item Cont, R., Kukanov, A.\ \& Stoikov, S.\ (2014). The price impact of order book
+          events. \textit{Journal of Financial Econometrics}, 12(1), 47--88.
+
+    \item Easley, D., L\'opez de Prado, M.\ \& O'Hara, M.\ (2012). Flow toxicity and
+          liquidity in a high-frequency world. \textit{Review of Financial Studies}, 25(5),
+          1457--1493.
+
+    \item Haber, S.\ \& Stornetta, W.\ S.\ (1991). How to time-stamp a
+          digital document. \textit{Journal of Cryptology}, 3(2), 99--111.
+
+    \item Kyle, A.\ S.\ (1985). Continuous auctions and insider trading.
+          \textit{Econometrica}, 53(6), 1315--1335.
+
+    \item L\'opez de Prado, M.\ (2018). \textit{Advances in Financial
+          Machine Learning}. Wiley.
+
+    \item Merkle, R.\ C.\ (1980). Protocols for public key cryptosystems.
+          In \textit{Proceedings of the IEEE Symposium on Security and Privacy}, 122--134.
+
+    \item Shleifer, A.\ \& Vishny, R.\ (2011). Fire sales in finance and macroeconomics.
+          \textit{Journal of Economic Perspectives}, 25(1), 29--48.
+
+    \item Onat, Y.\ (2026). From liquidation geometry to price movement:
+          a spatial-density heatmap and cascade-probability model for cryptocurrency perpetual
+          futures. Working paper.
+
+    \item Onat, Y.\ (2026). Autonomous microstructure alpha discovery under
+          false-discovery control: order-book imbalance, conditional information coefficients, and
+          the adverse-selection barrier in Hyperliquid perpetual futures. Working paper.
+
+    \item Onat, Y.\ (2026). Predictive structure of the perpetual-futures
+          limit order book: universality, orthogonality, and the execution boundary. Working paper.
+
+    \item Onat, Y.\ (2026). The process: a first-class analytical unit for
+          orthogonal information extraction from market microstructure. Working paper.
+\end{enumerate}
+
+\end{document}
