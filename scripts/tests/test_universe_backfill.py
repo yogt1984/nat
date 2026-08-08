@@ -241,3 +241,51 @@ class TestOutput:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ── the enumeration is a single point of failure ─────────────────────────────────
+class TestEnumerationRetriesTransientErrors:
+    """A 429 on the meta call killed the L2 sampler at startup on 2026-08-08.
+
+    Per-symbol failures were already survivable, but `fetch_universe` is called ONCE
+    before any work begins, so a single transient error takes down the whole run — the
+    exact failure mode the rest of this unit was built to prevent, missed in the one
+    place it is fatal.
+    """
+
+    def test_a_transient_error_is_retried(self):
+        import urllib.error
+        from data.fetch_candles import fetch_universe
+        calls = []
+
+        def flaky(_req):
+            calls.append(1)
+            if len(calls) < 3:
+                raise urllib.error.HTTPError("u", 429, "Too Many Requests", {}, None)
+            return _meta([("BTC", False)])
+
+        assert fetch_universe(info_fn=flaky, retries=3, backoff=0.0) == ["BTC"]
+        assert len(calls) == 3
+
+    def test_it_gives_up_loudly_rather_than_returning_an_empty_universe(self):
+        import urllib.error
+        from data.fetch_candles import fetch_universe
+
+        def always_429(_req):
+            raise urllib.error.HTTPError("u", 429, "Too Many Requests", {}, None)
+
+        with pytest.raises(urllib.error.HTTPError):
+            fetch_universe(info_fn=always_429, retries=2, backoff=0.0)
+
+    def test_a_malformed_payload_is_not_retried(self):
+        """Retrying a schema error just wastes a minute — only transport faults recur."""
+        from data.fetch_candles import fetch_universe
+        calls = []
+
+        def bad(_req):
+            calls.append(1)
+            return {"universe": []}
+
+        with pytest.raises(ValueError):
+            fetch_universe(info_fn=bad, retries=5, backoff=0.0)
+        assert len(calls) == 1
