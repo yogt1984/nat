@@ -10,25 +10,65 @@
      ╚═╝  ╚═══╝╚═╝  ╚═╝   ╚═╝                                                   
                                                                                 
      ╔══════════════════════════════════════════════════════════════╗            
-     ║  Autonomous Alpha Discovery for Crypto Perpetual Futures    ║            
+     ║  Alpha Discovery for Crypto Perpetual Futures                ║            
      ║  ─────────────────────────────────────────────────────────── ║            
-     ║  236 features · 100ms resolution · 25 algorithms             ║            
-     ║  4 research agents · 5-gate replication · FDR control       ║            
-     ║  Config swarm · Optuna evolution · ML pipeline (7 algos)    ║            
-     ║  From order book to deployment — zero human intervention    ║            
+     ║  239 features · 100ms ticks · 177-perp candle universe       ║            
+     ║  32 algorithms · 15 processes · 4 research agents            ║            
+     ║  Pre-registration · FDR control · adversarial kill gates     ║            
+     ║  Deployable tier: EMPTY. The record says why.                ║            
      ╚══════════════════════════════════════════════════════════════╝            
                                                                                 
           ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐             
-          │  INGEST │───>│ DISCOVER│───>│REPLICATE│───>│ DEPLOY  │             
-          │  (Rust) │    │ (Agent) │    │ (5-Gate)│    │ (Paper) │             
+          │  INGEST │───>│ DISCOVER│───>│ REFUTE  │───>│ PROMOTE │             
+          │  (Rust) │    │ (PROC)  │    │ (gates) │    │ (human) │             
           └─────────┘    └─────────┘    └─────────┘    └─────────┘             
-              ▲                                             │                   
-              └─────────────── feedback loop ───────────────┘                   
+              ▲                              │                                  
+              └────────── what survives ─────┘                                  
 ```
 
-NAT is a fully autonomous quantitative research platform that discovers tradeable alpha signals from [Hyperliquid](https://hyperliquid.xyz) perpetual futures microstructure. A Rust ingestor computes 236 order book features at 100ms tick resolution; four autonomous Python agents generate hypotheses, test them through a 5-gate replication protocol with FDR control, and register validated signals — without human intervention. A three-tier cloud deployment architecture automates parameter optimization via config swarm evaluation and Optuna-driven evolutionary search (CMA-ES/NSGA-II) with walk-forward guard rails.
+NAT is a quantitative research platform for extracting alpha from
+[Hyperliquid](https://hyperliquid.xyz) perpetual futures microstructure. A Rust ingestor
+computes 239 order-book features at 100 ms resolution for BTC/ETH/SOL; a Python research
+layer — a process/IT discovery engine, four autonomous hypothesis agents, and a
+cross-sectional layer over the venue's full 177-perp universe — generates, tests, and
+mostly *kills* candidate signals under pre-registration and FDR control.
 
-> **Project objective:** see [`docs/OBJECTIVE.md`](docs/OBJECTIVE.md) for the mission and the end-to-end loop (Ingest → Discover → Cluster → Visualize → Generate → Validate → Deploy).
+**The honest headline: NAT has no deployable strategy.** Its five shipped "winners" were
+refuted by its own adversarial kill gate on 2026-07-30, and passive quoting at BTC's touch
+is negative at every fee tier the venue offers. What the platform has built is the
+apparatus that established both facts, and a research program running on it. The full
+record — including every failure, with the same care as the successes — is
+[`docs/research/FINDINGS.md`](docs/research/FINDINGS.md).
+
+> **Objective:** [`docs/OBJECTIVE.md`](docs/OBJECTIVE.md) · **Method:**
+> [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) · **Plan & backlog:**
+> [`docs/PLAN.md`](docs/PLAN.md) / [`docs/TASKS.md`](docs/TASKS.md) ·
+> **Shorthand decoder:** [`docs/GLOSSARY.md`](docs/GLOSSARY.md)
+
+---
+
+## Where the project stands  *(2026-08-08)*
+
+Three results are settled and should not be re-litigated. Each is a measurement, not an
+opinion; each names its section in `FINDINGS.md`.
+
+| Result | Evidence | Consequence |
+|---|---|---|
+| **The taker path is arithmetically closed** | the 1–5 s move is 0.5–2 bps against ~11 bps round-trip cost (§2) | no tick-scale taker strategy can clear cost, at any accuracy |
+| **All five shipped "winners" are refuted** | Q4 kill gate, 2026-07-30, **5/5 KILL** — wrong-venue cost tier (1.61 bps Binance VIP9) plus a sweep harness that never ran each algorithm's own entry logic (§4.6) | all REJECTED in the lifecycle; the deployable tier is empty |
+| **Passive quoting at BTC's touch is negative at every reachable fee tier** | breakeven maker rate = E[adverse\|fill] − half-spread = **+0.144 bps**, against a zero-fee best case (§4.10–4.11) | the venue must *pay* ~0.15 bps before a resting BTC quote breaks even |
+
+**What survives:** the instruments (A4 EV gate, queue simulators, the HF1 microprice
+center), the **PROC discovery layer** (complete end-to-end 2026-08-05), the **XS
+cross-sectional layer** (Track C passed its pre-registered kill test, §7.4), and the
+methodology that caught all of the above.
+
+**The binding constraint has moved.** It is no longer "clean days" in general — the current
+research program runs entirely on data in hand. Data continuity now gates specifically
+**paper trading, live capital, and the fill-economics verdict (X-3)**.
+
+> **Hard rule:** zero contact with the `su-35` ingestor until a clean streak completes.
+> Verify locally with `nat gap status` — it does not touch su-35.
 
 ---
 
@@ -37,19 +77,21 @@ NAT is a fully autonomous quantitative research platform that discovers tradeabl
 - [Quick Start](#quick-start)
 - [Architecture](#architecture)
 - [Data Ingestion Layer (Rust)](#data-ingestion-layer-rust)
-- [Feature Vector (236 Dimensions)](#feature-vector-236-dimensions)
-- [Microstructure Algorithm Library (25 Algorithms)](#microstructure-algorithm-library-25-algorithms)
+- [The Candle Universe](#the-candle-universe)
+- [Feature Vector (239 Dimensions)](#feature-vector-239-dimensions)
+- [Microstructure Algorithm Library (32 Algorithms)](#microstructure-algorithm-library-32-algorithms)
+- [Process Discovery Layer (PROC)](#process-discovery-layer-proc)
+- [Cross-Sectional Layer (XS / Class 3)](#cross-sectional-layer-xs--class-3)
 - [Autonomous Research Agents](#autonomous-research-agents)
 - [Alpha Pipeline](#alpha-pipeline)
 - [Information-Theoretic Engine](#information-theoretic-engine)
-- [Paper Trading & OOS Validation](#paper-trading--oos-validation)
+- [Backtesting & OOS Validation](#backtesting--oos-validation)
 - [Analysis & Profiling Tools](#analysis--profiling-tools)
 - [Lifecycle, Promotion & Risk Automation](#lifecycle-promotion--risk-automation)
 - [Web Dashboard & API](#web-dashboard--api)
-- [Polymarket Integration](#polymarket-integration)
-- [Entropy-Adaptive Market Making (EAMM)](#entropy-adaptive-market-making-eamm)
 - [Config Swarm & Evolutionary Optimization](#config-swarm--evolutionary-optimization)
-- [The `nat` CLI (~280 commands)](#the-nat-cli-280-commands)
+- [Other Modules](#other-modules)
+- [The `nat` CLI](#the-nat-cli)
 - [Configuration](#configuration)
 - [Testing](#testing)
 - [Docker](#docker)
@@ -64,105 +106,93 @@ NAT is a fully autonomous quantitative research platform that discovers tradeabl
 ## Quick Start
 
 ```bash
-# 1. Build the Rust ingestor
-make release                          # LTO-optimized release build
+# 1. Build
+nat build                             # LTO release build (all binaries)
+nat build debug                       # faster iteration
 
-# 2. Start data ingestion (production: tmux + watchdog + dashboard)
-nat start                             # launches ingestor with auto-restart
+# 2. Start data ingestion (tmux + watchdog + dashboard)
+nat doctor                            # preflight: data-dir ownership, binary, disk
+nat start                             # launch ingestor with auto-restart
 nat log                               # tail live output
-nat status                            # health check (JSON)
-nat dashboard                         # web dashboard at :8050
+nat status                            # health check (add --json for machine output)
+nat gap status                        # ingestion freshness (local read, safe during a freeze)
 
 # 3. Inspect & validate the captured parquet
-nat data validate                     # validate the whole feature dir (continuity/NaN/ranges)
-nat data validate data/features/2026-06-15/20260615_140000.parquet  # one file → PASS/WARN/FAIL
-nat viz render --tf 15m               # whole-day all-features PNG snapshot (overview), auto path
-nat viz render --tf 5m 1 --open       # zoom into the first 5-min page (1m/5m/15m); open the PNG
-nat viz render --tf 5m 1 --features flow   # scope a page to one feature category/vector/list
-nat viz render --last 15m --open      # freshest-readable window + its age (honest about rotation lag)
-nat viz3d --tf 15m --features entropy --open   # interactive 3D feature-surface (Plotly HTML)
+nat data validate                     # whole feature dir (continuity / NaN / ranges)
+nat data validate data/features/2026-08-07/20260807_140000.parquet   # one file → PASS/WARN/FAIL
+nat viz render --tf 15m               # whole-day all-features PNG, auto path
+nat viz render --last 15m --open      # freshest readable window + its age
+nat viz3d --tf 15m --features entropy --open   # interactive 3D surface (Plotly)
 
-# 4. Launch autonomous research agents
+# 4. Run a discovery process (the PROC layer)
+nat process list                      # 15 registered processes
+nat process run ic_horizon --symbol BTC
+nat process results                   # past runs from the nat.db index
+nat xs ledger                         # program-level multiple-testing ledger
+
+# 5. Explore the cross-sectional layer (Class 3)
+nat xs universe                       # candle archive + L2 sampler coverage
+nat xs rank                           # rank-IC vs relative forward returns (XS-3)
+nat xs trajectory                     # how much more data the rotation verdict needs
+
+# 6. Launch autonomous research agents
 nat agent start                       # microstructure agent (tick-level)
-nat mf_agent start                    # medium-frequency agent (1min-1h)
-nat macro_agent start                 # macro agent (1h-24h)
-nat meta_agent start                  # meta orchestrator (cross-agent)
-
-# 5. Monitor research progress
+nat mf-agent start                    # medium-frequency agent (1 min–1 h)
+nat macro-agent start                 # macro agent (1 h–24 h)
+nat meta-agent start                  # meta orchestrator (cross-agent)
 nat agent status                      # phase, cycle count, registry size
 nat agent dashboard                   # IC heatmap on :8060
-nat agent registry                    # validated signals
-nat agent report                      # full summary
 
-# 6. Run paper trading (after 30 days of data)
-nat oos30                             # all 5 winning algorithms, walk-forward
-
-# 7. Manual research
-nat spannung --symbol BTC             # signal IC grid search
-nat spannung regime --symbol BTC      # regime screener
-nat profile scalp --symbol BTC        # walk-forward profiling
+# 7. Promotion state
+nat lifecycle status                  # where every signal sits in the state machine
+nat lifecycle list                    # (the deployable tier is currently empty)
 ```
 
-### Makefile Quickref
-
-```bash
-make build              # debug build (faster iteration)
-make release            # release build (LTO, stripped)
-make run                # foreground ingestor (dev mode)
-make run_and_serve      # ingestor + dashboard on :8080
-make test               # Rust unit tests
-make test_agent         # 350 agent tests (unit + integration)
-pytest scripts/tests/   # Python test suite (70+ test files)
-make validate           # live API validation (4 binaries)
-```
+Note the command shapes: groups are **hyphenated** (`nat mf-agent`, `nat macro-agent`,
+`nat meta-agent`, `nat it-engine`), and multi-word subcommands use hyphens too
+(`nat alpha pipeline-start`). `nat help` and `nat commands` are authoritative.
 
 ---
 
 ## Architecture
 
 ```
-                              ┌──────────────────────────┐
-                              │   Hyperliquid L2 WebSocket│
-                              └────────────┬─────────────┘
-                                           │
-                              ┌────────────▼─────────────┐
-                              │    Rust Ingestor (ing)    │
-                              │  209 features × 100ms    │
-                              │  × 3 symbols (BTC/ETH/SOL)│
-                              │  tokio::select! biased   │
-                              └────────────┬─────────────┘
-                                           │
-                                    Parquet files
-                          data/features/YYYY-MM-DD/*.parquet
-                                           │
-           ┌───────────────┬───────────────┼───────────────┬───────────────┐
-           │               │               │               │               │
-           ▼               ▼               ▼               ▼               ▼
-   ┌──────────────┐ ┌─────────────┐ ┌─────────────┐ ┌──────────┐ ┌──────────────┐
-   │   NAT Agent  │ │  IT Engine  │ │  Alpha      │ │ Discovery│ │  Analysis    │
-   │   Daemons    │ │  KSG MI     │ │  Pipeline   │ │ Orchstr  │ │  Tools       │
-   │              │ │  CMI, TE    │ │  9-step     │ │  sweep   │ │              │
-   │ 4 agents     │ │  greedy     │ │  w/ gates   │ │  train   │ │ spannung     │
-   │ 6 generators │ │  selection  │ │  to deploy  │ │  backtest│ │ profiler     │
-   │ 5-gate proto │ │             │ │             │ │          │ │ cluster      │
-   └──────┬───────┘ └──────┬──────┘ └──────┬──────┘ └────┬─────┘ └──────┬───────┘
-          │                │               │              │              │
-          ▼                ▼               ▼              ▼              ▼
-   ┌──────────────┐ ┌─────────────┐ ┌─────────────┐ ┌──────────┐ ┌──────────────┐
-   │  Registry    │ │  Feature    │ │  Paper      │ │  Reports │ │  JSON/HTML   │
-   │  (validated) │ │  Rankings   │ │  Trading    │ │  & Logs  │ │  Reports     │
-   │  Graveyard   │ │  MI Scores  │ │  Execution  │ │          │ │              │
-   │  (failed)    │ │             │ │  Bridge     │ │          │ │              │
-   └──────────────┘ └─────────────┘ └─────────────┘ └──────────┘ └──────────────┘
-          │                                │
-          ▼                                ▼
-   ┌────────────────────────────────────────────────┐
-   │         Web Dashboard (Next.js)                │
-   │  Hypothesis Explorer · IC Heatmap · Graveyard  │
-   │  Research Network · Signal Table · Gate Funnel  │
-   │         REST API (Axum, port 3000)              │
-   │  /api/research/hypotheses · /cycles · /signals  │
-   └────────────────────────────────────────────────┘
+                      ┌──────────────────────────────┐   ┌──────────────────────────┐
+                      │  Hyperliquid L2 WebSocket    │   │  Hyperliquid REST        │
+                      │  (BTC / ETH / SOL, 100ms)    │   │  (177 perps, candles+L2) │
+                      └──────────────┬───────────────┘   └────────────┬─────────────┘
+                                     │                                │
+                      ┌──────────────▼───────────────┐   ┌────────────▼─────────────┐
+                      │     Rust Ingestor (ing)      │   │  fetch_candles / fetch_l2│
+                      │  239 features × 100ms × 3    │   │  708 series, 3.06M bars  │
+                      │  tokio::select! { biased; }  │   │  zero gaps               │
+                      └──────────────┬───────────────┘   └────────────┬─────────────┘
+                                     │                                │
+                        data/features/YYYY-MM-DD/*.parquet    data/candles/
+                                     │                                │
+        ┌──────────────┬─────────────┼──────────────┬─────────────────┴──────┐
+        ▼              ▼             ▼              ▼                        ▼
+ ┌────────────┐ ┌────────────┐ ┌───────────┐ ┌────────────┐          ┌────────────┐
+ │ PROC layer │ │ IT Engine  │ │  Research │ │   Alpha    │          │  XS layer  │
+ │ 15 processes│ │ KSG MI/CMI │ │  Agents   │ │  Pipeline  │          │ (Class 3)  │
+ │ FDR ledger │ │ TE, greedy │ │ 4 daemons │ │  9 steps   │          │ rank/rotate│
+ └─────┬──────┘ └─────┬──────┘ └─────┬─────┘ └─────┬──────┘          └─────┬──────┘
+       │              │              │             │                       │
+       └──────────────┴──────────────┴─────┬───────┴───────────────────────┘
+                                           ▼
+                          ┌────────────────────────────────┐
+                          │   Signal Lifecycle (nat.db)    │
+                          │  DISCOVERED → VALIDATED →      │
+                          │  PAPER → APPROVAL_PENDING →    │
+                          │  LIVE → MONITORING → RETIRED   │
+                          │      (+ REJECTED)              │
+                          └────────────────┬───────────────┘
+                                           │  sole human gate: nat lifecycle approve
+                          ┌────────────────▼───────────────┐
+                          │  Promotion · Kill-switch ·     │
+                          │  Signal bridge · Gap alert     │
+                          │  Prometheus / Grafana / API    │
+                          └────────────────────────────────┘
 ```
 
 ### Tech Stack
@@ -170,450 +200,421 @@ make validate           # live API validation (4 binaries)
 | Layer | Technology |
 |-------|-----------|
 | Data ingestion | **Rust** (tokio, Arrow, Parquet, Axum) |
-| Feature computation | **Rust** (236 features, 15 categories, 100ms emission) |
-| Research agents | **Python** (autonomous daemons, SQLite state, FDR control) |
+| Feature computation | **Rust** (239 features, 21 categories, 100 ms emission) |
+| Research layer | **Python** (PROC processes, IT engine, autonomous daemons, SQLite state, FDR) |
 | ML & backtesting | **Python** (LightGBM, scikit-learn, pandas, numpy) |
 | Optimization | **Python** (Optuna CMA-ES/TPE/NSGA-II, walk-forward OOS) |
 | API server | **Rust** (Axum REST/WebSocket, port 3000) |
 | Web dashboard | **Next.js** (TypeScript, Tailwind, React) |
 | Agent dashboard | **Python** (stdlib HTTP server, port 8060) |
-| Messaging | **Redis** (Pub/Sub + Streams, feature distribution, alerts) |
-| State persistence | **SQLite** (hypothesis queue, agent state) + **PostgreSQL** (Optuna studies) + **JSON** |
-| Alerting | **Telegram** (bot API for alerts) |
-| Process management | **tmux** (sessions with watchdog auto-restart via cron) |
-| Containerization | **Docker** (docker-compose: redis, ingestor, api, postgres, optuna, grafana, caddy) |
+| Messaging | **Redis** (Pub/Sub + Streams) |
+| State persistence | **SQLite** (`nat.db`: lifecycle, hypothesis queue, process index) + **PostgreSQL** (Optuna) |
+| Alerting | **Telegram** (bot API) |
+| Process management | **tmux** + watchdog auto-restart; **systemd** units for cloud |
+| Containerization | **Docker Compose** (redis, ingestor, api, postgres, optuna, grafana, caddy, daemons) |
 
 ---
 
 ## Data Ingestion Layer (Rust)
 
-The Rust ingestor (`rust/ing/`) subscribes to Hyperliquid L2 WebSocket and computes 236 features at 100ms resolution for BTC, ETH, and SOL.
+The ingestor (`rust/ing/`) subscribes to the Hyperliquid L2 WebSocket and computes 239
+features at 100 ms resolution for BTC, ETH, and SOL.
 
 ```
 Hyperliquid WebSocket ──▶ OrderBook + TradeBuffer + MarketContext
-    ──▶ FeatureComputer (209 features, 15 categories)
-    ──▶ Parquet files (data/features/YYYY-MM-DD/*.parquet, rotated hourly)
+    ──▶ FeatureComputer (239 features, 21 categories)
+    ──▶ Parquet (data/features/YYYY-MM-DD/*.parquet, rotated hourly)
 ```
 
 **Key design decisions:**
 
-- Each symbol runs in its own `tokio` task
-- `tokio::select! { biased; }` prioritizes WebSocket messages over emission ticks (prevents data loss under load)
-- `ArrowWriter` with explicit `flush()` after each batch (prevents 0-byte files until close)
-- Hourly file rotation with 10,000-row buffer flush (~5.5 min at 30 rows/sec)
+- Each symbol runs in its own `tokio` task.
+- `tokio::select! { biased; }` prioritizes WebSocket messages over emission ticks — this
+  prevents data loss under load and is intentional, not incidental.
+- `ArrowWriter` with an explicit `flush()` after each batch, or files stay 0 bytes until
+  close (hourly rotation or shutdown).
+- Hourly rotation, 10,000-row buffer (~5.5 min at 30 rows/sec across 3 symbols).
 
-### Validation Binaries
+### Data integrity — the operational record
+
+Data continuity has been the platform's most expensive recurring failure, and it is
+documented as such (`FINDINGS.md` §7). The tick record carries real caveats: missing
+calendar days, a historical zombie-ingestor gap that produced no error logs, and dead
+(all-NaN) columns from unwired optional categories. `nat gap status` and `nat data
+validate` exist because of those incidents. Treat any tick-window claim as gated on the
+streak it was measured over.
+
+### Validation binaries
 
 ```bash
-nat validate api                # Hyperliquid API connectivity
-nat validate positions          # position tracking accuracy
-nat validate whales             # whale identification pipeline
-nat validate entropy            # entropy feature computation
+nat test validate               # 4 binaries against the live Hyperliquid API
 nat run show BTC 10             # real-time feature display
 ```
 
 ---
 
-## Feature Vector (236 Dimensions)
+## The Candle Universe
 
-| # | Category | Count | Prefix | Key Features | Reference |
+A second data substrate, independent of the tick path and of `su-35`. It is what the
+current research program actually runs on.
+
+```bash
+nat xs universe                 # coverage report: candle archive + L2 sampler
+python scripts/data/fetch_candles.py --universe   # backfill (XS-1)
+python scripts/data/fetch_l2.py                   # L2 half-spread sweep (XS-8)
+```
+
+**What was captured** (XS-1, `FINDINGS.md` §7.1): 177 listed perps (55 delisted excluded)
+× {1m, 5m, 15m, 1h} = **708 series, 3,059,200 candles, 98 MB — every series 100 % complete
+within its span, zero gaps anywhere.** It is the first dataset on the platform with no
+integrity caveat attached.
+
+**The constraint that matters more than the volume** — a ~5,000-bar retention cap per
+interval, measured rather than inferred:
+
+| interval | candles retained | span reachable | measured depth (177 pairs) |
+|---|---|---|---|
+| 1m | ~5,000 | ~3.5 d | **3.5 d** (0 pairs reach 7 d) |
+| 5m | ~5,000 | ~17 d | 17.4 d |
+| 15m | ~5,000 | ~52 d | 52 d (175/177 ≥ 30 d) |
+| 1h | ~5,000 | ~208 d | 90 d requested, 175/177 full |
+
+The cap is on bar *count*, so reachable history scales with bar size. **1-minute breadth
+must be accrued, not fetched** — which is why `XS-7` refreshes on a schedule and treats a
+missed window as data, not as a delay.
+
+---
+
+## Feature Vector (239 Dimensions)
+
+| # | Category | Count | Prefix | Key features | Reference |
 |---|----------|-------|--------|-------------|-----------|
 | 1 | **Raw** | 10 | `raw_` | midprice, spread, microprice, depth L5/L10 | Gatheral & Oomen (2010) |
 | 2 | **Imbalance** | 8 | `imbalance_` | OBI at L1/L5/L10, pressure scores | Cont, Stoikov & Talreja (2010) |
 | 3 | **Flow** | 12 | `flow_` | trade count/volume 1s/5s/30s, aggressor ratio, VWAP deviation | — |
-| 4 | **Volatility** | 9 | `vol_` | realized vol (1m/5m), Parkinson, Garman-Klass, vol ratio | Parkinson (1980), Garman & Klass (1980) |
-| 5 | **Entropy** | 24 | `ent_` | permutation entropy (m=3), tick entropy, book shape, spread dispersion | Bandt & Pompe (2002), Shannon (1948) |
-| 6 | **Context** | 9 | `ctx_` | funding rate, OI, premium, volume ratio | — |
-| 7 | **Trend** | 15 | `trend_` | momentum, R², monotonicity, Hurst exponent, MA crossover | Mandelbrot (1971), Jegadeesh & Titman (1993) |
-| 8 | **Illiquidity** | 12 | `illiq_` | Kyle's lambda, Amihud ratio, Roll spread, Hasbrouck | Kyle (1985), Amihud (2002) |
-| 9 | **Toxicity** | 10 | `toxic_` | VPIN (10/50), adverse selection, effective/realized spread | Easley et al. (2012) |
-| 10 | **Derived** | 15 | `derived_` | trend strength, regime score, toxicity-regime interaction | — |
-| 11 | **Whale Flow** | 12 | `whale_` | net flow, momentum, intensity (1h/4h/24h) | Optional |
-| 12 | **Liquidation** | 13 | `liquidation_` | risk at ±1%/2%/5%/10%, asymmetry, intensity | Optional |
-| 13 | **Concentration** | 15 | `top`/`conc_` | Herfindahl, Gini, Theil, top-K share | Optional |
-| 14 | **Regime** | 20 | `regime_` | absorption, divergence, churn, range position | Optional |
-| 15 | **GMM** | 8 | `prob_` | 5-state posteriors, confidence, regime entropy | Optional |
+| 4 | **Volatility** | 9 | `vol_` | realized vol (1m/5m), Parkinson, Garman-Klass | Parkinson (1980), Garman & Klass (1980) |
+| 5 | **Entropy** | 27 | `ent_` | permutation entropy (m=3), tick entropy, book shape, spread dispersion | Bandt & Pompe (2002), Shannon (1948) |
+| 6 | **Context** | 12 | `ctx_` | funding rate + z-score, OI, premium, volume ratio | — |
+| 7 | **Trend** | 15 | `trend_` | momentum, R², monotonicity, Hurst, MA crossover | Mandelbrot (1971), Jegadeesh & Titman (1993) |
+| 8 | **Medium-Freq** | 16 | `mf_` | RSI, Bollinger, ATR-family at minute scale | Wilder (1978), Bollinger (2001) |
+| 9 | **Illiquidity** | 12 | `illiq_` | Kyle's lambda, Amihud ratio, Roll spread, Hasbrouck | Kyle (1985), Amihud (2002) |
+| 10 | **Toxicity** | 10 | `toxic_` | VPIN (10/50), adverse selection, effective/realized spread | Easley et al. (2012) |
+| 11 | **Derived** | 15 | `derived_` | trend strength, regime score, toxicity-regime interaction | — |
+| 12 | **Microstructure** | 5 | `micro_` | microprice deviation, tick-rule signs | Stoikov (2018) |
+| 13 | **Hawkes** | 3 | `hawkes_` | self-excitation intensity, branching ratio | Bacry et al. (2015) |
+| 14 | **Resilience** | 3 | `resilience_` | book refill rate after depletion | — |
+| 15 | **Whale Flow** | 12 | `whale_` | net flow, momentum, intensity (1 h/4 h/24 h) | *optional* |
+| 16 | **Liquidation** | 13 | `liquidation_` | risk at ±1/2/5/10 %, asymmetry, intensity | *optional* |
+| 17 | **Concentration** | 15 | `top`/`conc_` | Herfindahl, Gini, Theil, top-K share | *optional* |
+| 18 | **Regime** | 23 | `regime_` | absorption, divergence, churn, range position | *optional* |
+| 19 | **GMM** | 8 | `regime`/`prob_` | 5-state posteriors, confidence, regime entropy | *optional* |
+| 20 | **Cross-Symbol** | 3 | `cross_` | lead-lag, cross-book pressure | *optional* |
+| 21 | **Heatmap** | 8 | `hm_` | depth-surface summaries | *optional* |
 
-138 base features always computed. 98 optional features NaN-padded when absent. Full manifest with formulas: [`FEATURES.md`](FEATURES.md).
+**157 base features** (always computed) + **82 optional** (NaN-padded when absent) = **239**.
+Full manifest with formulas: [`FEATURES.md`](FEATURES.md).
 
-### Feature Engineering Contract
+> **Known documentation drift (2026-08-08):** `FEATURES.md` and the `ing-features` crate
+> doc comment both still state **236**. The live contract is **239** — verified against the
+> emitted Parquet schema (242 columns = 3 metadata + 239 features) and by summing
+> `count_all()`. The counts in the table above are read from the Rust source, not from
+> `FEATURES.md`. Reconciling the two is an open docs task; the schema is the authority.
+
+### Feature engineering contract
 
 ```
-Features::to_vec()    → always returns exactly 236 elements
-Features::names_all() → matching column names (Parquet schema source)
-Features::count_all() → 236
+Features::to_vec()    → always returns exactly count_all() elements
+Features::names_all() → matching column names (the Parquet schema source)
+Features::count_all() → to_vec().len(), enforced
 ```
 
-When adding a new feature category:
-1. Create struct with `count()`, `names()`, `to_vec()`
-2. Add to `Features` in `features/mod.rs`
-3. Add to `to_vec()`, `names_all()`, `count_all()` (NaN padding for optional)
-4. Schema auto-updates via `create_schema()` in `output/schema.rs`
+Adding a feature category:
+1. Create the struct with `count()`, `names()`, `to_vec()`.
+2. Add it to `Features` in `features/mod.rs`.
+3. Add it to `to_vec()`, `names_all()`, `count_all()` — NaN padding if optional.
+4. Schema updates automatically via `create_schema()` in `output/schema.rs`.
+
+> **Guardrail:** plan before any feature-vector or schema change. It ripples to every
+> Parquet file and every reader.
 
 ---
 
-## Microstructure Algorithm Library (25 Algorithms)
+## Microstructure Algorithm Library (32 Algorithms)
 
-NAT includes 25 configurable microstructure algorithms that compute derived signals from the 236-dimensional base feature vector. Each algorithm implements the `MicrostructureAlgorithm` interface.
+32 registered algorithms compute derived signals from the feature vector. Each implements
+the `MicrostructureAlgorithm` ABC (`scripts/algorithms/base.py`).
 
 ```bash
-nat algorithm list                              # all algorithms and features
-nat algorithm evaluate --all                    # IC/drift on all
-nat algorithm evaluate --algorithm hawkes_intensity --symbol BTC
-nat algorithm config                            # TOML configuration
+nat algorithm list                              # all algorithms and their output features
+nat algorithm evaluate --all                    # IC / drift across the library
+nat algorithm evaluate --algorithm microprice --symbol BTC
 nat backtest algorithm --algorithm weighted_ofi --symbol BTC
 ```
 
-### Algorithm Catalog
+### Contract
 
-| # | Algorithm | Method | Reference |
-|---|-----------|--------|-----------|
-| 1 | `kalman_imbalance` | OU Kalman filter on L1 imbalance | — |
-| 2 | `regime_gated` | Entropy percentile gating | Bandt & Pompe (2002) |
-| 3 | `weighted_ofi` | Depth-decay weighted OFI | Cont, Kukanov & Stoikov (2014) |
-| 5 | `trade_through` | Queue depletion probability | Cont & de Larrard (2013) |
-| 6 | `propagator` | Transient impact, power-law kernel | Bouchaud et al. (2004) |
-| 7 | `hawkes_intensity` | Self-exciting trade arrival | Bacry, Mastromatteo & Muzy (2015) |
-| 8 | `jump_detector` | Lee-Mykland nonparametric jump test | Lee & Mykland (2008) |
-| 9 | `bipower_jump` | BV jump decomposition | Barndorff-Nielsen & Shephard (2004) |
-| 10 | `vpin_regime` | VPIN-triggered regime switch | Easley, López de Prado & O'Hara (2012) |
-| 11 | `spread_decomp` | Adverse selection decomposition | Hendershott, Jones & Menkveld (2011) |
-| 12 | `entropy_momentum` | Entropy-gated momentum | Novel |
-| 13 | `surprise_signal` | Entropy regime transition detection | Novel |
-| 14 | `funding_reversion` | Funding rate mean-reversion | Crypto-specific |
-| 15 | `oi_divergence` | Open interest vs price divergence | — |
-| 16 | `switching_ou` | Two-regime OU, Bayesian filtering | Elliott et al. (2005), Hamilton (1989) |
-| 17 | `optimal_entry` | SPRT on Kalman innovation | Wald (1947), Shiryaev (1978) |
-| 18 | `convolver` | Kernel convolution feature discovery | Novel |
-| 20 | `cascade_probability` | Liquidation cascade prediction | — |
-| 21 | `spectral` | Spectral momentum extraction | — |
-| 22-27 | Various | Additional signal algorithms | See `scripts/algorithms/` |
-| 28 | `change_point_detector` | CUSUM + Bayesian OCD | Page (1954), Adams & MacKay (2007) |
-| 29 | `momentum_continuation` | Logistic Regression momentum classifier | Moskowitz, Ooi & Pedersen (2012) |
-| 30 | `regime_state_machine` | 6-state manual threshold classifier | Hamilton (1989) |
-| 31 | `mean_reversion_detector` | LightGBM false-breakout detector | Avellaneda & Lee (2010) |
-| 32 | `meta_labeling` | De Prado meta-label precision filter | De Prado (2018) |
-| 33 | `regime_conditioned_lgbm` | Per-regime LightGBM ensemble | Gu, Kelly & Xiu (2020) |
-| 34 | `knn_retrieval` | Mahalanobis nearest-neighbor retrieval | Cover & Hart (1967) |
+- Register with the `@register` decorator (`scripts/algorithms/registry.py`).
+- `step()` returns exactly the keys declared by `alg_features()` — no more, no less.
+- Any NaN required column → NaN for every output. No silent imputation.
+- Output names are prefixed `alg_`.
+- Docstring carries the mathematical formulation and its reference.
+- `run_batch()` defaults to row iteration; override it with vectorized numpy/pandas.
+- The first `warmup` rows of `run_batch()` output are NaN-blanked automatically.
+- Parameters live in `config/algorithms.toml`, never inline.
 
-### ML Algorithms (Wave-Gated Pipeline)
+### Catalog
 
-NAT's ML algorithm pipeline is implemented in waves with hard decision gates.
-Each wave must demonstrate positive OOS alpha before the next begins.
-See `docs/research/new/ml_specs/` for per-algorithm specifications.
+| Algorithm | Method | Reference |
+|-----------|--------|-----------|
+| `kalman_imbalance` | OU Kalman filter on L1 imbalance | — |
+| `regime_gated` | Entropy-percentile gating | Bandt & Pompe (2002) |
+| `weighted_ofi` | Depth-decay weighted order-flow imbalance | Cont, Kukanov & Stoikov (2014) |
+| `trade_through` | Queue-depletion probability | Cont & de Larrard (2013) |
+| `propagator` | Transient impact, power-law kernel | Bouchaud et al. (2004) |
+| `hawkes_intensity` | Self-exciting trade arrival | Bacry, Mastromatteo & Muzy (2015) |
+| `jump_detector` | Lee-Mykland nonparametric jump test | Lee & Mykland (2008) |
+| `jump_detector_v2` | EVT (Gumbel) threshold, staggered bipower, directional routing | Lee & Mykland (2008) |
+| `bipower_jump` | BV jump decomposition | Barndorff-Nielsen & Shephard (2004) |
+| `vpin_regime` | VPIN-triggered regime switch | Easley, López de Prado & O'Hara (2012) |
+| `spread_decomp` | Adverse-selection decomposition | Hendershott, Jones & Menkveld (2011) |
+| `entropy_momentum` | Entropy-gated momentum | Novel |
+| `surprise_signal` | Entropy regime-transition detection | Novel |
+| `funding_reversion` | Funding-rate mean reversion | Crypto-specific |
+| `funding_settlement` | Funding-settlement clock effects | Crypto-specific |
+| `oi_divergence` | Open interest vs price divergence | — |
+| `switching_ou` | Two-regime OU, Bayesian filtering | Elliott et al. (2005), Hamilton (1989) |
+| `optimal_entry` | SPRT on Kalman innovation | Wald (1947), Shiryaev (1978) |
+| `convolver` | Kernel-convolution feature discovery | Novel |
+| `cascade_probability` | Liquidation-cascade prediction | — |
+| `microprice` | HF1 microprice deviation — the maker fair-value center | Stoikov (2018) |
+| `vwap_reversion` | VWAP-anchored reversion | — |
+| `toxic_vwap_reversion` | VWAP reversion under a VPIN toxicity gate | Easley et al. (2012) |
+| `vol_squeeze` | Volatility-compression breakout | Bollinger (2001) |
+| `hierarchical_combiner` | Direction-gated two-level signal combination | — |
+| `change_point_detector` | CUSUM + Bayesian online change detection | Page (1954), Adams & MacKay (2007) |
+| `momentum_continuation` | Logistic-regression momentum classifier | Moskowitz, Ooi & Pedersen (2012) |
+| `regime_state_machine` | 6-state threshold classifier | Hamilton (1989) |
+| `mean_reversion_detector` | LightGBM false-breakout detector | Avellaneda & Lee (2010) |
+| `meta_labeling` | De Prado meta-label precision filter | De Prado (2018) |
+| `regime_conditioned_lgbm` | Per-regime LightGBM ensemble | Gu, Kelly & Xiu (2020) |
+| `knn_retrieval` | Mahalanobis nearest-neighbour state retrieval | Cover & Hart (1967) |
 
-| Wave | Algorithm | Method | Status |
-|------|-----------|--------|--------|
-| 0 | Infrastructure | bar_level support, WelfordNormalizer | Done |
-| 1 | `change_point_detector` | CUSUM + Bayesian OCD | Done |
-| 1 | `momentum_continuation` | Logistic Regression (7 features) | Done (awaiting training) |
-| 2 | `regime_state_machine` | Manual threshold 6-state classifier | Gated |
-| 2 | `mean_reversion_detector` | LightGBM false-breakout detector | Done (awaiting training) |
-| 2 | `meta_labeling` | De Prado triple-barrier precision filter | Done (awaiting training) |
-| 3 | `regime_conditioned_lgbm` | Per-regime LightGBM ensemble | Done (awaiting training) |
-| 3 | `knn_retrieval` | Mahalanobis nearest-neighbor | Done |
-| 4 | `hmm_emissions` | HMM with Gaussian emissions | Deferred* |
-| 4 | `stacking_ensemble` | Ridge/LightGBM stacking | Deferred* |
-| 4 | `online_learner` | Online SGD adaptation wrapper | Deferred* |
+`nat algorithm list` is the source of truth; the table above is a reading aid.
 
-*Deferred algorithms are not scheduled. See `docs/research/new/ml_specs/DEFERRED_OVERVIEW.md` for trigger conditions.
+### Status of the library
 
-Developer guide: `docs/research/new/ml_specs/ML_DEVELOPER_GUIDE.md`
+**No algorithm is currently promoted.** The five once labelled winners —
+`jump_detector`, `optimal_entry`, `funding_reversion`, `surprise_signal`, `3f_liquidity` —
+were **all REFUTED** by the Q4 alpha-skeptic kill gate on 2026-07-30 and REJECTED in the
+signal lifecycle. Their P&L was measured at 1.61 bps round-trip (Binance VIP9 — the wrong
+venue; Hyperliquid reality is ~11 bps all-in) through a harness that applied one generic
+P20/P80 entry to every candidate instead of each algorithm's own logic.
 
-**Bar-level algorithms:** ML algorithms set `bar_level = True`. The runner
-automatically calls `aggregate_bars()` before `run_batch()` and forward-fills
-results to tick-level. No per-algorithm aggregation code needed.
+They remain registered for research. **Treat any historical Sharpe or P&L citation for them
+as invalid.** The performance tables and the full mathematical derivations are preserved in
+[`docs/research/ALGORITHMS.md`](docs/research/ALGORITHMS.md) as a mechanism record; the
+refutation itself is `FINDINGS.md` §4.6.
 
-**Operations:**
+### ML algorithms (wave-gated)
+
+Implemented in waves with hard decision gates — each wave must show positive OOS alpha
+before the next begins. Specs in `docs/research/new/ml_specs/`.
+
+| Wave | Algorithm | Status |
+|------|-----------|--------|
+| 0 | Infrastructure (bar-level support, WelfordNormalizer) | Done |
+| 1 | `change_point_detector` | Done |
+| 1 | `momentum_continuation` | Done (awaiting training) |
+| 2 | `regime_state_machine` | Gated |
+| 2 | `mean_reversion_detector` | Done (awaiting training) |
+| 2 | `meta_labeling` | Done (awaiting training) |
+| 3 | `regime_conditioned_lgbm` | Done (awaiting training) |
+| 3 | `knn_retrieval` | Done |
+| 4 | `hmm_emissions`, `stacking_ensemble`, `online_learner` | Deferred — triggers in `DEFERRED_OVERVIEW.md` |
+
+> **Open bug (BUG-1):** the three untrained ML algorithms keep their artifacts in
+> `models/`, which is gitignored — so trained state is unauditable from a clean checkout.
+
+**Bar-level algorithms** set `bar_level = True`; the runner calls `aggregate_bars()` before
+`run_batch()` and forward-fills to tick level. No per-algorithm aggregation code.
+
 ```bash
 python scripts/ml_health_check.py                    # nightly health check
-python scripts/ml_rollback.py disable <algo>          # remove from trading
-python scripts/ml_rollback.py enable <algo>           # re-enable algorithm
-python scripts/ml_rollback.py rollback-model <algo>   # revert to previous model
-python scripts/ml_rollback.py list-models <algo>      # list model versions
+python scripts/ml_rollback.py disable <algo>         # remove from trading
+python scripts/ml_rollback.py rollback-model <algo>  # revert to previous model
 ```
-
-### Top Performer Algorithms — `nat oos30` — ⚠️ REFUTED 2026-07-30
-
-These 5 algorithms were claimed as validated winners from a 17-algorithm walk-forward sweep.
-**The Q4 alpha-skeptic kill gate refuted all five** (`docs/research/FINDINGS.md` §4.6): the sweep
-priced trades at 1.61 bps RT (Binance VIP9 — the wrong venue; Hyperliquid reality is ~11 bps
-all-in) and applied one generic P20/P80 entry to every candidate instead of each algorithm's own
-logic. At SSOT cost every one is deeply net-negative; all five were REJECTED in the signal
-lifecycle on 2026-07-30. The table is retained as the historical claim, not current truth:
-
-| Tier (historical) | Algorithm | Total P&L (bps) | BTC Sharpe | ETH Sharpe | SOL Sharpe | Q4 verdict |
-|------|-----------|-----------------|-----------|-----------|-----------|-----------|
-| 1 | `jump_detector` | +23,199 | 1.6 | 6.2 | 6.2 | **KILL** |
-| 1 | `funding_reversion` | +14,459 | 0.4 | 6.0 | 1.7 | **KILL** |
-| 1 | `optimal_entry` | +13,679 | 1.1 | 5.2 | 1.0 | **KILL** |
-| 2 | `surprise_signal` | +3,505 | -8.3 | 3.1 | 6.7 | **KILL** |
-| Baseline | `3f_liquidity` | — | 9.2 | 7.8 | 3.2 | **KILL** |
-
-What survives is the mechanism record (VPIN-gate directionality, the conditional-IC
-adverse-selection barrier, maker-path economics) — see `docs/research/FINDINGS.md` §4.5–4.6.
 
 ---
 
-#### 1. `3f_liquidity` — Three-Feature Liquidity Composite (BTC Specialist)
+## Process Discovery Layer (PROC)
 
-**Verbal description.** Constructs a composite liquidity score from three order book features — spread, depth, and VWAP deviation — then z-scores the composite over a rolling training window. Extreme z-scores (P20/P80) trigger mean-reversion entries: wide spreads and thin depth revert as liquidity providers refill.
+A **process** is a reusable analytical unit with a declared contract — inputs, data level,
+outputs, and a planted test written before the implementation. Where an *algorithm*
+produces a tradeable signal, a *process* produces a **measurement**. The layer was
+completed end-to-end on 2026-08-05 and is one of the three things that survived Q4.
 
-**Mathematical formulation.** Given 5-minute bars, the three input features are:
-
-```
-  f₁ = raw_spread_bps       (bid-ask spread in basis points)
-  f₂ = raw_ask_depth_5      (ask-side volume, levels 1-5)
-  f₃ = flow_vwap_deviation  (price deviation from volume-weighted average)
-```
-
-Each feature is z-scored over a rolling W-day training window:
-
-```
-  z_i(t) = ( f_i(t) - μ_i ) / σ_i       where μ_i, σ_i from training window
+```bash
+nat process list                         # 15 registered processes
+nat process run mi_ksg --symbol BTC      # run one on feature data
+nat process results                      # past runs, indexed in nat.db
+nat process show <run_id>                # one run record, provenance-stamped
+nat process standing list|audit|run <name>   # standing (recurring) evaluations
 ```
 
-The composite signal is:
+### Registered processes
 
+| Process | Measures |
+|---|---|
+| `ic_horizon` | IC across feature × horizon grids |
+| `horizon_label_scan` | label construction vs horizon sensitivity |
+| `mi_ksg` | Kraskov-Stögbauer-Grassberger mutual information |
+| `mi_combiner` | synergy-aware MI combination (PROC-3) — synergy a greedy selector cannot see |
+| `mi_stability` | MI durability, **one fold per day** rather than pooled (PROC-4) |
+| `transfer_entropy` | directed information flow |
+| `conditional_predictability` | predictability conditioned on regime |
+| `residualize` | pure-innovation extraction; orthogonality that must survive a holdout (PROC-15) |
+| `pca_combo` | principal-component feature combination |
+| `spectral` | PSD, ACF, coherence, band-decomposed IC |
+| `triple_barrier` | De Prado triple-barrier labelling |
+| `persistence_stats` | momentum runs + band excursions (PROC-20) |
+| `ml_importance` | model-based feature importance |
+| `xs_rank_predictability` | cross-sectional rank-IC (XS-3) |
+| `xs_persistence` | rank autocorrelation and half-life (XS-4) |
+
+**Data levels:** `bars`, `ticks`, and — since PROC-19 — `candles`. The enumeration is
+declared **once** (`VALID_DATA_LEVELS`); a test that carried its own copy had already
+drifted, which is how that contract earned a single declaration.
+
+### The FDR ledger (PROC-13)
+
+Multiple testing is accounted **across the whole program**, not per study:
+`data/processes/fdr_ledger.jsonl` records every sweep with its trial count and git SHA.
+
+```bash
+nat xs ledger                            # inspect the ledger
 ```
-  C(t) = z₁(t) + z₂(t) + z₃(t)
-```
 
-Entry logic (percentile thresholds from training distribution):
+This exists because of §4.6 in miniature: winners selected from ~26 candidates with no
+algorithm-level FDR or deflated-Sharpe accounting. A per-study q-value does not protect a
+program that runs many studies on one window.
 
-```
-  Long   if  C(t) ≤ P₂₀(C_train)     (liquidity stress → reversion expected)
-  Short  if  C(t) ≥ P₈₀(C_train)     (excess liquidity → reversion expected)
-  Flat   otherwise
-```
+### Process → algorithm compiler (PROC-1)
 
-Exit: fixed 100-minute horizon (20 bars). P&L computed net of 1.61 bps round-trip fees.
-
-**Performance:** ~~Sharpe 9.2 (BTC), 7.8 (ETH), 3.2 (SOL)~~ — **REFUTED** (Q4 kill gate: wrong-venue cost + not reproducible; −11.1 BTC at SSOT cost; `docs/research/FINDINGS.md` §4.6).
+`scripts/agent/` hosts a **refusal-first** compiler that turns a validated process result
+into a registered algorithm skeleton. Refusal-first means it declines to emit anything when
+the process result does not meet its declared promotion contract — the failure mode it is
+designed against is a discovery loop that always produces something.
 
 ---
 
-#### 2. `jump_detector` — Lee-Mykland Nonparametric Jump Detection
+## Cross-Sectional Layer (XS / Class 3)
 
-**Verbal description.** Detects intraday price jumps by comparing each log-return against a locally-estimated diffusion volatility that is robust to other jumps in the window. After a jump is detected, the algorithm trades the post-jump mean-reversion: prices that jump sharply tend to partially revert within the next 50 ticks.
+The Class-3 layer ranks the venue's **full perp universe** rather than three symbols. It is
+the only branch of the current program that is fully data-independent — it runs on the
+candle archive, needs no tick streak, and therefore leads.
 
-**Mathematical formulation.** Let r_t = ln(p_t / p_{t-1}) be the tick-level log-return. The local volatility is estimated via bipower variation, which is robust to jumps (unlike standard deviation):
-
-```
-  σ̂_BV(t) = √( (π/2) · mean_{i=2}^{K} |r_{t-i}| · |r_{t-i+1}| )
-```
-
-The constant π/2 = 1/μ₁² corrects for the expected product of adjacent half-normal random variables (μ₁ = E[|Z|] = √(2/π) for Z ~ N(0,1)).
-
-The Lee-Mykland test statistic is:
-
-```
-  L(t) = |r_t| / σ̂_BV(t)
+```bash
+nat xs                 # layer overview — every entry [PRELIM], nothing promoted
+nat xs universe        # candle archive + L2 sampler coverage
+nat xs capacity        # tradability curve (XS-5)
+nat xs rank            # rank-IC vs relative forward returns (XS-3)
+nat xs persistence     # rank autocorrelation half-life (XS-4)
+nat xs trajectory      # standing t-stat trajectory (XS-10)
+nat xs ledger          # program multiple-testing ledger (PROC-13)
 ```
 
-A jump is declared when L(t) > c (default c = 3.0, corresponding to ~3σ under normal approximation). The exact critical value follows a Gumbel distribution under continuous-record asymptotics.
+**Everything in this layer is tagged `[PRELIM]`. Nothing is promoted.**
 
-After a detected jump at tick t_J with return r_J and price p_J, the post-jump reversion signal at tick t is:
+### The study chain, and what each one settled
 
-```
-  REV(t) = - ln(p_t / p_J) / r_J       for 0 < t - t_J ≤ H
-```
+| Study | Result |
+|---|---|
+| **XS-1** | Universe backfill: 708 series, 3.06 M candles, zero gaps; ~5,000-bar retention cap (§7.1) |
+| **XS-8** | L2 half-spread sampler: universe median **1.372 bps = 17.7× BTC**; 169 of 177 pairs wider (§7.2) |
+| **XS-2** | Permutation entropy carries **no** cross-sectional information at bar scale (IQR 0.0005–0.0025) — a negative that contradicts `specs/maker_system.md` §5 (§7.3) |
+| **XS-3** | **Track C survives its pre-registered kill test.** `xs_vol` rank-IC −0.0690 (z −8.37), `xs_momentum` −0.0387 (z −4.56), both BH q 0.007 (§7.4) |
+| **XS-4** | Only `vol` ranks persist: ρ(7 d) 0.691, half-life ~37.7 d. Momentum and Hurst decay in 1.4–1.5 d (§7.5) |
+| **XS-5** | Capacity: touch notional is the wrong instrument; at 1 % of ADV, **117 pairs** support $1 k/day at ≤2 bps, only **52** support $10 k (§7.6) |
+| **XS-6** | Rotation OOS: **0 of 6 configurations survive** the pre-registered criteria. It fails on **durability, not cost** (§7.7) |
+| **XS-9** | Post-mortem: within-basket ρ 0.433 → 40 names = **≈2.2 effective bets**; a −0.33 beta tilt whose P&L is 0.802-correlated with a *static* low-beta-minus-high-beta position (§7.8) |
+| **XS-10** | Standing trajectory: the wait now measures itself — **83 periods held, 325 needed, 242 remaining** |
+| **A5** | Hysteresis bands: cost saving real and monotone, **net effect undecidable**; the apparent winner is reported and *not* adopted (§7.9) |
+| **B-5a** | Wide-pair breakeven screen: reports the **indifference exponent**, not a survivor count (below) |
 
-Interpretation: REV > 0 means price has reverted against the jump direction. The negation convention makes +1 = "fully reverted", so a positive signal directly indicates reversion.
+### Two results worth reading twice
 
-**Parameters:** window K = 100 ticks, significance c = 3.0, reversion horizon H = 50 ticks.
+**The signs are the finding (XS-3).** Both surviving scores are *negative*: low-volatility
+pairs outperform high-volatility ones cross-sectionally, and recent winners *underperform*
+— so the "momentum" score is a cross-sectional **mean-reversion** signal with its sign
+inverted. That independently reproduces PROC-20's bar-scale anti-persistence result.
 
-**Performance:** ~~+23,199 bps total, Sharpe 6.2 ETH/SOL~~ — **REFUTED** (Q4 kill gate: c=3.0 threshold fires ~13,900×/day — a noise filter, not jump detection; fails G4 at any cost tier; `docs/research/FINDINGS.md` §4.6).
+**The breadth was an illusion, but the signal is not (XS-9).** Daily rebalancing was
+rearranging a position that was 80 % a standing factor bet — which is why IR = IC·√BR
+overpredicted, why t = 0.49, and why one day carried 104 % of P&L. But the beta exposure
+earns nothing (t −1.01) while the signal **survives neutralisation and sharpens** (t −5.48
+vs −4.08 raw). An implementation defect, not a signal defect.
 
-**Reference:** Lee, S.S. & Mykland, P.A. (2008). Jumps in financial markets: a new nonparametric test and jump dynamics. *Review of Financial Studies*, 21(6), 2535-2563.
+### B-5a — reporting the exponent instead of a verdict
 
----
+§7.2 showed NAT has been studying the extreme tight tail of its own venue. The tempting
+inference is that wide pairs cover adverse selection — and §7.2 named why that is a trap:
+spreads are wide *because* makers price inventory and toxicity into them, so adverse
+selection should scale with the spread.
 
-#### 3. `optimal_entry` — SPRT on Kalman Innovation
-
-**Verbal description.** Uses a Sequential Probability Ratio Test (Wald 1947) on the innovation sequence of a Kalman filter tracking an Ornstein-Uhlenbeck process on order book imbalance. The SPRT accumulates evidence for whether a systematic drift has appeared in the filtered imbalance signal. When sufficient evidence accumulates, an entry signal fires in the drift direction. This provides statistically optimal entry timing — the SPRT minimizes expected sample size for a given error rate.
-
-**Mathematical formulation.** A Kalman filter tracks latent OU dynamics on `imbalance_qty_l1`. The one-step-ahead innovation is:
-
-```
-  ν_t = z_t - ẑ_{t|t-1}
-```
-
-The SPRT tests between two hypotheses:
-
-```
-  H₀: ν_t ~ N(0, σ̂²)         (no signal — noise only)
-  H₁: ν_t ~ N(μ, σ̂²)         (drift present — entry opportunity)
-```
-
-where μ = 0.001 (minimum detectable drift) and σ̂² is an EMA estimate of innovation variance:
-
-```
-  σ̂²(t) = α · ν_t² + (1 - α) · σ̂²(t-1)       α = 0.02
-```
-
-The per-tick log-likelihood ratio increment (closed-form Gaussian ratio):
+So B-5a emits no verdict. Parameterising `E[adverse|fill](h) = A_btc·(h/h_btc)^β` and solving
+for indifference gives, per pair:
 
 ```
-  Λ_t = (μ / σ̂²) · ν_t  −  μ² / (2σ̂²)
+  β* = ln( (h + rebate) / A_btc ) / ln( h / h_btc )
 ```
 
-The cumulative test statistic is updated recursively:
+with β = 0 the optimistic reading and β = 1 the pessimistic one. A pair at the universe
+median has **β\* = 0.69**: it survives if and only if adverse selection scales more slowly
+than h^0.69. That is falsifiable by one tick-data measurement on one wide pair — which is
+what B-5b is for. Reporting β\* rather than a count is the difference between a screen and
+a claim, and a test asserts the summary carries no pooled survivor count at all.
 
-```
-  S_n = S_{n-1} + Λ_t
-```
-
-Wald's optimal decision boundaries:
-
-```
-  A = log((1 - β) / α) ≈ 2.77     (accept H₁ — fire entry signal)
-  B = log(β / (1 - α)) ≈ -1.55    (accept H₀ — no entry)
-```
-
-When S_n ≥ A: entry direction = sign(ν_t), S resets to 0. When S_n ≤ B: no signal, S resets.
-
-**Parameters:** OU theta = 0.1, process noise = 0.01, observation noise = 0.1, α = 0.05, β = 0.20.
-
-**Performance:** ~~+13,679 bps total, Sharpe 5.2 (ETH)~~ — **REFUTED** (Q4 kill gate: sweep never ran the SPRT logic; fails G4 on stored data; `docs/research/FINDINGS.md` §4.6).
-
-**References:** Wald, A. (1947). *Sequential Analysis*. Wiley. Shiryaev, A.N. (1978). *Optimal Stopping Rules*. Springer.
-
----
-
-#### 4. `funding_reversion` — Funding Rate Mean-Reversion
-
-**Verbal description.** Perpetual futures funding rates exhibit strong mean-reversion: when funding is extremely positive (longs pay shorts), the rate tends to revert toward zero, creating a predictable price movement. This algorithm monitors the funding rate z-score and fires a contrarian entry when it exceeds a threshold. It also incorporates premium divergence — the gap between spot and futures price — as a confirming signal.
-
-**Mathematical formulation.** Given the funding rate z-score z_t and premium p_t (in basis points):
-
-The entry signal activates only when funding is extreme (|z| ≥ z_entry, default 2.0):
-
-```
-  signal(t) = -sign(z_t) · min(|z_t| / z_entry, 3) / 3       if |z_t| ≥ z_entry
-            = 0                                                 otherwise
-```
-
-The signal is contrarian: short when funding is extremely positive (crowded longs), long when extremely negative. The magnitude is clamped to [-1, 1] via the min/3 normalization.
-
-Funding momentum tracks the EMA of the raw funding rate for trend detection:
-
-```
-  EMA(t) = α · rate(t) + (1 - α) · EMA(t-1)       α = 2/(span+1), span=100
-```
-
-Premium divergence combines funding and premium into a unified score:
-
-```
-  D(t) = (1 - w) · z_t + w · (p_t / 10)       w = 0.3
-```
-
-The premium is scaled by 1/10 to bring it to a comparable magnitude with the z-score.
-
-**Parameters:** z-score entry threshold = 2.0, momentum span = 100 ticks, premium weight = 0.3.
-
-**Performance:** ~~+14,459 bps total, Sharpe 6.0 (ETH)~~ — **REFUTED** (Q4 kill gate: wrong-venue cost, n_eff≈84, one-sided funding regime; `docs/research/FINDINGS.md` §4.6).
-
----
-
-#### 5. `surprise_signal` — Entropy Regime Transition Detection
-
-**Verbal description.** Markets alternate between disordered (high entropy) and ordered (low entropy) states. A sudden entropy drop signals the market transitioning from noise to structure — a regime shift that often precedes directional moves. This algorithm detects these transitions by computing the rate-of-change of a composite entropy measure and z-scoring it. Large surprise values indicate regime transitions.
-
-**Mathematical formulation.** The composite entropy blends book shape entropy and tick entropy:
-
-```
-  E(t) = 0.5 · ent_book_shape(t) + 0.5 · ent_tick_5s(t)
-```
-
-The entropy rate-of-change over window W (default 50 ticks):
-
-```
-  ROC(t) = Ē₅(t) - Ē₅(t - W)
-```
-
-where Ē₅ is a 5-tick moving average of E (smoothing).
-
-The surprise z-score normalizes ROC against its own recent distribution:
-
-```
-  surprise(t) = (ROC(t) - μ_ROC) / σ_ROC
-```
-
-where μ_ROC, σ_ROC are computed over a rolling 2W window (min 20 observations).
-
-The regime transition probability uses a sigmoid transform:
-
-```
-  P_transition(t) = 1 / (1 + exp(-|surprise(t)| + τ))       τ = 2.0
-```
-
-Large |surprise| → high transition probability. The sign of surprise indicates direction: negative surprise (entropy dropping) = market ordering = potential trend formation.
-
-**Parameters:** ROC window = 50 ticks, transition threshold τ = 2.0.
-
-**Performance:** +3,505 bps total. Sharpe 6.7 (SOL). Captures SOL's more volatile microstructure transitions exceptionally well.
-
-**References:** Bandt, C. & Pompe, B. (2002). Permutation entropy. *Physical Review Letters*, 88(17), 174102. Schreiber, T. (2000). Measuring information transfer. *Physical Review Letters*, 85(2), 461-464.
+Capacity is the second blade and cuts the other way: the widest pairs are nearly empty
+(XAI 12.9 bps on $20), so admission runs through `xs.capacity.admit` — XS-5's floors, not a
+second copy that can drift.
 
 ---
 
 ## Autonomous Research Agents
 
-NAT runs four autonomous research agents that continuously generate, test, and validate alpha hypotheses across different timeframes.
+Four agents continuously generate, test, and validate hypotheses across timeframes.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                        MetaAgent (Orchestrator)                         │
-│   Cross-agent budget allocation · Correlation dedup · Risk parity      │
+│   Cross-agent budget allocation · Correlation dedup · Risk parity       │
 ├─────────────────────┬───────────────────┬───────────────────────────────┤
 │  MicrostructureAgent│ MediumFreqAgent   │ MacroAgent                    │
-│  Tick-level (1-10s) │ 1min-1h signals   │ 1h-24h signals               │
+│  Tick-level (1-10s) │ 1min-1h signals   │ 1h-24h signals                │
 │  5-gate replication │ 4-gate replication│ 4-gate replication            │
 │  6 generators       │ MF generators     │ Macro generators              │
 └─────────────────────┴───────────────────┴───────────────────────────────┘
 ```
 
-### Agent Commands
-
 ```bash
-# Microstructure agent
-nat agent start                 # launch daemon (cycles hourly)
-nat agent stop                  # graceful shutdown
-nat agent once                  # single cycle (testing)
-nat agent status                # phase, cycle count, registry
-nat agent queue                 # queued hypotheses by priority
-nat agent registry              # validated signals
-nat agent graveyard             # failed hypotheses with reasons
-nat agent report                # full summary
-nat agent dashboard             # web UI on :8060
-
-# Medium-frequency agent
-nat mf_agent start / stop / once / status / queue / registry / report
-
-# Macro agent
-nat macro_agent start / stop / once / status / queue / registry / report
-
-# Meta orchestrator
-nat meta_agent start / stop / once / status / portfolio / correlation / budget / report
+nat agent {start,stop,once,status,queue,registry,graveyard,report,dashboard}
+nat mf-agent {start,stop,once,status,queue,registry,graveyard,report}
+nat macro-agent {start,stop,once,status,queue,registry,graveyard,report}
+nat meta-agent {start,stop,once,status,portfolio,correlation,budget,report}
 ```
 
-### Consolidated Daemon Architecture
+### Consolidated daemon architecture
 
-All agents share a common base (`ResearchAgent` ABC in `scripts/agent/base.py`) that owns:
-- Full cycle loop and state machine
-- Generator dispatch (lazy import via `generator_module_prefix`)
-- FDR control (Benjamini-Hochberg, q=0.05)
-- Hypothesis chaining and promotion logic
-- Structured research output emission
+All agents share `ResearchAgent` (ABC, `scripts/agent/base.py`), which owns the full cycle
+loop and state machine, generator dispatch (lazy import via `generator_module_prefix`), FDR
+control, hypothesis chaining, promotion logic, and structured research-output emission.
+Each subclass is a thin ~80–110 LOC file overriding config attributes and `create_runner()`.
 
-Each agent subclass is a thin ~80-110 LOC file overriding only config attributes and `create_runner()`.
-
-### Agent State Machine
+### Agent state machine
 
 ```
 Per-cycle:
-  MANIFEST ──▶ GENERATE ──▶ ADAPTIVE IC ──▶ EXECUTE (budget: 10 or 90min)
+  MANIFEST ──▶ GENERATE ──▶ ADAPTIVE IC ──▶ EXECUTE (budget: 10 or 90 min)
   ──▶ FDR control (BH q=0.05) ──▶ STRUCTURED OUTPUT
   ──▶ MONITOR (decay + promotion) ──▶ SLEEP
 
@@ -625,122 +626,86 @@ Per-hypothesis:
              (no_effect)         (cost_killed)         (no_repl)   (redundant)
 ```
 
-### Five-Gate Replication Protocol
+### Five-gate replication protocol
 
-Every hypothesis must independently pass five gates before registration. This controls the false discovery rate under multiple testing (Harvey, Liu & Zhu, 2016).
+Every hypothesis must independently pass five gates before registration — false-discovery
+control under multiple testing (Harvey, Liu & Zhu, 2016).
 
-```
-DISCOVERY ──▶ COST ──▶ TEMPORAL ──▶ SYMBOL ──▶ CORRELATION ──▶ REGISTER
-    │           │          │           │             │
-    ▼           ▼          ▼           ▼             ▼
-GRAVEYARD  GRAVEYARD  GRAVEYARD  GRAVEYARD      GRAVEYARD
+**Gate 1 — Discovery (IC + dIC).** Spearman rank IC ≥ adaptive threshold, dIC ≥ 0.05:
 
-                  + FDR control (BH, q=0.05) at end of each cycle
-```
-
-**Gate 1 — Discovery (IC + dIC).** Spearman rank IC >= adaptive threshold, dIC >= 0.05:
 ```
                 6 × Σ(dᵢ²)
   IC  =  1 − ─────────────────       dᵢ = rank(signalᵢ) − rank(returnᵢ)
                 n × (n² − 1)
 ```
 
-**Gate 2 — Cost.** Gross return per trade >= 0.1 bps.
+**Gate 2 — Cost.** Gross return per trade ≥ 0.1 bps. All costs via `load_costs()` →
+`config/costs.toml`. Never a hardcoded fee.
 
-**Gate 3 — Temporal replication.** IC holds on >= 1 additional date (White, 2000).
+**Gate 3 — Temporal replication.** IC holds on ≥ 1 additional date (White, 2000).
 
-**Gate 4 — Symbol replication.** IC holds on >= 1 other symbol (Gueant et al., 2012).
+**Gate 4 — Symbol replication.** IC holds on ≥ 1 other symbol (Guéant et al., 2012).
 
-**Gate 5 — Correlation deduplication.** max ρ < 0.7 vs all registry signals.
+**Gate 5 — Correlation deduplication.** max ρ < 0.7 against every registry signal.
 
-### Adaptive IC Threshold
+Plus BH FDR control (q = 0.05) at the end of each cycle.
 
-The acceptance threshold rises as the registry accumulates strong signals:
+### Adaptive IC threshold
+
+The acceptance threshold rises as the registry accumulates strong signals, so marginal
+signals cannot enter a strong registry:
 
 ```
-  min_ic(t) = max( floor, median{ ICᵢ : i ∈ R(t) } × 0.8 )
+  min_ic(t) = max( floor, median{ ICᵢ : i ∈ R(t) } × 0.8 )        floor = 0.10
 ```
 
-Floor = 0.10 (configurable). Marginal signals cannot enter a strong registry.
-
-### IC Decay Monitoring
-
-Signals are continuously monitored. Auto-retired if rolling IC drops below 50% of discovery IC for 14 consecutive cycles:
+### IC decay monitoring
 
 ```
   if IC_rolling(s) < IC_discovery(s) × 0.5   for 14 consecutive cycles:
       status(s) ← retired, reason ← ic_decay
 ```
 
-### Six Hypothesis Generators
+### Six hypothesis generators
 
 | Generator | Schedule | Strategy | Reference |
 |-----------|----------|----------|-----------|
-| **Systematic** | Nightly | Exhaustive (feature × gate × threshold) search | — |
+| **Systematic** | Nightly | Exhaustive feature × gate × threshold search | — |
 | **Spectral** | Daily | PSD slope / OU half-life anomaly detection | Mandelbrot & Van Ness (1968) |
 | **Regime** | Daily | IC improvement after HMM state transitions | Rabiner (1989) |
-| **Cross-Asset** | Weekly | Lead-lag at 68s coherence frequency | Priestley (1981) |
-| **Recycler** | Weekly | Re-examine graveyard on new data/conditions | — |
-| **IT Discovery** | Daily | MI/CMI/II-driven hypotheses from IT engine | Kraskov et al. (2004) |
+| **Cross-Asset** | Weekly | Lead-lag at the 68 s coherence frequency | Priestley (1981) |
+| **Recycler** | Weekly | Re-examine the graveyard on new data | — |
+| **IT Discovery** | Daily | MI/CMI/II-driven hypotheses from the IT engine | Kraskov et al. (2004) |
 
 Budget allocation uses a Beta-prior Thompson bandit (Thompson, 1933):
-```
-  weight(g) = (successes + 1) / (attempts + 2)       # E[Beta(a, b)]
-```
+`weight(g) = (successes + 1) / (attempts + 2)`.
 
-### Signal Lifecycle
+### Structured research output
 
-```
-Hypothesis (queued) ──▶ Discovery (IC+dIC) ──▶ Cost (gross >= 0.1 bps)
-  ──▶ Temporal replication (2+ dates) ──▶ Symbol replication (ETH + SOL)
-  ──▶ Correlation dedup (ρ < 0.7) ──▶ FDR control (BH q=0.05)
-  ──▶ Registry (validated) ──▶ Paper trading ──▶ Live (human approval)
-  ──▶ Retired (IC decay > 14 days)
-```
+Per hypothesis, a JSON record lands in `data/research/hypotheses/{id}.json` — claim,
+generator, status, per-gate results (metric, threshold, p-value), LaTeX derivation,
+features, regime gate, timestamps. Cycle summaries in `data/research/cycles/{cycle_id}.json`.
 
-Paper-to-live promotion: 7-day Sharpe > 1.5, realized/predicted IC > 0.8, max DD < 2%.
+### Computation cache
 
-### Structured Research Output
-
-After each hypothesis, a JSON record is emitted to `data/research/hypotheses/{id}.json` with:
-- Claim, generator, status, gate results (metric, threshold, p-value per gate)
-- LaTeX math derivation
-- Features, regime gate, timestamps
-
-Cycle summaries to `data/research/cycles/{cycle_id}.json` with aggregate stats.
-
-### Computation Cache
-
-Deterministic commands cached under `SHA-256(canonical_args)` with 7-day TTL.
-Measured: 85% hit rate, 56% cycle-time reduction.
+Deterministic commands cached under `SHA-256(canonical_args)`, 7-day TTL. Measured: 85 %
+hit rate, 56 % cycle-time reduction.
 
 ---
 
 ## Alpha Pipeline
 
-Nine-step alpha signal pipeline with quality gates (PASS/WEAK/FAIL) between each step.
+Nine steps with PASS/WEAK/FAIL quality gates between each.
 
 ```bash
-nat alpha_pipeline_start               # launch full pipeline
-nat alpha_pipeline_resume              # resume from last checkpoint
-nat alpha_pipeline_status              # current step and gate verdicts
-nat alpha_pipeline_gates               # gate thresholds
-nat alpha_pipeline_step 3              # run specific step
-```
+nat alpha pipeline-start                 # launch the full pipeline
+nat alpha pipeline-resume                # resume from checkpoint (--force-gate to override)
+nat alpha pipeline-status                # current step + gate verdicts
+nat alpha pipeline-gates                 # detailed gate report with metrics
+nat alpha pipeline-step 3                # run one step
 
-### Pipeline Steps
-
-```
-SCREENING ──▶ COMBINING ──▶ SIZING ──▶ VALIDATING ──▶ REGIME
-    │             │            │            │              │
-    ▼             ▼            ▼            ▼              ▼
- (FDR)       (weights)    (position)   (walk-fwd)    (HMM gate)
-    │
-    ▼
-MULTI_FREQ ──▶ PORTFOLIO ──▶ PAPER ──▶ DEPLOYING ──▶ DONE
-    │              │            │            │
-    ▼              ▼            ▼            ▼
- (freqs)      (assembly)   (simulate)   (live exec)
+# individual steps also run standalone:
+nat alpha combine|size|validate|regime|multi-freq|portfolio|paper|deploy
 ```
 
 | Step | Module | Function |
@@ -748,105 +713,95 @@ MULTI_FREQ ──▶ PORTFOLIO ──▶ PAPER ──▶ DEPLOYING ──▶ DON
 | 1. Screening | `screener.py` | Feature screening with FDR control |
 | 2. Combining | `combiner.py` | Signal combination and weighting |
 | 3. Sizing | `position.py` | Position sizing (Kelly / risk parity) |
-| 4. Validating | Walk-forward | Out-of-sample stability check |
-| 5. Regime | `regime_filter.py` | HMM/entropy regime conditioning |
-| 6. Multi-Freq | `multi_freq.py` | Multi-frequency signal integration |
+| 4. Validating | walk-forward | Out-of-sample stability |
+| 5. Regime | `regime_filter.py` | HMM / entropy regime conditioning |
+| 6. Multi-Freq | `multi_freq.py` | Multi-frequency integration |
 | 7. Portfolio | `portfolio.py` | Portfolio assembly and allocation |
-| 8. Paper | `paper_trader.py` | Live paper trading simulation |
-| 9. Deploy | `deployer.py` | Live deployment executor |
+| 8. Paper | `paper_trader.py` | Paper-trading simulation |
+| 9. Deploy | `deployer.py` | Deployment readiness |
 
-Config: `config/alpha.toml` (gate thresholds G1-G8).
+Config: `config/alpha.toml`. **Gate thresholds G1–G8 are imported from ROADMAP, never
+invented** — introducing a new number is a guardrail violation, not a tuning choice.
 
 ---
 
 ## Information-Theoretic Engine
 
-The IT Engine (`scripts/it_engine/`) provides rigorous mutual information estimation, entropy conditioning, and cost-aware feature selection across all 209 features.
+`scripts/it_engine/` — mutual-information estimation, entropy conditioning, and cost-aware
+feature selection across the full feature vector.
 
 ```bash
-nat it_engine start --symbol BTC               # live mode (Redis pub/sub)
-nat it_engine start --symbol BTC --offline     # offline mode (parquet)
-nat it_engine start --symbol BTC --dry-run     # single cycle
-nat it_engine status --symbol BTC              # MI rankings
-nat it_engine stop --symbol BTC                # shutdown
+nat it-engine start --symbol BTC               # live mode (Redis pub/sub)
+nat it-engine start --symbol BTC --offline     # offline mode (parquet)
+nat it-engine start --symbol BTC --dry-run     # single cycle
+nat it-engine status --symbol BTC              # MI rankings
+nat it-engine stop --symbol BTC
 ```
-
-### Core Estimators
 
 | Estimator | Formula | Purpose |
 |-----------|---------|---------|
-| **KSG MI** | Kraskov-Stögbauer-Grassberger k-NN (k=5) | I(f; r) — mutual information |
-| **Conditional MI** | I(f; r \| H) via KSG in joint/marginal spaces | Proper IT formulation of entropy gating |
-| **Interaction Info** | II(f;r;H) = I(f;r\|H) − I(f;r) | +synergy (gating helps), −redundancy |
-| **Linear TE** | TE = 0.5 × log(σ²_reduced / σ²_full) | Causal information flow |
-| **Cost threshold** | I_min = −0.5 × log₂(1 − (fee/σ_r)²) | Minimum MI to overcome costs |
+| **KSG MI** | Kraskov-Stögbauer-Grassberger k-NN (k=5) | I(f; r) |
+| **Conditional MI** | I(f; r \| H) via KSG in joint/marginal spaces | the proper IT formulation of entropy gating |
+| **Interaction Info** | II(f;r;H) = I(f;r\|H) − I(f;r) | + synergy (gating helps), − redundancy |
+| **Linear TE** | TE = ½·log(σ²_reduced / σ²_full) | causal information flow |
+| **Cost threshold** | I_min = −½·log₂(1 − (fee/σ_r)²) | minimum MI to overcome costs |
 
-### Greedy Feature Selection
-
-Forward stepwise selection by conditional MI gain:
-1. **Start**: f* = argmax_f I(f; r_k) across all features and horizons
-2. **Step**: f_next = argmax_f I(f; r_k | S) — largest conditional MI gain given selected set S
-3. **Stop**: when marginal gain < I_min(k) or max features reached
-
-The `it_discovery` generator feeds cost-viable features into the agent hypothesis queue.
+**Greedy selection:** start at `f* = argmax_f I(f; r_k)`; step to
+`f_next = argmax_f I(f; r_k | S)`; stop when the marginal gain falls below `I_min(k)`. The
+`it_discovery` generator feeds cost-viable features into the agent hypothesis queue.
 
 ---
 
-## Paper Trading & OOS Validation
-
-### Walk-Forward Paper Trading
+## Backtesting & OOS Validation
 
 ```bash
-# Individual algorithms
-python scripts/alpha/paper_trader_generic.py --algorithms jump_detector optimal_entry funding_reversion --save
-
-# 3-feature liquidity signal (BTC specialist)
-python scripts/alpha/paper_trader.py --save
-
-# Surprise signal (SOL specialist)
-python scripts/alpha/paper_trader_surprise.py --save
-
-# All 5 winning algorithms at once (via nat CLI)
-nat oos30
+nat backtest --symbol BTC                    # generic backtest
+nat backtest algorithm --algorithm NAME      # algorithm-specific
+nat backtest ml --symbol BTC                 # ML prediction backtest
+nat backtest list                            # available experiments
+nat gauntlet run                             # multi-day OOS sweep across all algorithms
+nat gauntlet report                          # latest gauntlet report
+nat oos --window N                           # longitudinal OOS over trailing gauntlet P&L
 ```
 
-**Configuration:**
-- Bar resolution: 5min (300s)
-- Horizon: 20 bars (100min)
-- Training window: 3-day rolling
-- Entry thresholds: P20/P80 percentile z-score
-- Fee model: 1.61 bps round-trip (Binance VIP9 taker)
-- Walk-forward: true out-of-sample
+### Costs — one source of truth
 
-### OOS Validation Workflow
+**All costs load via `load_costs()` (`scripts/costs.py` → `config/costs.toml`).** Never
+hardcode a fee or a slippage figure anywhere in the stack. This is a hard guardrail, and it
+exists because violating it is precisely what invalidated the 2026-05 sweep: it priced
+trades at 1.61 bps round-trip (Binance VIP9) when Hyperliquid reality is ~11 bps all-in.
+
+`config/costs.toml` carries the venue's real ladders, verified against the fee docs:
+the HYPE-staking discount tier (`[hyperliquid_staked]`, X-1) and the maker
+volume/rebate ladder (`[hyperliquid_maker_tiers]`, COST-5). COST-8 removed the last
+hardcoded 0.2 bps rebate — the most load-bearing unvalidated number in the stack, worth
+~1.7 bps/fill — so the maker preset now reads the SSOT and no longer inverts the rebate
+sign.
+
+> ⚠️ **`nat oos30` runs the historical 5-algorithm walk-forward.** All five algorithms it
+> exercises were refuted on 2026-07-30 and REJECTED in the lifecycle. It is retained to
+> reproduce the historical record, **not** as a validation path. Do not read its output as
+> a current result.
+
+### Deflated Sharpe
+
+The G4 gate deliberately keeps a lenient `std_max` DSR; the full canonical DSR is
+**reporting-only** in `nat oos --window`. Switching the gate is blocked on ~90 clean OOS
+days — the gate and the report answer different questions and are not interchangeable.
+
+### Discovery orchestrator
 
 ```bash
-nat start                  # start ingestor on production machine
-# ... wait 30 days for out-of-sample data collection ...
-nat oos30                  # runs all 5 winning algos in 3 steps:
-                           #   1. 3f liquidity (BTC specialist)
-                           #   2. jump_detector + optimal_entry + funding_reversion
-                           #   3. surprise_signal (SOL specialist)
+nat discovery {start,once,status,stop}
 ```
 
-### Discovery Orchestrator
-
-Continuous daemon that sweeps (symbol, horizon) combinations for alpha signals:
-
-```bash
-nat discovery start        # launch continuous sweep daemon
-nat discovery once         # single sweep cycle
-nat discovery status       # current state
-nat discovery stop         # shutdown
-```
-
-Cycle: DATA_HEALTH → SIGNAL_SWEEP → TRAINING → BACKTESTING → ALPHA_PIPELINE → REPORTING → SLEEPING.
+Cycle: DATA_HEALTH → SIGNAL_SWEEP → TRAINING → BACKTESTING → ALPHA_PIPELINE → REPORTING →
+SLEEPING, with gates at each step. Child scripts run via subprocess, not import, to prevent
+OOM.
 
 ---
 
 ## Analysis & Profiling Tools
-
-The agent orchestrates these tools autonomously. They can also be used interactively.
 
 | Command | Function | Output |
 |---------|----------|--------|
@@ -857,55 +812,40 @@ The agent orchestrates these tools autonomously. They can also be used interacti
 | `nat profile scalp --symbol BTC` | Walk-forward feature profiler | `reports/profiler/profile_{sym}.json` |
 | `nat cluster hmm` | Gaussian HMM fitting (Baum-Welch EM) | `reports/hmm_fit.json` |
 | `nat validate skeptical` | 20+ statistical tests (FDR, bootstrap, permutation) | `reports/skeptical_validation/` |
-| `nat data validate <file.parquet>` | Single-file validation (schema/quality/continuity/NaN/ranges) | PASS/WARN/FAIL, `--json`, nonzero exit on FAIL |
-| `nat viz render --tf {1m,5m,15m} [N]` | Paged PNG viewer: whole-day overview, or zoom into the Nth window; `--features` scopes a panel grid | `reports/figures/snapshots/*.png` |
-| `nat viz3d` / `nat mesh --tf {1m,5m,15m} [N]` | Interactive 3D feature-surface-over-time (Plotly) | `reports/figures/mesh/*.html` |
+| `nat validate regression` | Skeptical regression battery (10 tests) | JSON report |
+| `nat data validate [<file>]` | Schema / quality / continuity / NaN / ranges | PASS/WARN/FAIL, `--json`, nonzero exit on FAIL |
+| `nat viz render --tf {1m,5m,15m} [N]` | Paged PNG viewer; `--features` scopes the panel grid | `reports/figures/snapshots/*.png` |
+| `nat viz3d` / `nat mesh --tf {1m,5m,15m} [N]` | Interactive 3D feature surface (Plotly) | `reports/figures/mesh/*.html` |
 | `nat scan --symbol BTC` | Signal discovery scan | JSON report |
 | `nat macro --symbol BTC` | Macro regime analysis | JSON report |
 | `nat kalman analysis --symbol BTC` | Kalman filter analysis | `reports/kalman/` |
 
-### Cluster Pipeline
-
-Unsupervised regime discovery via feature vector clustering:
+### Cluster pipeline
 
 ```bash
-nat cluster analyze                    # K-means/hierarchical clustering
-nat cluster gmm                        # GMM-based regime classification
-nat cluster quality                    # silhouette, Davies-Bouldin, Calinski-Harabasz
-nat cluster explore                    # interactive exploration
-nat cluster hmm                        # HMM state fitting
+nat cluster {analyze,gmm,all,quality,explore,hmm}
 ```
 
-Modules: loader, preprocess, cluster, reduce (PCA/UMAP/t-SNE), characterize, hierarchy, transitions, online streaming, visualization.
-
-### Backtesting Engine
-
-```bash
-nat backtest --symbol BTC              # generic backtest
-nat backtest algorithm --algorithm weighted_ofi --symbol BTC
-nat backtest ml --symbol BTC           # ML prediction backtest
-nat backtest funding                   # funding rate reversion
-nat backtest list                      # list available experiments
-```
-
-Walk-forward validation with configurable cost models (taker/maker at various fee tiers).
+Unsupervised regime discovery: loader, preprocess, cluster, reduce (PCA/UMAP/t-SNE),
+characterize, hierarchy, transitions, online streaming, visualization. Quality via
+silhouette, Davies-Bouldin, Calinski-Harabasz.
 
 ---
 
 ## Lifecycle, Promotion & Risk Automation
 
-The path from a validated signal to live capital is automated end-to-end, behind a
-single human gate and hard risk controls. Each stage is an independent daemon
-sharing the same conventions: pidfile + heartbeat + `health` subcommand + graceful
-SIGTERM, dry-run by default, and a Docker Compose service with a healthcheck. All
-gate thresholds are **imported, not invented** (`config/alpha.toml`, ROADMAP Step 9).
+The path from a validated signal to live capital is automated end-to-end behind a single
+human gate and hard risk controls. Each stage is an independent daemon sharing the same
+conventions: pidfile + heartbeat + `health` subcommand + graceful SIGTERM, **dry-run by
+default**, and a Docker Compose service with a healthcheck. All gate thresholds are
+**imported, not invented**.
 
-### Signal Lifecycle (state machine)
+### Signal lifecycle
 
-`scripts/signal_lifecycle.py` is the single source of truth for a signal's
-promotion state, persisted to `nat.db` (`signal_lifecycle` + `lifecycle_history`,
-shared migration framework in `scripts/data/state.py`). Every transition is
-provenance-stamped (git SHA) and recorded; illegal transitions raise.
+`scripts/signal_lifecycle.py` is the single source of truth for promotion state, persisted
+to `nat.db` (`signal_lifecycle` + `lifecycle_history`, shared migration framework in
+`scripts/data/state.py`). Every transition is provenance-stamped with a git SHA and
+recorded; illegal transitions raise.
 
 ```
 DISCOVERED → VALIDATED → PAPER_TRADING → APPROVAL_PENDING → LIVE → MONITORING → RETIRED   (+ REJECTED)
@@ -917,361 +857,223 @@ DISCOVERED → VALIDATED → PAPER_TRADING → APPROVAL_PENDING → LIVE → MON
 nat lifecycle status|list|history|approve|reject|seed
 ```
 
-### Promotion Daemon
+### Promotion daemon
 
-`scripts/promotion_daemon.py` drives the lifecycle automatically: a data-sufficiency
-+ ≥7-clean-day guard, then rigorous **G4** (walk-forward + deflated Sharpe via
-`alpha/adapter.py`) → VALIDATED, paper trading → PAPER_TRADING, and **G8** (5 criteria
-over 14 days) → APPROVAL_PENDING. It never auto-promotes to LIVE.
+`scripts/promotion_daemon.py` drives the lifecycle: a data-sufficiency + ≥7-clean-day
+guard, then rigorous **G4** (walk-forward + deflated Sharpe) → VALIDATED, paper trading →
+PAPER_TRADING, and **G8** (5 criteria over 14 days) → APPROVAL_PENDING. It never
+auto-promotes to LIVE.
 
 ```bash
 nat promotion status|once [--dry-run]|start|stop
 ```
 
-### Kill-Switch Daemon (risk)
+### Kill-switch daemon
 
-`scripts/risk/kill_switch.py` polls realized PnL/IC every 60s and halts trading on
-ROADMAP Step-9 thresholds: daily loss >1% → `halt_24h`, weekly DD >2% →
-`halt_review`, monthly DD >5% → `kill_strategy` (retires the signal in the
-lifecycle), IC<0 for 5 days → `halt`. Publishes `data/risk/halt_state.json` (the IPC
-the bridge reads before every cycle) and a Telegram page within 60s.
+`scripts/risk/kill_switch.py` polls realized PnL/IC every 60 s and halts on ROADMAP Step-9
+thresholds: daily loss > 1 % → `halt_24h`, weekly DD > 2 % → `halt_review`, monthly DD > 5 %
+→ `kill_strategy` (retires the signal), IC < 0 for 5 days → `halt`. Publishes
+`data/risk/halt_state.json` — the IPC the bridge reads before every cycle — and a Telegram
+page within 60 s.
 
 ```bash
 nat risk status|resume [--confirm]|start|stop
 ```
 
-### Gap-Alert Daemon (data continuity)
+### Gap-alert daemon
 
-`scripts/ops/gap_alert.py` pages via Telegram within minutes when feature ingestion
-stalls — the real-time complement to the next-day report. Freshness = newest
-`*.parquet`/`*.parquet.tmp` mtime; alerts once on gap-open and once on recovery.
-Read-only, so it is safe to run alongside a streak-frozen ingestor.
+`scripts/ops/gap_alert.py` pages via Telegram within minutes when ingestion stalls — the
+real-time complement to the next-day report. Freshness = newest `*.parquet`/`*.parquet.tmp`
+mtime; alerts once on gap-open and once on recovery. Read-only, so it is safe alongside a
+streak-frozen ingestor.
 
 ```bash
 nat gap status|check|start|stop
 ```
 
-### Signal Bridge Daemon
+### Signal bridge
 
-`scripts/execution/signal_bridge.py` (`run_daemon()`) reads LIVE signals from the
-lifecycle, **checks `halt_state.json` before every cycle (cannot be skipped)**, sizes
-via `meta_portfolio` risk parity (never independent per-signal), logs fills to
-`data/execution/fills_*.jsonl` (fill-conditional IC), and rolls up
-`data/execution/daily_pnl.json` — the file the kill-switch reads back, closing the
-loop. **Dry-run by default**; live requires an explicit `mode=live` + a healthy
-kill-switch. The one-shot `run_bridge()` and `scripts/execution/hyperliquid_client.py`
-(order placement, position/account queries) remain available.
+`scripts/execution/signal_bridge.py` reads LIVE signals from the lifecycle, **checks
+`halt_state.json` before every cycle (cannot be skipped)**, sizes via `meta_portfolio` risk
+parity (never independent per-signal), logs fills to `data/execution/fills_*.jsonl` for
+fill-conditional IC, and rolls up `data/execution/daily_pnl.json` — the file the
+kill-switch reads back, closing the loop. **Dry-run by default**; live requires an explicit
+`mode=live` plus a healthy kill-switch.
 
 ```bash
 nat bridge status|once [--dry-run]|start|stop
 ```
 
-### Approval-Evidence Visualization
+> **No live capital before G8 and a healthy kill-switch.** This is not configurable.
+
+### Execution primitives
+
+`scripts/execution/rebalance.py` provides hysteresis bands (Constantinides no-trade
+boundary, "edge" and "full" modes) and TWAP/VWAP slicing. **Slicing ships as a primitive
+with no performance claim** — it exists to reduce market impact, and NAT's cost model has
+no impact term, so it measures as exactly zero. That is not a win left on the table; it is
+unpriceable until X-3 has fill data.
+
+### Approval-evidence visualization
 
 ```bash
 nat viz paper <signal>      # cumulative P&L, IC decay, the 5-criterion G8 scorecard
 nat viz portfolio --tab N   # P&L / exposure / cross-signal correlation (<0.35) / risk
-nat viz features|algorithm  # per-feature and per-algorithm terminal views (z/IC/sparkline)
+nat viz features|algorithm  # per-feature and per-algorithm terminal views
 ```
 
 ### Observability
 
-A pure-stdlib Prometheus exporter (`scripts/monitoring/metrics_exporter.py`, `:9094`)
-turns lifecycle/paper/live-PnL state (SQLite/JSON, which Grafana can't scrape
-directly) into gauges (`nat_lifecycle_signals{state}`, `nat_paper_sharpe{signal}`,
-`nat_live_cum_pnl_pct`, …), feeding three auto-provisioned Grafana dashboards
-(lifecycle funnel, paper performance, live P&L). The agent dashboard gains a
-lifecycle tab (`/api/lifecycle`).
+A pure-stdlib Prometheus exporter (`scripts/monitoring/metrics_exporter.py`, `:9094`) turns
+lifecycle/paper/live-PnL state — SQLite and JSON, which Grafana cannot scrape directly —
+into gauges (`nat_lifecycle_signals{state}`, `nat_paper_sharpe{signal}`,
+`nat_live_cum_pnl_pct`, …), feeding three auto-provisioned Grafana dashboards.
 
 ---
 
 ## Web Dashboard & API
 
-### Next.js Frontend (port 3001)
+### Next.js frontend (port 3001)
 
 ```bash
-cd web && npm run dev                  # development server
+cd web && npm run dev
 ```
 
 | Page | URL | Description |
 |------|-----|-------------|
 | Homepage | `/` | System overview |
-| Hypothesis Explorer | `/explorer` | Browse all hypotheses, filter by status/agent/generator |
+| Hypothesis Explorer | `/explorer` | Browse hypotheses, filter by status/agent/generator |
 | Hypothesis Detail | `/explorer/{id}` | Gate results, math derivation, feature data |
-| IC Heatmap | `/heatmap` | Feature × horizon IC matrix visualization |
+| IC Heatmap | `/heatmap` | Feature × horizon IC matrix |
 | Graveyard | `/graveyard` | Failed hypotheses with failure analysis |
-| Research Network | `/network` | Graph visualization of hypothesis relationships |
+| Research Network | `/network` | Graph of hypothesis relationships |
 | Signal Table | `/signals` | Active validated signals |
-| Math Viewer | `/math` | LaTeX math rendering |
-
-Components: hypothesis table, IC bar chart, cycle ring, gate funnel, agent cards, generator bars, weight treemap, signal table, filter bar, failure pie, near-miss analysis.
+| Math Viewer | `/math` | LaTeX rendering |
 
 ### Rust REST API (port 3000)
 
 ```bash
-nat api start                          # launch API server
+nat api start
 ```
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/research/hypotheses` | GET | Paginated list, filter by `?agent=`, `?generator=`, `?status=` |
-| `/api/research/hypotheses/:id` | GET | Full detail (gates, math, thresholds) |
-| `/api/research/cycles` | GET | Cycle summaries, filter by `?agent=` |
-| `/api/research/signals` | GET | Registered signals only |
-| `/api/research/stats` | GET | Aggregate counts by status, agent, generator |
-| `/api/research/heatmap` | GET | Feature × horizon IC matrix |
-| `/health` | GET | Health check |
+| Endpoint | Description |
+|----------|-------------|
+| `/api/research/hypotheses` | Paginated list; `?agent=`, `?generator=`, `?status=` |
+| `/api/research/hypotheses/:id` | Full detail (gates, math, thresholds) |
+| `/api/research/cycles` | Cycle summaries; `?agent=` |
+| `/api/research/signals` | Registered signals only |
+| `/api/research/stats` | Aggregate counts by status, agent, generator |
+| `/api/research/heatmap` | Feature × horizon IC matrix |
+| `/health` | Health check |
 
-### Agent Dashboard (port 8060)
+Config: `NAT_RESEARCH_DIR` selects the research data directory.
+
+### Agent dashboard (port 8060)
 
 ```bash
-nat agent dashboard                    # stdlib HTTP, dark theme, 10s auto-refresh
+nat agent dashboard        # stdlib HTTP, dark theme, 10s auto-refresh
 ```
 
-Panels: agent status, registry table, (signal × gate) IC heatmap, graveyard, queue, generator stats, cache statistics.
-
----
-
-## Polymarket Integration
-
-`scripts/polymarket/` — prediction market analysis module:
-
-| Module | Purpose |
-|--------|---------|
-| `client.py` | Polymarket API client |
-| `market_scanner.py` | Market opportunity scanner |
-| `probability_model.py` | Prediction modeling |
-| `edge_detector.py` | Edge detection in prediction markets |
-| `backtest.py` | Strategy backtesting |
-
----
-
-## Entropy-Adaptive Market Making (EAMM)
-
-`scripts/eamm/` — market making strategy that adapts quotes based on entropy regime:
-
-```bash
-nat eamm run                           # simulation
-nat eamm regime                        # regime analysis
-nat eamm backtest                      # backtesting
-```
-
-| Module | Purpose |
-|--------|---------|
-| `simulator.py` | MM simulation engine |
-| `features.py` | Feature engineering for MM |
-| `labels.py` | Label generation (realized vs potential P&L) |
-| `train.py` | Model training loop |
-| `evaluate.py` | Evaluation metrics |
-| `backtest.py` | Backtesting harness |
-| `regime_analysis.py` | Regime-conditioned analysis |
-| `export.py` | Model export |
+Panels: agent status, registry table, (signal × gate) IC heatmap, graveyard, queue,
+generator stats, cache statistics, and a lifecycle tab (`/api/lifecycle`).
 
 ---
 
 ## Config Swarm & Evolutionary Optimization
 
-NAT includes a three-tier cloud deployment architecture for automated parameter optimization:
+### Tier 1 — Continuous cloud + observability
 
-### Tier 1: Continuous Cloud + Observability
+Docker stack with Prometheus (5 s scrape, 90 d retention), Grafana, Caddy HTTPS reverse
+proxy, PostgreSQL state persistence. All services health-checked.
 
-Docker stack with Prometheus metrics (5s scrape, 90d retention), Grafana dashboards, Caddy HTTPS reverse proxy, PostgreSQL state persistence. All services health-checked.
+### Tier 2 — Config swarm
 
-### Tier 2: Config Swarm
-
-Shared ingestor writes Parquet once; N evaluators read and score configs in parallel across a ~35-dimensional parameter space.
+A shared ingestor writes Parquet once; N evaluators read and score configs in parallel over
+a ~35-dimensional parameter space.
 
 ```bash
 nat swarm run --instances 8          # parallel config evaluation
-nat swarm status                     # running evaluations
-nat swarm results                    # ranked fitness table
-nat swarm best                       # top config
-nat swarm generate                   # sample new config
+nat swarm {status,results,best,generate}
 ```
 
-| Component | File | Function |
-|-----------|------|----------|
-| `parquet_reader.py` | Data loading | Time-windowed reads from latest date |
-| `config_generator.py` | Sampling | Random, grid, or Optuna trial generation |
-| `evaluator.py` | Scoring | 5 algorithms → ensemble → fitness (Sharpe, IC, DD) |
-| `orchestrator.py` | Orchestration | ProcessPoolExecutor, ranking, export |
+| Component | Function |
+|-----------|----------|
+| `parquet_reader.py` | Time-windowed reads from the latest available date |
+| `config_generator.py` | Random, grid, or Optuna trial generation |
+| `evaluator.py` | Algorithms → ensemble → fitness (Sharpe, IC, drawdown, turnover) |
+| `orchestrator.py` | ProcessPoolExecutor, ranking, export |
 
-Config: `config/swarm_ranges.toml` (15 algo + 5 ensemble + 8 trading + 7 feature selection params).
+Config: `config/swarm_ranges.toml` (15 algo + 5 ensemble + 8 trading + 7 feature-selection
+params).
 
-### Tier 3: Evolutionary Optimization (Optuna)
-
-Optuna-based optimizer with CMA-ES (continuous 35D), TPE (mixed), and NSGA-II (multi-objective) samplers. Walk-forward train/test split with overfit detection guard rails.
+### Tier 3 — Evolutionary optimization (Optuna)
 
 ```bash
-nat evolve start --trials 5000 --sampler cma    # launch optimization
+nat evolve start --trials 5000 --sampler cma    # CMA-ES over the continuous 35D space
 nat evolve start --sampler nsga2                # multi-objective Pareto
-nat evolve status                                # trial count, best Sharpe
-nat evolve best --top 5                          # top configs
-nat evolve pareto                                # Pareto front (NSGA-II)
-nat evolve export                                # export best config to TOML
+nat evolve {status,best,pareto,export}
 ```
 
-**Guard Rails:**
-- Walk-forward OOS evaluation (train/test never overlap)
-- IS/OOS overfit detection (ratio > 3.0 triggers penalty)
-- Deflated Sharpe ratio (Bailey & Lopez de Prado, 2014)
-- Hard constraints: signal count > 50/day, turnover < 100/day, OOS Sharpe > 0
-- MedianPruner for early stopping of unpromising trials
+**Guard rails:** walk-forward OOS evaluation (train/test never overlap); IS/OOS overfit
+detection (ratio > 3.0 penalized); deflated Sharpe (Bailey & López de Prado, 2014); hard
+constraints (signal count > 50/day, turnover < 100/day, OOS Sharpe > 0); MedianPruner for
+early stopping.
 
-**Multi-Objective (NSGA-II):** Produces a Pareto front optimizing Sharpe (maximize), drawdown (minimize), and IC (maximize) simultaneously. User selects operating point based on risk appetite.
-
-**Distributed:** SQLite for single-machine, PostgreSQL for multi-machine studies. Optuna dashboard at http://localhost:8070.
+SQLite for single-machine, PostgreSQL for distributed studies. Dashboard on `:8070`.
 
 ---
 
-## The `nat` CLI (~280 commands)
+## Other Modules
 
-`nat` is a unified research terminal (~5,000 lines) that replaces the Makefile for production use. All commands follow the pattern `nat <command> [subcommand] [flags]`.
+| Module | Path | Purpose |
+|---|---|---|
+| **EAMM** | `scripts/eamm/` | Entropy-adaptive market making — simulator, features, labels, training, regime analysis (`nat eamm run|regime|backtest`) |
+| **Polymarket** | `scripts/polymarket/` | Prediction-market client, scanner, probability model, edge detector, backtest |
+| **Hypothesis suite** | `rust/ing/src/hypothesis/` | H1–H5 structural tests; decision matrix in `final_decision.rs` (0–1 pass = NOGO, 2–3 = PIVOT, 4–5 = GO) |
+| **Experiments** | `scripts/experiment/` | Experiment monitoring (`nat exp {start,status,analyze,dashboard,tunnel}`) |
+| **Tournament** | — | Head-to-head algorithm comparison (`nat tournament`) |
 
-### Command Reference
+---
 
-#### Ingestor Control
+## The `nat` CLI
+
+`nat` is the primary interface: **340 commands across 72 groups**.
+
+**[`docs/commands.md`](docs/commands.md) is the full reference — and it is generated, not
+written.** `scripts/ops/gen_commands_doc.py` regenerates it from the live argparse tree.
+Do not hand-edit it, and do not restate it here: it was hand-maintained until 2026-08-07,
+by which point 26 groups were missing and the headline count was stale by 80. A reference
+that disagrees with the CLI is worse than no reference, because it is trusted.
+
 ```bash
-nat doctor                 # ingestion preflight (data-dir ownership/writability, binary, disk)
-nat start                  # production launch (tmux + watchdog + dashboard + logging)
-nat stop                   # graceful shutdown
-nat status                 # health check (JSON-compatible; use `nat --json status`)
-nat log                    # tail latest log
-nat monitor                # live feature probe (show_features, ~10Hz, no ingestion); `nat monitor tui` = dashboard
-nat dashboard              # start/show dashboard at :8050
-nat health                 # system health overview
+nat help                     # curated usage guide
+nat commands                 # structured list of every command
+nat commands --json          # machine-readable source of truth
 ```
 
-#### Research Agents
-```bash
-nat agent {start,stop,once,status,queue,registry,graveyard,report,dashboard}
-nat mf_agent {start,stop,once,status,queue,registry,graveyard,report}
-nat macro_agent {start,stop,once,status,queue,registry,graveyard,report}
-nat meta_agent {start,stop,once,status,portfolio,correlation,budget,report}
-```
+Maturity tags (`[PRELIM]`, …) appear where a group declares one. **Absence of a tag is not
+a claim of maturity.**
 
-#### Lifecycle, Promotion & Risk Automation
-```bash
-nat lifecycle {status,list,history,approve,reject,seed}   # signal promotion state machine
-nat promotion {status,once,start,stop}                    # auto-promotion daemon (G4/G8 gates)
-nat risk {status,resume,start,stop}                        # kill-switch daemon (halt on breach)
-nat gap {status,check,start,stop}                          # data-gap alert daemon
-nat bridge {status,once,start,stop}                        # signal-bridge daemon (LIVE execution)
-nat viz {features,algorithm,paper,portfolio}               # terminal viz + approval evidence
-nat viz render --tf {1m,5m,15m} [N]                        # paged PNG viewer (overview / Nth window; --features, --open)
-nat viz3d | nat mesh --tf {1m,5m,15m} [N]                  # interactive 3D feature-surface (Plotly HTML; --open)
-```
+### The commands you actually need first
 
-#### Data & Validation
 ```bash
-nat data validate [<file.parquet>] [--json]   # validate a dir or one file → PASS/WARN/FAIL (nonzero on FAIL)
-nat data schema                                # scan parquet schema & vector coverage
-nat data explore                               # launch Jupyter on the feature data
-nat 15m viz [--no-open]                        # all-features 15m snapshot PNG (auto-opens by default)
-```
+# ingestion
+nat doctor · nat start · nat stop · nat status · nat log · nat gap status
 
-#### Analysis
-```bash
-nat spannung [--symbol SYM]              # IC grid search
-nat spannung regime [--symbol SYM]       # regime screener
-nat spannung spectral [--symbol SYM]     # spectral analysis
-nat profile [--symbol SYM]               # regime profiling
-nat profile scalp [--symbol SYM]         # walk-forward profiler
-nat scan [--symbol SYM]                  # signal discovery
-nat macro [--symbol SYM]                 # macro regime analysis
-nat kalman analysis [--symbol SYM]       # Kalman filter analysis
-```
+# data
+nat data validate · nat data schema · nat viz render --tf 15m · nat viz3d
 
-#### Swarm & Evolve
-```bash
-nat swarm run [--instances N]            # parallel config evaluation
-nat swarm {status,results,best,generate} # swarm management
-nat evolve start [--trials N --sampler cma|tpe|nsga2]
-nat evolve {status,best,pareto,export}   # optimization management
-```
+# discovery
+nat process list · nat process run <name> --symbol BTC · nat xs rank · nat xs ledger
 
-#### Algorithms
-```bash
-nat algorithm list                       # list all 25 algorithms
-nat algorithm evaluate {--all|--algorithm NAME}
-nat algorithm config                     # TOML config
-nat backtest algorithm --algorithm NAME --symbol SYM
-```
+# agents
+nat agent start · nat agent status · nat agent dashboard
 
-#### Alpha Pipeline
-```bash
-nat alpha_pipeline_start                 # start 9-step pipeline
-nat alpha_pipeline_resume [--force-gate] # resume with optional gate override
-nat alpha_pipeline_status                # current step
-nat alpha_pipeline_gates                 # gate thresholds
-nat alpha_pipeline_step N                # run specific step
-nat screen [--symbol SYM]               # feature screening (step 1)
-```
+# promotion
+nat lifecycle status · nat promotion status · nat risk status · nat bridge status
 
-#### Backtesting
-```bash
-nat backtest [--symbol SYM]              # generic backtest
-nat backtest algorithm --algorithm NAME  # algorithm-specific
-nat backtest ml [--symbol SYM]           # ML prediction backtest
-nat backtest funding                     # funding reversion
-nat backtest list                        # list experiments
-```
-
-#### OOS Validation
-```bash
-nat oos30                                # all 5 winning algorithms
-nat 15m                                  # 15-minute smoke test
-nat 15m offline                          # offline smoke test
-nat trade viz                            # trade visualization
-```
-
-#### Discovery & IT Engine
-```bash
-nat discovery {start,once,status,stop}   # continuous sweep daemon
-nat it_engine {start,stop,status}        # information-theory engine
-```
-
-#### Cascade Validation
-```bash
-nat cascade {start,once,status,stop,report}
-```
-
-#### Models
-```bash
-nat model train                          # baseline ML training
-nat model train gmm                      # GMM regime model
-nat model list                           # list trained models
-nat model score                          # prediction scoring
-nat model serve                          # FastAPI model server
-```
-
-#### Clusters
-```bash
-nat cluster {analyze,gmm,all,quality,explore,hmm}
-```
-
-#### Experiments
-```bash
-nat exp {start,stop,status,check,midweek,analyze,dashboard,tunnel}
-```
-
-#### Build & Dev
-```bash
-nat build [debug|api|clean|fmt|lint|check]
-nat test [verbose|hypotheses|validate|api|redis|integration|backtest|cluster|pipeline|dashboard|serving|eamm]
-```
-
-#### Infrastructure
-```bash
-nat api start                            # REST API server (port 3000)
-nat api alerts                           # Telegram alert service
-nat api serve all                        # API + alerts
-nat docker {build,up,down,logs}          # Docker orchestration
-nat config {show,get,validate}           # configuration management
-nat log agent                            # agent log tail
-nat reports [latest|show]                # report management
-nat commands                             # list all commands
-nat help                                 # usage help
+# build & test
+nat build · nat test · nat test validate
 ```
 
 ---
@@ -1280,168 +1082,137 @@ nat help                                 # usage help
 
 | File | Purpose |
 |------|---------|
-| `config/ing.toml` | Ingestor: WebSocket URL, symbols, emission interval (100ms), output format |
-| `config/agent.toml` | Agent: cycle interval, 5-gate thresholds, FDR q, generators, decay monitoring, promotion |
-| `config/alpha.toml` | Alpha pipeline: gate thresholds G1-G8, step parameters, symbols |
+| `config/ing.toml` | Ingestor: WebSocket URL, symbols, emission interval (100 ms), output format |
+| `config/costs.toml` | **Fees, rebates, slippage, venue tier ladders — single source of truth** |
+| `config/agent.toml` | Agents: cycle interval, gate thresholds, FDR q, generators, decay, promotion |
+| `config/alpha.toml` | Alpha pipeline: gate thresholds G1–G8, step parameters, symbols |
 | `config/pipeline.toml` | Pipeline orchestration: ingestion duration, analysis thresholds |
 | `config/discovery.toml` | Discovery orchestrator: sweep config, training, backtesting |
-| `config/algorithms.toml` | Algorithm parameters: per-algorithm constructor kwargs |
-| `config/swarm_ranges.toml` | Swarm parameter ranges (~35D: algo, ensemble, trading, feature selection) |
-| `config/costs.toml` | Fee parameters: taker/maker bps, slippage (single source of truth) |
+| `config/algorithms.toml` | Per-algorithm constructor kwargs |
+| `config/swarm_ranges.toml` | Swarm parameter ranges (~35D) |
 | `config/it_engine.toml` | IT engine: buffer size, KSG k, horizons, cost thresholds |
 | `config/kalman.toml` | Kalman filter parameters |
-| `config/hypothesis_testing.toml` | Hypothesis test parameters (H1-H5) |
+| `config/hypothesis_testing.toml` | Hypothesis test parameters (H1–H5) |
 | `config/symbols.toml` | Tradeable symbol list |
-| `config/risk.toml` | Kill-switch daemon: poll interval, paths (thresholds imported from `alpha.toml`) |
-| `config/ops.toml` | Gap-alert daemon: gap threshold, poll interval, watched data dirs |
+| `config/llm.toml` | LLM client: model, endpoint, API key reference |
+| `config/risk.toml` | Kill-switch: poll interval, paths (thresholds imported from `alpha.toml`) |
+| `config/ops.toml` | Gap-alert: gap threshold, poll interval, watched data dirs |
 | `config/promotion.toml` | Promotion daemon: poll interval, ≥7-clean-day guard, paths |
-| `config/execution.toml` | Signal-bridge daemon: mode (dry-run default), account value, paths |
+| `config/execution.toml` | Signal bridge: mode (dry-run default), account value, paths |
 | `config/monitoring.toml` | Metrics exporter: port, refresh interval, data paths |
 
-### Environment Variables
+### Environment variables
 
 | Variable | Purpose |
 |----------|---------|
-| `RUST_LOG` | Rust logging level (e.g., `info`, `debug`) |
+| `RUST_LOG` | Rust logging level (`info`, `debug`, …) |
 | `REDIS_URL` | Redis connection URL |
-| `ING_DASHBOARD_ENABLED` | Enable ingestor dashboard |
-| `NAT_RESEARCH_DIR` | Research data directory for API |
-| `TELEGRAM_BOT_TOKEN` | Telegram alert bot token |
-| `TELEGRAM_CHAT_ID` | Telegram chat for alerts |
+| `ING_DASHBOARD_ENABLED` | Enable the ingestor dashboard |
+| `ING_PROMETHEUS_ADDR` | Bind address for the metrics endpoint |
+| `NAT_RESEARCH_DIR` | Research data directory for the API |
+| `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Alert routing |
 
 ---
 
 ## Testing
 
+The full suite is **4,408 passing, 0 failed** as of 2026-08-07.
+
 ```bash
 # Rust
-make test                               # unit tests (cargo test --package ing)
-make test_verbose                       # with --nocapture
+nat test                                # cargo test --package ing
+nat test verbose                        # with --nocapture
 cd rust && cargo test -- test_name      # single test
 
 # Python
-pytest scripts/tests/                   # full suite (70+ test files)
-pytest scripts/algorithms/tests/ -v     # 600+ algorithm tests (unit + integration + smoke)
-make test_agent                         # 350 agent tests (unit + integration + logging + research output)
-make test_pipeline                      # pipeline state machine
-make test_dashboard                     # dashboard endpoints
-make test_eamm                          # EAMM module
+pytest scripts/tests/                    # main suite
+pytest scripts/algorithms/tests/ -v      # algorithm unit + integration + smoke
+pytest scripts/tests/test_agent_*.py     # agent tests
+pytest scripts/tests/test_signal_lifecycle.py scripts/tests/test_lifecycle_cli.py
+pytest scripts/tests/test_bar_level_dispatch.py     # algorithm dispatch/conformance
 
-# Swarm & Evolve
-pytest scripts/tests/test_tier3_optuna.py -v    # 38 Optuna optimizer tests
-pytest scripts/tests/test_nat_cli.py::TestEvolve # 9 evolve CLI tests
+# Live validation & smoke
+nat test validate                        # 4 binaries against the live API
+nat 15m                                  # 15-minute live smoke test
+nat 15m offline                          # offline smoke test on parquet
+nat validate skeptical                   # 20+ statistical tests
 
-# Validation
-make validate                           # live API validation (4 binaries against Hyperliquid)
-nat validate skeptical                  # 20+ statistical tests (FDR, bootstrap, permutation)
-
-# Smoke tests
-nat 15m                                 # 15-minute live smoke test
-nat 15m offline                         # offline smoke test on parquet data
-
-# Data sufficiency (run before ML training)
+# Data sufficiency (before ML training)
 python scripts/check_data_sufficiency.py --symbol BTC --data-dir data/features
-
-# Wave 1 decision gate evaluation
-python scripts/evaluate_wave1_gate.py --data-dir data/features --symbols BTC,ETH,SOL
-
-# Wave 2 decision gate evaluation
-python scripts/evaluate_wave2_gate.py --data-dir data/features
-
-# ML algorithm verification (all phases)
-bash scripts/run_ml_verification.sh
-
-# ML-specific parametrized tests only
-cd scripts && python -m pytest algorithms/tests/test_ml_algorithms.py -v
-
-# Constraint validation only
-cd scripts && python validate_all_algorithms.py
 ```
 
-### Hypothesis Testing (H1-H5)
+### Testing doctrine
 
-Five structural hypotheses validated before deployment:
+Two rules are non-negotiable, and both were bought with real failures:
 
-| # | Hypothesis | Status |
-|---|-----------|--------|
-| H1 | Whale flow predicts returns | Confirmed |
-| H2 | Entropy × whale interaction | Confirmed |
-| H3 | Liquidation cascade prediction | Confirmed |
-| H4 | Concentration → volatility | Confirmed |
-| H5 | Trend persistence indicator | Confirmed |
+1. **Planted (synthetic) test before any real-data use.** Level-1 planted tests caught
+   three estimator bugs that no amount of real-data eyeballing found. The test is written
+   *first*, and it fails first.
+2. **Real-parquet smoke before commit.** "Looks right" is not "is right"; correctness in
+   alpha work is enforced by gates, not by inspection.
 
-Decision matrix in `hypothesis/final_decision.rs`: 0-1 pass = NOGO, 2-3 = PIVOT, 4-5 = GO.
+A conformance test that silently validates a subset is worse than one that fails — a real
+incident here: XS processes were `@register`-ed but never imported, so the registry
+conformance test iterated a set that excluded the very units it should have validated.
 
 ---
 
 ## Docker
 
 ```bash
-make docker_build                      # build all images
-make docker_up                         # start full stack
-make docker_down                       # stop
-make docker_logs                       # tail logs
+nat docker build · nat docker up · nat docker down · nat docker logs
 ```
-
-### Services
 
 | Service | Port | Description |
 |---------|------|-------------|
-| **redis** | 6379 | Pub/sub, caching (256MB max, LRU) |
+| **redis** | 6379 | Pub/sub, caching (256 MB max, LRU) |
 | **ingestor** | 8080 | Market data collection + real-time dashboard |
 | **api** | 3000 | REST/WebSocket endpoints |
 | **alerts** | — | Telegram alert service |
-| **kill-switch** | — | Risk kill-switch daemon (halts on PnL/IC breach) |
-| **gap-alert** | — | Data-gap alert daemon (pages on ingestion stall) |
-| **promotion** | — | Signal promotion daemon (lifecycle automation) |
-| **signal-bridge** | — | LIVE signal execution daemon (`depends_on` kill-switch healthy) |
+| **kill-switch** | — | Risk kill-switch daemon |
+| **gap-alert** | — | Data-gap alert daemon |
+| **promotion** | — | Signal promotion daemon |
+| **signal-bridge** | — | LIVE execution daemon (`depends_on` kill-switch healthy) |
 | **metrics-exporter** | 9094 | Lifecycle/paper/live-P&L state → Prometheus gauges |
-| **web** | 3001 | Next.js frontend (depends on api) |
+| **web** | 3001 | Next.js frontend |
 | **prometheus** | 9090 | Metrics collection (90-day retention) |
-| **grafana** | 3002 | Pre-configured dashboards (anonymous access) |
+| **grafana** | 3002 | Auto-provisioned dashboards (anonymous access) |
 | **postgres** | 5432 | State persistence + Optuna study storage |
-| **optuna-dashboard** | 8070 | Live optimization history, Pareto fronts |
+| **optuna-dashboard** | 8070 | Optimization history, parameter importance, Pareto fronts |
 | **caddy** | 80/443 | HTTPS reverse proxy with auto-TLS |
 
-### Observability
+**Ingestor metrics:** `ing_features_emitted_total`, `ing_errors_total`,
+`ing_feature_latency_seconds`, `ing_update_latency_seconds`.
+**Business-state metrics** (`:9094`): `nat_lifecycle_signals{state}`,
+`nat_paper_sharpe{signal}`, `nat_paper_max_drawdown_bps{signal}`, `nat_live_cum_pnl_pct`.
 
-The Docker stack includes Prometheus + Grafana for production monitoring.
-
-**Metrics exposed by the ingestor:**
-- `ing_features_emitted_total` — counter, per symbol
-- `ing_errors_total` — counter, per symbol + error type
-- `ing_feature_latency_seconds` — histogram, feature compute time
-- `ing_update_latency_seconds` — histogram, WebSocket update processing time
-
-**Business-state metrics** (via the `metrics-exporter` service on `:9094`, which turns SQLite/JSON state into Prometheus gauges):
-- `nat_lifecycle_signals{state}` — signals by lifecycle state (the funnel)
-- `nat_paper_sharpe{signal}`, `nat_paper_max_drawdown_bps{signal}` — per-signal paper metrics
-- `nat_live_cum_pnl_pct`, `nat_live_last_daily_pnl_pct`, `nat_live_pnl_days` — live P&L
-
-**Access:**
-- Grafana: http://localhost:3002 (no login required) — auto-provisioned dashboards: **NAT Overview** (ingestor), **NAT Lifecycle Funnel**, **NAT Paper Performance**, **NAT Live P&L**
-- Prometheus: http://localhost:9090
-- Optuna Dashboard: http://localhost:8070 (optimization history, parameter importance, Pareto fronts)
-
-**Environment variables:**
-- `ING_PROMETHEUS_ADDR` — bind address for metrics endpoint (e.g. `0.0.0.0:9090`)
-- `ING_DASHBOARD_ENABLED` — enable real-time dashboard (`true`/`1`)
+Grafana dashboards: **NAT Overview**, **NAT Lifecycle Funnel**, **NAT Paper Performance**,
+**NAT Live P&L**.
 
 ---
 
 ## Multi-Machine Setup
 
-The Rust ingestor runs on a separate machine (`su-35`) for low-latency data collection. The agent daemons and analysis tools run on the research machine, reading Parquet files from `data/features/`.
+The Rust ingestor runs on a separate machine (`su-35`) for low-latency collection. Agents
+and analysis run on the research machine, reading Parquet from `data/features/`.
 
 ```
-┌──────────────────┐         ┌──────────────────┐
-│  su-35 (ingestor)│         │ research machine  │
-│                  │  rsync  │                   │
-│  nat start       │ ──────▶ │  nat agent start  │
-│  Hyperliquid WS  │  data/  │  nat spannung     │
-│  Parquet output  │         │  nat oos30         │
-└──────────────────┘         └──────────────────┘
+┌──────────────────┐         ┌──────────────────────┐
+│  su-35 (ingestor)│         │  research machine    │
+│                  │  rsync  │                      │
+│  nat start       │ ──────▶ │  nat process run     │
+│  Hyperliquid WS  │  data/  │  nat agent start     │
+│  Parquet output  │         │  nat xs rank         │
+└──────────────────┘         └──────────────────────┘
 ```
+
+> **Hard rule: zero su-35 contact until the clean-data streak completes.** The ingestor is
+> the critical dependency for the streak milestone; deploy wiring and validation to the T0b
+> cloud box instead (`nat deploy cloud <ip> --dry-run` first). Verify streak state locally
+> with `nat gap status` — it reads local files and does not touch su-35.
+
+Systemd units for the cloud box live in `deploy/`. Note `StartLimitIntervalSec` belongs in
+`[Unit]`, not `[Service]` — placed wrongly it silently fails to disable the restart limiter.
 
 ---
 
@@ -1449,201 +1220,194 @@ The Rust ingestor runs on a separate machine (`su-35`) for low-latency data coll
 
 ```
 nat/
-├── nat                            # Unified CLI (~5,000 lines, ~280 commands)
-├── Makefile                       # Build/dev targets (compat, prefer nat CLI)
-├── FEATURES.md                    # 209-feature manifest with formulas
-├── CLAUDE.md                      # Architecture guide
+├── nat                            # Unified CLI (340 commands, 72 groups)
+├── FEATURES.md                    # Feature manifest with formulas
+├── CLAUDE.md                      # Architecture guide + guardrails
 │
-├── rust/                          # Rust workspace
-│   ├── ing/src/                   # Ingestor crate
+├── rust/                          # Cargo workspace (ing-types → ing-features → ing; + api)
+│   ├── ing-types/src/             # Shared types (OrderBook, TradeBuffer, MarketContext)
+│   ├── ing-features/src/          # Feature computation (21 categories, 239 features)
+│   ├── ing/src/                   # Ingestor binary
 │   │   ├── main.rs                # tokio::select! biased loop
 │   │   ├── ws/                    # Hyperliquid WebSocket client
 │   │   ├── state/                 # OrderBook, TradeBuffer, MarketContext
-│   │   ├── features/              # 15 feature modules (209 features)
 │   │   ├── output/                # Parquet writer (Arrow, hourly rotation)
 │   │   ├── dashboard/             # Real-time monitoring (Axum WS)
-│   │   ├── hypothesis/            # H1-H5 hypothesis tests
+│   │   ├── hypothesis/            # H1–H5 hypothesis tests
 │   │   ├── ml/                    # GMM regime classification
-│   │   └── bin/                   # Validation binaries (7 tools)
+│   │   └── bin/                   # Validation binaries
 │   └── api/src/                   # API crate (Axum, port 3000)
-│       ├── routes/                # REST endpoints (research, health, whales, regime)
-│       └── bin/                   # Alert service binary
 │
-├── scripts/                       # Python analysis & ML
+├── scripts/                       # Python research layer
+│   ├── processes/                 # PROC layer — 15 registered processes + registry
+│   ├── xs/                        # Class-3 cross-sectional layer
+│   │   ├── features.py            # per-pair scores (XS-2)
+│   │   ├── rotation.py            # top-k rotation (XS-6)
+│   │   ├── capacity.py            # tradability / admission floors (XS-5)
+│   │   ├── breakeven.py           # wide-pair indifference exponent (B-5a)
+│   │   └── trajectory.py          # standing t-stat trajectory (XS-10)
 │   ├── agent/                     # Autonomous research agents
-│   │   ├── base.py                # ResearchAgent ABC (full cycle loop, FDR, chaining)
-│   │   ├── daemon.py              # MicrostructureAgent (tick-level)
-│   │   ├── mf_daemon.py           # MediumFrequencyAgent (1min-1h)
-│   │   ├── macro_daemon.py        # MacroAgent (1h-24h)
-│   │   ├── meta_daemon.py         # MetaAgent (orchestrator)
-│   │   ├── runner.py              # MicrostructureRunner (5-gate executor)
-│   │   ├── mf_runner.py           # MediumFrequencyRunner (4-gate)
-│   │   ├── macro_runner.py        # MacroRunner (4-gate)
-│   │   ├── hypothesis_queue.py    # SQLite-backed priority queue
+│   │   ├── base.py                # ResearchAgent ABC (cycle loop, FDR, chaining)
+│   │   ├── daemon.py / mf_daemon.py / macro_daemon.py / meta_daemon.py
+│   │   ├── runner.py / mf_runner.py / macro_runner.py
+│   │   ├── hypothesis_queue.py    # SQLite priority queue
 │   │   ├── research_output.py     # Structured JSON emitter (LaTeX math)
 │   │   ├── cache.py               # SHA-256 computation cache (7-day TTL)
-│   │   ├── meta_portfolio.py      # Risk parity portfolio optimization
-│   │   └── generators/            # Hypothesis generators
-│   │       ├── systematic.py      # Exhaustive feature × gate × threshold
-│   │       ├── spectral.py        # PSD/OU anomaly detection
-│   │       ├── regime.py          # HMM transition detection
-│   │       ├── cross_asset.py     # Lead-lag probing (BTC/ETH/SOL)
-│   │       ├── recycler.py        # Graveyard re-evaluation
-│   │       ├── it_discovery.py    # IT engine integration (MI/CMI/II)
-│   │       └── ensemble.py        # Ensemble prediction aggregation
-│   │
-│   ├── alpha/                     # Alpha signal pipeline (9 steps)
-│   │   ├── alpha_pipeline.py      # State machine orchestrator
-│   │   ├── screener.py            # FDR-controlled feature screening
-│   │   ├── combiner.py            # Signal combination
-│   │   ├── portfolio.py           # Portfolio assembly
-│   │   ├── regime_filter.py       # HMM regime conditioning
-│   │   ├── multi_freq.py          # Multi-frequency integration
-│   │   ├── paper_trader.py        # 3f liquidity paper trader
-│   │   ├── paper_trader_generic.py # Generic algo paper trader (17 algos)
-│   │   ├── paper_trader_surprise.py # Surprise signal paper trader
-│   │   └── deployer.py            # Live deployment executor
-│   │
-│   ├── algorithms/                # 25 microstructure algorithms
-│   │   ├── base.py                # MicrostructureAlgorithm ABC (bar_level support)
-│   │   ├── registry.py            # @register decorator, auto-discovery
-│   │   ├── runner.py              # AlgorithmRunner (tick + bar aggregation)
-│   │   ├── evaluate.py            # IC/drift evaluation harness
-│   │   ├── jump_detector.py       # Lee-Mykland jump test
-│   │   ├── funding_reversion.py   # Funding rate mean-reversion
-│   │   ├── optimal_entry.py       # SPRT on Kalman innovation
-│   │   ├── surprise_signal.py     # Entropy regime transition
-│   │   ├── change_point_detector.py  # CUSUM + Bayesian OCD
-│   │   ├── momentum_continuation.py  # LogReg momentum (ML, bar_level)
-│   │   ├── mean_reversion_detector.py # LightGBM reversion (ML, bar_level)
-│   │   ├── meta_labeling.py       # De Prado meta-label filter (ML, bar_level)
-│   │   ├── regime_state_machine.py # 6-state classifier (bar_level)
-│   │   ├── regime_conditioned_lgbm.py # Per-regime LightGBM (ML, bar_level)
-│   │   ├── knn_retrieval.py       # Mahalanobis KNN (bar_level)
-│   │   └── ...                    # 9 more algorithms
-│   │
-│   ├── analysis/                  # Signal analysis (11 modules)
-│   ├── backtest/                  # Backtesting engine (8 modules)
-│   ├── cluster_pipeline/          # Unsupervised clustering (13 modules)
-│   ├── cluster_quality/           # Quality metrics (5 modules)
-│   ├── data/                      # Data utilities (6 modules)
-│   ├── eamm/                      # Entropy-adaptive market making (10 modules)
-│   ├── execution/                 # Signal-bridge daemon (LIVE exec) + Hyperliquid client
-│   ├── risk/                      # Kill-switch daemon (publishes halt_state.json)
-│   ├── ops/                       # Gap-alert daemon (ingestion-freshness pager)
-│   ├── monitoring/                # Prometheus metrics exporter (lifecycle/paper/PnL gauges)
+│   │   ├── meta_portfolio.py      # Risk-parity portfolio optimization
+│   │   └── generators/            # systematic, spectral, regime, cross_asset, recycler, it_discovery
+│   ├── algorithms/                # 32 microstructure algorithms + registry + runner
+│   ├── alpha/                     # 9-step alpha pipeline
+│   ├── data/                      # Data utilities, fetch_candles.py, fetch_l2.py, state.py
+│   ├── execution/                 # Signal bridge, rebalance (bands/slicing), Hyperliquid client
+│   ├── risk/                      # Kill-switch daemon
+│   ├── ops/                       # Gap-alert daemon, gen_commands_doc.py
+│   ├── monitoring/                # Prometheus metrics exporter
+│   ├── it_engine/                 # Information-theory engine
+│   ├── cluster_pipeline/          # Unsupervised clustering
+│   ├── eamm/ · polymarket/ · swarm/ · experiment/ · backtest/ · analysis/ · viz/
 │   ├── signal_lifecycle.py        # Lifecycle state machine (nat.db, provenance-stamped)
-│   ├── promotion_daemon.py        # Auto-promotion daemon (G4/G8 gates)
-│   ├── provenance.py              # git-SHA + data-fingerprint stamping (T2)
-│   ├── experiment/                # Experiment monitoring (6 modules)
-│   ├── it_engine/                 # Information theory engine (6 modules)
-│   ├── polymarket/                # Prediction market integration (6 modules)
-│   ├── swarm/                     # Config swarm & optimization
-│   │   ├── parquet_reader.py      # Time-windowed data loading
-│   │   ├── config_generator.py    # 35D parameter space sampling
-│   │   ├── evaluator.py           # Fitness scoring (Sharpe, IC, DD)
-│   │   ├── orchestrator.py        # Parallel evaluation, ranking
-│   │   └── optuna_optimizer.py    # Optuna CMA-ES/TPE/NSGA-II optimizer
-│   │
-│   ├── utils/                     # Shared utilities
-│   │   ├── model_io.py            # ML model persistence (sklearn, LightGBM)
-│   │   └── online.py              # WelfordNormalizer, DerivativeBuffer
-│   ├── viz/                       # Visualization modules
-│   ├── workflows/                 # Validation workflows
-│   └── tests/                     # 70+ test files
+│   ├── promotion_daemon.py        # Auto-promotion daemon (G4/G8)
+│   ├── provenance.py              # git-SHA + data-fingerprint stamping
+│   └── tests/                     # Test suite
 │
 ├── web/                           # Next.js dashboard
-│   └── src/
-│       ├── app/                   # Pages (explorer, heatmap, graveyard, network, signals, math)
-│       ├── components/            # UI (hypothesis table, IC chart, gate funnel, agent cards)
-│       └── lib/                   # API client + WebSocket
-│
-├── config/                        # TOML configuration (12 files)
-├── data/                          # Output (parquet, state, research)
+├── config/                        # TOML configuration
+├── data/                          # features/ · candles/ · processes/ · research/ · risk/ · execution/
+├── docs/                          # OBJECTIVE, METHODOLOGY, PLAN, TASKS, GLOSSARY, contracts/, specs/, research/
 ├── reports/                       # Generated reports & analysis
-├── docs/                          # Architecture, research papers, specs
-├── docker/                        # Dockerfiles
-├── docker-compose.yml             # Full stack orchestration
-├── notebooks/                     # Jupyter notebooks
-├── models/                        # Trained ML models
-└── logs/                          # Ingestor & agent logs
+├── deploy/ · docker/ · docker-compose.yml
+├── models/ · notebooks/ · logs/
 ```
 
 ---
 
 ## Key Findings
 
-### Spannung Research Arc (Phases A-F)
+The complete record is [`docs/research/FINDINGS.md`](docs/research/FINDINGS.md). Findings
+are point-in-time; each block there states its test window. What follows is a reading path.
+
+### The central result
+
+Order-book imbalance carries **IC ≈ 0.45 at 1–5 s** on all three symbols, 24/7, in both
+volatility regimes, bootstrap CI width ~0.02. It is not noise and not symbol-specific.
+
+**And it cannot be monetized by any fill model tested.** Taker: the 1–5 s move (0.5–2 bps)
+is smaller than cost (~11 bps RT). Maker: conditioning on the directionally-correct
+mid-cross fill collapses IC from ~0.45 to ~0.03 / −0.06 / −0.03. **Adverse selection is
+structural, not a tuning problem.** This is the project's central result and its binding
+research question (gate Q5).
+
+### Spannung research arc
 
 | Finding | Evidence | Implication |
 |---------|----------|-------------|
-| OBI predicts 5s returns | IC = 0.19, 100% sign consistency across 5 folds | Structural signal, not overfit |
-| `ent_book_shape` is #1 regime gate | Independently #1 on BTC, ETH, and SOL | Universal microstructure property |
-| Signal replicates cross-symbol | KEEP on all 3 symbols, IC ordered by liquidity (SOL > ETH > BTC) | Genuine LOB effect |
-| Brown noise universality | PSD slope ~ −1.85 on all 3 symbols | Fractional Brownian motion microstructure |
-| 68s coherence dominance | Single peak at 0.015 Hz | Natural market-making cycle |
-| OU half-life orders by liquidity | BTC 7.3s > ETH 5.3s > SOL 3.3s | Per-symbol refresh rates |
-| `_last` features replicate, `_mean`/`_std` don't | Instantaneous = KEEP, aggregated = DROP | Time-domain spectral confirmation |
+| OBI predicts 5 s returns | IC 0.19, 100 % sign consistency across 5 folds | Structural, not overfit |
+| `ent_book_shape` is the #1 regime gate | Independently #1 on BTC, ETH, SOL | Universal microstructure property |
+| Signal replicates cross-symbol | KEEP on all 3; IC ordered by liquidity (SOL > ETH > BTC) | Genuine LOB effect |
+| Brown-noise universality | PSD slope ≈ −1.85 on all 3 symbols | Fractional Brownian microstructure |
+| 68 s coherence dominance | Single peak at 0.015 Hz | Natural market-making cycle |
+| OU half-life orders by liquidity | BTC 7.3 s > ETH 5.3 s > SOL 3.3 s | Per-symbol refresh rates |
+| `_last` replicates, `_mean`/`_std` don't | Instantaneous = KEEP, aggregated = DROP | Time-domain spectral confirmation |
+| Regime gating measurably works | `ent_book_shape` lifts imbalance IC +22 % (low-entropy quintile) | Conditioning is real |
+| Orthogonalization does **not** survive a holdout | 152-episode sweep; the control refuted the prior day's reading | A full-sample property, not a forward one |
+| Bar-scale momentum is **anti-persistent** | PROC-20; no band cell clears the bar | Reversion, not continuation |
 
-### Algorithm Sweep (17 Algorithms, 100min Horizon) — ⚠️ REFUTED 2026-07-30
+### The refutation record
 
-All five "winners" of this sweep were refuted by the Q4 alpha-skeptic kill gate
-(wrong-venue cost tier + a harness that never ran each algorithm's own logic; all
-REJECTED in the signal lifecycle — `docs/research/FINDINGS.md` §4.6). Historical claims:
+| § | Date | Result |
+|---|---|---|
+| **4.6** | 2026-07-30 | **Q4 kill gate: all five "winners" REFUTED, 5/5 KILL.** Wrong-venue cost tier (1.61 bps Binance VIP9) + a harness that never ran each algorithm's own entry logic. `jump_detector`'s c = 3.0 threshold fires ~13,900×/day — a noise filter, not jump detection. `optimal_entry`'s SPRT logic was never executed. `funding_reversion` had n_eff ≈ 84 in a one-sided funding regime. `surprise_signal` drew 87.6 % of its edge from a single day. |
+| **4.9** | 2026-07-31 | Touch-maker experiment, pre-registered, multi-day: **all 8 cells FAIL** on day-consistency and concentration |
+| **7.3** | 2026-08-07 | Permutation entropy does not rank the universe — a clean negative that contradicts the spec |
+| **7.7** | 2026-08-07 | Rotation OOS: **0 of 6** configurations survive their pre-registered criteria |
 
-- ~~**3f liquidity**: Sharpe 9.2 BTC / 7.8 ETH~~ — KILL (−11.1 BTC at SSOT cost)
-- ~~**jump_detector**: +23,199 bps total~~ — KILL (threshold fires ~13,900×/day; noise filter)
-- ~~**optimal_entry**: +13,679 bps~~ — KILL (sweep never ran the SPRT logic)
-- ~~**funding_reversion**: +14,459 bps~~ — KILL (n_eff≈84; one-sided funding regime)
-- ~~**surprise_signal**: Sharpe 6.7 SOL~~ — KILL (87.6% of edge from one day)
+### The maker line
 
-### Hypothesis Suite (H1-H6)
+| § | Date | Result |
+|---|---|---|
+| **4.7** | 07-30 | Touch-joined postings are marginally +EV: capture 0.278 bps (rebate-carried) vs adverse 0.22–0.26 → EV +0.01–0.04 bps/posting. **The rebate, not the spread, carries maker economics.** |
+| **4.7** | 07-30 | The A4 EV gate works as a filter: flips always-on touch per-fill **−1.66 → +0.67** (fills cut 55×) |
+| **4.8** | 07-30 | Wide Avellaneda-Stoikov spreads are negative: −1.5 to −1.9 bps/fill, price-through-dominated. Quote at the touch; width is never derived. |
+| **4.10** | 08-03 | **X-1: the maker line is fee-tier-invariant.** Staking discounts apply to fees *paid*, not to maker rebates — 179 day-symbol episodes re-priced, **no cell flips**. |
+| **4.11** | 08-04 | **COST-5: zero fees are not free money.** Breakeven maker rate = E[adverse\|fill] − half-spread = **+0.144 bps (bid) / +0.159 (ask)**. At BTC's touch the half-spread (0.083 bps) is ~⅓ of adverse selection (0.228/0.242), so a zero-fee quote is still ~0.08 bps/posting under water. |
+| **7.2** | 08-07 | Universe median half-spread **1.372 bps — 17.7× BTC**; 169 of 177 pairs wider. NAT has been studying the extreme tight tail of its own venue. |
 
-All six confirmed: directional, long-biased, no decay, 3-feature viable, maker viable.
+### The cross-sectional line
 
-### Maker-Line Measurements (2026-07-30/31 — `docs/research/FINDINGS.md` §4.7–4.9)
+| § | Date | Result |
+|---|---|---|
+| **7.1** | 08-07 | Candle universe: 708 series, 3.06 M candles, **zero gaps**; ~5,000-bar retention cap |
+| **7.4** | 08-07 | **XS-3: Track C survives its kill test.** `xs_vol` rank-IC −0.0690 (z −8.37), `xs_momentum` −0.0387 (z −4.56), BH q 0.007. **Both signs negative.** |
+| **7.5** | 08-07 | Only `vol` ranks persist (ρ₇d 0.691, half-life ~37.7 d); momentum and Hurst decay in ~1.4 d |
+| **7.6** | 08-07 | Capacity: at 1 % of ADV, 117 pairs support $1 k/day at ≤2 bps; only 52 support $10 k |
+| **7.7** | 08-07 | Rotation refuted — but **cost is not the killer**, and that was a validated prediction: turnover 0.17–0.49 against a max of 2.0, costs 1–2.7 % against 8.5 % gross |
+| **7.8** | 08-07 | 40 names = **≈2.2 effective bets**; beta earns nothing (t −1.01) while the signal sharpens under neutralisation (t −5.48) |
+| **7.9** | 08-07 | Hysteresis bands: cost saving real and monotone, **net effect undecidable** — the apparent winner is reported and not adopted |
 
-| Finding | Evidence | Implication |
-|---------|----------|-------------|
-| Microprice anchor is strong | HF1 `alg_mp_dev_bps` IC@50t +0.139 full / **+0.237 regime-gated** (11.7M ticks) | Fair-value center for all maker quoting |
-| Touch-joined postings are marginally +EV | A4 queue replay: capture 0.278 bps (rebate-carried) vs adverse 0.22–0.26 → EV +0.01–0.04 bps/posting | The rebate, not the spread, carries maker economics |
-| Wide A-S spreads are negative | Queue-coupled sim: −1.5 to −1.9 bps/fill (price-through-dominated) | Quote at the touch; width is never derived |
-| A4 EV gate works as a filter | Flips always-on touch per-fill −1.66 → **+0.67** (fills cut 55×) | Per-posting capture-vs-adverse gating validated |
-| No touch-maker config survives pre-registration | 8-cell × 173 day-symbol grid: all FAIL on day-consistency/concentration | Maker route unproven-not-disproven; blocked on fill data (L1 queue sizes / T0b shadow quoting) |
+### Data & sample-size arithmetic
+
+- **Data continuity is the operational binding constraint** for paper/live/X-3. The tick
+  record has missing days, a historical zombie-ingestor gap with no error logs, and dead
+  all-NaN columns. The candle archive has none of this.
+- **Sample-size arithmetic is unforgiving.** Convolver trap events need ~39 k candles;
+  across-regime validation needs 6–24 months; hourly-pattern discovery is infeasible
+  (~5 years). Claims must be sized to the data actually in hand — which is why XS-10 tracks
+  **83 of 325** required periods rather than declaring a verdict.
+
+### Hypothesis suite (H1–H6) — *historical, 2026-06*
+
+All six confirmed on their contemporaneous windows: directional, long-biased, no decay,
+3-feature viable, maker viable. These predate the Q4 kill gate and the maker-line
+measurements above; read them as structural priors, not as current tradeable claims.
 
 ---
 
 ## Current Direction: Three-Class Maker System
 
-Post-Q4 (2026-07-30: all five legacy "winners" refuted and REJECTED in the lifecycle), the
-platform pivoted to a **maker-only doctrine** with a three-class architecture. Design
-authority: [`docs/specs/maker_system.md`](docs/specs/maker_system.md) (v2). Research
-program: [`docs/THREE_CLASS_RESEARCH_PROPOSAL.md`](docs/THREE_CLASS_RESEARCH_PROPOSAL.md)
+Post-Q4, the platform runs a **maker-only doctrine** with a three-class architecture.
+Design authority: [`docs/specs/maker_system.md`](docs/specs/maker_system.md).
+Research program: [`docs/THREE_CLASS_RESEARCH_PROPOSAL.md`](docs/THREE_CLASS_RESEARCH_PROPOSAL.md)
 (16 pre-registered studies, four tracks).
 
 **Execution doctrine** — quotes are the only strategy; a taker order is an *emergency state
 transition* (inventory unwind timeout, kill-switch, episode end), never an alpha decision.
-Fee tiers (incl. the HYPE-staking discount) are SSOT state in `config/costs.toml`.
+Fee tiers are SSOT state in `config/costs.toml`.
 
 **The three classes** (one regime router across them, hysteresis at every level):
 
 | Class | Monetizes | Core | Status |
 |---|---|---|---|
-| **1 — Directional bias makers** | *persistent* book pressure | touch-pegged quotes, HF1 microprice center, agreement-gated combiner, VPIN/entropy/A4-EV vetoes | signal layer buildable; economics blocked on fill data |
-| **2 — Oscillation harvesters** | *anti-persistent* amplitude | band ladder, geometry read off the spectral surface (never swept), admission by Hurst/band-power/OU-τ; LF7 is the founding member | admission + geometry studies in-hand |
-| **3 — Cross-sectional rotation** | *breadth* (IR ≈ IC·√breadth) | rank the **full perp universe** (~150+ pairs, REST 1m candles) by entropy/momentum/vol vs each pair's own history → top-k weighted allocation → route Classes 1/2 onto selected pairs | fully data-independent — leads the program |
+| **1 — Directional bias makers** | *persistent* book pressure | touch-pegged quotes, HF1 microprice center, agreement-gated combiner, VPIN/entropy/A4-EV vetoes | signal layer buildable; **economics closed at every reachable fee tier** (§4.10–4.11) — blocked on X-3 fill data |
+| **2 — Oscillation harvesters** | *anti-persistent* amplitude | band ladder, geometry read off the spectral surface (never swept), admission by Hurst / band-power / OU-τ; LF7 is the founding member | admission + geometry studies in hand |
+| **3 — Cross-sectional rotation** | *breadth* (IR ≈ IC·√breadth) | rank the full perp universe by entropy/momentum/vol vs each pair's own history → top-k weighted allocation → route Classes 1/2 onto selected pairs | **kill test passed (XS-3); rotation refuted (XS-6); cause diagnosed (XS-9); trajectory tracking 83/325 periods (XS-10)** |
+
+**Where Class 3 actually stands.** It is the only data-independent branch, and it leads the
+program — but it is *not* a working strategy. XS-6 refuted every rotation configuration
+under pre-registered criteria; XS-9 showed why (≈2.2 effective bets, an uncompensated beta
+tilt) *and* that the underlying signal sharpens once neutralised. XS-10 turned the
+remaining question into arithmetic: at the measured Sharpe, **325 rebalance periods are
+needed and 83 are held** — so the answer arrives on a schedule, or the Sharpe decays as n
+grows and the rows make that visible in weeks. The sequence is the product, which is why it
+appends rather than overwrites.
+
+**Where Class 1 stands.** The maker economics are the tightest constraint in the project:
+breakeven demands the venue *pay* ~0.15 bps, no fee tier reaches it, and no touch-maker
+configuration survived pre-registration. The one hypothesis left alive is wider-spread
+pairs — now reduced by B-5a to a single falsifiable exponent (β\* = 0.69 at the universe
+median), resolvable by one tick-data measurement (B-5b).
 
 **Combiner feature contract** — one representative per measured orthogonal axis: fast
-direction (IC 0.40–0.47 @1–5s), slow bias (0.15–0.21 @30min–3h), reversion anchor
-(0.12–0.29 @10s–5min), carry tilt (hypothesis), three gates (VPIN / entropy / A4 EV), and
+direction (IC 0.40–0.47 @1–5 s), slow bias (0.15–0.21 @30 min–3 h), reversion anchor
+(0.12–0.29 @10 s–5 min), carry tilt (hypothesis), three gates (VPIN / entropy / A4 EV), and
 volatility strictly for sizing (zero directional IC, measured). Agreement-gating is
-mandatory — the only structure with measured conditional-IC above unconditional.
+mandatory — the only structure with measured conditional IC above unconditional.
 
-**Discipline** — every study pre-registers its criteria before results (per-fill EV > 0,
-positive-day share ≥ 0.55, max single-day ≤ 30 %, proxy-sensitivity stability); signal
-claims pass null-calibration (z ≥ 3) + BH-FDR (q ≤ .05) with a program-level FDR ledger;
-failures are recorded in `FINDINGS.md` with the same care as successes. **No live capital
-before G8 + healthy kill-switch**; `nat lifecycle approve` remains the sole human gate.
+**Discipline.** Every study pre-registers its criteria before results (per-fill EV > 0,
+positive-day share ≥ 0.55, max single-day ≤ 30 %, proxy-sensitivity stability). Signal
+claims pass null calibration (z ≥ 3) and BH-FDR (q ≤ 0.05) against a **program-level** FDR
+ledger. Failures are recorded in `FINDINGS.md` with the same care as successes — the
+negatives in §7.3 and §7.7 were written up as fully as any positive. **No live capital
+before G8 and a healthy kill-switch**; `nat lifecycle approve` remains the sole human gate.
 
 ---
 
@@ -1652,41 +1416,45 @@ before G8 + healthy kill-switch**; `nat lifecycle approve` remains the sole huma
 1. Amihud, Y. (2002). Illiquidity and stock returns. *Journal of Financial Markets*, 5(1), 31-56.
 2. Avellaneda, M. & Stoikov, S. (2008). High-frequency trading in a limit order book. *Quantitative Finance*, 8(3), 217-224.
 3. Bacry, E., Mastromatteo, I. & Muzy, J.F. (2015). Hawkes processes in finance. *Market Microstructure and Liquidity*, 1(1).
-4. Bandt, C. & Pompe, B. (2002). Permutation entropy. *Physical Review Letters*, 88(17), 174102.
-5. Barndorff-Nielsen, O.E. & Shephard, N. (2004). Power and bipower variation. *Econometrica*, 72(1), 1-37.
-6. Benjamini, Y. & Hochberg, Y. (1995). Controlling the false discovery rate. *JRSS B*, 57(1), 289-300.
-7. Bouchaud, J.P., Gefen, Y., Potters, M. & Wyart, M. (2004). Fluctuations and response in financial markets. *Quantitative Finance*, 4(2), 176-190.
-8. Cont, R. & de Larrard, A. (2013). Price dynamics in a Markovian limit order market. *SIAM J. Financial Math*, 4(1), 1-25.
-9. Cont, R., Kukanov, A. & Stoikov, S. (2014). The price impact of order book events. *Journal of Financial Econometrics*, 12(1), 47-88.
-10. Cont, R., Stoikov, S. & Talreja, R. (2010). A stochastic model for order book dynamics. *Operations Research*, 58(3), 549-563.
-11. Cover, T.M. & Thomas, J.A. (2006). *Elements of Information Theory*. 2nd ed. Wiley.
-12. Easley, D., Lopez de Prado, M. & O'Hara, M. (2012). Flow toxicity and liquidity. *Review of Financial Studies*, 25(5), 1457-1493.
-13. Elliott, R.J., Aggoun, L. & Moore, J.B. (2005). *Hidden Markov Models*. Springer.
-14. Garman, M.B. & Klass, M.J. (1980). On the estimation of security price volatilities. *Journal of Business*, 53(1), 67-78.
-15. Gatheral, J. & Oomen, R. (2010). Zero-intelligence realized variance estimation. *Finance and Stochastics*, 14(2), 249-283.
-16. Glosten, L.R. & Milgrom, P.R. (1985). Bid, ask and transaction prices. *Journal of Financial Economics*, 14(1), 71-100.
-17. Gueant, O., Lehalle, C.A. & Fernandez-Tapia, J. (2012). Dealing with the inventory risk. *Mathematics and Financial Economics*, 4(7), 477-507.
-18. Hamilton, J.D. (1989). A new approach to nonstationary time series. *Econometrica*, 57(2), 357-384.
-19. Harvey, C.R., Liu, Y. & Zhu, H. (2016). ... and the Cross-Section of Expected Returns. *Review of Financial Studies*, 29(1), 5-68.
-20. Hendershott, T., Jones, C.M. & Menkveld, A.J. (2011). Does algorithmic trading improve liquidity? *Journal of Finance*, 66(1), 1-33.
-21. Hoerl, A.E. & Kennard, R.W. (1970). Ridge regression. *Technometrics*, 12(1), 55-67.
-22. Jegadeesh, N. & Titman, S. (1993). Returns to buying winners and selling losers. *Journal of Finance*, 48(1), 65-91.
-23. Kraskov, A., Stögbauer, H. & Grassberger, P. (2004). Estimating mutual information. *Physical Review E*, 69(6), 066138.
-24. Kyle, A.S. (1985). Continuous auctions and insider trading. *Econometrica*, 53(6), 1315-1335.
-25. Lee, S.S. & Mykland, P.A. (2008). Jumps in financial markets. *Review of Financial Studies*, 21(6), 2535-2563.
-26. Mandelbrot, B.B. & Van Ness, J.W. (1968). Fractional Brownian motions. *SIAM Review*, 10(4), 422-437.
-27. Parkinson, M. (1980). The extreme value method for estimating variance. *Journal of Business*, 53(1), 61-65.
-28. Priestley, M.B. (1981). *Spectral Analysis and Time Series*. Academic Press.
-29. Rabiner, L.R. (1989). A tutorial on hidden Markov models. *Proceedings of the IEEE*, 77(2), 257-286.
-30. Schreiber, T. (2000). Measuring information transfer. *Physical Review Letters*, 85(2), 461-464.
-31. Shannon, C.E. (1948). A mathematical theory of communication. *Bell System Technical Journal*, 27(3), 379-423.
-32. Shiryaev, A.N. (1978). *Optimal Stopping Rules*. Springer.
-33. Thompson, W.R. (1933). On the likelihood that one unknown probability exceeds another. *Biometrika*, 25(3-4), 285-294.
-34. Wald, A. (1947). *Sequential Analysis*. Wiley.
-35. White, H. (2000). A reality check for data snooping. *Econometrica*, 68(5), 1097-1126.
+4. Bailey, D.H. & López de Prado, M. (2014). The deflated Sharpe ratio. *Journal of Portfolio Management*, 40(5), 94-107.
+5. Bandt, C. & Pompe, B. (2002). Permutation entropy. *Physical Review Letters*, 88(17), 174102.
+6. Barndorff-Nielsen, O.E. & Shephard, N. (2004). Power and bipower variation. *Econometrica*, 72(1), 1-37.
+7. Benjamini, Y. & Hochberg, Y. (1995). Controlling the false discovery rate. *JRSS B*, 57(1), 289-300.
+8. Bouchaud, J.P., Gefen, Y., Potters, M. & Wyart, M. (2004). Fluctuations and response in financial markets. *Quantitative Finance*, 4(2), 176-190.
+9. Constantinides, G.M. (1986). Capital market equilibrium with transaction costs. *Journal of Political Economy*, 94(4), 842-862.
+10. Cont, R. & de Larrard, A. (2013). Price dynamics in a Markovian limit order market. *SIAM J. Financial Math*, 4(1), 1-25.
+11. Cont, R., Kukanov, A. & Stoikov, S. (2014). The price impact of order book events. *Journal of Financial Econometrics*, 12(1), 47-88.
+12. Cont, R., Stoikov, S. & Talreja, R. (2010). A stochastic model for order book dynamics. *Operations Research*, 58(3), 549-563.
+13. Cover, T.M. & Thomas, J.A. (2006). *Elements of Information Theory*. 2nd ed. Wiley.
+14. Easley, D., López de Prado, M. & O'Hara, M. (2012). Flow toxicity and liquidity. *Review of Financial Studies*, 25(5), 1457-1493.
+15. Elliott, R.J., Aggoun, L. & Moore, J.B. (2005). *Hidden Markov Models*. Springer.
+16. Garman, M.B. & Klass, M.J. (1980). On the estimation of security price volatilities. *Journal of Business*, 53(1), 67-78.
+17. Gatheral, J. & Oomen, R. (2010). Zero-intelligence realized variance estimation. *Finance and Stochastics*, 14(2), 249-283.
+18. Glosten, L.R. & Milgrom, P.R. (1985). Bid, ask and transaction prices. *Journal of Financial Economics*, 14(1), 71-100.
+19. Guéant, O., Lehalle, C.A. & Fernandez-Tapia, J. (2012). Dealing with the inventory risk. *Mathematics and Financial Economics*, 4(7), 477-507.
+20. Hamilton, J.D. (1989). A new approach to nonstationary time series. *Econometrica*, 57(2), 357-384.
+21. Harvey, C.R., Liu, Y. & Zhu, H. (2016). ... and the Cross-Section of Expected Returns. *Review of Financial Studies*, 29(1), 5-68.
+22. Hendershott, T., Jones, C.M. & Menkveld, A.J. (2011). Does algorithmic trading improve liquidity? *Journal of Finance*, 66(1), 1-33.
+23. Jegadeesh, N. & Titman, S. (1993). Returns to buying winners and selling losers. *Journal of Finance*, 48(1), 65-91.
+24. Kraskov, A., Stögbauer, H. & Grassberger, P. (2004). Estimating mutual information. *Physical Review E*, 69(6), 066138.
+25. Kyle, A.S. (1985). Continuous auctions and insider trading. *Econometrica*, 53(6), 1315-1335.
+26. Lee, S.S. & Mykland, P.A. (2008). Jumps in financial markets. *Review of Financial Studies*, 21(6), 2535-2563.
+27. López de Prado, M. (2018). *Advances in Financial Machine Learning*. Wiley.
+28. Mandelbrot, B.B. & Van Ness, J.W. (1968). Fractional Brownian motions. *SIAM Review*, 10(4), 422-437.
+29. Parkinson, M. (1980). The extreme value method for estimating variance. *Journal of Business*, 53(1), 61-65.
+30. Priestley, M.B. (1981). *Spectral Analysis and Time Series*. Academic Press.
+31. Rabiner, L.R. (1989). A tutorial on hidden Markov models. *Proceedings of the IEEE*, 77(2), 257-286.
+32. Schreiber, T. (2000). Measuring information transfer. *Physical Review Letters*, 85(2), 461-464.
+33. Shannon, C.E. (1948). A mathematical theory of communication. *Bell System Technical Journal*, 27(3), 379-423.
+34. Shiryaev, A.N. (1978). *Optimal Stopping Rules*. Springer.
+35. Stoikov, S. (2018). The micro-price: a high-frequency estimator of future prices. *Quantitative Finance*, 18(12), 1959-1966.
+36. Thompson, W.R. (1933). On the likelihood that one unknown probability exceeds another. *Biometrika*, 25(3-4), 285-294.
+37. Wald, A. (1947). *Sequential Analysis*. Wiley.
+38. White, H. (2000). A reality check for data snooping. *Econometrica*, 68(5), 1097-1126.
 
 ---
 
 <p align="center">
-<i>Built with Rust, Python, and relentless hypothesis testing.</i>
+<i>Built with Rust, Python, and relentless hypothesis testing —<br>
+most of which refuted the hypothesis.</i>
 </p>
