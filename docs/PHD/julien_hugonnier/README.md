@@ -18,6 +18,7 @@
 | lob_predictive_structure_preprint — Predictive Structure of the Perp LOB: Two Orthogonal Channels | _pending P2_ |
 | process_preprint — The Process as a First-Class Analytical Unit | _pending P2_ |
 | liquidity_heatmap_preprint — Liquidation Geometry → Cascade Probability | _pending P2_ |
+| nat2_exact_map_preprint — Exact or Nothing: Gate-Governed Measurement of the Liquidation Map | _pending P2_ |
 | prism_preprint — Perception Pressure and Resonance | _pending P2_ |
 | prism_signal_preprint — From Narrative to Alpha | _pending P2_ |
 

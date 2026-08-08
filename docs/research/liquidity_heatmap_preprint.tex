@@ -66,8 +66,18 @@ with an explicit, falsifiable five-gate validation protocol and a candid treatme
 practical obstacle: on a decentralized venue the field is observed only through a \emph{sample} of
 tracked wallets, not the full population of open interest. We formalize this sample-to-population
 bias, propose an open-interest rescaling that preserves field \emph{shape}, and report the failure
-mode it produces in practice. We deliberately present no fabricated performance numbers; empirical
-validation under the stated protocol is the explicit next step.
+mode it produces in practice. We then report first measurements of that bias from a purpose-built
+Hyperliquid instrument (Section~\ref{sec:data}), which change what the obstacle \emph{is}. The
+sampling rate is no longer unknown: a $3{,}596$-wallet registry seeded from a $41{,}392$-wallet
+leaderboard covers $25$--$38\%$ of venue open interest per symbol, measured and gate-thresholded on
+every map. But the measurement also exposes a \emph{second} bias we did not anticipate and which no
+rescaling can repair: the wallets that hold notional and the wallets that get liquidated are
+different populations. Of $48$ observed liquidations, the registry contained $2.9\%$ of the
+liquidated \emph{wallets} but $21.9\%$ of the liquidated \emph{notional}---so the field is far
+better at seeing the mass that cascades than the events that start one. That reading is itself
+confounded by snapshot timing, and we state the experiment that settles it. We deliberately present
+no fabricated performance numbers; empirical validation under the stated protocol is the explicit
+next step.
 \end{abstract}
 
 \smallskip
@@ -441,6 +451,11 @@ fraction of open interest. The field of Definition~\ref{def:field} is therefore 
 $H^{\text{obs}}(t,k) = \rho_t\, H(t,k) + \text{noise}$, with sampling rate $\rho_t$ unobserved and
 time-varying.
 
+That was the state of the world when this section was first written. It has since been measured, by
+a purpose-built Hyperliquid instrument whose design and gate protocol are the subject of a companion
+paper. Subsections~\ref{sec:rho_measured} and \ref{sec:popmismatch} report what the measurement
+found; the theory in between (what survives sampling, and the rescaling) is unchanged by it.
+
 \paragraph{What survives sampling.} The scale-invariant features---$d_{\min}$, $\mathrm{CMR}$,
 $\mathrm{ACP}$, $\bar d$, $S$---depend on the field's \emph{shape}, which is preserved in
 expectation under uniform sampling; and the largest, cascade-causing positions are
@@ -461,11 +476,132 @@ which leaves every ratio feature unchanged while correcting the mass-dependent o
 
 \paragraph{Observed failure mode.} We report candidly that, in a preliminary multi-symbol backtest,
 the cascade-probability algorithm produced \emph{zero} trades and the nearest-cluster-distance
-feature frequently returned its no-data sentinel---direct evidence that, under current wallet
-coverage, the observed field is too sparse for the absolute-mass features to fire. This is the
-single most important practical result of the work to date: the geometry and the model are sound,
-but their utility is gated on coverage, and the first priority is therefore data---aggressive wallet
-discovery and the rescaling \eqref{eq:oiscale}---not further modeling.
+feature frequently returned its no-data sentinel---direct evidence that, under the wallet coverage
+available at the time, the observed field was too sparse for the absolute-mass features to fire.
+This was the single most important practical result of the work to that point: the geometry and the
+model are sound, but their utility is gated on coverage, and the first priority is therefore
+data---aggressive wallet discovery and the rescaling \eqref{eq:oiscale}---not further modeling.
+
+% ------------------------------------------------------------
+\subsection{The sampling rate, measured}
+\label{sec:rho_measured}
+% ------------------------------------------------------------
+
+Acting on that priority produces the first direct estimate of $\rho_t$. Hyperliquid publishes a
+leaderboard exposing $41{,}392$ wallets with equity and windowed volume---roughly forty times the
+population the trade-stream discovery of the previous paragraph reaches. Seeding a registry from it
+is therefore a different regime, and the two natural seeds behave differently (probe of
+2026-08-07): the top $2{,}000$ wallets \emph{by equity} span $61\%$ of venue open interest but only
+$28\%$ of them hold any position at a given moment, while the top $2{,}000$ \emph{by weekly volume}
+span $39\%$ with $46\%$ active. The union reaches $69\%$ of venue OI (BTC $68\%$, ETH $79\%$, HYPE
+$70\%$, SOL $66\%$). Mass and activity are thus carried by distinguishable populations---a fact we
+return to in Section~\ref{sec:popmismatch}, where it becomes the central obstacle rather than a
+seeding detail.
+
+The operational registry holds $3{,}596$ wallets, and its cost sets the map's time resolution: one
+full sweep of clearinghouse state takes approximately five minutes and consumes the entire per-IP
+request-weight budget, leaving nothing for the trade tape. Polling frequency would therefore
+\emph{become} the field's resolution, which is why positions are maintained between snapshots by
+reconstruction from the public fill stream and polling is demoted to reconciliation.
+
+Coverage is then computed per map and per symbol as
+\begin{equation}
+  \widehat{\rho}_t \;=\; \frac{\sum_k H^{\text{obs}}(t,k)}{s \cdot \mathrm{OI}_{\text{total}}(t)},
+  \qquad s = 2,
+  \label{eq:coverage}
+\end{equation}
+where $s$ is the side convention: an exchange that counts each contract once in
+$\mathrm{OI}_{\text{total}}$ reports half the position notional actually outstanding, since every
+long has a matching short and a registry sees both. Taking $s=2$ is the conservative reading and
+halves the headline number; it is printed on every map alongside the coverage figure, because being
+wrong about $s$ is a factor of two on the one quantity by which the field is judged. Under
+\eqref{eq:coverage}, gate verdicts recorded on 2026-08-08 give
+\[
+  \widehat{\rho}_{\text{BTC}} = 0.315,\qquad
+  \widehat{\rho}_{\text{ETH}} = 0.380,\qquad
+  \widehat{\rho}_{\text{SOL}} = 0.247,
+\]
+against a $0.25$ minimum below which the map's gate refuses to pass. (The gap between these figures
+and the $69\%$ scoping probe above is very nearly the factor $s$ itself; whether the probe was
+computed one-sided is an open verification item, and we report both numbers rather than silently
+adopting the flattering one.)
+
+Two consequences for this paper. First, $\rho_t$ is no longer an unobserved nuisance parameter: it
+is a measured, logged series, so the rescaling \eqref{eq:oiscale} can be applied with a known
+multiplier and audited after the fact rather than assumed. Second, a related fidelity question
+becomes measurable. Where the venue publishes its own liquidation price per position, that published
+value is the source of truth and the field needs no model; a derived price is needed only for
+positions whose size changed since the last snapshot. Diffing the derivation against the published
+field over $2{,}926$ positions gives a median relative error of $0.152$ and agreement to within
+$10^{-4}$ for $40.8\%$ of positions ($58\%$ among accounts holding no isolated margin, over $1{,}074$
+cross positions). The residual is unexplained---size-tiered maintenance margin is the leading
+suspect---and is the reason the derivation is used only for maintenance and never as the primary
+source.
+
+% ------------------------------------------------------------
+\subsection{A second bias: the liquidated population is not the tracked population}
+\label{sec:popmismatch}
+% ------------------------------------------------------------
+
+Measuring $\rho_t$ was expected to be the end of the observational problem. It was not. The
+measurement exposes a second bias, distinct from the first in kind, and one that no mass rescaling
+can repair.
+
+Equation~\eqref{eq:oiscale} corrects a \emph{magnitude} error under the assumption that the observed
+field is a uniform thinning of the true one. That assumption is what fails. The registry is seeded by
+equity because the map wants whoever holds size; but the wallets that actually get liquidated are
+small and highly leveraged. Sampling proportional to notional is precisely \emph{not} sampling
+proportional to liquidation events.
+
+The magnitudes are stark. Of $48$ liquidations observed on Hyperliquid and appended to the
+instrument's ledger, the registry contained
+\[
+  2.9\%\ \text{of the liquidated \emph{wallets}, but}\ 21.9\%\ \text{of the liquidated \emph{notional}}
+\]
+($\$223{,}491$ of realized liquidation notional across $35$ distinct wallets; a second reading a
+cycle later gave $2.8\%$ and $21.9\%$ over $49$ events). The order-of-magnitude gap between the two
+percentages \emph{is} the second bias, stated quantitatively. It is also, for this paper, a
+qualified reprieve: the field is built to predict cascades, cascades are driven by notional, and a
+fifth of liquidated notional is not nothing. What the field is poor at is seeing the long tail of
+small forced exits---which matters if those exits are what \emph{initiates} a chain in
+\eqref{eq:domino}.
+
+\paragraph{Why the reading cannot yet be believed.} Both readings show $0.0\%$ of liquidated
+notional \emph{mapped}---i.e.\ attributable to a position the field had marked in advance---and that
+zero is confounded rather than informative. A liquidated wallet no longer holds the position, so a
+registry snapshot taken \emph{after} a liquidation shows nothing that could have predicted it. Until
+snapshots reliably precede the events they are scored against, the measurement cannot distinguish
+``different populations'' from ``we looked too late''. Reporting the confound rather than the
+headline is the whole point: the $0.0\%$ would otherwise read as a refutation of the model, when it
+is currently a statement about observation order.
+
+\paragraph{The experiment that settles it.} A scheduled snapshot-then-observe cycle---sweep the
+registry, then scan for liquidations, appending an overlap reading each pass---turns the single
+confounded reading into a series, and the series discriminates:
+
+\begin{itemize}
+  \item mapped notional fraction climbing off zero $\Rightarrow$ per-position scoring works and the
+        field can be validated as constructed;
+  \item mapped fraction pinned at zero while the notional fraction holds near $22\%$ $\Rightarrow$
+        the registry sees the right wallets but never \emph{before} they are liquidated, and
+        validation must move from per-position to cluster-level scoring---did liquidations land in
+        the price buckets the field marked, regardless of whose they were;
+  \item the notional fraction collapsing as well $\Rightarrow$ neither, and the registry needs a
+        third seed drawn by \emph{liquidation risk} (margin ratio, distance to liquidation price)
+        rather than by size or activity.
+\end{itemize}
+
+Only the first outcome validates the instrument as specified; the second demotes the claim this
+paper can make from position-level to cluster-level, which is weaker but still falsifiable; the
+third reopens registry construction. None of the three is available from analysis---only from
+calendar time under capture. Correspondingly, the instrument's map gate currently records
+\textsf{FAIL} on its predictive criterion, on the grounds that a criterion which cannot yet be
+evaluated must not be allowed to pass by default.
+
+\paragraph{What this does to the validation protocol.} Section~\ref{sec:validation}'s protocol is
+unchanged in structure but acquires a precondition: G1--G5 are not merely unmet, they are
+\emph{unevaluable} until the cycle above resolves. We regard stating that explicitly as more useful
+than reporting the protocol as pending.
 
 % ============================================================
 \section{Discussion}
@@ -488,6 +624,16 @@ That ordering---specify the mechanism, expose the observational constraint, fix 
 measure---is, we argue, the correct one for a phenomenon whose theoretical structure is clear but
 whose measurement on a decentralized venue is genuinely hard.
 
+Section~\ref{sec:data} is the first return from executing that ordering, and it is worth being
+precise about what it did and did not settle. It settled the constraint the paper originally
+named: the sampling rate is measured, logged, and gate-thresholded rather than unknown. It did not
+clear the path, because the act of measuring surfaced a bias of a different kind---mass and events
+are carried by different wallets---which the rescaling \eqref{eq:oiscale} is structurally unable to
+correct, since that correction assumes uniform thinning. The useful lesson is that
+``insufficient coverage'' was an incomplete diagnosis: coverage \emph{of what} turns out to be the
+operative question, and a field can be simultaneously adequate for the mass that sustains a cascade
+and inadequate for the events that start one.
+
 % ============================================================
 \section{Conclusion}
 \label{sec:conclusion}
@@ -502,6 +648,19 @@ deliberate in not reporting performance numbers we cannot substantiate, and in f
 binding constraint: on a decentralized venue the field is sampled, not observed in full, and the
 immediate priority is the coverage and rescaling needed to make the absolute-mass features fire.
 With that data in hand, every claim above becomes a pre-registered, testable hypothesis.
+
+Section~\ref{sec:data} reports the first measurements against that constraint. The sampling rate is
+now known---$25$--$38\%$ of venue open interest per symbol, from a $3{,}596$-wallet registry, logged
+per map and gate-thresholded---and the derived liquidation price is calibrated against the venue's
+published one ($40.8\%$ exact over $2{,}926$ positions). Both were open unknowns in the first
+version of this paper. In their place stands a sharper and more interesting obstacle: the tracked
+population is selected on notional and the liquidated population is selected on leverage, and the
+two barely intersect at the wallet level ($2.9\%$) while overlapping substantially at the notional
+level ($21.9\%$). Whether that asymmetry is fatal to position-level validation or merely demotes it
+to cluster-level is not decidable from the data in hand; it is decidable from a scheduled
+snapshot-then-observe series, which is running. We report the confound rather than the headline
+because the headline---zero mapped notional---is currently an artifact of observation order and
+would be read as a refutation it has not earned.
 
 % ============================================================
 \section*{References}
