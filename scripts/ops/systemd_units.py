@@ -60,8 +60,6 @@ ExecStart={bin_ing} {ing_cfg}
 {_env_lines({"RUST_LOG": "info"})}
 Restart=always
 RestartSec=5
-# Never give up restarting (a crash-looping ingestor is still better than a dead one).
-StartLimitIntervalSec=0
 
 [Install]
 WantedBy=default.target
@@ -79,7 +77,6 @@ ExecStart={py} {gap_script} start
 {_env_lines()}
 Restart=always
 RestartSec=10
-StartLimitIntervalSec=0
 
 [Install]
 WantedBy=default.target
@@ -139,6 +136,9 @@ WantedBy=timers.target
     l2_script = root / "scripts" / "data" / "fetch_l2.py"
     l2 = f"""\
 [Unit]
+# systemd only honours StartLimitIntervalSec in [Unit]; it was in [Service]
+# and silently ignored, so the restart limiter was never actually disabled.
+StartLimitIntervalSec=0
 Description=NAT L2 order-book sampler (XS-8 — universe half-spread distribution)
 After=network-online.target
 Wants=network-online.target
@@ -150,7 +150,6 @@ ExecStart={py} -u {l2_script} --loop --every 300
 {_env_lines()}
 Restart=always
 RestartSec=30
-StartLimitIntervalSec=0
 
 [Install]
 WantedBy=default.target

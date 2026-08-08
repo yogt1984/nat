@@ -58,3 +58,21 @@ def test_gap_unit(monkeypatch, tmp_path):
 def test_unit_dir_under_xdg_config(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     assert systemd_units.unit_dir() == tmp_path / "cfg" / "systemd" / "user"
+
+
+def test_start_limit_interval_is_in_the_unit_section():
+    """systemd parses StartLimitIntervalSec ONLY in [Unit]; in [Service] it is ignored
+    with a warning, so `Restart=always` silently keeps the default rate limiter and a
+    crash-looping daemon gives up after 5 tries in 10s. Observed in the journal when the
+    XS-8 sampler units were installed on 2026-08-08."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from ops.systemd_units import render_units
+
+    for name, text in render_units().items():
+        if "StartLimitIntervalSec" not in text:
+            continue
+        head = text.split("[Service]", 1)[0]
+        assert "StartLimitIntervalSec" in head, (
+            f"{name}: StartLimitIntervalSec sits after [Service] — systemd ignores it there")
