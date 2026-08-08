@@ -1,0 +1,113 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage{onepager}
+
+\begin{document}
+\small
+
+\ophead{Perception Pressure and Resonance}
+{Decomposable, Trust-Weighted Measures of Media Narrative from a Multi-Perspective News-Aggregation System}
+{\code{prism_preprint.tex} $\cdot$ 7pp $\cdot$ Jun 2026 $\cdot$ system lives at \code{~/Prism}
+ (separate repo) $\cdot$ lead preprint for Leippold (UZH) $\cdot$ methods/system paper, no empirics}
+
+\begin{multicols}{2}
+
+\opsec{Thesis}
+Two quantitative measures of media narrative computed continuously from a live multi-source news stream,
+plus the system that produces them. Not another sentiment index: the design goal is a measure that is
+\emph{signed}, \emph{magnitude-meaningful}, \emph{manipulation-resistant}, and \emph{fully auditable}.
+
+\opsec{Resonance — per-story media impact}
+\[
+  \mathrm{Res}(c,t)=\underbrace{\mathrm{breadth}(c)}_{\text{diversity multiplier}}\cdot
+   \sum_{m\in c}\mathrm{trust}(s_m)\,\mathrm{eng}(m)\,\mathrm{dec}(a_m)
+\]
+with
+$\mathrm{breadth}(c)=\log_2(1+n_{\text{sources}})$,
+$\mathrm{eng}(m)=1+\log_2(1+\mathrm{re}_m/\text{median})$,
+$\mathrm{dec}(a)=e^{-\lambda a}$, $\lambda=\ln2/h$.
+
+\opsec{Perception Pressure — per-concept longitudinal signal}
+\begin{align*}
+ \text{salience:}\ & A(K,t)=\textstyle\sum_c \mathrm{breadth}(c)\,\mathrm{dec}(a_c)\ \ge 0\\
+ \text{valence:}\ & V(K,t)\in[-1,+1]\ \text{(credibility-weighted)}\\
+ \text{perception:}\ & \boxed{\,P(K,t)=A(K,t)\cdot V(K,t)\,}
+\end{align*}
+momentum $\dot P(K,t)=P(K,t)-P(K,t-1)$.
+
+\opsec{Three properties, novel \emph{in combination}}
+\begin{opnums}
+\item \textbf{Multiplicative coupling} of attention and directional sentiment $\Rightarrow$ the signal is
+      \emph{signed} and its magnitude means something. Volume-only proxies have no sign; sentiment-only
+      indices have no weight.
+\item \textbf{Diversity as a multiplier, not a sum} $\Rightarrow$ a single outlet cannot inflate the
+      measure. Multi-perspective by construction, not by editorial policy.
+\item \textbf{Every component persisted independently} $\Rightarrow$ fully decomposable and auditable.
+      You can always answer ``why did $P$ move'' — it is not a black box.
+\end{opnums}
+
+\opsec{Trust is earned, not assigned}
+\[
+  \mathrm{trust}=0.1+0.4\cdot\frac{\#\,\text{validated}}{\#\,\text{total}}
+\]
+via an automated cross-corroboration lifecycle. \textbf{No hand-assigned credibility table} — which is
+where comparable indices smuggle in the researcher's politics, and the first thing a referee will
+probe.
+
+\opsec{The system}
+Five-agent pipeline — \emph{discover $\to$ analyze $\to$ track $\to$ personalize $\to$ deliver} —
+coordinated by a database state machine. Prism is the upstream producer of the narrative/hype series NAT
+ingests.
+
+\opsec{Positioning}
+Against volume-only attention proxies (Google Trends, article counts) and direction-only sentiment
+indices. The claim is not ``better sentiment'' but \emph{a different object}: a signed pressure with
+interpretable units and an audit trail.
+
+\opsec{Downstream application (specified, not claimed)}
+Treat $P(K,t)$ as an \textbf{exogenous narrative signal} whose incremental predictive value for financial
+returns is measured under a leakage-controlled information-theoretic protocol.
+\caution{The paper is explicit that this is a methods-and-system paper: the instrument is fully specified
+and parameterized for ablation; \textbf{empirical validation is the next step, not a claim made here}.
+Neither Prism metric has logged results. Do not let a reader infer otherwise.}
+
+\opsec{Why it is honest to publish results-free}
+Same posture as \#3 and \#5: specify the instrument, expose the constraint, then measure. A referee can
+attack the construction on its merits without having to disentangle it from a performance claim — and
+there is nothing to retract when the empirics land.
+
+\opsec{The five agents}
+Coordinated not by a message queue but by a \textbf{database state machine}: \textsc{raw} $\to$
+\textsc{analyzed} $\to$ \textsc{delivered}.
+\begin{opfacts}
+Discovery & pull + cluster articles by event; grow the source registry (RSS ingest; lexical dedup — Jaccard, TF--IDF, entity overlap) \\
+Analysis & summarize a cluster; extract per-source perspective, sentiment, bias, claims (LLM structured extraction + quality score) \\
+Tracking & scan clusters for tracked concepts; compute the measures \\
+Personalize & per-reader selection \\
+Deliver & emit \\
+\end{opfacts}
+Stated editorial principle: make bias \emph{visible} rather than hidden — no original reporting, every
+claim attributed, multiple framings side by side. The quantitative measures are instrumentation of that
+principle, not a bolt-on.
+
+\opsec{Disclosed threats to validity}
+\caution{Sentiment/bias labels come from an \textbf{LLM, not gold-standard human annotation} — the
+structure of that measurement error is itself an open research question, and it is the first thing a
+referee will press. Clustering is \textbf{lexical, not embedding-based} (token overlap, TF--IDF, regex
+entity extraction), so events can split or merge. The engagement term \textbf{defaults to neutral} when
+reaction counts are missing, so it is often inert in practice. Storage is single-writer, bounding
+throughput. None of these undermine the \emph{definitions}; all of them bear on the fidelity of the
+computed series and must be controlled in any empirical study.}
+
+\opsec{Siblings}
+\#5 (\emph{From Narrative to Alpha}) is the direct sequel: it takes $P(K,t)$ as given and argues, at the
+level of methodology, what an exogenous signal contributes to a microstructure book — timescale
+separation, effective breadth, partial evasion of the adverse-selection barrier. Send \#4 then \#5 to
+Leippold; \#4 alone reads as a systems paper.
+
+\end{multicols}
+
+\opfoot{One-pager for personal use. The distinguishing feature to lead with: \textbf{diversity enters as
+a multiplier}, so the measure is structurally resistant to single-outlet manipulation — and trust is
+earned by corroboration rather than assigned by hand.}
+
+\end{document}

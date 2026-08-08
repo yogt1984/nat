@@ -1,0 +1,103 @@
+% ------------------------------------------------------------------
+% onepager.sty — dense single-page summary layout for the preprint set.
+%
+% Personal reference cards, not publication output: every one-pager must
+% fit on exactly one A4 side, so this file optimises for information per
+% square centimetre and nothing else.
+%
+% This TeX install has no enumitem/titlesec/xcolor/booktabs/microtype, so
+% the tight lists, section rules and key/value rows below are hand-rolled
+% rather than configured. Only multicol is external.
+% ------------------------------------------------------------------
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{onepager}[2026/08/08 dense one-page preprint summaries]
+
+\RequirePackage[a4paper, margin=1cm]{geometry}
+\RequirePackage{amsmath, amssymb}
+\RequirePackage{multicol}
+
+% --- global density knobs -------------------------------------------
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{1.1pt}
+\setlength{\columnsep}{10pt}
+\setlength{\columnseprule}{0.2pt}
+\setlength{\abovedisplayskip}{2pt}
+\setlength{\belowdisplayskip}{2pt}
+\setlength{\abovedisplayshortskip}{1pt}
+\setlength{\belowdisplayshortskip}{1pt}
+\linespread{0.94}
+\pagestyle{empty}
+
+% --- masthead: title / subtitle / provenance ------------------------
+\newcommand{\ophead}[3]{%
+  {\centering
+   {\large\bfseries #1}\par\vspace{1pt}
+   {\footnotesize\itshape #2}\par\vspace{2pt}
+   {\scriptsize #3}\par}%
+  \vspace{2pt}\hrule height 0.7pt\vspace{4pt}%
+}
+
+% --- section rule ---------------------------------------------------
+\newcommand{\opsec}[1]{%
+  \vspace{3pt}{\footnotesize\bfseries #1}\par\vspace{0.5pt}%
+  \hrule height 0.25pt\vspace{2pt}%
+}
+
+% --- tight bullet list ----------------------------------------------
+\newenvironment{opitems}{%
+  \begin{list}{$\bullet$}{%
+    \setlength{\topsep}{1pt}\setlength{\partopsep}{0pt}%
+    \setlength{\parsep}{0pt}\setlength{\itemsep}{0.8pt}%
+    \setlength{\leftmargin}{9pt}\setlength{\labelwidth}{6pt}%
+    \setlength{\labelsep}{3pt}\setlength{\rightmargin}{0pt}}%
+}{\end{list}}
+
+% --- tight numbered list --------------------------------------------
+\newcounter{opnum}
+\newenvironment{opnums}{%
+  \setcounter{opnum}{0}%
+  \begin{list}{\arabic{opnum}.}{%
+    \usecounter{opnum}%
+    \setlength{\topsep}{1pt}\setlength{\partopsep}{0pt}%
+    \setlength{\parsep}{0pt}\setlength{\itemsep}{0.8pt}%
+    \setlength{\leftmargin}{11pt}\setlength{\labelwidth}{8pt}%
+    \setlength{\labelsep}{3pt}\setlength{\rightmargin}{0pt}}%
+}{\end{list}}
+
+% --- inline key/value fact ------------------------------------------
+\newcommand{\kv}[2]{\textbf{#1}\;#2\par}
+
+% --- fixed-width code, safe in text ---------------------------------
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+% --- a claim flagged as unverified / confounded ----------------------
+\newcommand{\caution}[1]{\textbf{[!]}\ #1}
+
+% --- dense two-column fact table ------------------------------------
+% \par first: without it a preceding label joins the tabular's line box and
+% overflows the column instead of sitting above the table.
+\newenvironment{opfacts}{%
+  \par\nobreak\vspace{1pt}\scriptsize\noindent
+  \begin{tabular}{@{}p{0.46\columnwidth}@{\hspace{4pt}}p{0.5\columnwidth}@{}}%
+}{%
+  \end{tabular}\par\vspace{1pt}%
+}
+
+% --- footer line ----------------------------------------------------
+\newcommand{\opfoot}[1]{%
+  \par\vfill\vspace{2pt}\hrule height 0.25pt\vspace{1.5pt}%
+  {\scriptsize #1\par}%
+}
+
+% --- shared maths ---------------------------------------------------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Neff}{N_{\mathrm{eff}}}
+\newcommand{\ICbar}{\overline{\mathrm{IC}}}
+\newcommand{\rhobar}{\bar{\rho}}
+\newcommand{\sgn}{\operatorname{sign}}
+\DeclareMathOperator{\IC}{IC}
+\DeclareMathOperator{\IR}{IR}
+\DeclareMathOperator{\MI}{I}
+
+\endinput

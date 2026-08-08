@@ -1,0 +1,106 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage{onepager}
+
+\begin{document}
+\small
+
+\ophead{Event-Aligned Singular Value Decomposition}
+{for Data-Driven Pattern Kernel Discovery in Cryptocurrency Perpetual Futures}
+{\code{convolver_preprint.tex} $\cdot$ 15pp $\cdot$ May 2026 $\cdot$ the P1 camera-ready target $\cdot$
+ lead preprint for Teichmann / Bölcskei / Malamud / Cheridito / Zdeborová / Krzakala / Filipović}
+
+\begin{multicols}{2}
+
+\opsec{Thesis}
+Discover predictive multi-candle price patterns without hand-designing them. Define events
+\emph{analytically} (so they stay interpretable), extract aligned OHLCV windows, decompose into four
+signal channels, let SVD find the dominant \emph{shapes}, then gate on forward-return correlation with
+FDR control. Inherits the interpretability of classical TA and the statistical efficiency of learned
+bases.
+
+\opsec{Pipeline}
+\begin{opnums}
+\item \textbf{Six analytical event types} — breakout bull/bear, turtle-soup false breakout bull/bear,
+      trap bull/bear. Analytically defined, not learned $\Rightarrow$ interpretable.
+\item \textbf{Four channels} per window: body, upper wick, lower wick, volume.
+\item \textbf{Event-aligned matrix} $\to$ \textbf{SVD} $\to$ dominant shape variations.
+\item \textbf{IC gate} with Benjamini--Hochberg FDR ($q=0.05$) on forward returns.
+\item \textbf{Online scoring} by cosine similarity against the surviving kernels.
+\end{opnums}
+
+\opsec{The structural safeguard (the argument to a supervisor)}
+\textbf{SVD operates on price geometry alone — it never sees forward returns.} Basis discovery and
+label-fitting are separated by construction, so the usual ``the shape was fit to the outcome'' objection
+does not apply. Returns enter only at the gating step, where FDR is applied. That separation is the
+methodological point of the paper.
+
+\opsec{Data}
+\begin{opfacts}
+Asset / venue & BTC-USD perp, Hyperliquid \\
+Ticks & 7,235,623 at 100\,ms \\
+Candles & 12,059 at 60\,s \\
+Params & $W{=}20$, $N{=}20$, $K{=}3$, $\alpha{=}1.0$, $N_{\mathrm{atr}}{=}14$ \\
+Events & 1,775 total (147.2 per 1000 candles) \\
+\end{opfacts}
+Breakouts most frequent (bear 522 $>$ bull 418); traps rarest (136/172) — consistent with stricter
+multi-bar confirmation. All types clear $n_{\min}=100$ for stable SVD.
+
+\opsec{Result: 6 of 158 candidates survive FDR}
+\begin{opfacts}
+Turtle bull, body, $k{=}0$ & $\IC=+0.203$ \\
+Turtle bull, body, $k{=}6$ & $\IC=-0.201$ \\
+Turtle bear, lower wick, $k{=}0$ & $\IC=-0.262$ \\
+Trap bull, upper wick, $k{=}6$ & $\IC=+0.357$ \\
+Trap bull, volume, $k{=}0$ & $\IC=-0.270$ \\
+Trap bear, body, $k{=}7$ & $\IC=-0.272$ \\
+\end{opfacts}
+\textbf{No breakout kernel survives} — despite high explained variance. The most-traded pattern in
+retail TA carries no forward-return information after multiple-testing correction. Turtle-soup and traps
+dominate; $|\IC|\in[0.20,0.36]$. All 6 have max cosine similarity $<0.5$ against each other (genuinely
+distinct shapes, not one kernel six ways).
+
+\opsec{Rolling-SVD stability}
+$\bar\rho$ over rolling windows: trap bull $0.941$, turtle bull $0.920$, breakout bear $0.855$ (stable);
+turtle bear $0.719$ (borderline); breakout bull $0.692$, trap bear $0.669$ (unstable). \textbf{The event
+types with the strongest IC are also the most temporally stable} — encouraging, and not something the
+method was tuned to produce.
+
+\opsec{The caveat that matters most}
+\caution{\textbf{No kernel meets the robustness threshold} on the IS/OOS decay test. OOS ICs collapse:
+breakout bull $+0.243\to-0.010$; trap bull upper wick $-0.474\to+0.126$ (\emph{sign flip}); trap bull
+volume $-0.449\to+0.145$ (sign flip). Best decay ratios are turtle-type at $0.26$--$0.38$, still under
+threshold. So: 6 kernels are \emph{statistically significant in-sample after FDR}, and \emph{none} is
+demonstrated to generalise. Do not let the abstract's ``6 significant kernels'' be read as 6 usable
+signals — the paper is explicit; a skimming reader will not be.}
+
+\opsec{Open decision (standing)}
+Publish as-is now (it is complete) vs.\ expand with the Spannung spectral sections first.
+\textbf{Recommendation on record: publish now, Spannung as paper \#2.} P1 = polish to camera-ready,
+P2 = SSRN, P3 = arXiv \code{q-fin.TR} endorsement.
+
+\opsec{Validation framework}
+Walk-forward: \textbf{discovery} on $t\le T_{\text{train}}$, \textbf{validation} strictly on
+$t>T_{\text{train}}$ — the split is what produced the negative robustness result above rather than
+hiding it. \textbf{Rolling-SVD stability} re-estimates the basis on moving windows and correlates
+successive bases ($\bar\rho$), which tests whether a ``shape'' is a real recurring geometry or a
+window-specific artifact. A kernel can be significant and unstable; both are reported.
+
+\opsec{Analytical basis dictionary}
+Discovered kernels are matched against closed-form families — polynomial, cubic, exponential
+($a\in[3,8]$) — plus an alignment diagnostic. Purpose: say \emph{what shape was found}, in words, rather
+than shipping an opaque 20-dim vector. This is the interpretability half of the pitch and the part a
+classical-TA reader can check.
+
+\opsec{Why it suits a maths/signal-processing supervisor}
+Matched filtering + event-aligned averaging is the FINDCHIRP / gravitational-wave template-bank idea
+transplanted to price geometry; the basis is learned by SVD rather than derived from a physical model,
+and the multiple-testing control is what makes the transplant honest. That framing is the pitch for
+Bölcskei (signal-processing theory) and Teichmann (ML in finance).
+
+\end{multicols}
+
+\opfoot{One-pager for personal use. Carry two facts into any conversation about this paper: breakouts
+carry nothing after FDR, and \emph{no kernel passed OOS robustness}. The method is the contribution;
+the kernels are not yet a result.}
+
+\end{document}

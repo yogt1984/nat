@@ -1,0 +1,129 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage{onepager}
+
+\begin{document}
+\small
+
+\ophead{From Liquidation Geometry to Price Movement}
+{A Spatial-Density Heatmap and Cascade-Probability Model for Cryptocurrency Perpetual Futures}
+{\code{liquidity_heatmap_preprint.tex} $\cdot$ 11pp $\cdot$ Jun 2026, revised Aug 2026 $\cdot$
+ honest methods paper — \textbf{no performance numbers anywhere}}
+
+\begin{multicols}{2}
+
+\opsec{Thesis}
+Leveraged perp positions carry deterministic liquidation prices. When price reaches a dense cluster of
+them, forced market liquidations impose impact that can reach the \emph{next} cluster — a self-reinforcing
+cascade. This paper formalizes that intuition into a field, eight features, a closed-form trigger
+condition, and a falsifiable protocol.
+
+\opsec{The field}
+Discretize the log-return axis around mid into $K=200$ bins ($10$\,bps each, $\pm10\%$); map each tracked
+position's USD notional into the bin holding its liquidation price. Eight scale- and level-invariant
+geometric features:
+\begin{opitems}
+\item $d_{\min}$ nearest-cluster distance $\cdot$ CMR mass concentration $\cdot$ cascade-chain length
+      $\cdot$ ACP directional asymmetry
+\item absorption capacity $A$ $\cdot$ cluster velocity $\cdot$ $\bar d$ mass-weighted distance $\cdot$
+      $S$ spatial entropy
+\end{opitems}
+
+\opsec{The mechanism}
+\textbf{Domino condition} — liquidating cluster $A$ triggers $B$ iff
+\[
+  \delta_B-\delta_A \;<\; \lambda\,M_A/m_t
+\]
+($\lambda$ Kyle-type impact, $M_A$ cluster mass, $m_t$ depth). Order-book depth acts as a \textbf{damper}
+— a liquidity spiral in the Brunnermeier--Pedersen sense — and $\sgn(\mathrm{ACP})$ predicts cascade
+\emph{sign}. Geometry feeds an online, delayed-target logistic cascade-probability model.
+
+\opsec{The obstacle, as originally stated}
+On a decentralized venue no endpoint returns the full population of open positions. The field is a sample,
+$H^{\mathrm{obs}}=\rho_t H+\text{noise}$, with $\rho_t$ \emph{unobserved and time-varying}. Proposed fix —
+shape-preserving OI rescaling:
+\[
+  H^{\mathrm{scaled}}(t,k)=H^{\mathrm{obs}}(t,k)\cdot\frac{\mathrm{OI}_{\text{tot}}(t)}{\sum_k H^{\mathrm{obs}}(t,k)}
+\]
+leaves every ratio feature unchanged, corrects the mass-dependent ones. Original failure mode reported
+candidly: a preliminary multi-symbol backtest produced \emph{zero} trades, $d_{\min}$ constantly returning
+its no-data sentinel.
+
+\opsec{What the Aug-2026 revision adds (§7)}
+$\rho_t$ is no longer unknown — measured by the \#8 instrument:
+\begin{opfacts}
+Coverage, $s{=}2$ & BTC .315 / ETH .380 / SOL .247 \\
+Registry & 3,596 wallets from a 41,392-wallet leaderboard \\
+Scoping probe & equity-2k 61\% OI/28\% active; volume-2k 39\%/46\%; union 69\% \\
+Derived liq px & exact for 40.8\% of 2,926 positions \\
+\end{opfacts}
+Side convention $s$: OI counts each contract once, a registry sees both sides, so outstanding notional is
+$2\,\mathrm{OI}$. $s{=}2$ is conservative and \emph{is a factor of two on the one number the field is
+judged by}.
+
+\opsec{And the finding that changes the paper}
+\[
+  \mathbf{2.9\%}\ \text{of liquidated \emph{wallets}} \quad\text{vs}\quad \mathbf{21.9\%}\ \text{of liquidated \emph{notional}}
+\]
+(48 events, 35 wallets, \$223{,}491.) A \textbf{second bias, different in kind}: the registry is seeded by
+equity because the map wants whoever holds size, but whoever gets liquidated is small and levered.
+\textbf{The rescaling above cannot repair this} — it assumes uniform thinning, and this sampling is biased
+in \emph{shape}. Cuts both ways: cascades are driven by notional and a fifth of it is not nothing; what
+the field cannot see is the long tail of small forced exits, which matters exactly if those \emph{start}
+a chain rather than continue one.
+
+\opsec{Why the zero is not a refutation}
+\caution{Mapped notional fraction reads $0.0\%$. Confounded: a liquidated wallet no longer holds the
+position, so a snapshot taken after the event has nothing to have predicted. Cannot yet separate
+``different populations'' from ``we looked too late''. Reported as a confound, deliberately, because the
+bare zero reads as a refutation it has not earned.}
+
+\opsec{Validation protocol status}
+G1--G5 are not merely unmet — they are \textbf{unevaluable} until the snapshot-then-observe series
+resolves. Three outcomes: mapped frac climbs (validates per-position scoring) $|$ pinned at 0 with
+notional $\approx22\%$ (demote to cluster-level scoring) $|$ notional collapses too (seed a third registry
+by liquidation risk).
+
+\opsec{Falsifiable claims it makes}
+Cascade probability jumps discontinuously as spacing falls below $\lambda M_A/m_t$ $\cdot$ deep near-money
+depth converts approach into \emph{rejection} rather than breakout $\cdot$ $\sgn(\mathrm{ACP})$ leads
+cascade sign. Open question: do the eight features add anything beyond simple cluster proximity? Designed
+to be answerable by ablation; G5 guards against the field being a disguised liquidity proxy.
+
+\opsec{The five validation gates (pre-specified)}
+\begin{opfacts}
+G1 Discrimination & OOS $\mathrm{AUC}>0.65$ \emph{and} top-decile lift $>2\times$ \\
+G2 Net information & $\IC_{\text{net}}=\IC_{\text{gross}}-\frac{2\bar s}{\sigma_r\sqrt T}>0.02$ \\
+G3 Stability & walk-forward median $\mathrm{AUC}>0.60$; $<20\%$ of windows under $0.55$ \\
+G4 Universality & BTC/ETH/SOL each pass G1, pairwise $\cos(\boldsymbol\beta_i,\boldsymbol\beta_j)>0.6$ \\
+G5 Orthogonality & $R^2<0.30$ regressing $\hat p$ on a spread/depth composite \\
+\end{opfacts}
+G2 makes it survive costs. \textbf{G5 is the important one}: it stops the field being a relabelled
+liquidity proxy — the most likely way this whole construction is secretly trivial.
+
+\opsec{What survives sampling, and what does not}
+\textbf{Survives} (shape-dependent, preserved in expectation under uniform thinning): $d_{\min}$, CMR,
+ACP, $\bar d$, $S$ — and the largest, cascade-causing positions are disproportionately likely to be
+discovered since they dominate trade flow.
+\textbf{Biased} (absolute-mass): absorption capacity $A$ is \emph{over}estimated (observed mass
+understates the true denominator); chain length may be \emph{under}counted when untracked positions fill
+gaps in the domino inequality.
+
+\opsec{Why publish results-free}
+Same posture as \#4, \#5, \#6, \#8: specify the mechanism, expose the observational constraint, fix the
+data, \emph{then} measure. A referee can attack the construction on its merits without disentangling it
+from a performance claim, and there is nothing to retract when the empirics land. The §7 revision is the
+first return on that ordering — and it is the case for the ordering, since measuring found a bias that
+more modelling never would have.
+
+\opsec{Siblings}
+\#8 is the instrument (and the source of every number in §7) $\cdot$ internal/confidential results-free
+companion \code{liquidity_heatmap_cascade.tex} $\cdot$ implementation lives at
+\code{rust/ing-features/src/heatmap.rs}.
+
+\end{multicols}
+
+\opfoot{One-pager for personal use. The lesson worth carrying: ``insufficient coverage'' was an
+\emph{incomplete diagnosis} — coverage \emph{of what} is the operative question, and a field can be
+adequate for the mass that sustains a cascade and blind to the events that start one.}
+
+\end{document}

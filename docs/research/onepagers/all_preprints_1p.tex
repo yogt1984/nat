@@ -1,0 +1,149 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage{onepager}
+
+\begin{document}
+\footnotesize
+
+\ophead{The Preprint Set — All Eight on One Sheet}
+{P-branch publication set $\cdot$ \code{docs/research/*_preprint.\{tex,pdf\}} $\cdot$ one house layout
+ $\cdot$ author Yigit Onat \code{<yionat@gmail.com>}}
+{P1 polish $\to$ P2 SSRN $\to$ P3 arXiv \code{q-fin.TR} $\to$ P4 outreach $\to$ P5 track
+ $\cdot$ EPFL EDFI deadlines \textbf{Jan 15 / Mar 31 2027} $\cdot$ card built 2026-08-08}
+
+\begin{multicols}{2}
+
+\opsec{1 \ convolver — Event-Aligned SVD \hfill 15pp}
+Analytically-defined events (breakout / turtle-soup / trap) $\times$ 4 channels (body, wicks, volume)
+$\to$ SVD $\to$ IC gate with BH-FDR. \textbf{SVD never sees forward returns} — the structural
+anti-overfit argument. 7.2\,M ticks, 12,059 candles, 1,775 events. \textbf{6 of 158 kernels survive FDR},
+$|\IC|\in[0.20,0.36]$; \textbf{no breakout kernel survives}. Rolling stability $\bar\rho>0.90$ for the
+strongest. \caution{No kernel passes OOS robustness — two sign-flip. Method is the result.}
+\emph{P1 camera-ready target. Lead for Teichmann, Bölcskei, Malamud, Cheridito, Zdeborová, Krzakala,
+Filipović.}
+
+\opsec{2 \ microstructure\_alpha — FDR-Controlled Discovery \hfill 12pp}
+236 features, 100\,ms, BTC/ETH/SOL, 1\,s--15\,min. Imbalance dominates, $\IC\approx0.45$ at 1--5\,s,
+universal across symbols, 7/8 robustness (BTC). \textbf{Central negative result:} conditioning on
+directionally-correct passive fills collapses $\IC$ $0.45\to0.03$ on all three symbols — a structural
+\textbf{adverse-selection barrier}; execution, not signal quality, binds. Five-gate protocol
+(discovery/cost/temporal/cross-symbol/dedup) + BH-FDR $q{=}0.05$ + adaptive threshold + decay monitoring.
+\caution{Combiner $\IC$ .18/.25/.36 on a thin window — those algorithms were REFUTED by the Q4 kill gate
+2026-07-30. The barrier result is unaffected.}
+\emph{Lead for Collin-Dufresne, Hugonnier, Acciaio, Bühlmann, Farkas, Kuhn.}
+
+\opsec{3 \ liquidity\_heatmap — Liquidation Geometry \hfill 11pp}
+$K{=}200$ bins, $10$\,bps, $\pm10\%$; 8 scale-invariant features. Domino condition
+$\delta_B-\delta_A<\lambda M_A/m_t$, depth as damper, $\sgn(\mathrm{ACP})$ predicts sign. \textbf{No
+performance numbers anywhere — deliberate.} Aug-2026 revision (§7): sampling rate now \emph{measured}
+(coverage .315/.380/.247 at $s{=}2$), and a \textbf{second bias found} — 2.9\% of liquidated wallets vs
+21.9\% of liquidated notional; the OI rescaling cannot repair it (assumes uniform thinning; this is
+biased in shape). \caution{Mapped frac $0.0\%$ is confounded by snapshot ordering, not a refutation.}
+
+\opsec{4 \ prism — Perception Pressure \& Resonance \hfill 7pp}
+$P(K,t)=A(K,t)\cdot V(K,t)$: salience $\ge0$ times credibility-weighted valence in $[-1,+1]$.
+Three properties novel in combination — multiplicative coupling (signed, magnitude-meaningful),
+\textbf{diversity as multiplier} (one outlet cannot inflate it), full decomposability. Trust
+\emph{earned} by automated cross-corroboration, $0.1+0.4\cdot(\text{validated}/\text{total})$, never
+hand-assigned. Five-agent pipeline. System at \code{~/Prism}. \caution{Methods/system paper; no empirics
+logged.} \emph{Lead for Leippold — send with \#5.}
+
+\opsec{5 \ prism\_signal — From Narrative to Alpha \hfill 9pp}
+What does one exogenous signal add to a structurally narrow microstructure book? Three reasons it helps
+without being individually strong: \textbf{timescale separation} (disjoint from the 0.005--0.1\,Hz
+imbalance band), \textbf{effective breadth} ($\Neff=N/[1+(N-1)\rhobar]$ — a weak orthogonal signal beats
+a strong redundant one), \textbf{partial evasion} of the adverse-selection barrier (patient execution
+couples weakly to the fillable-state indicator). Same as-of join, same five gates, no privileges.
+\caution{All three stated as hypotheses with FDR-corrected tests; no performance figures. Weak point:
+$\rhobar$ must be estimated under \emph{stress}, per \#6.}
+
+\opsec{6 \ process — The Process as an Analytical Unit \hfill 14pp}
+Third first-class unit beside feature and algorithm: a typed, registry-bound contract certifying whether
+something carries information about a precisely specified target. MI as currency (justified by
+\textbf{Fano}, a hard lower bound on error). $\IR\approx\ICbar\sqrt{\Neff}$; \textbf{the binding
+correlation is the stress-regime one, not the calm one}. Five mechanisms: CMI greedy selection,
+interaction-information synergy mining, prefix residualization, Marchenko--Pastur-denoised PCs, capstone
+decorrelated book reporting honest $\Neff$. Aspect$\times$horizon target taxonomy; derivative operators
+under a program-level FDR ledger. \caution{First real surface: 284 BTC cells, 0 discoveries — BH at the
+100-shuffle $p$-floor \emph{cannot} pass. Power problem, not a verdict.}
+
+\opsec{7 \ lob\_predictive\_structure — Two Channels \hfill 8pp}
+2.17\,M ticks/symbol. \textbf{Two empirically orthogonal channels}: directional ($\IC$ to $0.47$ at
+1--5\,s, 8 independent axes, imbalance-led) and volatility ($\IC$ $0.35$, arrival intensity/activity/
+toxicity) — each carries \emph{zero} of the other's information, on all three symbols. Spectral
+localization to 0.005--0.1\,Hz, OU half-life 5--7\,s, cross-coherence 68\,s; \textbf{time-domain
+aggregation destroys the signal}. Efficiency drift measured live (5\,s IC $.45\to.29$ as spreads tighten).
+Execution boundary: maker-fill conditioning $\to0.03$, but \textbf{any-fill conditioning $\to0.52$} —
+which isolates adverse selection rather than decay. \caution{OOS replication in progress, not done.}
+
+\opsec{8 \ nat2\_exact\_map — Exact or Nothing \hfill 11pp}
+Instrument for \#3. Two rules: \textbf{exact or nothing} (unobserved $\Rightarrow$ absent + coverage
+deficit, never imputed) and \textbf{gates before models} (feed$\to$map$\to$magnet$\to$persistence$\to$
+decay; the refusal is the product). WORM store, dual clocks $t^{\mathrm{event}}/t^{\mathrm{ingest}}$ so
+lookahead is \emph{queryable}; hash-chained ledger (threat model is the researcher, not an attacker);
+admissibility $=$ exists $\wedge$ passed $\wedge$ fresh. \code{gate feed} PASS 20/20; \textbf{\code{gate
+map} FAIL} on \code{predictive} — an unevaluable criterion must not pass. Coverage .315/.380/.247;
+derivation exact for 40.8\% of 2,926. Code at \code{~/nat2} (separate repo).
+
+\opsec{Cross-map — who supplies what}
+\begin{opitems}
+\item \textbf{The barrier:} \#2 finds it, \#7 isolates it (0.03 vs 0.52), \#5 proposes to evade it, \#8
+      builds around it.
+\item \textbf{Breadth / $\Neff$:} \#6 is the theory, \#7's 8 axes are an instance, \#5 is the argument
+      for spending it on a new domain.
+\item \textbf{Liquidation cascades:} \#3 is the model, \#8 is the instrument and revises \#3's obstacle.
+\item \textbf{Narrative:} \#4 is the instrument, \#5 is the integration theory.
+\item \textbf{Standalone:} \#1 (method paper; different mathematics, best fit for the D-MATH/D-ITET
+      supervisors).
+\end{opitems}
+
+\opsec{Posture shared by 3, 4, 5, 6, 8}
+Specify the instrument, expose the constraint, \textbf{report no fabricated performance}, state the
+falsifying experiment before running it. Five of eight papers report a negative or unevaluable result as
+their headline. That is the set's signature and should be foregrounded in outreach, not apologised for.
+
+\opsec{Outreach map — lead preprint per supervisor}
+\textbf{Tier 1 (send first).}
+\begin{opfacts}
+Teichmann \emph{(ETH D-MATH)} & \#1 convolver \\
+Collin-Dufresne \emph{(EPFL SFI)} & \#2 micro\_alpha \\
+Hugonnier \emph{(EPFL SFI)} & \#2 micro\_alpha \\
+Malamud \emph{(EPFL SFI)} & \#1 convolver \\
+Bölcskei \emph{(ETH D-ITET)} & \#1 convolver \\
+\end{opfacts}
+\textbf{Tier 2 (stagger $+2$ weeks).}
+\begin{opfacts}
+Acciaio \emph{(ETH D-MATH)} & \#2 \\
+Cheridito \emph{(ETH D-MATH)} & \#1 \\
+Bühlmann \emph{(ETH D-MATH)} & \#2 \\
+Farkas \emph{(ETH/UZH)} & \#2 \\
+Leippold \emph{(UZH/SFI)} & \#5 (with \#4) \\
+Zdeborová \emph{(EPFL SPOC)} & \#1 \\
+Krzakala \emph{(EPFL IdePHICS)} & \#1 \\
+Kuhn \emph{(EPFL RAO)} & \#2 \\
+Filipović \emph{(EPFL Swissquote)} & \#1 \\
+\end{opfacts}
+\caution{\#7 is arguably the better lead than \#2 for the pure-microstructure/econometrics targets
+(Collin-Dufresne, Hugonnier, Bühlmann) — it is measurement-first rather than apparatus-first, and it
+does not carry the refuted combiner numbers. Not yet reassigned in \code{docs/PHD/README.md}.}
+
+\opsec{Co-supervision pairings}
+Teichmann $+$ Bölcskei (ML in finance $+$ signal-processing theory) $\cdot$ Collin-Dufresne $+$ Krzakala
+(microstructure $+$ random matrix theory) $\cdot$ Malamud $+$ Zdeborová (ML asset pricing $+$ statistical
+physics).
+
+\opsec{Before sending — known debts}
+\begin{opitems}
+\item \#2 §Hierarchical combiner rests on the five algorithms REFUTED 2026-07-30. Re-check or caveat
+      before P1 camera-ready.
+\item \#7's out-of-time replication is stated as in progress; make sure the version sent says so.
+\item \code{docs/TASKS.md} P1 still reads ``camera-ready \emph{convolver} PDF'' — the set is now eight.
+\item Prof email addresses are \emph{not} stored anywhere; gathering them is part of P4.
+\end{opitems}
+
+\end{multicols}
+
+\opfoot{One-pager for personal use, built 2026-08-08. Per-paper cards: \code{onepagers/*_1p.pdf}.
+SSRN links pending P2 — tables in all 14 \code{docs/PHD/*/README.md}. Every number here is a
+pointer, not a source: re-read the paper (or, for \#8, \code{nat2/data/ledger.jsonl}) before quoting.}
+
+\end{document}
