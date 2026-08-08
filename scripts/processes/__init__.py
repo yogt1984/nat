@@ -48,6 +48,7 @@ from . import mi_stability  # noqa: F401,E402
 from . import pca_combo  # noqa: F401,E402
 from . import persistence_stats  # noqa: F401,E402
 from . import residualize  # noqa: F401,E402
+from . import agreement_gate_eval  # noqa: F401,E402
 from . import conditional_predictability  # noqa: F401,E402
 from . import horizon_label_scan  # noqa: F401,E402
 # XS-10: without these imports the @register decorators never fire, so the units are

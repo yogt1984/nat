@@ -48,6 +48,16 @@ STANDING_EVALS: dict[str, StandingEval] = {
         timeframe="15min",
         note="3-bar triple-barrier label vs feature MI, PROC-12 null-gated (PROC-5).",
     ),
+    "agreement_gate": StandingEval(
+        name="agreement_gate",
+        transform=None,
+        scorer="agreement_gate_eval",
+        target=None,
+        symbols=("BTC", "ETH", "SOL"),
+        timeframe="5min",
+        note="A-1: conditional IC given fast/slow agreement vs a size-preserving gate "
+             "permutation null. Promotes §5's pilot to a monitored fact, or kills it.",
+    ),
 }
 
 
