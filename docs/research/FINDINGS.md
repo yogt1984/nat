@@ -1114,6 +1114,71 @@ reduce market impact; NAT's cost model is spread + fee + slippage per unit turno
 **no impact term**, so it measures as exactly zero here. That is not a win being left on the
 table — it is unpriceable until `X-3` has fill data.
 
+### 7.10 Wide-pair breakeven screen (B-5a, first run 2026-08-08) — **the hypothesis survives, capacity nearly kills it; n = 1 hour**
+
+*Source: `scripts/xs/breakeven.py` via `exploration/b5a_breakeven_study.py` over
+`xs.capacity.aggregate_l2` on **~18 XS-8 sweeps across ~1.5 hours** (2026-08-08, 2,751
+snapshot rows). **177 of 177 pairs** cleared the ≥12-sweep floor — an earlier read at 12
+sweeps had only 127, and the missing 50 were request failures that resolved as sampling
+continued, so the coverage bias that read carried is gone. Rebate from the COST-5 ladder
+(`rebate_t2`, +0.2 bps).
+**This is one hour of one day, not the "several days" B-5a asks for — recorded as a first
+reading, not a verdict.***
+
+**What was actually tested, and why it is the decisive question.** §4.11 established the
+maker rule `posting is +EV ⟺ half_spread + rebate > E[adverse | fill]`, and §7.2 then showed
+NAT has only ever tested it on the extreme tight tail of its own venue (169/177 pairs are
+wider than BTC). The tempting inference — wide pairs cover adverse selection — rests entirely
+on assuming `E[adverse|fill]` stays at BTC's measured 0.228 bps as the spread widens. It
+should not: spreads are wide *because* makers price toxicity and inventory risk into them.
+So the screen refuses to emit a survivor count and instead reports the exponent at which the
+verdict flips, parameterising `E[adverse|fill](h) = A_btc·(h/h_btc)^β` pinned through BTC's
+measured point:
+
+| β | E[adverse] at the median pair | survivors |
+|---|---|---|
+| 0.00 (constant — the optimistic reading) | 0.228 bps | 177 / 177 |
+| 0.50 | 0.961 bps | 177 / 177 |
+| **0.75** | 1.976 bps | **29 / 177** |
+| 1.00 (proportional — the pessimistic reading) | 4.062 bps | 6 / 177 |
+
+**Median β\* = 0.698**, and it held at 0.696 on the shorter 127-pair read. The whole hypothesis is now one number: *does adverse selection scale
+more slowly than `h^0.70`?* One tick-data measurement on one wide pair settles it — that is
+`B-5b`, and it is a measurement rather than a program of simulations.
+
+**Capacity is the harder blade.** Joint wide-AND-deep, via `XS-5`'s floors:
+
+| touch floor | admitted | of which wide (>1 bps) | survive @ β=0.75 |
+|---|---|---|---|
+| $0 | 177 | 131 | 29 |
+| $500 | 33 | 18 | 15 |
+| $1,000 | 18 | 10 | 10 |
+| **$5,000** | **4** | **0** | 2 |
+
+So the tradeable version is **≈10 wide pairs at roughly $1,000 of touch size**, conditional on
+β < 0.75. That is the capacity ceiling `B-5b` must justify before any simulation is worth
+running.
+
+**A genuine surprise: spread and depth are uncorrelated** (Spearman −0.107, p = 0.16, n=177).
+It is not that wide pairs are especially thin — **the whole universe is thin at the touch**.
+Median touch notional by spread quartile: $391 (tightest 25 %) · $33 · $45 · $121 (widest).
+The only pairs carrying real size are BTC ($268 k), ETH ($172 k), SOL ($27 k) and XRP ($9.7 k) — all tight, and all already studied.
+This weakens §7.2's "wide pairs are nearly empty" reading: emptiness is universe-wide, not a
+property of width.
+
+**Cross-check:** BTC measured **0.0769 bps** here against §4.11's 0.0832 anchor — a third
+independent instrument agreeing on the same quantity.
+
+**How to read the optimistic row.** "177/177 survive at β ≤ 0.5" is *not* evidence; it is the
+assumption restated, and it is exactly the trap §7.2 named. The defensible prior is β nearer 1
+than 0, where 6 pairs survive.
+
+*Limits:* ~18 sweeps over ~1.5 hours of one weekday; no intraday, weekday or regime variation;
+quoted spreads are not fill economics; the per-pair β\* is only interpretable
+as robustness for pairs genuinely wider than the anchor (near `h ≈ h_btc`, `ln(h/h_btc) → 0`
+and β\* explodes — BTC's −2.48 and SOL's −0.65 are artifacts, not scores). The survivors-by-β
+table is the sound output.
+
 ## 8. Platform & hypothesis-suite metrics
 
 *Source: project_state_report 2026-06-09.*
