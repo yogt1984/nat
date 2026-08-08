@@ -40,9 +40,13 @@ and the fill-economics verdict (X-3)**. The su-35 freeze and the T0b deployment 
 2. **`B-5` — maker viability on wider-spread pairs.** The one maker hypothesis §4.11 left alive:
    breakeven scales with the half-spread, and every maker experiment so far ran on the three
    *tightest* symbols on the venue. §4.9 criteria imported unchanged.
-3. **`A-2` — combiner revalidation.** The last unrefuted capital-relevant claim in the record
-   (§5's IC .18/.25/.36 on a **2-day** OOS with monotonically rising fold ICs). Settle it before
-   building on it.
+3. ~~**`A-2` — combiner revalidation.**~~ ✅ **DONE 2026-08-08 — REFUTED, with `A-1`** (FINDINGS
+   §5.1). The composite loses to a single feature under honest walk-forward and the agreement gate
+   is *harmful*, not merely absent. **No capital-relevant claim in the record is now unrefuted**,
+   and §2's adverse-selection collapse stands unopposed. The surviving open questions — B-5a's β
+   conditional and Track C's beta-neutral rotation — are **time-blocked, not work-blocked**
+   (XS-9's own power arithmetic: ~325 rebalances ≈ 0.89 yr), which makes the data clocks
+   (`XS-7`/`XS-8`) and `REL-4`→`Q1` the work that actually shortens the wait.
 4. **`COST-8`** — stop hardcoding the 0.2 bps maker rebate; it is the most load-bearing
    unvalidated number in the stack (§4.11), worth ~1.7 bps/fill.
 

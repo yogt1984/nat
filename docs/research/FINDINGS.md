@@ -543,13 +543,87 @@ outside the three tightest symbols on the venue. Sim-only; proxy caveats of §4.
 
 ## 5. Combination, gating & regime
 
-- **Hierarchical combiner** (2026-06-10; ⚠️ 2-day OOS 06-08→10, 4-fold, 100-bar embargo):
+- ⚠️ **REFUTED 2026-08-08 — both halves. See §5.1 below.** The composite loses to a single
+  feature under honest walk-forward (A-2), and the gating mechanism is not merely absent but
+  **harmful** (A-1). The bullet is retained as the claim that was tested, not as a finding.
+
+  **Hierarchical combiner** (2026-06-10; ⚠️ 2-day OOS 06-08→10, 4-fold, 100-bar embargo):
   composite IC BTC **+0.178** (Sharpe +1.25, dir-acc 0.557) · ETH **+0.248** (+1.71, 0.576) ·
   SOL **+0.359** (+2.40, 0.594; 3.3 h horizon). L1 slow bias × L2 fast timing (zeroed on
   disagreement) × L3 inverse-vol sizing. **Directional gating works:** L2 conditional-on-agreement
   IC exceeds unconditional — the first architecture structurally addressing §2. Honest caveats in
   the source: monotonically rising fold ICs (possible look-ahead/trend artifact), L1 dominance
   (ablation pending), SOL likely inflated, costs assumed not measured.
+
+### 5.1 The combiner, retired (A-2 + A-1, 2026-08-08) — **the last unrefuted capital-relevant claim**
+
+*Sources: `alpha/walkforward_ic.py` + `exploration/a2_combiner_revalidation.py` (A-2);
+`processes/agreement_gate_eval.py` + `exploration/a1_agreement_gate_study.py` (A-1). 25 days
+(2026-07-14→08-07), 5-min bars, BTC/ETH/SOL. Criteria pre-registered in the driver docstrings
+before either run.*
+
+Until this week the combiner was the only capital-relevant claim in the record that had never
+been tested to destruction. It made **two** separate claims and both are now refuted.
+
+**A-2 — the composite loses to one of its own inputs.** Walk-forward IC, weights refitted per
+fold on rows strictly before it, evaluated on **non-overlapping** observations:
+
+| symbol | walk-forward IC | §5 claimed | positive folds | max-fold share | verdict |
+|---|---|---|---|---|---|
+| BTC | +0.062 | .178 | 0.60 | 0.36 | FAIL(c,d) |
+| ETH | +0.099 | .248 | 0.80 | 0.31 | FAIL(c,d) |
+| SOL | **−0.024** | .359 | 0.20 | 0.40 | FAIL(a,b,c,d) |
+
+Criterion (d) is the one that matters: **the composite never beats its own best single
+feature.** `trend_ema_short` alone scores ~0.20 against the three-layer stack's 0.06–0.10, and
+SOL — §5's strongest claim — comes back negative. The hierarchy destroys information.
+
+**The mechanism behind §5's number is in the file dates.**
+`models/hierarchical_combiner/weights_BTC.json` carries `training_date 2026-06-11`; the OOS
+window was 2026-06-08→10. **The weights were fitted after the period they were scored on.**
+That produces monotonically rising fold ICs by construction — each successive fold has more of
+its own fit behind it — which is exactly the artifact §5 observed and could not explain.
+
+**A-1 — the gate is not neutral, it is harmful.** Conditional IC given fast/slow agreement,
+against a null that permutes *the gate* while holding the subset size fixed:
+
+| symbol | hz | IC uncond. | IC **agree** | IC **disagree** | lift | z |
+|---|---|---|---|---|---|---|
+| BTC | 30m | −0.033 | −0.043 | −0.024 | −0.010 | −0.45 |
+| ETH | 30m | −0.020 | **−0.087** | **+0.040** | −0.067 | **−2.91** |
+| SOL | 30m | +0.011 | **−0.047** | **+0.073** | −0.057 | **−2.71** |
+| SOL | 2h | −0.004 | −0.050 | +0.047 | −0.046 | −2.11 |
+
+On ETH and SOL the **disagreement** subset carries the signal and agreement destroys it;
+`frac_days_informative = 0.00` everywhere. §5 claimed conditional IC *above* unconditional.
+
+**Why the original passed, and the null that catches it.** The trap is selection, not
+estimation: split any sample on any condition and report the better half, and a lift appears —
+the agreement subset is smaller and differently distributed, so `max(agree, disagree)` beats
+the pooled figure by construction. "Agreement IC > unconditional IC" therefore passes on pure
+noise, and §5's pilot is that shape. A-1's null permutes which observations count as agreeing
+while holding the fast signal, the target and the **subset size** fixed — size matters because
+IC's sampling variance depends on n, so a resizing null would measure sample size rather than
+structure. A planted test with two independent signals confirms the raw lift is often positive
+there while the calibrated one is not.
+
+**A second finding fell out of A-2: the data cannot currently test §5's own horizon.** At its
+~5 h horizon, 25 days of gap-affected bars yield **28 non-overlapping observations** — no
+walk-forward verdict is possible on 28 points, so the results above are at 30 min, the longest
+horizon this sample supports. An initial run *without* non-overlapping sampling printed pooled
+IC 0.39–0.46 — *higher* than §5's claim, since consecutive bars share 59 of 60 bars of their
+forward window; that inflation is recorded here because it is the same error in a new costume.
+
+**Consequence.** Nothing capital-relevant in the record is now unrefuted. §2's adverse-selection
+collapse stands unopposed: the one architecture claiming to address it structurally does not.
+The surviving open questions are B-5a's β conditional (§7.10) and Track C's beta-neutral
+rotation (§7.8), both of which are **time-blocked rather than work-blocked** — XS-9's own power
+arithmetic needs ~325 rebalances ≈ 0.89 yr.
+
+*Limits:* A-1 used `imbalance_qty_l1 × regime_divergence_1h` — the §2 contract's axis
+representatives — not the combiner's exact L1/L2 composites; a defender of §5 could fairly ask
+for those. A-2 priced no costs, because it did not need to: the IC fails before costs are
+applied. Both are single-window studies on 25 days.
 - **Spannung arc** (situation_analysis): 1,350-combo grid — raw L1 imbalance IC 0.45, EWM smoothing
   *hurts*; causality clean (smooth lag decay, no look-ahead); aging IC 0.48 (IS) → 0.47 (24 h) →
   0.45 (48 h) → 0.36 (3 wk); **unprofitable at taker fees** (0.17–0.37 bps edge vs 7 bps RT);
