@@ -239,14 +239,36 @@ def _info_request(payload: dict) -> object:
 
 
 def fetch_universe(info_fn=None, include_delisted: bool = False,
-                   return_excluded: bool = False):
+                   return_excluded: bool = False, retries: int = 4,
+                   backoff: float = 2.0):
     """Every perp name the venue currently lists, in meta order.
 
     `info_fn` is injected so this is testable offline. Raises on a malformed payload
     rather than returning a short list: a truncated universe silently narrows every
     downstream breadth claim, which is worse than a loud failure.
     """
-    data = (info_fn or _info_request)({"type": "meta"})
+    # The enumeration runs ONCE before any work, so a transient 429 here takes down the
+    # whole sweep — it killed the L2 sampler at startup on 2026-08-08. Transport faults
+    # are retried with backoff; a malformed payload is NOT (retrying a schema error just
+    # burns a minute).
+    fn = info_fn or _info_request
+    last: Exception | None = None
+    data = None
+    for attempt in range(max(1, retries)):
+        try:
+            data = fn({"type": "meta"})
+            break
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError,
+                json.JSONDecodeError) as exc:
+            last = exc
+            if attempt + 1 >= max(1, retries):
+                raise
+            wait = backoff * (2 ** attempt)
+            log.warning("meta request failed (%s); retrying in %.1fs", exc, wait)
+            time.sleep(wait)
+    if data is None and last is not None:      # pragma: no cover - defensive
+        raise last
+
     if not isinstance(data, dict):
         raise TypeError(f"meta payload must be an object, got {type(data).__name__}")
     universe = data.get("universe")
