@@ -627,6 +627,15 @@ arithmetic needs ~325 rebalances ≈ 0.89 yr.
 representatives — not the combiner's exact L1/L2 composites; a defender of §5 could fairly ask
 for those. A-2 priced no costs, because it did not need to: the IC fails before costs are
 applied. Both are single-window studies on 25 days.
+
+⚠️ **Amended 2026-08-09 — the A-1 half is weaker than stated above; see [§7.11](#711-the-regime_-category-is-dead-in-production-2026-08-09--and-it-silently-hollowed-out-a-1).**
+`regime_divergence_1h` is all-NaN from 2026-07-26, so only **07-15→07-18** of A-1's 25-day
+window carries a live gate input and the result rests on **≤4 usable day-folds** — which is
+precisely why every cell came back `insufficient_days`/`non_durable`. A second run on the
+alive window reproduces the *direction* (0/9 informative, 7/9 lifts negative) but not the
+strength. **A-1 is better read as "no support, underpowered" than as "refuted."** A-2 is
+unaffected — it does not use `regime_` at all — so the section's headline conclusion stands on
+A-2 alone.
 - **Spannung arc** (situation_analysis): 1,350-combo grid — raw L1 imbalance IC 0.45, EWM smoothing
   *hurts*; causality clean (smooth lag decay, no look-ahead); aging IC 0.48 (IS) → 0.47 (24 h) →
   0.45 (48 h) → 0.36 (3 wk); **unprofitable at taker fees** (0.17–0.37 bps edge vs 7 bps RT);
@@ -1255,6 +1264,72 @@ quoted spreads are not fill economics; the per-pair β\* is only interpretable
 as robustness for pairs genuinely wider than the anchor (near `h ≈ h_btc`, `ln(h/h_btc) → 0`
 and β\* explodes — BTC's −2.48 and SOL's −0.65 are artifacts, not scores). The survivors-by-β
 table is the sound output.
+
+### 7.11 The `regime_` category is dead in production (2026-08-09) — **and it silently hollowed out A-1**
+
+*Source: per-day scan of `regime_divergence_1h` finiteness across all 75 day-directories in
+`data/features/`, one mid-day file per day, cross-checked against `regime_absorption_1h`.
+Found while attempting to run `A-1` through `nat process run`.*
+
+**`regime_divergence_1h` is 100 % NaN in every file written since 2026-07-26** — 0 finite
+values in 1,444,319 tick rows over the recent window. `regime_absorption_1h` is dead alongside
+it, so this is the whole optional `regime_` category (23 features), not one column.
+
+| last ALIVE | outage | first DEAD | dead since |
+|---|---|---|---|
+| **2026-07-18** | 07-19 → 07-25 (no files) | **2026-07-26** | 13 consecutive data-days |
+
+The break is bracketed by a 7-day ingestion outage, so the *transition* is unobservable in the
+data: the category was alive going into the gap and dead coming out. It has flapped before —
+46 of 75 days alive, with alternating runs since 2026-04-19 — so this is a recurrence, not a
+first occurrence.
+
+**The cause is not determinable from the repo, and the freeze forbids finding out.** The two
+commits nearest the boundary are `OPS-1` (connect-timeout) and `OPS-2` (per-symbol crash-restart
+supervision), both **2026-07-27 — after the first dead file**, so neither is established as the
+trigger. One hypothesis worth testing when contact is allowed: `regime_` needs 1 h/4 h/24 h
+rolling windows (`regime/mod.rs:13`), so a supervisor that restarts symbol tasks frequently
+would reset those accumulators and hold the whole category at NaN indefinitely — a
+warmup-starvation failure that presents exactly as this does. Recorded as a hypothesis, not a
+diagnosis; confirming it requires inspecting the running ingestor, which the **su-35 freeze
+forbids**.
+
+**Consequence for §5.1 — A-1 had at most four usable days, not 25.** A-1 conditions the fast
+signal on `regime_divergence_1h`; its stated window is 2026-07-14→08-07, and within that
+window only **07-15, 07-16, 07-17 and 07-18** carry a live slow feature. Every row from 07-26
+onward drops out of `valid` because the gate input is NaN, silently. That is consistent with
+what A-1 reported — `n_days` of 0–3 against `min_days = 3`, every cell `insufficient_days` or
+`non_durable`, `frac_days_informative = 0.00` — but it means the "25 days" framing in §5.1's
+limits paragraph describes the *requested* window, not the *usable* one.
+
+An independent run on the alive window (2026-06-21→07-25, 243 bars, 237 with both features
+finite) reproduces the direction and not the strength: **0 of 9 cells informative, 7 of 9 lifts
+negative**, with the three largest-magnitude cells all favouring *disagreement* (BTC 1 d: agree
+−0.035 vs disagree +0.259; ETH 4 h: +0.027 vs +0.217; SOL 4 h: −0.123 vs +0.150; SOL 4 h z
+−2.64, which would not survive BH across nine cells and points against the claim in any case).
+
+**So the A-1 half of §5.1 is better stated as "no support, on a test too underpowered to
+settle it" than as "refuted."** The direction is consistent across two independent windows and
+nothing supports the original claim — but a durability verdict on ≤4 day-folds is not a
+refutation, and A-1's own process refuses to issue one. The A-2 half is unaffected: it does not
+use `regime_` at all.
+
+**Three defects in the A-1 unit itself, all found by the same attempt:**
+
+1. **Its registered defaults cannot run.** `AgreementGateEval` declares `data_level = "bars"`
+   but defaults to `slow="regime_divergence_1h"` and `fast="alg_mp_dev_ema"`. Bar frames carry
+   `{col}_{agg}` (`regime_divergence_1h_last`), and **no `alg_` column exists in any feature
+   file** — algorithm outputs are computed at runtime and never persisted. `nat process run
+   agreement_gate_eval` therefore fails on its own defaults. The 15 planted tests pass because
+   they construct frames with names of their own choosing, so the planted layer and the
+   real-data path never met — the `real-parquet smoke before commit` step, skipped.
+2. **Unrunnable reports as success.** With no horizon clearing `min_obs`, the loop `continue`s
+   for every horizon and the run returns `n_tested: 0, error: null` — a clean exit with nothing
+   in it. Same shape as the conformance test that silently validated a subset (XS-10).
+3. **The loader cap is invisible and binding.** `config/processes.toml` sets
+   `max_memory_mb = 4000`, which truncated a 35-day request to **78 bars** — below
+   `min_obs = 100`, so the process skipped silently. The same window at a 16 GB budget yields
+   243 bars. `nat process run` exposes no memory flag.
 
 ## 8. Platform & hypothesis-suite metrics
 
