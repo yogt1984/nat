@@ -1381,6 +1381,40 @@ residual ≡ 0, corr ≈ 0, false PASS; the planted duplicate test forced the ga
 `|corr(slow, fast)|`, with the spec's literal number recorded alongside. The spec text should
 be amended at the next touch.
 
+### 7.13 Trend continuation at 15m/1h (TC-1, 2026-08-09) — **the universe reverts here too; the continuation band does not exist**
+
+*Sources: `exploration/trend_continuation_study.py` + `tests/test_trend_continuation_study.py`
+(7 planted tests, red-first). Fresh venue fetch (XS-1 machinery): 177 pairs × 15m (~52 d) +
+173 pairs × 1h (~90 d; 4 recent listings empty). Engine: PROC-20 momentum family per pair —
+run-length continuation under the sign-permutation null, all statistics imported. Gate cell:
+**next-bar continuation only** (non-overlapping by construction; markouts recorded as
+descriptive after §7.12's overlap lesson). One BH family over all 1,739 gate cells, sweep
+recorded to the FDR ledger. Artifact: `reports/trend_continuation_study.json`.*
+
+The record refuted continuation at 1m/5m (34/36 negative) and found daily cross-sectional
+reversal (XS-3). The 15m–1h band between them was the open question. It is now closed:
+
+| interval | k=1 sign (pos/neg) | k=2 | k=3 | k=4 | k=5 | median excess range |
+|---|---|---|---|---|---|---|
+| 15m (177 pairs) | 10 / **167** | 19 / 158 | 23 / 150 | 41 / 131 | 30 / 141 | −0.019 … −0.045 |
+| 1h (173 pairs) | 35 / 136 | 12 / **159** | 29 / 142 | 23 / 149 | 39 / 124 | −0.015 … −0.057 |
+
+- **The sign distribution is the finding.** 81 % of all cells are negative; 18.2 % sit at
+  z ≤ −2 against 0.5 % at z ≥ +2 (a 36:1 asymmetry where a null predicts ~1:1); 19.3 % of raw
+  p's clear 0.05 (vs 5 % expected), all on the reversal side. Pairs share a market factor, so
+  no cross-pair binomial is quoted — the asymmetry is reported, not converted into a p-value.
+- **No single cell is promotable**: 0 of 1,739 survive the joint z + durability + BH gate
+  (1,027 cells `insufficient_days` — a 1h day holds 24 bars, per-day folds are thin by
+  construction; 712 `non_durable`; 0 `durable`). Per-pair power is the constraint, direction
+  is not.
+- **Consequence:** time-series trend-following on this venue now has a negative record at
+  every tested horizon from 1m to 1d. The reversal sign at 15m–1h feeds the mean-reversion
+  program (Step 4 / Track B-C): next-bar continuation excess of −2…−6 % per run-length is the
+  same physics LF7's band-reversion wants to harvest, measured from the other side.
+- Continuation-band trading (the "profiling for trend-following algorithms" hypothesis) is
+  dead on arrival here; any future trend claim must show why it survives a universe that
+  reverts 8-to-1.
+
 ## 8. Platform & hypothesis-suite metrics
 
 *Source: project_state_report 2026-06-09.*
