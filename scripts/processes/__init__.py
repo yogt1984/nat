@@ -47,6 +47,7 @@ from . import mi_combiner  # noqa: F401,E402
 from . import mi_stability  # noqa: F401,E402
 from . import pca_combo  # noqa: F401,E402
 from . import persistence_stats  # noqa: F401,E402
+from . import regime_profile  # noqa: F401,E402
 from . import residualize  # noqa: F401,E402
 from . import agreement_gate_eval  # noqa: F401,E402
 from . import conditional_predictability  # noqa: F401,E402
