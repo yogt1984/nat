@@ -225,6 +225,15 @@ theta_pct = 0.70             # gate OPEN when VPIN percentile < theta (stand asi
 spread_pct_max = 0.90        # skip when spread percentile >= this (no blown spreads)
 size_by_toxicity = true      # scale size by (1 - vpin_pct) within the gate
 
+[vpin_gate]
+# HF4 extraction: the §4.5-validated VPIN veto as a standalone permission unit for
+# the maker path (HF1 quoting, A4-gated mean reversion). No direction is emitted —
+# VPIN-as-signal was falsified (vpin_regime). Parameters are the donor's
+# ([toxic_vwap_reversion]), not new choices; parity is pinned in tests/test_vpin_gate.py.
+w_p = 288                    # percentile window for VPIN / spread
+theta_pct = 0.70             # gate OPEN when VPIN percentile < theta
+spread_pct_max = 0.90        # closed when spread percentile >= this (no blown spreads)
+
 [vwap_reversion]
 # GAP-01: ungated micro-VWAP mean-reversion (the control for toxic_vwap_reversion).
 z_window = 96                # z-score window for flow_vwap_deviation
