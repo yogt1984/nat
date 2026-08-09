@@ -55,8 +55,12 @@ import pandas as pd
 NS_PER_MIN = 60_000_000_000
 
 #: Candidate windows, in minutes. Each must earn its column in VW-2 before Phase B.
+#: 30m and 2h bracket the continuation->reversion crossover: the propagator model
+#: (Bouchaud et al. 2004) says `price - VWAP_W` measures impact not yet decayed, so the
+#: sign flips where W crosses the impact decay timescale. A first read put the flip
+#: between 15m and 1h — too wide a gap to leave unsampled around the point of interest.
 WINDOWS: dict[str, int] = {
-    "5m": 5, "10m": 10, "15m": 15, "1h": 60, "6h": 360, "12h": 720,
+    "5m": 5, "10m": 10, "15m": 15, "30m": 30, "1h": 60, "2h": 120, "6h": 360, "12h": 720,
 }
 
 #: Rolling window (in emitted rows) for the deviation's z-score — the `k` of LF7's k·sigma.
