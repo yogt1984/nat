@@ -60,6 +60,28 @@ class ValidationConfig:
     # Cross-symbol
     max_count_ratio_diff: float = 0.1     # Max 10% difference in row counts
 
+    # Category liveness (BUG-6). A category whose every column is 100% NaN means a
+    # subsystem stopped computing — categorically different from scattered NaN, which
+    # is `NaN Ratio`'s job.
+    #
+    # The declared-dead set is DECLARED, never inferred from a threshold, and it is
+    # short on purpose. A per-category census over all 76 day-directories (mid-day file
+    # each, one representative column per category) gives:
+    #
+    #     hm             0 / 53   never alive  -> declared
+    #     liquidation   35 / 76   alive then dead
+    #     concentration 36 / 76   alive then dead
+    #     whale         36 / 76   alive then dead
+    #     regime        49 / 76   alive then dead
+    #     (all others  48-76/76   healthy)
+    #
+    # Only `hm` (heatmap, 8 features) has never produced a finite value, so only `hm`
+    # is declared. The other four HAVE run before and are dead now — they are
+    # regressions, and the check is supposed to keep failing on them until they are
+    # fixed. Adding a prefix here says "this subsystem is known to be off forever",
+    # which should cost an edit and a justification rather than happen silently.
+    expected_dead_categories: frozenset = frozenset({"hm"})
+
 
 # =============================================================================
 # Validation Results
@@ -72,6 +94,7 @@ HARD_CHECKS = frozenset({
     "File Integrity",
     "Continuity",
     "NaN Ratio",
+    "Category Liveness",
     "Sequence Monotonicity",
 })
 
@@ -375,6 +398,98 @@ def check_nan_ratio(df: pd.DataFrame, config: ValidationConfig) -> CheckResult:
     )
 
 
+#: Columns that are not features and must never be scored as a category.
+_META_COLS = ('timestamp_ns', 'timestamp', 'symbol', 'sequence_id')
+
+
+#: Prefixes that belong to one manifest category but do not share a common stem.
+#: Concentration is the only such case: its 15 columns are named after the statistic
+#: (`gini`, `theil`, `herfindahl`, `top5`, …) rather than carrying a `conc_` prefix, so
+#: splitting on the first `_` shatters one category into fourteen singletons and every
+#: one of them reads as "a dead category". Found by real-parquet smoke, which is the
+#: only place it could have been found — the planted frames use tidy prefixes.
+_CONCENTRATION_PREFIXES = frozenset({
+    'concentration', 'active', 'positions', 'position', 'largest', 'nearest',
+    'top5', 'top10', 'top20', 'top50', 'herfindahl', 'gini', 'theil', 'hhi',
+})
+
+
+def _category_of(column: str) -> str:
+    """The feature category a column belongs to, per `FEATURES.md`'s 21 categories.
+
+    Mostly the prefix up to the first `_` (`raw_`, `imbalance_`, `regime_`, `hm_`, …),
+    with concentration's statistic-named columns folded back into one category.
+    """
+    stem = column.split('_', 1)[0]
+    return 'concentration' if stem in _CONCENTRATION_PREFIXES else stem
+
+
+def check_category_liveness(df: pd.DataFrame, config: ValidationConfig) -> CheckResult:
+    """Flag whole feature CATEGORIES that are 100% NaN (BUG-6).
+
+    `NaN Ratio` already reports dead columns, but it reports them one per line: on
+    2026-08-08 it said "90 columns exceed 1% NaN threshold" — the same sentence it
+    printed on 2026-07-15, when the `regime_` category was still alive. A message that
+    does not change when a 23-feature subsystem dies cannot raise the alarm, and BUG-6
+    went unnoticed for 13 days behind exactly that sentence.
+
+    So this check works at the category level, where the signal survives: 90 flagged
+    columns collapse to one named item. A category is dead only when *every* one of its
+    columns is wholly NaN — partial deadness is noise and belongs to `NaN Ratio`.
+
+    There is deliberately no warmup grace. A category NaN for an entire file never
+    started; warmup shows up as a leading NaN block, not a column of them.
+    """
+    if df.empty:
+        return CheckResult(
+            name="Category Liveness",
+            passed=False,
+            message="No data to check",
+        )
+
+    feature_cols = [c for c in df.columns if c not in _META_COLS]
+    categories: dict[str, dict[str, int]] = {}
+    for col in feature_cols:
+        cat = _category_of(col)
+        entry = categories.setdefault(cat, {"dead": 0, "total": 0})
+        entry["total"] += 1
+        series = pd.to_numeric(df[col], errors="coerce")
+        if not np.isfinite(series.to_numpy(dtype=float)).any():
+            entry["dead"] += 1
+
+    wholly_dead = sorted(
+        cat for cat, e in categories.items()
+        if e["total"] > 0 and e["dead"] == e["total"]
+    )
+    undeclared = [c for c in wholly_dead if c not in config.expected_dead_categories]
+    declared = [c for c in wholly_dead if c in config.expected_dead_categories]
+
+    details = {
+        "categories": categories,
+        "dead_categories": undeclared,
+        "declared_dead": declared,
+    }
+
+    if undeclared:
+        named = ", ".join(
+            f"{c} ({categories[c]['total']} features)" for c in undeclared
+        )
+        return CheckResult(
+            name="Category Liveness",
+            passed=False,
+            message=f"{len(undeclared)} feature category(ies) wholly NaN: {named}",
+            details=details,
+        )
+
+    suffix = f" ({len(declared)} declared-dead: {', '.join(declared)})" if declared else ""
+    return CheckResult(
+        name="Category Liveness",
+        passed=True,
+        message=f"All {len(categories) - len(declared)} live categories producing values{suffix}",
+        details=details,
+    )
+
+
 def check_feature_ranges(df: pd.DataFrame, config: ValidationConfig) -> CheckResult:
     """Check that key features are within expected ranges."""
     if df.empty:
@@ -624,6 +739,7 @@ def validate(data_dir: Path, config: ValidationConfig, hours: Optional[int] = No
         check_file_integrity(files),
         check_continuity(df, config),
         check_nan_ratio(df, config),
+        check_category_liveness(df, config),
         check_feature_ranges(df, config),
         check_cross_symbol_consistency(df, config),
         check_data_rate(df, config),
