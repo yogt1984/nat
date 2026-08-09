@@ -36,6 +36,14 @@ min_obs = 200
 min_band_ic = 0.05
 min_obs = 5000                  # tick-level; Welch needs ~2 full segments
 
+[regime_profile]                 # PROF-1: per-asset J/K trend-vs-reversion profile
+j_grid = [1, 2, 4, 8, 16]        # Jegadeesh-Titman formation periods, in bars
+k_grid = [1, 2, 4, 8, 16]        # holding periods
+vr_q = [2, 4, 8, 16, 32]         # Lo-MacKinlay variance-ratio horizons
+min_obs = 60                     # non-overlapping observations per cell
+min_bars = 200
+day_shuffles = 40
+
 [persistence_stats]              # PROC-20: run-length continuation + band excursion
 max_run_length = 5
 vwap_window = 60                 # bars in the rolling midline / sigma window
