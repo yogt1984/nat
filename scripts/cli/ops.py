@@ -108,6 +108,7 @@ def cmd_gap_help(args=None):
 
     status     show current gap state (gapping / seconds since last write)
     check      one-shot freshness check (exit 1 if gapping) — for cron/CI
+    test       send a REAL test page through the alert path (exit 1 unless delivered)
     start      run the gap-alert daemon (foreground; polls data freshness)
     stop       graceful shutdown (SIGTERM)
 
@@ -142,6 +143,12 @@ def cmd_gap_check(args):
         _p("GAP" if st.gapping else "✓", R if st.gapping else G,
            f"age {st.age_s:.0f}s" if st.age_s is not None else "no data")
     return 1 if st.gapping else 0
+
+
+def cmd_gap_test(args):
+    """REL-4: send a REAL test page through the alert path; exit 1 unless delivered."""
+    r = _py(f"{GAP_SCRIPT} test")
+    return r.returncode if hasattr(r, "returncode") else r
 
 
 def cmd_gap_start(args):
@@ -594,6 +601,8 @@ def register(sub):
     gpst = gapsub.add_parser('status', help='Show current gap state')
     gpst.add_argument('--json', action='store_true', help='JSON output')
     gpst.set_defaults(func=cmd_gap_status)
+    gpts = gapsub.add_parser('test', help='Send a REAL test page via Telegram (exit 1 unless delivered)')
+    gpts.set_defaults(func=cmd_gap_test)
     gpck = gapsub.add_parser('check', help='One-shot freshness check (exit 1 if gapping)')
     gpck.add_argument('--json', action='store_true', help='JSON output')
     gpck.set_defaults(func=cmd_gap_check)

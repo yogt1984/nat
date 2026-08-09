@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+import requests
 
 from .db import TournamentDB
 
@@ -145,24 +146,34 @@ def format_telegram_summary(date: str, rankings: list[dict],
     return "\n".join(lines)
 
 
-def send_telegram(message: str) -> bool:
-    """Send message to Telegram. Returns True on success."""
+def send_telegram(message: str, parse_mode: str | None = "Markdown") -> bool:
+    """Send message to Telegram. Returns True only if the API accepted every chunk.
+
+    Telegram rejects Markdown containing unmatched entities (a bare `_` in a file
+    path is enough) with a 400 — and for an ALERT channel a formatting error must
+    never cost the page. So a Markdown-mode chunk that the API rejects is retried
+    once as plain text before the send counts as failed. Callers that page (the
+    gap-alert daemon) pass ``parse_mode=None`` and skip formatting entirely.
+    """
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         log.debug("Telegram not configured — skipping send")
         return False
 
-    import requests
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     chunks = [message[i:i + 4096] for i in range(0, len(message), 4096)]
     for chunk in chunks:
         try:
-            resp = requests.post(url, json={
-                "chat_id": chat_id,
-                "text": chunk,
-                "parse_mode": "Markdown",
-            }, timeout=10)
+            payload = {"chat_id": chat_id, "text": chunk}
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
+            resp = requests.post(url, json=payload, timeout=10)
+            if not resp.ok and parse_mode:
+                log.warning("Telegram rejected %s chunk (%s) — retrying plain",
+                            parse_mode, resp.text)
+                resp = requests.post(url, json={"chat_id": chat_id, "text": chunk},
+                                     timeout=10)
             if not resp.ok:
                 log.warning("Telegram send failed: %s", resp.text)
                 return False

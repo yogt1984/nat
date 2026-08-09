@@ -360,17 +360,39 @@ class GapAlerter:
     def _iso(epoch: float) -> str:
         return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
 
-    def _send(self, message: str) -> None:
-        """Page on every available channel (best-effort). Local channels always
-        fire so a gap is never invisible; Telegram is push-on-top when configured."""
+    def _send(self, message: str) -> dict:
+        """Page on every available channel; return per-channel outcomes.
+
+        Local channels always fire so a gap is never invisible; Telegram is
+        push-on-top when configured. REL-4's rule: a push failure must be LOUD
+        and on the record — every alerts.log line carries its telegram outcome,
+        so a broken token is visible the first time it eats a page. Pages go
+        plain-text (parse_mode=None): formatting is never worth a page.
+        """
         log.warning(message)
+        outcomes = {"alert_log": False, "notify_send": False,
+                    "telegram": "unconfigured"}
         if not self.notify:
-            return
+            return outcomes
+        # Push first, so the durable log line can record how the push went.
+        if telegram_configured():
+            try:
+                from tournament.report import send_telegram
+
+                ok = send_telegram(message, parse_mode=None)
+                outcomes["telegram"] = "ok" if ok else "FAILED"
+            except Exception as e:  # pragma: no cover
+                outcomes["telegram"] = "FAILED"
+                log.warning("Telegram send raised: %s", e)
+            if outcomes["telegram"] == "FAILED":
+                log.warning("Telegram page FAILED — alert is LOCAL-ONLY: %s", message)
         # Local fallback 1: durable, timestamped alert log (always works).
         try:
             self.alert_log.parent.mkdir(parents=True, exist_ok=True)
             with self.alert_log.open("a") as fh:
-                fh.write(f"{self._iso(self._now())}  {message}\n")
+                fh.write(f"{self._iso(self._now())}  {message}  "
+                         f"[telegram={outcomes['telegram']}]\n")
+            outcomes["alert_log"] = True
         except OSError as e:  # pragma: no cover
             log.debug("alert_log write failed: %s", e)
         # Local fallback 2: desktop notification, if a display is available.
@@ -380,15 +402,10 @@ class GapAlerter:
                 import subprocess as _sp
                 _sp.run(["notify-send", "-u", "critical", "nat: data gap", message],
                         check=False, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+                outcomes["notify_send"] = True
         except Exception:  # pragma: no cover
             pass
-        # Push: Telegram (no-op without creds — caller already warned loudly).
-        try:
-            from tournament.report import send_telegram
-
-            send_telegram(message)
-        except Exception as e:  # pragma: no cover
-            log.debug("Telegram send skipped: %s", e)
+        return outcomes
 
     def _track_tmp(self, prev: GapState, now_iso: str) -> tuple[str | None, int | None, str | None, float | None]:
         """Returns (tmp_path, tmp_size, tmp_grew_at, stall_age) for this cycle."""
@@ -544,6 +561,23 @@ class GapAlerter:
         self._shutdown = True
 
 
+def delivery_test(alerter: "GapAlerter") -> dict:
+    """REL-4 acceptance: page through the daemon's OWN send path, report outcomes.
+
+    Passes only if Telegram is configured AND the API accepted the message —
+    the same code path a real gap takes, so a green here means a real gap pages.
+    (The other half of the acceptance is the phone that buzzes; only a human
+    holds that half.)
+    """
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    msg = (f"🔔 nat gap-alert delivery test — {ts} (REL-4). "
+           f"If you can read this on your phone, gap paging works end-to-end.")
+    out = alerter._send(msg)
+    out["telegram_configured"] = telegram_configured()
+    out["passed"] = out["telegram"] == "ok"
+    return out
+
+
 # ───────────────────────────────────────────────────────────────────────────
 # CLI entrypoint (invoked by `nat gap start`)
 # ───────────────────────────────────────────────────────────────────────────
@@ -572,6 +606,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if st.gapping else 0
     if cmd == "health":
         return 0 if healthy(a.config) else 1
+    if cmd == "test":
+        out = delivery_test(a)
+        print(json.dumps(out, indent=2))
+        if out["passed"]:
+            print("PASS — Telegram accepted the page; confirm the buzz on your phone.",
+                  file=sys.stderr)
+        elif not out["telegram_configured"]:
+            print("FAIL — TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID not set (.env); "
+                  "alerts are local-only.", file=sys.stderr)
+        else:
+            print("FAIL — Telegram configured but the API rejected the page; "
+                  "see log for the response.", file=sys.stderr)
+        return 0 if out["passed"] else 1
     print(f"unknown command: {cmd}", file=sys.stderr)
     return 2
 
