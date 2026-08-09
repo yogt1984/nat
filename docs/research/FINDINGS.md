@@ -1331,6 +1331,56 @@ use `regime_` at all.
    `min_obs = 100`, so the process skipped silently. The same window at a 16 GB budget yields
    243 bars. `nat process run` exposes no memory flag.
 
+### 7.12 Multi-scale VWAP study (VW-2, 2026-08-09) — **0 of 6 windows earn a column; the migration does not happen**
+
+*Sources: `exploration/vwap_multiscale_study.py` + `tests/test_vwap_multiscale_study.py` (20
+planted tests, red-first). Full `data/trades/` archive (44 calendar days, 1,197 files) ×
+BTC/ETH/SOL × {5m, 10m, 15m, 30m, 1h, 2h} (6h/12h excluded — unmeasurable on this archive,
+VW-1 smoke). Criteria pre-registered in `specs/multiscale_vwap.md` §A2 before the run; every
+statistic imported from PROC-4/12/13/15/20. Artifact: `reports/vwap_multiscale_study.json`.*
+
+**Verdict: no window passes the five gates. VW-3 closes; the ingestor is untouched** — the
+outcome the spec called "good, cheaply obtained." The 12-column schema migration (236→248,
+now 236→254 with the 30m/2h crossover bracket) is not built.
+
+| gate | result |
+|---|---|
+| (a) z ≥ 3 at ≥ 1 horizon | passes somewhere on every window except 5m-ETH/SOL, 30m-BTC/SOL, 1h-BTC/SOL |
+| (b) frac_days ≥ 0.55 | **fails everywhere — the binding gate.** Best cell 0.16 (2h BTC); most 0.03–0.11 |
+| (c) BH-FDR q ≤ 0.05 | passes wherever (a) does (q down to 6×10⁻¹¹) |
+| (d) \|corr vs next-faster\| < 0.5 | **fails for every nested window** (0.81–0.92) — the spec's "six windows are one axis" prediction, confirmed |
+| (e) ≥ 10 events/day at k = 2 | passes ≤ 30m (11.8–16.4); fails at 1h (9.1–9.9) and 2h (7.4–8.0) |
+
+**Day-consistency is again the failure mode, and coverage is again the reason it cannot be
+appealed.** The archive's holes leave only 29–32 % of minutes active; per-day folds at the 15m
+horizon survive on just 6–7 of 44 days, and the 1h horizon supports **zero** usable day folds
+(24 non-overlapping rows/day < any defensible KSG fold — refused, not averaged). §4.9's lesson
+holds: the pooled average is publishable, the per-day series is the finding.
+
+**Two observations for the record, not promoted:**
+
+1. **The 2h deviation is the one candidate with a pooled, cross-symbol-replicated effect:**
+   Stouffer z = 7.06 / 4.28 / 3.99 (BTC/ETH/SOL) at the 5m horizon, q ≤ 5×10⁻⁴ — and it is
+   the *least* redundant with the shipped fast axis (holdout corr vs 5m falls monotonically:
+   0.81 → 0.68 → 0.48 → 0.32 → **0.21** at 2h). It fails only (b) and (e), both of which are
+   coverage-starved. If a clean streak (REL-4→Q1→Q0) ever provides ≥ 30 well-covered days,
+   re-running this exact driver is the cheapest high-prior test in the queue.
+2. **The oscillation is not bid-ask bounce:** amplitude-to-spread at k = 2 touches is 15–390×
+   across all cells (Roll 1984 predicts ≈ 1 for pure bounce), so *if* the effect firms up on
+   clean data it is not disqualified by construction.
+
+**Methods note (caught by the smoke, worth keeping):** on dense minute rows the pre-registered
+PROC-4 criterion inflates without bound — first run showed z = 50–70 rising with window
+length, `frac_days = 1.00` everywhere. Mechanism: a 1h target overlaps 60× across rows and
+PROC-12's permutation null assumes exchangeable rows — the same mechanism as §5's phantom-IC
+incident. Fix: each horizon evaluates a frame **strided to non-overlapping targets** (data
+prep, estimator untouched); z fell to 0.2–2.0 on the same 3 days. Any future PROC-4 run on
+bar-level frames needs the same defense. Second methods note: criterion (d)'s literal quantity
+(holdout corr of the *residual* with the faster window) is degenerate on an exact duplicate —
+residual ≡ 0, corr ≈ 0, false PASS; the planted duplicate test forced the gate onto holdout
+`|corr(slow, fast)|`, with the spec's literal number recorded alongside. The spec text should
+be amended at the next touch.
+
 ## 8. Platform & hypothesis-suite metrics
 
 *Source: project_state_report 2026-06-09.*
