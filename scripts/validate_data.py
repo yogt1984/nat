@@ -65,21 +65,27 @@ class ValidationConfig:
     # is `NaN Ratio`'s job.
     #
     # The declared-dead set is DECLARED, never inferred from a threshold, and it is
-    # short on purpose. A per-category census over all 76 day-directories (mid-day file
-    # each, one representative column per category) gives:
+    # short on purpose. Only `hm` (heatmap, 8 features) qualifies: a per-category
+    # census over all 76 day-directories found 0/53 days with a single finite value.
     #
-    #     hm             0 / 53   never alive  -> declared
-    #     liquidation   35 / 76   alive then dead
-    #     concentration 36 / 76   alive then dead
-    #     whale         36 / 76   alive then dead
-    #     regime        49 / 76   alive then dead
-    #     (all others  48-76/76   healthy)
+    # A raw alive/total ratio is NOT the right instrument here and must not be used as
+    # one. `whale` 36/76 and `concentration` 36/76 look half-dead by that count, but the
+    # count is dominated by April-to-mid-June, before the position tracker was deployed
+    # at all. Split at the 06-18 deploy and they are healthy:
     #
-    # Only `hm` (heatmap, 8 features) has never produced a finite value, so only `hm`
-    # is declared. The other four HAVE run before and are dead now — they are
-    # regressions, and the check is supposed to keep failing on them until they are
-    # fixed. Adding a prefix here says "this subsystem is known to be off forever",
-    # which should cost an edit and a justification rather than happen silently.
+    #     since 2026-06-18       alive / dead      dead days
+    #     whale                    35 / 3          06-19, 08-04, 08-09
+    #     concentration            35 / 3          06-19, 08-04, 08-09
+    #     liquidation              34 / 4          06-19, 07-27, 08-04, 08-09
+    #     regime                   23 / 15         contiguous DEAD since 07-26
+    #
+    # So there is exactly one standing regression (`regime`), not four. The scattered
+    # dead days for the position-tracker trio are all low-coverage days — the same days
+    # on which no continuous run reaches these categories' readiness windows — which is
+    # a symptom of ingestion continuity, not of those categories being broken.
+    #
+    # Adding a prefix here says "this subsystem is known to be off forever", which
+    # should cost an edit and a justification rather than happen silently.
     expected_dead_categories: frozenset = frozenset({"hm"})
 
 
