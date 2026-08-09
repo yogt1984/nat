@@ -1415,6 +1415,43 @@ reversal (XS-3). The 15m–1h band between them was the open question. It is now
   dead on arrival here; any future trend claim must show why it survives a universe that
   reverts 8-to-1.
 
+### 7.14 Mean-reversion program maintenance (BUG-1 first leg + HF4 extraction, 2026-08-09)
+
+**BUG-1, `mean_reversion_detector` leg — retrained and it does not revalidate.**
+`train_mean_reversion.py`, current schema, explicit window `--start-date 2026-07-14`
+(~2,200 5-min bars after the archive's holes; the loader's 4 GB cap makes an implicit "all
+days" request silently smaller — §7.11, so the window is pinned):
+
+| symbol | OOS AUC | IS AUC | OOS/IS | trainer's own gate (≥ 0.52) |
+|---|---|---|---|---|
+| BTC | 0.506 | 0.717 | 0.71 | **FAIL** |
+| ETH | 0.519 | 0.829 | 0.63 | **FAIL** |
+| SOL | 0.530 | 0.716 | 0.74 | PASS (barely) |
+
+At chance on 2 of 3 symbols on current data — weaker than §4's 0.577/0.564/0.552 record and
+consistent with the 2026-07-29 artifact's decay (0.536). The detector stays research-only;
+nothing here feeds a capital path. Remaining BUG-1 legs: `meta_labeling` (runnable),
+`regime_conditioned_lgbm` (**blocked by BUG-6** — its `regime_` inputs are all-NaN in
+production since 07-26; retraining on dead columns would validate nothing).
+
+**HF4's VPIN gate is now a registered unit** (`algorithms/vpin_gate.py`, `vpin_gate`):
+the §4.5-directionally-validated veto (Sharpe improved 3/3 as a gate inside
+`toxic_vwap_reversion`) extracted as a standalone permission unit — `alg_vping_pct` /
+`alg_vping_gate` / `alg_vping_size`, **no direction emitted** (VPIN-as-signal is falsified;
+veto-only is its institutionally correct use). Parameters are the donor's, and
+`tests/test_vpin_gate.py` (9 planted tests) pins bit-for-bit gate parity with the donor,
+the max-rank percentile convention, NaN discipline, and step≡batch. Real-parquet smoke
+(2026-08-08 BTC, 424 k ticks): runs clean; note that `w_p` counts **rows**, so at 100 ms
+tick cadence 288 rows ≈ 29 s and the gate opens ~11 % — consumers on bar streams get the
+§4.5 timescale, consumers on ticks must size `w_p` for it. The maker path (HF1 quoting,
+A4-gated entries, Track B) can now compose with toxicity permission without dragging in
+the dead taker fade.
+
+Entropy-gated mean-reversion construction itself is deliberately NOT started here: that is
+Track B's B-3 behind the B-1 admission stop-gate ("Track B stops here if admission has no
+forward validity"), and bypassing a pre-registered stop-gate to build the fun part first is
+exactly the §4.6 failure shape.
+
 ## 8. Platform & hypothesis-suite metrics
 
 *Source: project_state_report 2026-06-09.*
