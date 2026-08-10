@@ -23,6 +23,7 @@ GAP_UNIT = "nat-gap-alert.service"
 CANDLE_UNIT = "nat-candle-refresh.service"
 CANDLE_TIMER = "nat-candle-refresh.timer"
 L2_UNIT = "nat-l2-sampler.service"
+POSITION_UNIT = "nat-position-sampler.service"
 
 #: Intervals the daily refresh sweeps. Ordered cheap→expensive so a truncated run still
 #: captures the perishable one first: the venue keeps ~5000 bars per interval, so 1m
@@ -155,9 +156,36 @@ RestartSec=30
 WantedBy=default.target
 """
 
+    # WP-2 — position sampler. The most schedule-critical unit here: WP-5 needs ≥90 days of
+    # accrual, so the verdict date (2026-11-08) slips one-for-one with every day this is not
+    # running, and no later effort buys the days back (FINAL_PLAN §2, same shape as the XS-7
+    # retention cap). A loop rather than a timer because a wallet's *transitions* are the
+    # signal — a daily snapshot cannot see a position opened and closed between windows.
+    positions_script = root / "scripts" / "data" / "fetch_positions.py"
+    positions = f"""\
+[Unit]
+# systemd only honours StartLimitIntervalSec in [Unit]; it was in [Service]
+# and silently ignored, so the restart limiter was never actually disabled.
+StartLimitIntervalSec=0
+Description=NAT position sampler (WP-2 — wallet positioning panel, ≥90d accrual)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={root}
+ExecStart={py} -u {positions_script} --loop --every 900
+{_env_lines()}
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target
+"""
+
     return {INGESTOR_UNIT: ingestor, GAP_UNIT: gap,
             CANDLE_UNIT: candle, CANDLE_TIMER: candle_timer,
-            L2_UNIT: l2}
+            L2_UNIT: l2, POSITION_UNIT: positions}
 
 
 def unit_dir() -> Path:
