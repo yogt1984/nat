@@ -19,7 +19,7 @@ for your role, or jump to the map by document type. The strategic spine is
 | **Doing research** | [`research/FINDINGS.md`](research/FINDINGS.md) → [`research/ALGORITHMS.md`](research/ALGORITHMS.md) → [`research/INSTITUTIONAL_ALGORITHMS.md`](research/INSTITUTIONAL_ALGORITHMS.md) → [`research/MECHANISM_FAMILIES.md`](research/MECHANISM_FAMILIES.md) → [`specs/process_layer.md`](specs/process_layer.md) |
 | **Building a unit** | [`contracts/`](contracts/) (feature / algorithm / process / viz) → [`METHODOLOGY.md`](METHODOLOGY.md) → `TASKS.md` (pick an ID) |
 | **On the PhD track** | `research/*_preprint.{tex,pdf}` → [`phd_related/`](phd_related/) → [`ideas/spannung.md`](ideas/spannung.md) |
-| **Planning / leading** | [`PLAN.md`](PLAN.md) → [`TASKS.md`](TASKS.md) → [`DOCS_RESTRUCTURE_PROPOSAL.md`](DOCS_RESTRUCTURE_PROPOSAL.md) |
+| **Planning / leading** | [`PLAN.md`](PLAN.md) → [`FINAL_PLAN.md`](FINAL_PLAN.md) → [`TASKS.md`](TASKS.md) → [`DOCS_RESTRUCTURE_PROPOSAL.md`](DOCS_RESTRUCTURE_PROPOSAL.md) |
 
 ---
 
@@ -33,6 +33,7 @@ Docs are grouped by **what they are for** (a light [Diátaxis](https://diataxis.
 | [`PLAN.md`](PLAN.md) | The Q/D/P strategic spine — gates, Current Focus, milestones. |
 | [`TASKS.md`](TASKS.md) | The single itemized backlog (~80 tasks: Q/QA/D/P/REL/INF/BUG/PROC). |
 | [`OBJECTIVE.md`](OBJECTIVE.md) | Mission + the end-to-end loop (Ingest → Discover → … → Deploy). |
+| [`FINAL_PLAN.md`](FINAL_PLAN.md) | **The terminal sequence** — what is still worth building, the `REV-2` stop rule (2026-10-10), and what accepting failure means. Points into `TASKS.md`; carries no work items. |
 
 ### Explanation — understand *why / how it works*
 | Document | Purpose |
