@@ -99,6 +99,7 @@ from cli import report as cli_report  # noqa: E402
 from cli.report import *  # noqa: E402,F401,F403
 from cli import lifecycle as cli_lifecycle  # noqa: E402
 from cli import xs as cli_xs  # noqa: E402  (XS-10: Class-3 cross-sectional layer)
+from cli import wallets as cli_wallets  # noqa: E402  (WP-1: on-chain wallet layer)
 from cli.lifecycle import *  # noqa: E402,F401,F403
 from cli import visualize as cli_visualize  # noqa: E402
 from cli.visualize import *  # noqa: E402,F401,F403
@@ -476,6 +477,9 @@ def cmd_help(args=None):
     nat xs persistence              Rank autocorrelation half-life (XS-4)
     nat xs trajectory               Rotation t-stat trajectory (XS-10)
     nat xs ledger                   Program multiple-testing ledger (PROC-13)
+
+  {BOLD}Wallets — on-chain layer (WP-1..5){W}  [PRELIM — substrate, not a signal]
+    nat wallets roster              Derive the wallet roster from the leaderboard (WP-1)
 
   {BOLD}Ingestor (explicit group; the bare `nat start/stop/status/log` aliases these){W}
     nat ing start                   Start ingestor locally
@@ -1041,6 +1045,7 @@ def build_parser():
 
     cli_lifecycle.register(sub)  # lifecycle group -> scripts/cli/lifecycle.py
     cli_xs.register(sub)         # xs group -> scripts/cli/xs.py (XS-10)
+    cli_wallets.register(sub)    # wallets group -> scripts/cli/wallets.py (WP-1)
 
     cli_ops.register(sub)  # risk/gap/service/promotion/bridge groups -> scripts/cli/ops.py
 

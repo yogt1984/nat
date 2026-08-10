@@ -3328,6 +3328,58 @@
           "name": "-h"
         }
       ],
+      "help": "On-chain wallet layer (WP-1..5) [PRELIM]",
+      "name": "wallets"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "200",
+          "help": "",
+          "name": "--limit",
+          "type": "int"
+        },
+        {
+          "default": "month",
+          "help": "",
+          "name": "--window"
+        },
+        {
+          "default": "notional_seen",
+          "help": "",
+          "name": "--rank-by"
+        },
+        {
+          "default": "1000000.0",
+          "help": "Volume floor \u2014 excludes vaults/bridge accounts (default 1e6)",
+          "name": "--min-notional",
+          "type": "float"
+        },
+        {
+          "default": "False",
+          "help": "Keep only positive window P&L",
+          "name": "--profitable"
+        },
+        {
+          "default": "False",
+          "help": "",
+          "name": "--json"
+        }
+      ],
+      "help": "Derive the wallet roster from the leaderboard (WP-1) [PRELIM]",
+      "name": "wallets roster"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
       "help": "Kill-switch daemon + halt control (T16)",
       "name": "risk"
     },
@@ -3405,6 +3457,16 @@
       ],
       "help": "Show current gap state",
       "name": "gap status"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        }
+      ],
+      "help": "Send a REAL test page via Telegram (exit 1 unless delivered)",
+      "name": "gap test"
     },
     {
       "args": [
@@ -6039,5 +6101,5 @@
       "name": "it-engine status"
     }
   ],
-  "count": 340
+  "count": 343
 }
