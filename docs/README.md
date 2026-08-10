@@ -16,7 +16,7 @@ for your role, or jump to the map by document type. The strategic spine is
 |---|---|
 | **New to NAT** | [`OBJECTIVE.md`](OBJECTIVE.md) → [`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md) → [`METHODOLOGY.md`](METHODOLOGY.md) → [`contracts/README.md`](contracts/README.md) → [`GLOSSARY.md`](GLOSSARY.md) |
 | **Operating the system** | [`commands.md`](commands.md) → [`../HETZNER_DEPLOYMENT_PLAN.md`](../HETZNER_DEPLOYMENT_PLAN.md) → [`AUTOMATION.md`](AUTOMATION.md) → `TASKS.md` §REL (reliability) |
-| **Doing research** | [`research/FINDINGS.md`](research/FINDINGS.md) → [`research/ALGORITHMS.md`](research/ALGORITHMS.md) → [`research/INSTITUTIONAL_ALGORITHMS.md`](research/INSTITUTIONAL_ALGORITHMS.md) → [`specs/process_layer.md`](specs/process_layer.md) |
+| **Doing research** | [`research/FINDINGS.md`](research/FINDINGS.md) → [`research/ALGORITHMS.md`](research/ALGORITHMS.md) → [`research/INSTITUTIONAL_ALGORITHMS.md`](research/INSTITUTIONAL_ALGORITHMS.md) → [`research/MECHANISM_FAMILIES.md`](research/MECHANISM_FAMILIES.md) → [`specs/process_layer.md`](specs/process_layer.md) |
 | **Building a unit** | [`contracts/`](contracts/) (feature / algorithm / process / viz) → [`METHODOLOGY.md`](METHODOLOGY.md) → `TASKS.md` (pick an ID) |
 | **On the PhD track** | `research/*_preprint.{tex,pdf}` → [`phd_related/`](phd_related/) → [`ideas/spannung.md`](ideas/spannung.md) |
 | **Planning / leading** | [`PLAN.md`](PLAN.md) → [`TASKS.md`](TASKS.md) → [`DOCS_RESTRUCTURE_PROPOSAL.md`](DOCS_RESTRUCTURE_PROPOSAL.md) |
@@ -49,6 +49,7 @@ Docs are grouped by **what they are for** (a light [Diátaxis](https://diataxis.
 | [`contracts/`](contracts/) | Per-unit contracts: [feature](contracts/feature.md) · [algorithm](contracts/algorithm.md) · [process](contracts/process.md) · [viz](contracts/viz.md). |
 | [`research/ALGORITHMS.md`](research/ALGORITHMS.md) | Implemented-algorithm catalogue with OOS results. |
 | [`research/INSTITUTIONAL_ALGORITHMS.md`](research/INSTITUTIONAL_ALGORITHMS.md) | Institutional-algo survey + HAVE/PARTIAL/GAP audit. |
+| [`research/MECHANISM_FAMILIES.md`](research/MECHANISM_FAMILIES.md) | **Edge sources by economic mechanism** — who is on the other side and why they lose; which families are exhausted, undecidable or untried. |
 
 ### How-to / operations
 | Document | Purpose |
