@@ -10,7 +10,7 @@
 > *every* command lands with NAT9. Absence of a tag is not a claim of maturity.
 
 
-**340 commands** across **72 groups**.
+**343 commands** across **73 groups**.
 
 | Group | Commands |
 |---|---|
@@ -40,7 +40,7 @@
 | [`exp`](#exp) | 9 |
 | [`experiment`](#experiment) | 7 |
 | [`fetch`](#fetch) | 2 |
-| [`gap`](#gap) | 6 |
+| [`gap`](#gap) | 7 |
 | [`gauntlet`](#gauntlet) | 5 |
 | [`health`](#health) | 1 |
 | [`help`](#help) | 1 |
@@ -85,6 +85,7 @@
 | [`visualize`](#visualize) | 8 |
 | [`viz`](#viz) | 8 |
 | [`viz3d`](#viz3d) | 1 |
+| [`wallets`](#wallets) | 2 |
 | [`xs`](#xs) | 7 |
 
 
@@ -362,6 +363,7 @@
 | `nat gap start` | Run the gap-alert daemon (foreground) |
 | `nat gap status` | Show current gap state |
 | `nat gap stop` | Graceful shutdown (SIGTERM) |
+| `nat gap test` | Send a REAL test page via Telegram (exit 1 unless delivered) |
 | `nat gap watchdog` | Install cron watchdog (auto-restart every 5 min) |
 
 ## gauntlet
@@ -775,6 +777,13 @@
 | Command | Description |
 |---|---|
 | `nat viz3d` | Interactive 3D feature-surface-over-time (Plotly HTML) |
+
+## wallets
+
+| Command | Description |
+|---|---|
+| `nat wallets` | On-chain wallet layer (WP-1..5) [PRELIM] |
+| `nat wallets roster` | Derive the wallet roster from the leaderboard (WP-1) [PRELIM] |
 
 ## xs
 
