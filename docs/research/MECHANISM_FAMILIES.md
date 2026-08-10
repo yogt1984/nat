@@ -65,10 +65,43 @@ events"). Treating them as refuted would discard live questions.
 | 6 | **Slow-moving capital / segmentation** | Duffie (2010), *Asset price dynamics with slow-moving capital* | Untried |
 | 7 | **Attention & flow-driven demand** — listings, inclusion, retail flow | Shleifer (1986); Harris & Gurel (1986) index inclusion; Barber & Odean (2008) attention | **Untried — data already on disk.** 177 listed / 55 delisted, listing events in the candle archive (§7.1) |
 | 8 | **Statistical relative value** — cointegrated mispricing between instruments | Gatev, Goetzmann & Rouwenhorst (2006); Avellaneda & Lee (2010) | `relative_value_pairs` registered but **never evaluated** |
-| 9 | **Behavioural under/over-reaction** — momentum & reversal | Jegadeesh & Titman (1993); De Bondt & Thaler (1985); Lehmann (1990) | **Exhausted.** Three independent instruments agree the universe reverts: PROC-20 (§5), TC-1 (§7.13), XS-3 (§7.4) |
+| 9 | **Behavioural under/over-reaction** — genuine mis-pricing, no intermediary role | Jegadeesh & Titman (1993); De Bondt & Thaler (1985); Lehmann (1990) | **The naked signature is exhausted, the mechanisms are not** — see [Signatures vs mechanisms](#signatures-are-not-mechanisms). Trading the sign of recent returns is dead at bar scale on this universe (PROC-20 §5, TC-1 §7.13, XS-3 §7.4) |
 | 10 | **Volatility risk premium** — sell insurance | Carr & Wu (2009); Bakshi & Kapadia (2003) | **Inaccessible** — no options data |
 | 11 | **Microstructure noise / bid-ask bounce** | Roll (1984); Hasbrouck (1993) | Exhausted (mean-reversion suite) |
 | 12 | **Latency / queue priority** — pure speed | Budish, Cramton & Shim (2015) | **Not viable** — REST/WS access, no colocation |
+
+### Signatures are not mechanisms
+
+**Momentum and mean-reversion are not families.** They describe the *sign of autocorrelation* —
+an observable. A family names **who pays you**. Several unrelated mechanisms produce the same
+signature, and the distinction decides whether a result generalises:
+
+| Signature | Produced by | Who pays, and why |
+|---|---|---|
+| **Reversion** | Family 1 — liquidity provision | You absorb an imbalance; the reversion **is** the compensation (Grossman & Miller) |
+| | Family 5 — forced flow | A liquidation overshoots fair value and snaps back once forced selling ends (Coval & Stafford) |
+| | Family 11 — microstructure noise | Bid–ask bounce. Mechanical, no economic content (Roll) |
+| | Family 9 — behavioural | Genuine over-reaction (De Bondt & Thaler) |
+| **Momentum** | Family 3 — price-discovery lag | One venue leads; "continuation" is information arriving (Hasbrouck) |
+| | Family 6 — slow-moving capital | Capital arrives gradually, so price trends while it does (Duffie) |
+| | Family 7 — attention | Flow arrives in waves |
+| | Family 9 — behavioural | Under-reaction |
+
+**What NAT exhausted was the naked signature** — take the sign of recent returns, at bar scale,
+on this universe, at taker cost. Three instruments agree, and that is settled. It says nothing
+about the mechanisms that *generate* reversion, which are largely untried.
+
+**And the strongest result in the record is a signpost, not a dead end.** "The universe reverts
+8-to-1" (TC-1) is *precisely the condition under which liquidity provision and forced-flow
+harvesting pay*, because both are compensated **by** reversion. The finding therefore points
+directly at families **1** and **5** — uncomfortably, the two NAT cannot currently execute
+(family 1 blocked on an unearned rebate tier, family 5 on K2 dead columns). But *blocked* is row
+four of the death table, not row two.
+
+**The question to ask any reversion or momentum proposal is therefore not "what horizon?" but
+"paid by whom?"** A proposal that cannot name the counterparty and their reason for losing is
+proposing a signature, and belongs in family 9 — where the record says the naked version does
+not pay.
 
 ### The structural advantage not yet used
 
