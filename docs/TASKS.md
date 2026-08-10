@@ -48,7 +48,7 @@ maker rate is **+0.144 bps** vs a zero-fee best case (§4.11). One maker hypothe
 **wider-spread pairs**, where the half-spread is a multiple of BTC's 0.083 bps.
 
 **0 — The pre-failure sequence** *(added 2026-08-10; supersedes tier ordering below where they
-conflict)*. Six months, ~10 000 configurations, 14 refuted mechanisms, zero unrefuted
+conflict)*. Narrative + the stop rule: [`FINAL_PLAN.md`](FINAL_PLAN.md). Six months, ~10 000 configurations, 14 refuted mechanisms, zero unrefuted
 capital-relevant claims. Before "this failed" is a defensible statement rather than a mood, this
 much has to be built — and it is now all carried here rather than in conversation:
 

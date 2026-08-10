@@ -1452,6 +1452,52 @@ Track B's B-3 behind the B-1 admission stop-gate ("Track B stops here if admissi
 forward validity"), and bypassing a pre-registered stop-gate to build the fun part first is
 exactly the §4.6 failure shape.
 
+### 7.15 The market-maker route (2026-08-10) — **closed by capital, not only by arithmetic**
+
+*Source: venue [fee docs](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees) and
+[HIP-3 spec](https://hyperliquid.gitbook.io/hyperliquid-docs/hyperliquid-improvement-proposals-hips/hip-3-builder-deployed-perpetuals),
+read 2026-08-10; venue volume from DefiLlama's 30-day figure. §4.11 established that a passive
+quote at BTC's touch is negative below rebate tier 2 — this asks the obvious follow-up: **can the
+tier be obtained?***
+
+**There is no designated market-maker program.** The fee documentation carries no application, no
+liquidity-provider agreement and no negotiated terms — access is permissionless (public HTTP/WS,
+API wallets, batched submit/cancel) and the rebate ladder is the *only* lever. Nobody can block
+entry; nobody will grant terms either.
+
+**What the tiers cost, in dollars.** The rebate rungs are a share of **venue-wide 14-day maker
+volume**, so the threshold scales with the venue. At ~\$172.6 bn/30 d ⇒ ~\$5.75 bn/day ⇒ **~\$80 bn
+per 14 days**, and since every fill has exactly one maker side, maker volume ≈ total volume:
+
+| rung | rate | share | 14-day maker volume | per day |
+|---|---|---|---|---|
+| rebate_t1 | +0.1 bps | 0.5 % | ~\$400 M | ~\$29 M |
+| rebate_t2 | +0.2 bps | 1.5 % | ~\$1.2 bn | **~\$86 M** |
+| rebate_t3 | +0.3 bps | 3.0 % | ~\$2.4 bn | ~\$171 M |
+
+**Cross this with §4.11 and the route closes twice.** Breakeven is **+0.144 bps**, so rebate_t1
+(+0.1) still leaves a BTC-touch posting at **−0.025/−0.033 bps**: the *first* viable rung is
+**rebate_t2**, an entry ticket of ~\$86 M/day in maker fills — millions of working capital turning
+over continuously against firms already doing it. And the §4.11 grid found **0 of 8 cells
+surviving at every rung including t3**, on day-consistency and concentration, which no rebate
+fixes. The constraint was never a tier NAT had failed to ask for.
+
+**Scope, stated precisely.** §4.11 measured **BTC's touch**. The universe median half-spread is
+1.372 bps = 17.7× BTC's 0.083 (§7.2), so the honest claim is *"passive quoting at BTC's touch is
+closed below rebate_t2"*, **not** *"market making on this venue is closed"*. `B-5`/`B-5a` remains
+the one live maker hypothesis precisely because it does not route through the rebate ladder.
+
+**Three adjacent routes, none of which solve the fee problem.** (i) **HLP deposit** — an LP
+investment (~22 % claimed trailing APR), not market making; it takes the other side of everything
+and has realised losses (JELLY). (ii) **Own vault** — 100 USDC minimum, leader holds ≥5 % equity
+for 10 % of profits above high-water mark: raises *capital*, not *tier*, and needs a profitable
+strategy first. (iii) **HIP-3 own perp DEX** — the only one that inverts the sign of the fee term
+(deployer takes up to 50 % of trading fees), but requires **500,000 staked HYPE** locked ≥183 days
+and slashable by validator vote. Recorded because it is the shape of the answer, not because it
+is reachable.
+
+---
+
 ## 8. Platform & hypothesis-suite metrics
 
 *Source: project_state_report 2026-06-09.*
