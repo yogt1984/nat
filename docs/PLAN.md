@@ -200,6 +200,11 @@ data, and methodology. Decision gates:
   cross-sectional process kind), and pre-registered acceptance criteria. Build order inside;
   the Class-3 Tier-W scanner is fully data-independent and buildable now; fill-economics
   claims blocked on the F-task (L1 queue sizes + side volume) or T0b shadow quoting.
+- **Edge-source taxonomy:** `research/MECHANISM_FAMILIES.md` — the 12 mechanism families
+  keyed on *who is on the other side and why they lose*, with each family's status
+  (exhausted / undecidable / untried) and its canonical literature. Written because the
+  technique-organised survey hid a concentration: six different techniques were all drawing
+  on one edge source, which is why they failed the same way. Names the untried directions.
 - **Empirical findings:** `research/FINDINGS.md` — the consolidated measured record (IC scans,
   conditional-IC adverse-selection result, OOS tiers, data audits), with provenance.
 - **CLI:** `commands.md`.
