@@ -55,20 +55,31 @@ events"). Treating them as refuted would discard live questions.
 
 ## The families
 
+*Numbers are stable identifiers, not positions — 6, 10 and 12 are deliberately absent (see the footnote below) and are never reused.*
+
 | # | Family — economic source | Canonical literature | NAT status |
 |---|---|---|---|
 | 1 | **Liquidity provision** — paid to bear inventory + adverse selection | Grossman & Miller (1988); Ho & Stoll (1981); Avellaneda & Stoikov (2008); Guéant, Lehalle & Fernandez-Tapia (2013) | Heavily worked. Blocked on an **unearned rebate tier** + fill data (§4.7–§4.11) |
 | 2 | **Adverse-selection avoidance** — don't be the informed trader's counterparty | Kyle (1985); Glosten & Milgrom (1985); Easley et al. (1996) PIN; Easley, López de Prado & O'Hara (2012) VPIN | Survives **as a gate only** — VPIN lifts Sharpe 3/3 symbols but carries no direction (§4.5) |
 | 3 | **Price-discovery lag** — learn a price before another venue does | Hasbrouck (1995) information share; Gonzalo & Granger (1995); Makarov & Schoar (2020) | **Untried.** Needs the `F9` cross-venue feed (specced, unbuilt) |
-| 4 | **Risk transfer / carry** — paid a premium to hold what others shed | Perpetual funding mechanics; Alexander et al. on perpetual basis | **Untried as a carry position.** `funding_reversion` was refuted as a *directional* signal; funding is charged **nowhere** in any sim (§4.6) |
-| 5 | **Forced / constrained flow** — someone must trade regardless of price | Coval & Stafford (2007) fire sales; Shleifer & Vishny (1997) limits of arbitrage | **Untried in practice.** H3 (cascade prediction) was *confirmed* in the hypothesis suite, but the features are K2 dead columns (§7, §8) |
-| 6 | **Slow-moving capital / segmentation** | Duffie (2010), *Asset price dynamics with slow-moving capital* | Untried |
+| 4 | **Funding reflexivity** — crowded positioning pays funding → forces unwinding → moves price → changes positioning. A *feedback loop*, not a carry trade | Perpetual funding mechanics; Alexander et al. on perpetual basis | **Untried.** `funding_reversion` was refuted as a *directional signal*, which is a third thing again; funding is charged **nowhere** in any sim (§4.6), so it is simultaneously an unpriced cost and an untested edge |
+| 5 | **Deterministic liquidation** — an engine executes at a price anyone can compute from public positions. *Not* a fire sale: no discretion, no delay, trigger known in advance | Coval & Stafford (2007) is the nearest equity analogue and is **weaker** — their seller chooses; Shleifer & Vishny (1997) | **Untried in practice, and the best-supported family here.** H3 *confirmed* in the hypothesis suite; blocked only by K2 dead columns — a plumbing problem, not a research one (§7, §8) |
 | 7 | **Attention & flow-driven demand** — listings, inclusion, retail flow | Shleifer (1986); Harris & Gurel (1986) index inclusion; Barber & Odean (2008) attention | **Untried — data already on disk.** 177 listed / 55 delisted, listing events in the candle archive (§7.1) |
 | 8 | **Statistical relative value** — cointegrated mispricing between instruments | Gatev, Goetzmann & Rouwenhorst (2006); Avellaneda & Lee (2010) | `relative_value_pairs` registered but **never evaluated** |
 | 9 | **Behavioural under/over-reaction** — genuine mis-pricing, no intermediary role | Jegadeesh & Titman (1993); De Bondt & Thaler (1985); Lehmann (1990) | **The naked signature is exhausted, the mechanisms are not** — see [Signatures vs mechanisms](#signatures-are-not-mechanisms). Trading the sign of recent returns is dead at bar scale on this universe (PROC-20 §5, TC-1 §7.13, XS-3 §7.4) |
-| 10 | **Volatility risk premium** — sell insurance | Carr & Wu (2009); Bakshi & Kapadia (2003) | **Inaccessible** — no options data |
 | 11 | **Microstructure noise / bid-ask bounce** | Roll (1984); Hasbrouck (1993) | Exhausted (mean-reversion suite) |
-| 12 | **Latency / queue priority** — pure speed | Budish, Cramton & Shim (2015) | **Not viable** — REST/WS access, no colocation |
+
+**Not carried in the table** — three families are real in the literature but *operationally
+inaccessible here*, and listing them would inflate the taxonomy without adding options:
+slow-moving capital (Duffie 2010), volatility risk premium (Carr & Wu 2009 — no options data),
+and latency/queue priority (Budish, Cramton & Shim 2015 — REST/WS access, no colocation).
+Revisit only if the access changes.
+
+**A caution on the skeleton.** Nine of the families are drawn from *equity* market
+microstructure. Perps differ structurally — 24/7 so no open/close/overnight effects, no
+settlement, funding as a continuous forced payment, retail-dominated leverage, no NBBO — so
+this taxonomy should be treated as a starting frame that crypto-native mechanisms may not fit.
+Families 4 and 5 were already respecified once for exactly this reason.
 
 ### Signatures are not mechanisms
 
@@ -115,20 +126,29 @@ a better estimator, and it cannot be lifted from an equities paper.
 
 ---
 
-## Ranked shortlist — untried, by cost to attempt
+## Ranked shortlist — untried, by **expected value**
 
-1. **Listing & delisting dynamics** (family 7) — *free*. The events are already in the candle
-   archive. In a universe that measurably mean-reverts, listings are one of the few places with
-   a **structural** reason for one-sided flow.
-2. **Funding carry as a position** (family 4) — data exists. Note the asymmetry: because funding
-   is modelled nowhere, it is simultaneously an **unpriced cost** in every existing backtest and
-   an **untested edge**.
-3. **Liquidation-cascade mechanics** (family 5) — mechanism already confirmed (H3); blocked only
-   by dead feature columns, i.e. a plumbing problem, not a research one.
-4. **Positioning / on-chain cohorts** (family 5/7) — specced as `WP-1..5`.
-5. **Cross-venue basis / lead-lag** (family 3) — strongest academic support for crypto
-   specifically (Makarov & Schoar documented large cross-venue dislocations), but requires
-   building `F9` first, so it is real work rather than free.
+*Revised 2026-08-10. The first version ranked by cost-to-attempt and presented it as priority,
+which put cheap-but-weak first and buried the best-evidenced item last. Cost is a tiebreak, not
+the ordering.*
+
+1. **Deterministic liquidation** (family 5) — the mechanism is already *confirmed* (H3), the
+   venue makes the flow **observable** rather than inferred, and the market condition that pays
+   it — reversion — is the most robustly measured result in the record (TC-1, PROC-20, XS-3).
+   Blocked only by K2 dead columns: plumbing, not research.
+2. **Cross-venue dislocation** (family 3) — strongest crypto-*specific* evidence base; Makarov &
+   Schoar document large, persistent cross-venue price differences. Costs building the `F9`
+   feed, which is real work, and it is still worth ranking above cheaper items.
+3. **Funding reflexivity** (family 4) — data already exists, and the term is unmodelled in
+   *both* directions, so the first measurement is informative whichever way it lands.
+4. **On-chain cohorts** (families 5/7) — specced as `WP-1..5`; shares family 5's observability
+   advantage.
+5. **Listing & delisting dynamics** (family 7) — **demoted to a collection task.** The 90-day
+   archive contains exactly **two** observable listing events (GRAM 2026-07-02, CASHCAT
+   2026-07-11). The first version of this document called it "free — data already on disk",
+   which was true of the *data* and false of the *sample*: n = 2 supports no study. Needs venue
+   listing history, or forward accumulation. Recorded because the error is instructive — cheap
+   is not the same as ready, and ranking by cost is how that mistake gets made.
 
 ---
 
