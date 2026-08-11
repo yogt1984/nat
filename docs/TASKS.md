@@ -126,7 +126,7 @@ one — 11 bps RT against a 0.5–2 bps move was a ratio of ~0.1, knowable on da
 
 **Parallel tracks** *(independent of the streak)*
 - **D (platform):** `D1` finish viz + maturity tags → `D3` apt-packaging → `D4` cloud lab; plus `DOCS-3`, `HYG-*`, `INF-*`. (`D2`, `DOCS-1` done.)
-- **P (PhD):** `P1` polish preprint → `P2` SSRN → `P3` arXiv → `P4` prof outreach → `P5` track responses (EPFL EDFI **Jan 15 2027**).
+- **P (PhD):** `P2` SSRN (unblocks all mail) → `P4` outreach, asking for `P3` arXiv endorsement first → `P5` track. In parallel and more urgent: `P8` **referees** (0 of 3, the real blocker) + `P7` CV. `P6` proposal and `P0` materials sweep are done. EPFL EDFI **Jan 15 2027**.
 
 ---
 
@@ -211,11 +211,21 @@ Institutional-GAP items cross-ref [`research/INSTITUTIONAL_ALGORITHMS.md`](resea
 
 | ID | Title | Status | Prio | Eff | Data | Dep | Notes |
 |----|-------|--------|------|-----|------|-----|-------|
-| P1 | Polish → camera-ready convolver PDF | TODO | P1 | S | in-hand | — | |
-| P2 | SSRN upload | TODO | P1 | XS | in-hand | P1 | 1–3 business days. |
-| P3 | arXiv `q-fin.TR` endorsement | TODO | P1 | S | in-hand | P1 | |
-| P4 | Prof outreach (gather Tier-1 emails + send) | TODO | P1 | S | in-hand | P2,P3 | Emails not stored — gathering is part of the task. |
-| P5 | Track responses; stagger Tier-2 | TODO | P2 | — | in-hand | P4 | 2+ interested → formal apps. EPFL EDFI **Jan 15 / Mar 31 2027**. |
+Campaign plan: `~/.claude/plans/linked-seeking-mountain.md`. Target **EDFI Jan 15 2027**, Switzerland
+only, direct entry or pre-doc/RA. The binding constraint is **referees**, not preprints — see P8.
+
+| ID | Title | Status | Prio | Eff | Data | Dep | Notes |
+|----|-------|--------|------|-----|------|-----|-------|
+| P0 | Outreach materials swept | DONE | **P1** | M | in-hand | — | **2026-08-11.** Identity drift fixed (guide/summary/draft all said *Onat Yılmaz / yogt1984@* against preprints authored *Yigit Onat / yionat@* — a mail whose signature disagrees with its attachment). Part III template rewritten: it sold convolver's "6 significant kernels" with no mention that **none survives OOS and two flip sign** — to Bühlmann, whose subject is stability selection, that is one line from being caught. Also purged the retired combiner (0.18/0.25/0.36) and nat2's 69% probe. **13 draft emails written** (was 1 of 14). `docs/PHD/README.md` re-split by admission mechanism. |
+| P1 | Polish → camera-ready lead PDFs | TODO | P1 | S | in-hand | — | Was "convolver PDF" — the set is now eight. Camera-ready needed for the two leads actually sent: `convolver` and `lob_predictive_structure`. |
+| P2 | SSRN upload (all 8) | TODO | **P1** | XS | in-hand | P1 | 1–3 business days, no affiliation needed. **Blocks every mail** — all 14 drafts contain a literal `[SSRN link]`. Do this first; it is the cheapest unblock in the branch. |
+| P3 | arXiv `q-fin.TR` endorsement | TODO | P1 | S | in-hand | **P4** | **Dependency inverted 2026-08-11.** The endorsement is no longer a prerequisite for outreach — it *is* the outreach ask, deliberately: it is small, specific, only a professor can grant it, and it opens a correspondence that "supervise me" does not. |
+| P4 | Prof outreach — Tier 1 mid-Oct, Tier 2 +2wk | TODO | P1 | S | in-hand | P2 | Emails not stored; gathering them is part of the task. Ladder the ask: endorsement → call → pre-doc/RA → supervision. |
+| P5 | Track responses; stagger Tier-2 | TODO | P2 | — | in-hand | P4 | Log in each dossier's tracking block. **Leading indicator: ≥1 real correspondence by end-Nov.** Zero ⇒ the pitch is wrong, not the volume — revise before Tier 2 is spent. |
+| P6 | Research proposal | DONE | **P1** | M | in-hand | — | **2026-08-11**, `phd_related/research_proposal.tex` (4pp). The four-year question is the execution boundary: IC 0.45 unconditional → 0.03 on directionally-correct maker fills → **0.52 on any fill**. That third number is what makes it a research programme and not a disappointment. Four work packages; every one still a thesis if the answer is negative. |
+| P7 | CV | TODO | **P1** | S | in-hand | — | Skeleton at `phd_related/cv.tex`; research/technical sections populated from the repo. **Every `\TODO` is a fact not in the repo** (MSc, employers, dates) — fill before sending; do not invent. |
+| P8 | Referees — 2–3 confirmed | TODO | **P0** | M | in-hand | — | **The campaign's real blocker**, `phd_related/referees.md`. 0 of 3. Slot 1 MSc advisor, slot 2 professional, slot 3 created by outreach. To have a letter by Jan 15 the relationship must exist by **late Nov** ⇒ Tier 1 goes out mid-Oct at the latest. Cannot be produced in December. |
+| P9 | One refereed submission in flight | TODO | P2 | M | in-hand | P1 | Best candidate `lob_predictive_structure` — empirical census with a clean negative, the most conventionally publishable of the eight. "Under review at X" outweighs eight unrefereed preprints. |
 
 ## REL — Reliability & ingestor *(P0 — the binding-constraint machinery; Q1 depends on it)*
 
