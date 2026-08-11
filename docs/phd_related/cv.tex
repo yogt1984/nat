@@ -1,0 +1,104 @@
+\documentclass[11pt,a4paper]{article}
+
+% ------------------------------------------------------------------
+% CV for the doctoral application.
+%
+% EVERY \TODO BELOW IS A FACT I DO NOT HAVE. Fill them in before this
+% is sent anywhere. The research section is populated from the repo and
+% is accurate as of 2026-08-11; the personal history is not, because
+% inventing it would be worse than leaving it blank.
+% ------------------------------------------------------------------
+\usepackage[a4paper, margin=2.2cm]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{array}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{2pt}
+\pagestyle{empty}
+
+\newcommand{\TODO}[1]{\textbf{[TODO: #1]}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+\newcommand{\cvsec}[1]{%
+  \vspace{7pt}{\normalsize\bfseries #1}\par\vspace{1pt}\hrule height 0.4pt\vspace{4pt}}
+\newcommand{\entry}[2]{%
+  \vspace{2pt}\noindent\begin{tabular}{@{}p{0.19\textwidth}@{}p{0.79\textwidth}@{}}
+  \textit{#1} & #2 \end{tabular}\par}
+
+\begin{document}
+
+\begin{center}
+{\LARGE\bfseries Yigit Onat}\\[3pt]
+\texttt{yionat@gmail.com} \quad$\cdot$\quad \TODO{phone} \quad$\cdot$\quad \TODO{city, country}\\[2pt]
+{\small \TODO{SSRN author page URL --- exists after P2} \quad$\cdot$\quad \TODO{GitHub, if the code is to be shown}}
+\end{center}
+\vspace{2pt}\hrule height 0.7pt
+
+\cvsec{Education}
+\entry{\TODO{years}}{\textbf{MSc, \TODO{exact degree title}} --- \TODO{institution}.\\
+  Thesis: \TODO{title}. Advisor: \TODO{name --- this person is referee slot 1}.\\
+  \TODO{grade / distinction, if favourable; omit if not}}
+\entry{\TODO{years}}{\textbf{BSc, \TODO{degree}} --- \TODO{institution}.}
+
+\cvsec{Professional experience}
+\entry{\TODO{years}}{\textbf{\TODO{role}} --- \TODO{organisation}.\\
+  \TODO{2--3 lines. Emphasise: systems where correctness mattered, independent technical
+  judgement, scale. This is what referee slot 2 will be asked to confirm.}}
+\entry{\TODO{years}}{\textbf{\TODO{role}} --- \TODO{organisation}. \TODO{1--2 lines}}
+
+\cvsec{Independent research (2025--2026)}
+
+Built and operate an end-to-end quantitative research platform for cryptocurrency perpetual futures,
+and wrote up its results as eight working papers.
+
+\entry{Instrumentation}{Rust ingestion engine subscribing to full order-book and trade streams;
+  236-dimensional feature vector per symbol every 100\,ms across 21 categories; end-to-end feature
+  latency below 80\,ms at the 99th percentile. Write-once capture store with dual event/ingest
+  timestamps, making lookahead a queryable property rather than a review convention.}
+\entry{Research layer}{Autonomous discovery agents under a five-gate replication protocol with
+  Benjamini--Hochberg false-discovery-rate control and an adaptive acceptance threshold; hash-chained
+  verdict ledger; walk-forward validation with purging and embargo. Python/Rust, roughly 4{,}300
+  automated tests, a 340-command research CLI.}
+\entry{Datasets held}{Tick-level order book, trade and funding data on BTC, ETH and SOL at 100\,ms
+  cadence; position-level liquidation data from a venue publishing per-position liquidation prices.}
+
+\cvsec{Working papers}
+
+All eight authored solely. \TODO{Add SSRN abstract IDs after P2; mark any arXiv posting and any
+venue a paper is under review at --- ``under review at X'' is worth more than the other seven lines.}
+
+\begin{enumerate}\itemsep1pt
+  \item \textit{Predictive Structure of the Perpetual-Futures Limit Order Book: Universality,
+        Orthogonality, and the Execution Boundary.} Two empirically orthogonal predictive channels;
+        the fill-conditioning decomposition bounding monetization.
+  \item \textit{Autonomous Microstructure Alpha Discovery under False-Discovery Control.}
+        The replication apparatus, and the adverse-selection barrier as its central negative result.
+  \item \textit{The Process: A First-Class Analytical Unit for Orthogonal Information Extraction.}
+        Effective degrees of freedom of a signal book; five orthogonalisation mechanisms.
+  \item \textit{Event-Aligned Singular Value Decomposition for Data-Driven Pattern Kernel Discovery.}
+        Basis estimation provably blind to forward returns.
+  \item \textit{Exact or Nothing: Gate-Governed Measurement of the Liquidation Map.}
+        Measurement instrument; a negative result on sampling bias in liquidation data.
+  \item \textit{From Liquidation Geometry to Price Movement.} Spatial density field and a
+        closed-form cascade condition.
+  \item \textit{Perception Pressure and Resonance.} Signed, decomposable media-narrative measures.
+  \item \textit{From Narrative to Alpha.} Effective-breadth argument for an exogenous signal.
+\end{enumerate}
+
+\cvsec{Technical}
+\entry{Languages}{Rust, Python, C/C++ (embedded), SQL. \TODO{trim or extend to what is true}}
+\entry{Methods}{Multiple-testing control (BH-FDR), walk-forward validation with purging and embargo,
+  information-theoretic feature selection (KSG mutual information, conditional MI), random-matrix
+  denoising, Hawkes-type intensity models, gradient boosting.}
+\entry{Systems}{Real-time streaming, columnar storage (Parquet/DuckDB), containerised deployment,
+  Prometheus/Grafana observability. \TODO{prune to what you would defend in an interview}}
+
+\cvsec{Languages}
+\TODO{e.g.\ Turkish (native), English (fluent), German (level) --- German matters for ETH/UZH
+  administration though not for research}
+
+\cvsec{References}
+Available on request. \TODO{See \code{referees.md} --- do not send this CV until at least two are
+  confirmed.}
+
+\end{document}

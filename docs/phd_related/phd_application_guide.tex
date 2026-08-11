@@ -21,7 +21,7 @@
 {\LARGE\bfseries PhD Application Guide}\\[0.3cm]
 {\Large Preprint Publication Platforms \& Target Supervisors}\\[0.3cm]
 {\large ETH Z\"urich \& EPFL Lausanne}\\[0.5cm]
-{\large Onat Y{\i}lmaz --- May 2026}
+{\large Yigit Onat --- May 2026}
 \end{center}
 
 \bigskip
@@ -253,7 +253,42 @@ These pairings combine a finance domain expert with a methods expert:
 \part{Email Template}
 % ============================================================
 
-\noindent\textbf{Subject:} Prospective PhD Inquiry --- Microstructure Pattern Discovery via SVD
+\section{The rule that governs every draft}
+
+\textbf{No number that is not currently defensible.} Three claims from earlier drafts are now
+retired and must never appear in outreach:
+
+\begin{itemize}
+  \item \textbf{The convolver kernels as a result.} Six survive BH-FDR in sample; \emph{none} passes
+        the out-of-sample robustness threshold and two flip sign. The method is the contribution ---
+        say so. Sending ``6 significant kernels'' to a statistician invites the one-line reply
+        ``and out of sample?''
+  \item \textbf{The hierarchical combiner} ($\text{IC}$ of $0.18/0.25/0.36$). Retired
+        2026-08-09, both halves.
+  \item \textbf{``69\% of venue open interest''} for the \texttt{nat2} liquidation map. That is a
+        leaderboard scoping probe, not the coverage figure; measured coverage is $25$--$38\%$.
+\end{itemize}
+
+The \texttt{[!]} block on each card in \texttt{docs/research/onepagers/} is the checklist. Cross-check
+every draft against the card for the paper it leads with.
+
+\section{The laddered ask}
+
+``Will you supervise my PhD'' is a large request with a low hit rate, and it is the \emph{last} thing
+to ask, not the first. Ask in this order, one step per exchange:
+
+\begin{enumerate}
+  \item \textbf{arXiv endorsement} for \texttt{q-fin.TR} --- small, specific, a real favour only an
+        existing author can grant, and it costs them two minutes.
+  \item \textbf{A short call, or presenting to the group.}
+  \item \textbf{A pre-doctoral or research-assistant position.} This is the step that generates the
+        reference letter an independent researcher cannot otherwise obtain.
+  \item \textbf{Doctoral supervision}, once the correspondence is warm.
+\end{enumerate}
+
+\section{Template}
+
+\noindent\textbf{Subject:} Prospective PhD inquiry --- [the negative result, stated as a finding]
 
 \bigskip
 
@@ -261,19 +296,19 @@ These pairings combine a finance domain expert with a methods expert:
 
 \medskip
 
-I am writing to express my interest in pursuing a PhD under your supervision at [ETH Z\"urich / EPFL]. My background is in embedded systems engineering and quantitative trading, and I have spent the past year building a real-time research platform for cryptocurrency perpetual futures microstructure.
+I am writing to express my interest in pursuing a PhD under your supervision at [ETH Z\"urich / EPFL]. My background is in embedded systems engineering and quantitative trading; over the past year I have built a real-time research platform for cryptocurrency perpetual futures that computes 236 order-book and flow features at 100\,ms cadence on BTC, ETH and SOL.
 
 \medskip
 
-As part of this work, I have written a preprint titled \textit{``Event-Aligned Singular Value Decomposition for Data-Driven Pattern Kernel Discovery in Cryptocurrency Perpetual Futures,''} available at [SSRN link]. The paper proposes a pipeline that analytically defines market events (breakouts, false breakouts, traps), extracts aligned OHLCV windows, and applies SVD to discover predictive multi-candle shapes --- with FDR-controlled significance testing. On BTC tick data (7.2\,M ticks), the method identifies 6 significant kernels after multiple testing correction, with the strongest signals ($|\text{IC}| \in [0.20, 0.36]$) arising from turtle-soup and trap events rather than classical breakouts.
+Its central finding is a negative one, which is why I think it may interest you. Order-book imbalance predicts 1--5\,s mid-price direction with rank $\text{IC} \approx 0.45$, uniformly across all three symbols and both volatility regimes. Yet the signal is structurally unmonetizable: conditioning on directionally-consistent maker fills collapses the $\text{IC}$ to $\approx 0.03$, while conditioning on the presence of \emph{any} fill raises it to $0.52$ --- isolating adverse selection, rather than signal decay, as the binding mechanism. [One sentence bridging this to their own work.]
 
 \medskip
 
-I am particularly drawn to your work on [specific paper/topic], which connects to my findings on [bridge to their research].
+A preprint documenting it is available at [SSRN link] (PDF attached); a one-page summary of the wider body of work is attached alongside it. [If the replication has landed: one sentence on the out-of-time result, positive or negative.]
 
 \medskip
 
-I would welcome the opportunity to discuss how this line of research might develop into a doctoral project. I am happy to share the full codebase or additional technical reports upon request.
+Before anything larger, may I ask a small favour: I am seeking an endorsement to post this to arXiv under \texttt{q-fin.TR}. If you consider the work sound enough to be worth an endorsement, I would be very grateful --- and glad to share the full codebase or the dataset itself.
 
 \medskip
 
@@ -282,7 +317,13 @@ I would welcome the opportunity to discuss how this line of research might devel
 \medskip
 
 \noindent Best regards,\\
-Onat Y{\i}lmaz\\
-\texttt{yogt1984@gmail.com}
+Yigit Onat\\
+\texttt{yionat@gmail.com}
+
+\bigskip
+
+\noindent\textit{Length: 270--300 words. Checklist --- specific paper of theirs cited $\cdot$ bridge to
+their research $\cdot$ SSRN link live, no placeholder $\cdot$ PDF attached $\cdot$ one-pager attached
+$\cdot$ codebase offered $\cdot$ one small ask, not four.}
 
 \end{document}

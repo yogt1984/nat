@@ -1,0 +1,220 @@
+\documentclass[11pt,a4paper]{article}
+
+% ------------------------------------------------------------------
+% Doctoral research proposal. House layout, shared with the preprints
+% in ../research/: 11pt a4, 2.5cm margins, \maketitle front matter.
+% ------------------------------------------------------------------
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{array}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\ind}{\mathbf{1}}
+\newcommand{\sgn}{\operatorname{sign}}
+\DeclareMathOperator{\IC}{IC}
+\DeclareMathOperator{\IR}{IR}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+\begin{document}
+
+\title{\textbf{The Execution Boundary}\\[6pt]
+\large How Much of a Measurable Short-Horizon Edge\\
+Can Actually Be Realised, and What Determines the Limit}
+
+\author{Yigit Onat\\
+\textit{Doctoral research proposal}\\
+\texttt{yionat@gmail.com}}
+\date{August 2026}
+\maketitle
+
+% ============================================================
+\section{The question}
+% ============================================================
+
+Short-horizon direction in a modern electronic limit order book is predictable to a degree that
+would be remarkable in any other asset class. In my own measurements on cryptocurrency perpetual
+futures --- 236 features at 100\,ms cadence, 2.17 million ticks per symbol on BTC, ETH and SOL ---
+order-book imbalance attains a rank information coefficient of up to $0.47$ at horizons of one to
+five seconds, uniformly across symbols and across volatility regimes.
+
+Almost none of it can be earned. Conditioning on the states in which a passive (maker) order would
+actually have been filled \emph{and} the signal was directionally correct collapses that coefficient
+to approximately $0.03$. The collapse is not estimation noise: it replicates on all three symbols,
+and it has a clear mechanism, because the fill event is not exogenous to the prediction. You are
+filled when someone chooses to trade against you, and they choose to do so when they are better
+informed than you are.
+
+The observation that turns this from a disappointment into a research programme is the third
+number. Conditioning on the presence of \emph{any} fill --- without requiring the direction to have
+been right --- \emph{raises} the coefficient to $0.52$. Writing $F$ for the event that a resting
+order is filled and $D$ for the event that the signal was directionally correct,
+\begin{equation}
+  \IC \;=\; 0.45,
+  \qquad
+  \IC \mid F \;=\; 0.52,
+  \qquad
+  \IC \mid (F \cap D) \;=\; 0.03 .
+  \label{eq:three}
+\end{equation}
+Information is not absent in the states where trading happens --- it is abundant there. What is
+absent is information in the states where trading happens \emph{on our terms}. The gap between
+$0.03$ and $0.52$ is therefore not a measurement of how weak the signal is. It is a measurement of
+how much of it adverse selection appropriates, and it invites a question with a real answer:
+
+\begin{quote}
+\textbf{What is the achievable frontier between $0.03$ and $0.52$, and what does its position depend
+on?}
+\end{quote}
+
+That is the thesis I propose. It is falsifiable, it is quantitative, its lower and upper bounds are
+already measured, and progress on it is legible: any proposed mechanism either moves the conditional
+coefficient or it does not.
+
+% ============================================================
+\section{Why it is worth four years}
+% ============================================================
+
+\paragraph{It is a bound, not a strategy.} The literature on order-flow imbalance establishes
+predictability (Cont, Kukanov and Stoikov, 2014, and the subsequent deep-LOB work). The literature
+on adverse selection establishes that market makers lose to informed flow (Glosten--Milgrom;
+Kyle, 1985). What is thin is the quantitative bridge: given a measured unconditional signal, how much
+survives a realistic execution channel, and which properties of the signal, the venue and the
+execution policy determine the survival rate. Equation~\eqref{eq:three} is a way of posing that
+question that a dataset can answer.
+
+\paragraph{It generalises past its venue.} Nothing in \eqref{eq:three} is crypto-specific. The
+decomposition applies wherever a passive order can rest and a counterparty can choose to take it.
+Crypto perpetuals are a convenient laboratory --- continuous trading, no fragmentation across
+lit/dark venues, published funding and oracle prices, and on at least one venue a fully public
+per-position liquidation structure --- but the object of study is a property of limit order markets.
+
+\paragraph{It has an honest negative baseline.} I have already established, on my own data and
+against my own interest, that the naive answers fail. Five strategies the platform initially
+identified as profitable were subsequently refuted under a stricter cost model and a corrected
+evaluation harness. A signal-combination result was retired. In a pattern-discovery study, six
+kernels significant after false-discovery-rate correction in sample yielded none that survived
+out-of-sample, two of them reversing sign. Starting from a set of things known not to work is a
+better position than starting from a set of things not yet disproved.
+
+% ============================================================
+\section{Preliminary work}
+% ============================================================
+
+The proposal is not speculative: the instrument exists and has produced results, all of which are
+written up as working papers.
+
+\begin{center}
+\small
+\begin{tabular}{@{}p{0.30\textwidth} p{0.63\textwidth}@{}}
+\hline\hline
+\textbf{Paper} & \textbf{Result relevant to this proposal} \\
+\hline
+Predictive structure of the perp LOB &
+  The census behind \eqref{eq:three}: two empirically orthogonal channels (direction, volatility),
+  eight independent directional axes, spectral localisation to 0.005--0.1\,Hz, OU half-life
+  5--7\,s, and the fill-conditioning decomposition. \\
+Autonomous alpha discovery under FDR control &
+  The apparatus: a five-gate replication protocol under Benjamini--Hochberg control with an adaptive
+  threshold, and the first statement of the conditional-IC collapse. \\
+The process as an analytical unit &
+  The orthogonality and effective-breadth mathematics; why the binding correlation is the
+  stress-regime one. \\
+Event-aligned SVD &
+  Pattern discovery with basis estimation provably blind to forward returns; a clean in-sample
+  positive that does not replicate out of sample. \\
+Exact or nothing (\code{nat2}) &
+  A gate-governed measurement instrument in which lookahead is queryable by construction, plus a
+  negative result on liquidation-map coverage. \\
+Liquidation geometry; Prism; narrative as exogenous signal &
+  Adjacent instruments and their stated, unvalidated protocols. \\
+\hline\hline
+\end{tabular}
+\end{center}
+
+Supporting infrastructure: a Rust ingestion engine sustaining 100\,ms feature emission with
+end-to-end latency under 80\,ms at the 99th percentile; a research CLI of some 340 commands; a test
+suite of roughly 4{,}300 tests; and a hash-chained ledger in which a failed verdict cannot be quietly
+removed from the record.
+
+% ============================================================
+\section{Proposed work packages}
+% ============================================================
+
+\paragraph{WP1 --- Characterise the boundary (year 1).} Establish \eqref{eq:three} as a robust,
+replicated fact rather than a single-window observation. Out-of-time and out-of-venue replication;
+decomposition of the collapse into queue position, cancellation dynamics, and counterparty
+composition; and identification of which of the eight independent directional axes lose the most to
+conditioning. \emph{Deliverable:} the measurement paper, extended and refereed.
+
+\paragraph{WP2 --- Model the fill as an endogenous, adversarial event (years 1--2).} The standard
+treatment models fill probability as a function of queue position and volatility. That is
+insufficient here, because the relevant object is the joint law of (fill, signal correctness). I
+propose to model the fill indicator as adversarially coupled to the signal and to ask what execution
+policies are optimal under that coupling --- a problem that admits both an optimal-stopping
+formulation (when to stop resting and cross) and a distributionally robust formulation (optimise
+against a worst-case fill measure within an ambiguity set around the empirical one).
+
+\paragraph{WP3 --- Mechanisms that move the frontier (years 2--3).} Test, each with a pre-registered
+kill criterion: \emph{(i)} regime gating --- conditioning on book-shape entropy already recovers
+part of the loss in preliminary work; \emph{(ii)} timescale separation --- a slower signal harvested
+by patient execution should couple less strongly to the fill indicator, which is a testable
+prediction rather than a hope; \emph{(iii)} orthogonal information sources, where the effective
+breadth argument $\IR \approx \overline{\IC}\sqrt{N_{\text{eff}}}$ says a weak uncorrelated signal
+can beat a strong redundant one; \emph{(iv)} the volatility channel, which is disjoint from the
+directional one and may be monetizable where direction is not.
+
+\paragraph{WP4 --- Synthesis (year 4).} A characterisation of the frontier: given a signal's
+autocorrelation structure, its spectral support, and the venue's microstructure, how much of its
+unconditional information is realisable, and by which execution policy. Plus the negative
+counterpart --- the conditions under which the answer is provably close to zero.
+
+% ============================================================
+\section{Data, method, and discipline}
+% ============================================================
+
+Data is in hand and accumulating: tick-level order book and trade data on three symbols at 100\,ms,
+with a continuously running capture daemon, plus a position-level collector on a venue that publishes
+per-position liquidation prices.
+
+The methodological commitments are already load-bearing in my own work and I would carry them into
+the doctorate. Every candidate result passes a replication protocol with false-discovery-rate
+control before it is believed. Every unit is tested against a planted synthetic signal
+\emph{before} it touches real data --- three estimator bugs were caught only that way. Lookahead is
+enforced by construction: each record carries both an event timestamp and an ingest timestamp, and a
+replay audit fails on any feature that reads what it could not have known. Verdicts, including
+failures, are appended to a hash-chained ledger, so the variants tried before the one that worked
+remain visible.
+
+% ============================================================
+\section{Risks, stated honestly}
+% ============================================================
+
+\emph{The frontier may be flat.} It is possible that no execution policy meaningfully improves on
+$0.03$ and that the answer to the thesis question is ``essentially none of it, and here is why''.
+That is a publishable result and the work packages are designed so that a negative answer is still
+a thesis, not a failure.
+
+\emph{The venue may mature away from me.} I have already measured efficiency drift in real time: the
+five-second signal weakened from $0.45$ to $0.29$ over six weeks as spreads tightened, while the
+one-second signal held. If the phenomenon disappears during the doctorate, its disappearance is
+itself a measurement of market efficiency arriving, and worth documenting.
+
+\emph{Single-venue dependence.} Mitigated by making the venue a parameter rather than an assumption
+in WP1's replication design.
+
+% ============================================================
+\section{Fit}
+% ============================================================
+
+% TAILOR PER APPLICATION — one paragraph naming the group, the specific
+% methodological gap they close, and which work package they would shape.
+% Do not send with this comment in place.
+
+What I bring is measurement infrastructure, a large clean dataset, and a demonstrated willingness to
+publish results that refute my own earlier claims. What I lack, and would come to learn, is the
+formal apparatus --- optimal stopping, robust optimisation, high-dimensional inference --- to turn a
+set of measured regularities into a theory of what is achievable. That asymmetry is the reason I am
+applying rather than continuing alone.
+
+\end{document}

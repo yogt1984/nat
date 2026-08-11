@@ -1,8 +1,11 @@
 # Draft — outreach email (execution-overlay preprint focus)
 
 **Send after SSRN upload (P2) — replace the [SSRN link] placeholder first.**
-Body ≈ 270 words. Checklist: specific paper ✓ · bridge ✓ · SSRN link ✓ · PDF attach ✓ ·
-codebase offer ✓ · empirical-improvements paragraph ✓.
+Body ≈ 280 words. Checklist: specific paper ✓ · bridge ✓ · SSRN link ✓ · PDF attach ✓ ·
+one-pager attach ✓ · codebase offer ✓ · one small ask ✓.
+
+> **Lead preprint changed 2026-08-11** to `lob_predictive_structure` — measurement-first, and it does
+> not carry the retired combiner. EPFL: apply to EDFI by **Jan 15** regardless of reply.
 
 ---
 
@@ -32,11 +35,13 @@ estimates, drift measurement (the signal's half-life is shortening as the venue 
 queue-position fill simulation on raw trade data. I would be glad to share results, the full
 codebase, or the dataset itself.
 
-Would you be open to a short call to discuss whether this could develop into a doctoral project?
+Before anything larger: might I ask for an endorsement to post this to arXiv under `q-fin.TR`? If you
+judge it sound enough to be worth one I would be grateful, and I am glad to share the codebase or the
+dataset either way.
 
 Best regards,
-Onat Yılmaz
-yogt1984@gmail.com
+Yigit Onat
+yionat@gmail.com
 
 ---
 
