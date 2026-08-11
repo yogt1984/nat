@@ -457,3 +457,44 @@ class TestHealthcheck:
         hb.write_text("old")
         os.utime(hb, (1_700_000_000.0, 1_700_000_000.0))
         assert healthy({"heartbeat_path": str(hb), "poll_interval_s": 30}) is False
+
+
+# --------------------------------------------------------------------------- #
+# BUG-6 regression guard: the threshold is only correct RELATIVE to rotation
+# --------------------------------------------------------------------------- #
+
+def test_gap_threshold_exceeds_parquet_rotation_cadence():
+    """`gap_threshold_s` must stay above ing.toml's `rotate_interval`.
+
+    Freshness is the newest *.parquet/*.parquet.tmp MTIME, and the open .tmp stays at
+    size 0 (ArrowWriter buffers internally), so the mtime only advances when a file is
+    CLOSED — once per `rotate_interval`. A threshold below that cadence declares a gap
+    on a perfectly healthy writer.
+
+    That is not hypothetical. With gap_threshold_s=300 against rotate_interval="10m",
+    the daemon restarted the ingestor every 300+600=900s — ~96 clean `nat stop && nat
+    start` cycles a day, from 2026-07-26 to 2026-08-11. Each reset the in-memory warmup
+    buffers, so `regime_` (60 continuous minute-bars to become ready) never matured and
+    all 31 columns were NaN for 16 days. The restarts were invisible because they were
+    graceful: every log ends "ING shutdown complete".
+
+    Raising `rotate_interval` without raising this is the exact way to reintroduce it.
+    """
+    import re
+
+    from ops import gap_alert as ga
+
+    root = Path(ga.__file__).resolve().parents[2]
+    threshold = float(ga.load_config()["gap_threshold_s"])
+
+    ing_toml = (root / "config" / "ing.toml").read_text()
+    m = re.search(r'^\s*rotate_interval\s*=\s*"(\d+)([smh])"', ing_toml, re.M)
+    assert m, "rotate_interval not found in config/ing.toml"
+    value, unit = int(m.group(1)), m.group(2)
+    rotate_s = value * {"s": 1, "m": 60, "h": 3600}[unit]
+
+    assert threshold > rotate_s, (
+        f"gap_threshold_s={threshold:.0f}s must exceed rotate_interval={rotate_s}s — "
+        f"below it, normal rotation reads as a stall and the daemon restart-loops "
+        f"the ingestor (BUG-6, FINDINGS §7.11)."
+    )

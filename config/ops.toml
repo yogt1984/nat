@@ -1,11 +1,29 @@
 # Operational monitoring daemons (T0b).
 
 [gap_alert]
-# Page if no new feature data has been written for longer than this. Default 300s
-# ("<5 min page") sits comfortably above the writer's flush cadence so normal
-# row-group buffering never false-alarms. Lower it once the deploy's real cadence
-# is known (the 48h test targets zero gaps >60s, measured from row timestamps).
-gap_threshold_s = 300
+# Page if no new feature data has been written for longer than this.
+#
+# MUST stay above the writer's file-close cadence, which is `rotate_interval` in
+# ing.toml (currently "10m" = 600s). Freshness here is the newest *.parquet /
+# *.parquet.tmp MTIME, and the open .tmp sits at size 0 because ArrowWriter buffers
+# internally — so the mtime only advances when a file is CLOSED, i.e. every ~600s.
+#
+# The old 300s value was below that cadence and produced a self-sustaining restart
+# loop: gap declared at 300s -> auto_restart fires -> 600s cooldown -> gap declared
+# again. 300 + 600 = 900s, which is exactly the 15-minute restart period measured in
+# logs/ingestor_*.log from 2026-07-26 to 2026-08-11 (~96 restarts/day, every one a
+# clean `nat stop && nat start`, no crash). The comment it replaced asserted 300s sat
+# "comfortably above the writer's flush cadence" — true when rotate_interval was "1h"
+# and the .tmp mtime advanced on each ~5.5-min row-group flush, false since the
+# 2026-06-19 change to 10m rotation.
+#
+# The cost of that loop was not the restarts themselves: in-memory warmup buffers reset
+# on every one, so `regime_` (which needs 60 continuous minute-bars via
+# regime_buffer.is_ready()) never matured and all 31 columns stayed NaN for 16 days.
+# See FINDINGS §7.11 / BUG-6.
+#
+# 900s = 600s cadence + 300s headroom. Raise `rotate_interval` and this must follow.
+gap_threshold_s = 900
 poll_interval_s = 30
 
 # Dirs watched for freshness (newest *.parquet OR *.parquet.tmp mtime wins).
