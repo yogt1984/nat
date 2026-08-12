@@ -64,7 +64,7 @@ events"). Treating them as refuted would discard live questions.
 | 3 | **Price-discovery lag** — learn a price before another venue does | Hasbrouck (1995) information share; Gonzalo & Granger (1995); Makarov & Schoar (2020) | **Untried.** Needs the `F9` cross-venue feed (specced, unbuilt) |
 | 4 | **Funding reflexivity** — crowded positioning pays funding → forces unwinding → moves price → changes positioning. A *feedback loop*, not a carry trade | Perpetual funding mechanics; Alexander et al. on perpetual basis | **Carry branch measured and failed (LF8, 2026-08-12, FINDINGS §7.16, pre-registered).** Both directions resolved at once: the cost side is now priced in every sim (COST-9 — hourly, not 8 h), and the edge side collects +5–11 %/92 d gross that the short-the-crowd price leg loses back with interest — carry is fair compensation for drift here. 0/6 configs pass; best cell has 92 % of P&L in one day. The *reflexive-unwinding* branch (funding → forced flow → price) is a different test and remains untried; it needs the WP-2 position clock, not more funding history |
 | 5 | **Deterministic liquidation** — an engine executes at a price anyone can compute from public positions. *Not* a fire sale: no discretion, no delay, trigger known in advance | Coval & Stafford (2007) is the nearest equity analogue and is **weaker** — their seller chooses; Shleifer & Vishny (1997) | **Untried in practice, and the best-supported family here.** H3 *confirmed* in the hypothesis suite; blocked only by K2 dead columns — a plumbing problem, not a research one (§7, §8) |
-| 6 | **Gradual information diffusion** — a slow-to-update holder sells to you early and buys from you late; diffusion is *slower in less-visible assets* | Hong & Stein (1999); Hong, Lim & Stein (2000) *bad news travels slowly*; Da, Gurun & Warachka (2014) frog-in-the-pan; Duffie (2010) slow-moving capital | **Untried, and NOT excluded by the reversion results** — see [Why the reversion finding does not close it](#why-the-reversion-finding-does-not-close-family-6). Test is `XS-11` |
+| 6 | **Gradual information diffusion** — a slow-to-update holder sells to you early and buys from you late; diffusion is *slower in less-visible assets* | Hong & Stein (1999); Hong, Lim & Stein (2000) *bad news travels slowly*; Da, Gurun & Warachka (2014) frog-in-the-pan; Duffie (2010) slow-moving capital | **Tested 2026-08-12 (XS-11, pre-registered): 12/12 cells UNDECIDABLE — now a collection task, not a research one (§7.17).** Weekly cells sit near a powered null (point estimates ≈ 0, CI ±0.12 vs the ±0.10 absent-band — one more quarter likely closes them); monthly cells have n=2 and, notably, m/c ratios of 4–30×, so a monthly effect *would clear costs* — the constraint is span alone. Re-run the committed driver at ~12 non-overlapping months (≈ 2027-05) |
 | 7 | **Attention & flow-driven demand** — listings, inclusion, retail flow | Shleifer (1986); Harris & Gurel (1986) index inclusion; Barber & Odean (2008) attention | **Untried — data already on disk.** 177 listed / 55 delisted, listing events in the candle archive (§7.1) |
 | 8 | **Statistical relative value** — cointegrated mispricing between instruments | Gatev, Goetzmann & Rouwenhorst (2006); Avellaneda & Lee (2010) | `relative_value_pairs` registered but **never evaluated** |
 | 9 | **Behavioural under/over-reaction** — genuine mis-pricing, no intermediary role | Jegadeesh & Titman (1993); De Bondt & Thaler (1985); Lehmann (1990) | **The naked signature is exhausted, the mechanisms are not** — see [Signatures vs mechanisms](#signatures-are-not-mechanisms). Trading the sign of recent returns is dead at bar scale on this universe (PROC-20 §5, TC-1 §7.13, XS-3 §7.4) |
@@ -194,11 +194,12 @@ the ordering.*
    branch survives as a question, and it waits on WP-2 accrual.
 4. **On-chain cohorts** (families 5/7) — specced as `WP-1..5`; shares family 5's observability
    advantage.
-5. **Information diffusion × liquidity** (family 6) — the only shortlist item whose test needs
-   **no new data**: PROC-6 already computes conditional MI, and the candle archive already
-   carries the universe. Ranked below the four above because the horizon it lives at
-   (weeks–months) is the one where 90 days of history has the least power, so *undecidable* is
-   the likely verdict. Cheap enough that the answer is worth having anyway.
+5. **Information diffusion × liquidity** (family 6) — ~~the only shortlist item whose test needs
+   no new data~~ **Run 2026-08-12 (XS-11, §7.17): *undecidable* 12/12, exactly as this entry
+   predicted — and the answer was worth having.** The monthly cells carry m/c 4–30×, so the
+   family died of *span*, not cost; it re-decides itself as the candle archive accrues
+   (weekly cells ≈ one more quarter; monthly cells ≈ 2027-05). Off the research queue,
+   onto the calendar.
 6. **Listing & delisting dynamics** (family 7) — **demoted to a collection task.** The 90-day
    archive contains exactly **two** observable listing events (GRAM 2026-07-02, CASHCAT
    2026-07-11). The first version of this document called it "free — data already on disk",

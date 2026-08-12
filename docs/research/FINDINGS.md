@@ -1551,6 +1551,46 @@ arithmetic on day one.
 
 ---
 
+### 7.17 XS-11 liquidity-conditioned momentum (2026-08-12) — **12/12 undecidable, as pre-recorded — and family 6 becomes a collection task**
+
+*Source: `exploration/xs11_diffusion_study.py`, **pre-registered** (`305d110` before the run).
+177 pairs × 90 d of 1 h candles (2026-05-09 → 08-07), terciles of 59 by measured half-spread
+(XS-8 aggregate), trailing-return signal with a 24 h reversal skip, non-overlapping rebalances,
+BH q = 0.05 over the declared 12-cell grid, absent-band ±0.10, m/c ≥ 3 tradability rule.
+Artifact: `reports/xs11_diffusion_study.json`.*
+
+**The verdict is exactly what the queue pre-recorded — but now it is measured, with the
+open/closed boundary drawn precisely.** Every cell returns *undecidable*: no cell clears BH
+(smallest p = 0.011 vs the 0.0042 it needed), and no cell achieves the powered null either —
+the 1-week cells (n = 11) put every point estimate near zero (wide tercile +0.015, t = 0.27;
+tight −0.005; mid −0.026) but their CIs (±≈0.12) exceed the ±0.10 absent-band. The grid cannot
+be closed, only left open honestly. Filing this as "no effect" would repeat the exact error the
+death-reason table exists to prevent.
+
+**The informative result is on the cost side, and it inverts the usual story.** At the 4-week
+horizon the m/c ratios run **4–30×** (monthly cross-sectional dispersion is huge relative to
+even wide-tercile round trips: e.g. tight 1w/4w cell shows expected move ≈ 30× cost). Family
+6's problem is **not** the "cost is worst where the edge lives" bias this file worried about —
+at monthly scale the dispersion dwarfs the round trip everywhere. The binding constraint is
+that 90 days contains exactly **2 non-overlapping months** (n = 2, meaningless t-stats). So:
+if a monthly diffusion effect exists, it is *tradeable arithmetic-wise*; whether it exists
+needs n ≈ 12 months of candle accrual, which the archive accumulates for free.
+
+**Consequence:** family 6 graduates from research question to **collection task** — the same
+reclassification the listing family (7) went through, and the row-3 death ("undecidable —
+revisit at n; a collection decision, not a research one"). No new infrastructure is needed:
+the candle fetcher already accrues the panel; re-run the committed driver when the archive
+holds ~12 non-overlapping months (≈ 2027-05). The 1-week cells, by contrast, are close to a
+powered null already (CI ±0.12 vs band ±0.10) — one more quarter of data likely closes them
+as *absent*.
+
+**Method note:** the planted layer caught one estimator edge at design time — a perfectly
+stable IC (se = 0) produced t = 0 and would have filed a *perfect* signal as undecidable;
+fixed before any real data was read. The planted scenario was family 6's own prediction
+(persistent drift in the wide tercile only), recovered where planted and nowhere else.
+
+---
+
 ## 8. Platform & hypothesis-suite metrics
 
 *Source: project_state_report 2026-06-09.*
