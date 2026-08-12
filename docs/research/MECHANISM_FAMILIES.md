@@ -62,7 +62,7 @@ events"). Treating them as refuted would discard live questions.
 | 1 | **Liquidity provision** — paid to bear inventory + adverse selection | Grossman & Miller (1988); Ho & Stoll (1981); Avellaneda & Stoikov (2008); Guéant, Lehalle & Fernandez-Tapia (2013) | Heavily worked. Blocked on an **unearned rebate tier** + fill data (§4.7–§4.11) |
 | 2 | **Adverse-selection avoidance** — don't be the informed trader's counterparty | Kyle (1985); Glosten & Milgrom (1985); Easley et al. (1996) PIN; Easley, López de Prado & O'Hara (2012) VPIN | Survives **as a gate only** — VPIN lifts Sharpe 3/3 symbols but carries no direction (§4.5) |
 | 3 | **Price-discovery lag** — learn a price before another venue does | Hasbrouck (1995) information share; Gonzalo & Granger (1995); Makarov & Schoar (2020) | **Untried.** Needs the `F9` cross-venue feed (specced, unbuilt) |
-| 4 | **Funding reflexivity** — crowded positioning pays funding → forces unwinding → moves price → changes positioning. A *feedback loop*, not a carry trade | Perpetual funding mechanics; Alexander et al. on perpetual basis | **Untried.** `funding_reversion` was refuted as a *directional signal*, which is a third thing again; funding is charged **nowhere** in any sim (§4.6), so it is simultaneously an unpriced cost and an untested edge |
+| 4 | **Funding reflexivity** — crowded positioning pays funding → forces unwinding → moves price → changes positioning. A *feedback loop*, not a carry trade | Perpetual funding mechanics; Alexander et al. on perpetual basis | **Carry branch measured and failed (LF8, 2026-08-12, FINDINGS §7.16, pre-registered).** Both directions resolved at once: the cost side is now priced in every sim (COST-9 — hourly, not 8 h), and the edge side collects +5–11 %/92 d gross that the short-the-crowd price leg loses back with interest — carry is fair compensation for drift here. 0/6 configs pass; best cell has 92 % of P&L in one day. The *reflexive-unwinding* branch (funding → forced flow → price) is a different test and remains untried; it needs the WP-2 position clock, not more funding history |
 | 5 | **Deterministic liquidation** — an engine executes at a price anyone can compute from public positions. *Not* a fire sale: no discretion, no delay, trigger known in advance | Coval & Stafford (2007) is the nearest equity analogue and is **weaker** — their seller chooses; Shleifer & Vishny (1997) | **Untried in practice, and the best-supported family here.** H3 *confirmed* in the hypothesis suite; blocked only by K2 dead columns — a plumbing problem, not a research one (§7, §8) |
 | 6 | **Gradual information diffusion** — a slow-to-update holder sells to you early and buys from you late; diffusion is *slower in less-visible assets* | Hong & Stein (1999); Hong, Lim & Stein (2000) *bad news travels slowly*; Da, Gurun & Warachka (2014) frog-in-the-pan; Duffie (2010) slow-moving capital | **Untried, and NOT excluded by the reversion results** — see [Why the reversion finding does not close it](#why-the-reversion-finding-does-not-close-family-6). Test is `XS-11` |
 | 7 | **Attention & flow-driven demand** — listings, inclusion, retail flow | Shleifer (1986); Harris & Gurel (1986) index inclusion; Barber & Odean (2008) attention | **Untried — data already on disk.** 177 listed / 55 delisted, listing events in the candle archive (§7.1) |
@@ -187,8 +187,11 @@ the ordering.*
 2. **Cross-venue dislocation** (family 3) — strongest crypto-*specific* evidence base; Makarov &
    Schoar document large, persistent cross-venue price differences. Costs building the `F9`
    feed, which is real work, and it is still worth ranking above cheaper items.
-3. **Funding reflexivity** (family 4) — data already exists, and the term is unmodelled in
-   *both* directions, so the first measurement is informative whichever way it lands.
+3. **Funding reflexivity** (family 4) — ~~data already exists, and the term is unmodelled in
+   *both* directions, so the first measurement is informative whichever way it lands~~
+   **Measured 2026-08-12 (LF8, §7.16): it landed negative and it was informative** — cost side
+   priced (COST-9), carry side fails pre-registered criteria 0/6. Only the reflexive-unwinding
+   branch survives as a question, and it waits on WP-2 accrual.
 4. **On-chain cohorts** (families 5/7) — specced as `WP-1..5`; shares family 5's observability
    advantage.
 5. **Information diffusion × liquidity** (family 6) — the only shortlist item whose test needs

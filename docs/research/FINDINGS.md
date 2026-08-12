@@ -1498,6 +1498,59 @@ is reachable.
 
 ---
 
+### 7.16 LF8 funding-carry study (2026-08-12) — **gate 0 passes, the book does not: the carry is real and it is fair compensation**
+
+*Source: `exploration/lf8_funding_carry_study.py`, **pre-registered** (criteria + gate-0
+threshold committed in `b911dfd` before any real data was fetched). Data: new 158-coin hourly
+funding archive (`data/funding`, LF8 fetcher — venue retention verified ≥95 d, hourly
+settlements per COST-9), 118 admitted pairs (≤2 bps half-spread, XS-5) × 92 d of 1 h candle
+closes. Costs SSOT at tier `none`; funding accrued via `CostModel` (COST-9). 12 declared
+trials: k ∈ {5,10,20} × window ∈ {24 h,72 h} × 2 cost modes.*
+
+**Family 4's first measurement, and it is informative in both directions as predicted.** The
+mechanism: a dollar-neutral book short the most-positive-funding coins and long the
+most-negative collects the hourly funding spread while price exposure is hedged in aggregate.
+Not `funding_reversion` (§4.6) — the position is in the funding, not the price.
+
+**Gate 0 passed honestly** — best carry/cost ratio **4.48** (k=5, w=72 h; carry 16.5 bps/day
+against 3.7 bps/day of churn cost), clearing the pre-registered ≥3 bar, so the study ran with
+no discretion involved. This matters for the record: the family did **not** die the §2
+arithmetic death.
+
+**The three-leg decomposition is the finding** (92 d, fractions of gross book):
+
+| config | price leg | funding leg | cost | net | SR | verdict |
+|---|---|---|---|---|---|---|
+| k=5 w=24h | −13.06 % | **+11.43 %** | 6.44 % | −8.07 % | −1.27 | FAILS(a,b,c,d) |
+| k=5 w=72h | −16.32 % | +10.46 % | 3.31 % | −9.17 % | −1.67 | FAILS(a,b,c,d) |
+| k=10 w=24h | −7.30 % | +8.07 % | 5.66 % | −4.88 % | −1.13 | FAILS(a,b,c,d,e) |
+| k=10 w=72h | −2.40 % | +7.57 % | 3.02 % | +2.14 % | 0.59 | FAILS(b,c,d,f) |
+| k=20 w=24h | −4.74 % | +5.42 % | 4.73 % | −4.04 % | −1.37 | FAILS(a,b,c,d,e) |
+| k=20 w=72h | −0.35 % | +5.17 % | 2.35 % | +2.46 % | 0.93 | FAILS(b,d,e) |
+
+**0 of 6 configurations survive; the declared sceptical prior is exactly what the data shows.**
+The funding leg genuinely collects — +5.2 % to +11.4 % gross over 92 days, largest where the
+book concentrates in the most crowded names — but the price leg loses **more** at every fast
+configuration: positive-funding coins kept drifting in the crowd's direction, so the
+short-the-crowd hedge eats the drift the funding was compensating. That is the textbook risk
+story (carry ≈ fair price of drift), now measured on this venue rather than assumed.
+
+**The two positive cells are fragile, not suggestive.** k=20 w=72h nets +2.46 % (SR 0.93) but
+a **single day carries 92 % of the total P&L** (max-day 0.919 vs the ≤0.30 bar), OOS/IS is
+0.256, and DSR p = 0.986 — at SR ≈ 0.9, t = 2 needs ~1,700 daily observations ≈ **4.6 years**
+(n ∝ 1/SR²), so even its sign is unknowable inside any realistic window. Recording it as
+*suggestive* would be manufacturing the number that died three times the week of 08-04.
+
+**Verdict for REV-2:** family 4's carry branch **fails the pre-registered bar** — decisively
+negative at high-churn configs (the crowd was right; shorting it costs more than it pays), and
+undecidable-by-power at the slow ones, with the best cell disqualified by single-day
+concentration regardless. Not re-runnable with tweaks: any refinement is a new trial against
+the declared 12. What transfers: the funding archive + fetcher (LF8) now accrue forward for
+free, and the measured leg magnitudes give any future funding-adjacent proposal its cost/carry
+arithmetic on day one.
+
+---
+
 ## 8. Platform & hypothesis-suite metrics
 
 *Source: project_state_report 2026-06-09.*
