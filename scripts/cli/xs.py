@@ -111,12 +111,19 @@ def _record_trajectory_point(args) -> dict:
     cost_bps = agg.loc[list(wide.columns), "half_spread_bps"] + taker_bps() \
         + float(costs["hyperliquid"]["slippage_bps"])
 
-    m = run_rotation(wide, cost_bps)
+    # COST-9: funding on held inventory. Previously unpriced — XS-9 passes 4 of 6
+    # pre-registered criteria (§7.8), and it held overnight without ever paying funding.
+    from data.fetch_funding import load_funding_panel
+    funding_wide = load_funding_panel(wide.index, symbols=list(wide.columns))
+    if not len(funding_wide.columns):
+        funding_wide = None          # reported, never a silent zero-funding price
+
+    m = run_rotation(wide, cost_bps, funding_wide=funding_wide)
     if not m.get("n_periods"):
         return {"recorded": False, "reason": m.get("reason", "no periods")}
 
     # criterion (f): sign stability under a 2x cost stress
-    stressed = run_rotation(wide, cost_bps, cost_stress=2.0)
+    stressed = run_rotation(wide, cost_bps, cost_stress=2.0, funding_wide=funding_wide)
     m["sign_stable_2x"] = bool(
         stressed.get("n_periods") and
         (stressed["net_total_pct"] >= 0) == (m["net_total_pct"] >= 0))

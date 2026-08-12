@@ -118,3 +118,95 @@ class TestUniverseSweep:
         assert len(result["ok"]) + len(result["failed"]) == 3
         assert (tmp_path / "AAA.parquet").exists()
         assert not (tmp_path / "BAD.parquet").exists()
+
+
+class TestTransportRetry:
+    """A universe sweep is ~5 pages x 177 coins — the highest request rate here.
+
+    `_info_request` has no retry of its own; only `fetch_universe`'s one-shot `meta` call
+    wraps itself. A run without a page-level retry lost **75 of 177 coins to HTTP 429**.
+    """
+
+    def test_transport_fault_is_retried(self, monkeypatch):
+        import data.fetch_funding as ff
+        monkeypatch.setattr(ff.time, "sleep", lambda s: None)
+        calls = {"n": 0}
+
+        def flaky(payload):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise OSError("HTTP Error 429: Too Many Requests")
+            return [_entry(i * HOUR_MS, 1e-5) for i in range(24)]
+
+        df = fetch_funding("TST", 0, info_fn=flaky, sleep_s=0)
+        assert len(df) == 24, "a transient 429 was not retried"
+        assert calls["n"] == 2
+
+    def test_schema_fault_is_not_retried(self, monkeypatch):
+        import data.fetch_funding as ff
+        monkeypatch.setattr(ff.time, "sleep", lambda s: None)
+        calls = {"n": 0}
+
+        def broken(payload):
+            calls["n"] += 1
+            raise KeyError("fundingRate")       # not a transport fault
+
+        with pytest.raises(KeyError):
+            fetch_funding("TST", 0, info_fn=broken, sleep_s=0)
+        assert calls["n"] == 1, "a schema error was retried into the same wall"
+
+    def test_retries_are_bounded(self, monkeypatch):
+        import data.fetch_funding as ff
+        monkeypatch.setattr(ff.time, "sleep", lambda s: None)
+        calls = {"n": 0}
+
+        def down(payload):
+            calls["n"] += 1
+            raise OSError("down")
+
+        with pytest.raises(OSError):
+            fetch_funding("TST", 0, info_fn=down, sleep_s=0)
+        assert calls["n"] == ff.RETRIES, "retry count did not match RETRIES"
+
+
+class TestFundingPanel:
+    """`load_funding_panel` is what lets the rotation charge funding at all."""
+
+    def test_millisecond_offsets_still_align(self, tmp_path):
+        """Settlements stamp a few ms past the hour; candle bars sit exactly on it.
+
+        Without rounding, an exact reindex matched 32 of 2198 rows on the real archive —
+        the study would have reported funding CHARGED and charged ~nothing.
+        """
+        from data.fetch_funding import load_funding_panel
+        base = pd.Timestamp("2026-05-13 19:00:00", tz="UTC")
+        df = pd.DataFrame({
+            "time": [int((base + pd.Timedelta(hours=i)).timestamp() * 1000) + 37
+                     for i in range(24)],
+            "funding_rate": [1.25e-05] * 24,
+            "premium": [0.0] * 24,
+        })
+        df.to_parquet(tmp_path / "TST.parquet", index=False)
+
+        index = pd.date_range(base, periods=24, freq="1h", tz="UTC")
+        panel = load_funding_panel(index, symbols=["TST"], data_dir=tmp_path)
+        assert panel["TST"].notna().sum() == 24, \
+            f"millisecond offsets broke alignment: {panel['TST'].notna().sum()}/24"
+        assert panel["TST"].iloc[0] == pytest.approx(1.25e-05)
+
+    def test_missing_hours_are_not_forward_filled(self, tmp_path):
+        """An hour with no settlement is not the previous hour's rate."""
+        from data.fetch_funding import load_funding_panel
+        base = pd.Timestamp("2026-05-13 19:00:00", tz="UTC")
+        pd.DataFrame({"time": [int(base.timestamp() * 1000)],
+                      "funding_rate": [1.25e-05], "premium": [0.0]}
+                     ).to_parquet(tmp_path / "TST.parquet", index=False)
+        index = pd.date_range(base, periods=5, freq="1h", tz="UTC")
+        panel = load_funding_panel(index, symbols=["TST"], data_dir=tmp_path)
+        assert panel["TST"].notna().sum() == 1
+
+    def test_empty_archive_is_detectable_not_silently_zero(self, tmp_path):
+        from data.fetch_funding import load_funding_panel
+        index = pd.date_range("2026-05-13", periods=10, freq="1h", tz="UTC")
+        panel = load_funding_panel(index, symbols=["TST"], data_dir=tmp_path / "absent")
+        assert panel.empty or not len(panel.columns)

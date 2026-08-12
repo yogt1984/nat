@@ -46,15 +46,31 @@ def _sharpe(r: np.ndarray, periods_per_year: float) -> float:
 def run_rotation(wide: pd.DataFrame, cost_bps: pd.Series, *, lookback: int = 168,
                  rebalance: int = 24, is_frac: float = 0.6,
                  periods_per_year: float = 365.0, cost_stress: float = 1.0,
-                 band: float = 0.0, band_mode: str = "edge") -> dict:
+                 band: float = 0.0, band_mode: str = "edge",
+                 funding_wide: pd.DataFrame | None = None) -> dict:
     """Run the beta-neutral rotation over a (timestamp x symbol) close matrix.
 
     Args:
         wide: close prices, NaN where a pair had not listed (PROC-19 keeps the holes).
         cost_bps: per-pair round-trip cost in bps for one unit of turnover.
         cost_stress: multiplier for the §4.9 criterion-(f) sensitivity run.
+        funding_wide: per-bar funding RATE (a fraction, like `fwd` — not bps), aligned to
+            `wide`. Optional: `None` reproduces the pre-COST-9 result exactly, so any
+            re-pricing delta is attributable to funding and nothing else.
 
     Returns a metrics dict shaped for `xs.trajectory.evaluate_criteria`.
+
+    **Funding (COST-9).** This priced only turnover until 2026-08-11; inventory held between
+    rebalances paid nothing, which the XS-6 study docstring declared but never closed. Since
+    Hyperliquid settles hourly and these bars are hourly, the charge over one holding period
+    is `Σ_i held_i × Σ_t f[t, i]` — signed, so a long pays a positive rate and a short
+    receives it, matching `backtest.costs.CostModel.compute_pnl`.
+
+    On a beta-neutral book with a *uniform* rate this nets to ~0: the weights sum to zero,
+    so what survives is exposure to the cross-sectional **dispersion** of funding rates, not
+    their level. That is why the headline "21 bps/week" is an upper bound belonging to
+    long-only configurations, and why both cases are pinned in
+    `tests/test_xs_rotation_funding.py`.
     """
     cols = list(wide.columns)
     prev = pd.Series(0.0, index=cols)
@@ -103,7 +119,19 @@ def run_rotation(wide: pd.DataFrame, cost_bps: pd.Series, *, lookback: int = 168
         # which is why it stayed latent until A5.
         held = full.reindex(live).fillna(0.0)
         gross = float((held * pd.Series(fwd, index=live)).sum())
-        rows.append({"gross": gross, "cost": cost, "net": gross - cost,
+
+        # Funding on the inventory actually HELD over [i, i+rebalance), on the same
+        # weights `gross` is priced on. Missing history is 0 for that cell, never NaN for
+        # the period: a pair listed mid-window would otherwise delete a whole rebalance
+        # from a study whose binding constraint is already n (§7.8 wanted ~325, had 83).
+        funding = 0.0
+        if funding_wide is not None:
+            fw = funding_wide.iloc[i:i + rebalance]
+            rate_sum = fw.reindex(columns=live).sum(axis=0, skipna=True).fillna(0.0)
+            funding = float((held * rate_sum).sum())
+
+        rows.append({"gross": gross, "cost": cost, "funding": funding,
+                     "net": gross - cost - funding,
                      "turnover": float(turn.sum()),
                      "net_beta": float((wts * bser).sum())})
         prev = full
@@ -122,6 +150,9 @@ def run_rotation(wide: pd.DataFrame, cost_bps: pd.Series, *, lookback: int = 168
         "n_periods": len(d),
         "gross_total_pct": round(float(d.gross.sum()) * 100, 3),
         "cost_total_pct": round(float(d.cost.sum()) * 100, 3),
+        # COST-9: reported separately from turnover cost, because the two answer different
+        # questions — turnover is a choice, funding is a toll on holding at all.
+        "funding_total_pct": round(float(d.funding.sum()) * 100, 3),
         "net_total_pct": round(total * 100, 3),
         "sharpe_net": round(_sharpe(net, periods_per_year), 3),
         "sharpe_is": round(sr_is, 3),
