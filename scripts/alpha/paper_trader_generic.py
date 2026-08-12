@@ -379,13 +379,16 @@ def generate_trades(bars: pd.DataFrame, date_str: str, symbol: str,
         ret_bps = (exit_p - entry_p) / entry_p * 1e4
         gross = d * ret_bps
 
-        # Funding cost
+        # Funding cost — accrual via the cost model (SSOT interval, COST-9).
+        # The old inline `holding_hours / 8.0` understated it 8x: Hyperliquid
+        # settles hourly and ctx_funding_rate is the hourly rate.
         funding_cost = 0.0
         if has_funding:
             avg_funding = np.nanmean(funding_rates[i:i + HORIZON_BARS])
             if np.isfinite(avg_funding):
-                funding_bps = avg_funding * 10000 * (holding_hours / 8.0)
-                funding_cost = d * funding_bps
+                funding_pct = cost_model.compute_funding_cost(
+                    holding_hours, avg_funding * 10000)
+                funding_cost = d * funding_pct * 100  # pct -> bps
 
         net = gross - rt_cost - funding_cost
 

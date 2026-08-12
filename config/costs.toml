@@ -7,7 +7,11 @@ taker_bps = 3.5             # one-way taker fee (0.035%)
 maker_bps = 0.2             # one-way maker rebate (0.002%)
 round_trip_taker_bps = 7.0  # taker_bps × 2
 slippage_bps = 2.0          # one-way slippage estimate
-funding_interval_hours = 8.0
+# Funding settles EVERY HOUR on Hyperliquid, not every 8 h (COST-9). Verified live
+# 2026-08-12: `fundingHistory` entries for BTC are spaced 1.0000 h apart and
+# `assetCtx.funding` is the HOURLY rate (1.25e-5 observed = the 0.00125 %/h
+# baseline). The old value 8.0 (the CEX convention) understated accrual 8x.
+funding_interval_hours = 1.0
 
 [hyperliquid_maker_tiers]
 # Perp MAKER ladder (COST-5). Source: Hyperliquid docs "Fees", verified 2026-08-03 —

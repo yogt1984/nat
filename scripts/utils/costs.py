@@ -121,6 +121,7 @@ def tier_summary() -> dict:
         "round_trip_taker_bps": round_trip_taker_bps(),
         "slippage_bps": slippage_bps(),
         "realistic_taker_rt_bps": realistic_taker_rt_bps(),
+        "funding_interval_hours": funding_interval_hours(),
     }
 
 
@@ -195,6 +196,15 @@ def round_trip_taker_bps() -> float:
 def slippage_bps() -> float:
     """Hyperliquid one-way slippage assumption in bps."""
     return load_costs().get("hyperliquid", {}).get("slippage_bps", 2.0)
+
+
+def funding_interval_hours() -> float:
+    """Hours between perp funding settlements on Hyperliquid.
+
+    1 h, a venue fact verified live 2026-08-12 (`fundingHistory` spacing;
+    `assetCtx.funding` is the hourly rate) — see config/costs.toml (COST-9).
+    """
+    return float(load_costs().get("hyperliquid", {}).get("funding_interval_hours", 1.0))
 
 
 def realistic_taker_rt_bps() -> float:
