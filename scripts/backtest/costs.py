@@ -13,13 +13,13 @@ from typing import Literal
 MAX_REBATE_BPS = 5.0
 
 try:
-    from utils.costs import maker_bps, taker_bps
+    from utils.costs import funding_interval_hours, maker_bps, taker_bps
 except ImportError:  # pragma: no cover - path bootstrap for direct/script imports
     import sys
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from utils.costs import maker_bps, taker_bps
+    from utils.costs import funding_interval_hours, maker_bps, taker_bps
 
 
 @dataclass
@@ -35,7 +35,14 @@ class CostModel:
     slippage_bps : float
         Expected slippage in basis points. Depends on order size and liquidity.
     funding_enabled : bool
-        Whether to apply funding rate costs (requires funding_rate column in data).
+        Whether to apply funding accrual (requires funding_rate column in data).
+        DEFAULTS TO TRUE (COST-9): funding is a forced payment at every settlement
+        while a position is held — omitting it mis-states every held-position
+        result, with the sign of the error set by which side was held. Opt out
+        explicitly (or via the "zero" preset), never by accident.
+    funding_interval_hours : float
+        Hours between funding settlements. Sourced from config/costs.toml via
+        utils.costs (1 h on Hyperliquid, venue-verified) — never hardcoded.
 
     Notes
     -----
@@ -46,7 +53,8 @@ class CostModel:
 
     fee_bps: float = field(default_factory=taker_bps)  # config taker fee (SSOT)
     slippage_bps: float = 2.0  # Conservative slippage estimate
-    funding_enabled: bool = False
+    funding_enabled: bool = True
+    funding_interval_hours: float = field(default_factory=funding_interval_hours)
     fill_probability: float = 1.0  # Probability an order fills (1.0 = always)
 
     def __post_init__(self):
@@ -61,6 +69,9 @@ class CostModel:
             raise ValueError(f"slippage_bps must be non-negative, got {self.slippage_bps}")
         if not 0.0 < self.fill_probability <= 1.0:
             raise ValueError(f"fill_probability must be in (0, 1], got {self.fill_probability}")
+        if self.funding_interval_hours <= 0:
+            raise ValueError(
+                f"funding_interval_hours must be positive, got {self.funding_interval_hours}")
 
     @classmethod
     def from_config(cls, path: str | None = None,
@@ -174,7 +185,7 @@ class CostModel:
         self,
         holding_hours: float,
         funding_rate_bps: float,
-        funding_interval_hours: float = 8.0,
+        funding_interval_hours: float | None = None,
     ) -> float:
         """
         Compute accumulated funding cost for a position.
@@ -184,9 +195,11 @@ class CostModel:
         holding_hours : float
             Duration of the position in hours
         funding_rate_bps : float
-            Average funding rate in basis points (per interval)
-        funding_interval_hours : float
-            Funding settlement interval (default 8h for Hyperliquid)
+            Average funding rate in basis points (per settlement interval)
+        funding_interval_hours : float, optional
+            Funding settlement interval. Defaults to the model's SSOT-sourced
+            value (1 h on Hyperliquid, venue-verified — COST-9). The old
+            hardcoded 8.0 understated accrual 8x.
 
         Returns
         -------
@@ -194,6 +207,8 @@ class CostModel:
             Funding cost as percentage. Positive = cost for longs when
             funding is positive (longs pay shorts).
         """
+        if funding_interval_hours is None:
+            funding_interval_hours = self.funding_interval_hours
         if not self.funding_enabled or funding_interval_hours <= 0:
             return 0.0
         n_settlements = holding_hours / funding_interval_hours
@@ -303,8 +318,11 @@ def conservative() -> CostModel:
 
 
 def zero_cost() -> CostModel:
-    """Zero cost model - only for debugging, not real backtests."""
-    return CostModel(fee_bps=0.0, slippage_bps=0.0)
+    """Zero cost model - only for debugging, not real backtests.
+
+    Funding is off too: "zero" means genuinely cost-free, not fee-free-but-funded.
+    """
+    return CostModel(fee_bps=0.0, slippage_bps=0.0, funding_enabled=False)
 
 
 # Named presets selectable via a `--cost-model` flag.
