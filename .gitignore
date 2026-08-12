@@ -40,6 +40,9 @@ data/
 !scripts/data/
 rust/data/
 *.parquet
+# DOCS-4: the frozen public slice ships in git — it is the whole point
+!reproduce/slice/**/*.parquet
+reproduce/out/
 validation_report_*.json
 
 # IDE
