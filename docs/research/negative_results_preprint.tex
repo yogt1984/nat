@@ -1,0 +1,644 @@
+\documentclass[11pt,a4paper]{article}
+
+% ------------------------------------------------------------------
+% House layout, shared with the sibling preprints in docs/research/:
+% 11pt a4, 2.5cm margins, Computer Modern, \maketitle front matter,
+% abstract + keywords + JEL codes, numbered sections, table of contents.
+% ------------------------------------------------------------------
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{array}
+\usepackage{longtable}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\DeclareMathOperator{\IC}{IC}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+
+% booktabs unavailable in this distribution — plain equivalents
+\newcommand{\toprule}{\hline\hline}
+\newcommand{\midrule}{\hline}
+\newcommand{\bottomrule}{\hline\hline}
+\usepackage[round]{natbib}
+
+\begin{document}
+
+% ============================================================
+
+\title{\textbf{Fifteen Mechanisms That Did Not Work\\[3pt]
+on a Perpetual-Futures DEX}\\[6pt]
+\large A Negative-Results Census, with Reproducible
+Microstructure Measurements}
+
+\author{Yigit Onat\thanks{Working paper, preliminary draft --- comments
+welcome. All estimates are from an internal empirical record
+consolidated 2026-08-12; section references of the form \S$n$ in tables
+refer to that record and are retained for provenance. Please do not
+cite specific numbers without checking for a newer version.}\\
+\textit{Independent Researcher}\\
+\texttt{yionat@gmail.com}}
+\date{August 2026}
+\maketitle
+
+% ============================================================
+\begin{abstract}
+Over six months and roughly ten thousand tested configurations on
+Hyperliquid, a fully on-chain perpetual-futures exchange, we attempted
+to monetise short-horizon predictive structure in the limit order book
+and adjacent mechanisms, and failed fifteen times. This paper reports
+the graveyard deliberately: negative results in trading research are
+rarely published, so each generation of researchers re-derives the same
+walls at full cost. We organise the record by \emph{economic mechanism}
+(who is on the other side, and why they would lose) and by \emph{death
+reason} (arithmetic, mechanism absent, underpowered, or blocked), a
+distinction that decides whether a question is closed or merely
+unresolved. The common signature of every refutation is stated and
+quantified: the predicted move is comparable to the round-trip cost.
+Alongside the graveyard we report descriptive measurements of the venue
+that are, to our knowledge, undocumented in the academic literature:
+the median pair quotes a half-spread $17$--$19\times$ that of BTC;
+spread and depth are uncorrelated in cross-section ($\rho=-0.107$); the
+median pair carries under \$100 of notional at the touch and only 4 of
+177 pairs hold \$5{,}000; funding settles hourly; and the venue's
+candle history is capped at ${\sim}5000$ bars per interval, making
+fine-grained history unrecoverable unless accumulated live. A frozen
+data slice and a one-command script reproducing the headline
+measurements ship with the paper. We close with the transferable
+result: a twenty-minute expected-move-to-cost calculation, run before
+any infrastructure is built, would have redirected the entire programme
+in week one.
+\end{abstract}
+
+\smallskip
+\noindent\textbf{Keywords:} negative results, market microstructure,
+perpetual futures, decentralised exchanges, transaction costs, adverse
+selection, reproducibility
+
+\smallskip
+\noindent\textbf{JEL Classification:} C58, G12, G14, G23
+
+\tableofcontents
+
+% ============================================================
+\section{Introduction}
+\label{sec:intro}
+
+The empirical starting point of this programme was a strong positive
+result, documented in a companion paper: order-book imbalance on BTC,
+ETH and SOL perpetuals predicts the direction of the mid-price with a
+rank information coefficient of ${\approx}0.45$ at horizons of one to
+five seconds, universally across symbols and volatility regimes. The
+result survives every statistical control we ran at it. What follows
+here is the record of attempting to turn that structure, and fourteen
+adjacent mechanisms, into realised profit --- and failing every time.
+
+Negative results of this kind are close to unpublishable in the
+standard venues, which is precisely why they are worth writing down.
+The walls documented below are structural properties of the venue and
+of transaction-cost arithmetic; they do not depend on our estimators,
+and anyone entering this market will hit them at full cost unless told
+where they are. Fifteen refutations at roughly ten thousand tested
+configurations is, in effect, a large prepaid experiment whose output
+is a map.
+
+Three choices shape the paper:
+
+\begin{enumerate}
+\item \textbf{Organisation by mechanism, not by technique.} Hawkes
+intensities, order-flow imbalance, VPIN, jump detection, OU
+mean-reversion and book-pressure features are six different techniques
+--- and all six draw on one economic source: short-horizon order-flow
+pressure in a single venue's book. Organised by technique, the record
+looks diversified; organised by \emph{who pays}, the concentration is
+visible, and the failures stop being surprising. Two techniques applied
+to one edge source are not diversification.
+\item \textbf{Death reasons are first-class.} ``This failed'' is not
+one statement but four (Section~\ref{sec:deaths}), and conflating them
+is how live questions get buried and dead ones exhumed. Each entry in
+the census carries its death reason, and only two of the four reasons
+close a question permanently.
+\item \textbf{The measurements are the contribution; the graveyard is
+the service.} The descriptive facts in Section~\ref{sec:venue} ---
+spread structure, depth, funding cadence, history retention, and the
+survivorship boundary of the data itself --- hold independently of any
+trading hypothesis, are reproducible from the frozen slice shipped with
+this paper (Appendix~\ref{app:repro}), and several of them contradict
+intuitions imported from equity microstructure or from centralised
+crypto venues.
+\end{enumerate}
+
+One boundary is deliberate: this paper publishes methods, measurements
+and refutations. It does not publish anything the record currently
+treats as a live, unrefuted edge, and the census below should be read
+with that filter in mind.
+
+\section{The venue and the data}
+\label{sec:data}
+
+Hyperliquid is a fully on-chain perpetual-futures exchange with a
+central limit order book, permissionless API access over REST and
+WebSocket, an hourly funding clock
+(Section~\ref{sec:venue:funding}), and --- unusually ---
+publicly observable wallet positions and liquidation levels. At the
+time of the census the venue listed 177 tradeable perpetual pairs.
+
+The internal platform ingests the venue's book and trade stream at
+100\,ms cadence into a 236-feature representation per symbol (BTC, ETH,
+SOL; ${\sim}2.17$ million ticks per symbol in the core sample), and
+maintains three slower archives across the full universe: OHLCV candles
+at 1m/5m/15m/1h (${\sim}3.06$ million candles, 708 series), periodic
+full-book snapshots for all 177 pairs, and, since August 2026, the
+hourly funding-rate history of every pair.
+
+\paragraph{Survivorship, declared.} The candle archive covers the 177
+pairs listed during the collection window. At least 55 previously
+listed perpetuals were delisted before or during the window and are
+absent. Delisting concentrates in exactly the thin, low-attention tail
+where several of the untested mechanisms (notably gradual information
+diffusion, Section~\ref{sec:census}) predict their effect, so
+cross-sectional results below are conditioned on survival to an extent
+we cannot fully quantify. We state this rather than let a referee find
+it: every cross-sectional number in this paper should be read as
+``among pairs that survived to be measured.''
+
+\paragraph{History is not recoverable.} The venue caps retrievable
+candle history at ${\sim}5000$ bars per interval regardless of start
+time. One-minute history therefore expires ${\sim}3.5$ days after the
+fact and \emph{cannot be backfilled at any later date}; the same
+applies pro-rata to every interval. There is, to our knowledge, no
+public archive of this venue's L2 book states. Datasets here are
+accumulated live or lost, which is why the reproducibility slice
+(Appendix~\ref{app:repro}) is frozen into the repository rather than
+re-fetched on demand.
+
+\section{Descriptive measurements}
+\label{sec:venue}
+
+These facts constrain every strategy on the venue, are independent of
+any signal, and each one killed or reshaped at least one hypothesis in
+the census.
+
+\subsection{The universe is not its majors}
+\label{sec:venue:spread}
+
+Measured over repeated full-book snapshot sweeps of all 177 pairs, the
+cross-sectional median half-spread is $1.37$--$1.43$ basis points
+against BTC's $0.077$--$0.083$\,bps: \textbf{the median pair quotes
+$17$--$19\times$ wider than BTC}, and 169 of 177 pairs are wider than
+the three majors on which all high-frequency work was done. Any result
+established on BTC's book generalises to almost nowhere on the venue,
+and any cost model calibrated on the majors understates the universe by
+an order of magnitude.
+
+\subsection{Depth does not follow spread}
+\label{sec:venue:depth}
+
+Across the same sweeps, per-pair half-spread and touch depth are
+essentially uncorrelated in cross-section ($\rho = -0.107$): wide pairs
+are not deep pairs resting at a fairer price, they are simply thin. The
+median pair carries \$33--\$391 of notional at the best quotes
+(slice median \$81), and \textbf{only 4 of 177 pairs hold \$5{,}000 at
+the touch}. The extreme cases are instructive: pairs quoting
+$13$--$27$\,bps half-spreads over \$3--\$20 of touch notional. A large
+per-fill edge on \$20 of size is not a business. Admission to any
+cross-sectional strategy is therefore a \emph{joint} spread--depth
+condition, and the joint condition is far more restrictive than either
+margin: a 2\,bps half-spread ceiling alone admits 129 pairs, but the
+capacity to deploy even \$1{,}000 per pair per day at 1\% of volume
+cuts the tradeable set to ${\sim}117$, and \$5{,}000 of touch size
+exists in four names.
+
+\subsection{Funding settles hourly, and the displayed rate is hourly}
+\label{sec:venue:funding}
+
+Perpetual funding on this venue is exchanged \textbf{every hour}
+(verified directly: settlement timestamps in the venue's own funding
+history are spaced $1.0000$\,h apart), and the funding field in the
+live asset context is the hourly rate --- observed baseline
+$1.25\times10^{-5}$ per hour, i.e.\ the venue's $0.00125\%$/h default.
+Conventional CEX intuition (8-hour funding) mis-prices held positions
+on this venue by a factor of eight. In our own simulation stack this
+exact error survived undetected for months --- funding was charged in
+\emph{no} backtest, and the configured interval was 8 hours --- an
+error we document in Section~\ref{sec:method} because the manner of
+finding it generalises.
+
+\subsection{Retention, cadence, and what they imply}
+
+The ${\sim}5000$-bar retention cap (Section~\ref{sec:data}) has a
+strategic consequence that is easy to miss: for any research programme
+on this venue, \emph{data continuity is the binding constraint}, ahead
+of ideas, compute, or capital. A gap in live collection is permanent.
+Half of the operational machinery described in
+Section~\ref{sec:method} exists to protect continuity, and the single
+most damaging defect we record (Section~\ref{sec:census},
+entry~M) was an availability failure, not a statistical one.
+
+\section{Method, and what the method caught}
+\label{sec:method}
+
+The statistical equipment is standard; what we would emphasise is the
+combination, because in every near-miss of the final month it was a
+\emph{control}, not judgement, that killed the hypothesis.
+
+\begin{itemize}
+\item \textbf{Planted-signal tests before real data.} Every estimator
+must first recover a synthetic effect of known size planted in
+synthetic data, and return null on planted noise. Three separate
+estimator bugs --- each of which would have manufactured a discovery
+--- were caught only this way.
+\item \textbf{Null calibration under the right exchangeability.}
+Permutation nulls are constructed to preserve the dependence structure
+the statistic is exposed to (day-block permutations for serial
+dependence, label permutations that preserve group sizes for
+cross-sectional claims). One internal audit produced an IC of
+$0.39$--$0.46$ --- \emph{higher} than the claim it was auditing ---
+purely from overlapping forward windows; non-overlapping sampling is
+mandatory since.
+\item \textbf{False-discovery control across the whole grid.}
+Benjamini--Hochberg at $q=0.05$ over every cell actually computed, not
+over the cells that looked interesting.
+\item \textbf{Per-day durability, not pooled means.} A pooled mean
+over 25 days is routinely carried by two days. Every claim must hold on
+a stated fraction of individual days.
+\item \textbf{Pre-registration in version control.} Acceptance
+criteria, trial counts for deflated-Sharpe penalties
+\citep[in the sense of][]{bailey2014}, and stop rules are committed to
+the repository \emph{before} a study runs; the commit hash is the
+proof. The funding-carry study of entry~O below is the worked example:
+its gate, criteria, and sceptical priors were committed before its
+data was fetched, and the study's own gate was not permitted to be
+adjusted afterwards.
+\item \textbf{Cost realism as a gate, not a sensitivity.} All costs
+flow from one configuration file through one loader. The census
+contains a five-fold false-discovery event (entry~C) whose root cause
+was a silently wrong venue's fee tier reaching a harness default.
+\end{itemize}
+
+Two of the fifteen entries below are methodological deaths --- the
+hypothesis was never really tested because the harness was wrong --- and
+we count them in the census deliberately. A negative-results paper that
+omitted its own instrumentation failures would be reporting a cleaner
+record than the one that exists.
+
+\section{How a mechanism dies}
+\label{sec:deaths}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{p{4.2cm} p{2.2cm} p{7.4cm}}
+\toprule
+Death reason & Permanent? & Implication \\
+\midrule
+\textbf{Arithmetic} --- predicted move $\approx$ cost & Yes, at that
+horizon & Only a cost change reopens it \\
+\textbf{Mechanism absent} --- measured, not there & Yes & Closed \\
+\textbf{Undecidable} --- underpowered & No & Revisit at adequate $n$; a
+\emph{collection} task, not a research one \\
+\textbf{Blocked} --- data or access missing & No & Acquire the data;
+the question is untested, not answered \\
+\bottomrule
+\end{tabular}
+\caption{The four death reasons. Only the first two close a question.
+Filing an underpowered result as ``refuted'' discards a live question;
+filing an arithmetic death as ``needs more data'' wastes a year. The
+census tags every entry with one of these four.}
+\label{tab:deaths}
+\end{table}
+
+The distinction earns its keep twice in this record: two of the
+strongest-looking refutations (entries~J and~L) are formally
+\emph{undecidable} --- one observed $1.5$ events per day against a
+design that needed hundreds, the other needs ${\sim}0.9$ years of
+rebalances for its Sharpe ratio to reach significance --- and treating
+either as ``mechanism absent'' would have been a classification error
+with multi-month consequences in both directions.
+
+\section{The census}
+\label{sec:census}
+
+Table~\ref{tab:census} is the record. Family numbers refer to the
+economic taxonomy of Section~\ref{sec:families}.
+
+{\small
+\begin{longtable}{p{0.5cm} p{5.2cm} p{3.8cm} p{1.4cm} p{2.9cm}}
+\caption{The fifteen-entry census. ``Family'' refers to
+Table~\ref{tab:families}. Entries C and M are instrumentation deaths
+and are included deliberately (Section~\ref{sec:method}).}
+\label{tab:census}\\
+\toprule
+\# & What was tried & Outcome & Family & Death reason \\
+\midrule
+\endfirsthead
+\toprule
+\# & What was tried & Outcome & Family & Death reason \\
+\midrule
+\endhead
+A & Taker capture of the 1--5\,s imbalance signal & $0.5$--$2$\,bps
+predicted move vs $11$\,bps round trip & 1/11 & Arithmetic \\
+B & Naive maker capture of the same signal & $\IC$ $0.45 \to 0.03$
+conditional on directionally-consistent fills & 1 & Arithmetic (adverse
+selection) \\
+C & Five production signal ``winners'' & All five refuted on re-audit
+& --- & Methodological (wrong venue's fee tier in harness defaults) \\
+D & VWAP-reversion at taker cost, 58 days & $-25$k to $-41$k bps
+cumulative & 1/11 & Arithmetic (${\sim}50$ trades/day $\times$ fees) \\
+E & Textbook Avellaneda--Stoikov quoting & $-1.89$\,bps/fill;
+risk-widened quotes rest behind the touch and fill only through
+adverse moves & 1 & Model-transfer failure \\
+F & Touch-pegged passive quoting, 8 configs $\times$ 179
+symbol-days & 0 survive day-consistency and concentration & 1 &
+Mechanism absent (at the majors' touch) \\
+G & Fee-tier staking discounts as the fix & Verdict tier-invariant:
+discounts apply to fees, never rebates & 1 & Arithmetic \\
+H & The full maker rebate ladder & Breakeven rebate $+0.144$\,bps
+exceeds the best volume-tier rate (zero); first viable rung requires
+${\sim}1.5\%$ of venue-wide maker volume & 1 & Arithmetic
+(structural) \\
+I & Momentum persistence, 1m/5m bars, majors & Anti-persistent: 34/36
+cells negative; the universe mean-reverts ${\sim}$8-to-1 & 9 &
+Mechanism absent (naked signature, bar scale) \\
+J & VWAP-band oscillation harvesting, 330 cells & 0 survive --- but
+${\sim}1.5$ events/day against a design needing hundreds & 1 &
+\emph{Undecidable} \\
+K & Permutation entropy as cross-sectional score & Interquartile range
+$0.0005$: the middle half of the universe is indistinguishable & --- &
+Mechanism absent \\
+L & Cross-sectional low-vol rotation (long/short, out of sample) & 0/6
+pre-registered criteria; beta-neutral rebuild reaches 4/6 with Sharpe
+2.1 but needs ${\sim}0.89$\,yr for significance & 8/9 &
+\emph{Undecidable} \\
+M & Hierarchical signal combiner & Loses to one of its own inputs;
+weights were fitted after the window they were scored on & --- &
+Methodological \\
+N & Agreement gating (trade only when signals agree) & Harmful: the
+\emph{disagreement} subset carries the signal & 2 & Mechanism absent
+(as specified) \\
+O & Funding carry, dollar-neutral across 118 pairs, 92 days,
+pre-registered & Funding leg collects $+5$--$11\%$ gross; the
+short-the-crowd price leg loses more; 0/6 configs pass & 4 & Mechanism
+absent (carry $\approx$ fair drift compensation) \\
+\bottomrule
+\end{longtable}}
+
+Three entries deserve prose beyond the table.
+
+\paragraph{B: the execution boundary.} The strongest structure in the
+record --- directional $\IC \approx 0.45$ at seconds --- collapses to
+${\approx}0.03$ when conditioned on obtaining a directionally-correct
+passive fill, while conditioning on the presence of \emph{any} fill
+\emph{raises} the coefficient to $0.52$. The information is real and
+the market microstructure prices it: a passive order fills
+preferentially when the move is against it. This isolates adverse
+selection, not signal decay, as the binding constraint, and it is the
+single result that most reshaped the programme.
+
+\paragraph{H: zero fees are not free money.} At BTC's touch the
+half-spread ($0.077$--$0.083$\,bps) is roughly one third of the
+expected adverse move conditional on a fill ($0.23$--$0.24$\,bps), so a
+resting quote loses ${\sim}0.08$\,bps per posting even at a zero fee
+rate. The venue must \emph{pay} ${\sim}+0.15$\,bps before passive
+quoting at the majors' touch breaks even, and the first rebate rung
+that clears this sits at ${\sim}1.5\%$ of venue-wide 14-day maker
+volume (${\sim}\$86$M/day of maker fills at current venue volume) ---
+an entry ticket, not a fee schedule. The reproduction script regenerates
+this ladder from the frozen slice and the venue's published tiers.
+
+\paragraph{O: the carry that was exactly fair.} The funding-carry study
+is the census's worked example of the full method: mechanism named in
+advance (the crowded side pays hourly; a dollar-neutral book collects
+the spread), gate and criteria committed to version control before the
+data existed, and a cost-ratio gate (expected carry over expected
+churn cost $\ge 3$) evaluated \emph{before} the backtest was permitted
+to run. The gate passed at $4.5$; the book still failed. Funding was
+collected almost exactly as forecast ($+5$--$11\%$ gross over 92 days)
+and the price leg gave it back with interest: the coins whose crowd
+paid the most kept moving the crowd's way. On this venue, over this
+window, funding was a fair price for drift --- a textbook risk-premium
+story, measured rather than assumed. The two marginally positive slow
+configurations are disqualified rather than suggestive: the best
+carries 92\% of its P\&L in one day and would need
+${\sim}4.6$ years for its Sharpe ratio to clear significance.
+
+\section{The mechanism families, and what remains open}
+\label{sec:families}
+
+{\small
+\begin{longtable}{p{0.5cm} p{5.6cm} p{7.6cm}}
+\caption{Families by economic source. Numbers are stable identifiers
+in the internal taxonomy; 6, 10, 12 were re-specified or retired and
+never reused --- gaps are deliberate. Two families are omitted as
+operationally inaccessible (volatility risk premium: no options
+market; queue-priority/latency: no colocation).}
+\label{tab:families}\\
+\toprule
+\# & Family --- economic source & Status after the census \\
+\midrule
+\endfirsthead
+\toprule
+\# & Family --- economic source & Status after the census \\
+\midrule
+\endhead
+1 & Liquidity provision --- paid to bear inventory + adverse selection
+\citep[cf.][]{grossman1988, avellaneda2008} & Heavily worked; closed at
+the majors' touch by arithmetic (entries E--H); open on wide pairs,
+where the half-spread is a multiple of BTC's \\
+2 & Adverse-selection avoidance \citep[cf.][]{kyle1985, easley2012} &
+Survives as a \emph{gate} only: flow-toxicity conditioning lifts
+per-fill economics on all three majors but carries no direction \\
+3 & Price-discovery lag across venues \citep[cf.][]{hasbrouck1995,
+makarov2020} & Untried --- blocked on a cross-venue feed \\
+4 & Funding reflexivity & Carry branch measured and dead (entry O);
+the reflexive-unwinding branch (funding $\to$ forced flow $\to$ price)
+untested, blocked on position-history accrual \\
+5 & Deterministic liquidation --- the engine executes at a computable
+price \citep[nearest analogue][]{coval2007} & Best-supported untried
+family: trigger prices are \emph{public} on this venue; blocked on
+instrumentation, not theory \\
+6 & Gradual information diffusion \citep[cf.][]{hong1999, hong2000} &
+Untried at its native horizon (weeks); the minute-scale reversion
+result does not touch it, and the pooled tests that exist would dilute
+a liquidity-conditional effect to zero by construction \\
+7 & Attention and flow-driven demand \citep[cf.][]{barber2008} &
+Untried; listing events exist in-archive but $n=2$ observable events
+so far --- a collection task \\
+8 & Statistical relative value \citep[cf.][]{gatev2006} & Registered,
+never evaluated \\
+9 & Behavioural under/over-reaction \citep[cf.][]{jegadeesh1993,
+debondt1985} & The \emph{naked signature} is exhausted at bar scale
+(entry I); the generating mechanisms are largely untried \\
+11 & Microstructure noise / bid--ask bounce \citep[cf.][]{roll1984} &
+Exhausted \\
+\bottomrule
+\end{longtable}}
+
+Two remarks the table cannot carry.
+
+\paragraph{Signatures are not mechanisms.} Momentum and mean-reversion
+are signs of autocorrelation --- observables, not explanations. At
+least four distinct mechanisms produce reversion (inventory
+compensation, forced-flow overshoot, bid-ask bounce, behavioural
+over-reaction) and four produce momentum (discovery lag, gradual
+diffusion, attention flow, under-reaction). What this record exhausted
+is the \emph{naked signature} --- trade the sign of recent returns, at
+bar scale, at taker cost --- which says nothing about the generating
+mechanisms individually. The question to ask any momentum or reversion
+proposal is not ``what horizon?'' but ``\emph{paid by whom?}''
+
+\paragraph{The strongest negative is a signpost.} ``The universe
+reverts 8-to-1'' (entry I) is precisely the condition under which
+liquidity provision and forced-flow harvesting pay, because both are
+compensated \emph{by} reversion. The most robust refutation in the
+record therefore points directly at the two families the venue's
+architecture makes most observable --- and both are blocked on
+instrumentation rather than closed. On-chain position visibility is a
+structural research advantage of this venue class: forced flow that
+equity-market studies must infer from returns is, here, directly
+observable in advance.
+
+\section{The transferable result}
+\label{sec:lesson}
+
+Every arithmetic death in Table~\ref{tab:census} was knowable in
+advance. The predicted move of the core signal ($0.5$--$2$\,bps at
+seconds) against the realistic round trip ($\sim$$11$\,bps taker) is a
+ratio of ${\sim}0.1$; the programme's subsequently adopted rule ---
+\emph{expected move over round-trip cost} $\ge 3$ \emph{at the design
+horizon, computed before anything is built} --- would have failed the
+entire high-frequency taker programme on day one, using twenty minutes
+and public data. The same twenty minutes, run at gate zero of the
+funding-carry study (entry O), correctly admitted it --- and the study
+then failed for a reason the ratio cannot see, which is the right
+division of labour: the ratio filters what cannot work; measurement
+decides what does not.
+
+Stated for the general case: on any venue, for any signal, compute
+$m/c$ where $m$ is the expected favourable move over the holding
+horizon and $c$ the full round trip at the fee tier you actually hold.
+Below $1$, the strategy is arithmetically dead regardless of the
+information content; between $1$ and $3$, it is a fill-quality
+research programme, not a trading strategy; above $3$, it earns the
+right to a backtest. The census contains six entries that this
+one-line calculation would have prevented.
+
+\section*{Acknowledgements}
+The platform, studies and record summarised here were built and run by
+the author. No external funding; no conflicts to declare.
+
+% ============================================================
+\appendix
+
+\section{Reproducibility}
+\label{app:repro}
+
+The repository ships a frozen public slice and a one-command
+reproduction path:
+
+\begin{center}
+\code{./reproduce.sh}
+\end{center}
+
+\noindent requiring only Python with \code{pandas}, \code{pyarrow} and
+\code{matplotlib}; no network access and no credentials. The script
+reads the frozen slice (two full-universe L2 snapshot days --- 177
+pairs, ${\sim}50$k book states, ${\sim}9.9$\,MB --- plus hourly candles
+for the majors) and the venue fee configuration, and regenerates:
+
+\begin{enumerate}
+\item the cross-sectional half-spread distribution
+(Section~\ref{sec:venue:spread}): slice values --- median $1.428$\,bps,
+$18.6\times$ BTC;
+\item the touch-depth distribution (Section~\ref{sec:venue:depth}):
+slice values --- median \$81; $4/177$ pairs at \$5{,}000;
+\item the maker-ladder breakeven (entry H): slice values --- breakeven
+rebate $+0.151$\,bps; first viable rung unchanged.
+\end{enumerate}
+
+\noindent together with a machine-readable \code{headlines.json}. The
+slice's own values are pinned by unit tests, so any drift in the
+computation is a build failure rather than a silent revision. Two
+constants (expected adverse selection conditional on a fill at BTC's
+touch, $0.228/0.242$\,bps bid/ask) enter the ladder figure from tick
+data too large to freeze and are declared as frozen inputs in the
+script's header. Because the venue caps history retention and serves no
+historical order-book states (Section~\ref{sec:data}), freezing the
+slice in the repository is the only mechanism by which these
+measurements remain independently checkable.
+
+\renewcommand{\refname}{References}
+\begin{thebibliography}{99}\small
+
+\bibitem[Avellaneda and Stoikov(2008)]{avellaneda2008}
+Avellaneda, M.\ and S.\ Stoikov (2008). High-frequency trading in a
+limit order book. \emph{Quantitative Finance} 8(3), 217--224.
+
+\bibitem[Bailey and L\'opez de Prado(2014)]{bailey2014}
+Bailey, D.\ and M.\ L\'opez de Prado (2014). The deflated Sharpe
+ratio. \emph{Journal of Portfolio Management} 40(5), 94--107.
+
+\bibitem[Barber and Odean(2008)]{barber2008}
+Barber, B.\ and T.\ Odean (2008). All that glitters: the effect of
+attention and news on the buying behavior of individual and
+institutional investors. \emph{Review of Financial Studies} 21(2),
+785--818.
+
+\bibitem[Coval and Stafford(2007)]{coval2007}
+Coval, J.\ and E.\ Stafford (2007). Asset fire sales (and purchases)
+in equity markets. \emph{Journal of Financial Economics} 86(2),
+479--512.
+
+\bibitem[De Bondt and Thaler(1985)]{debondt1985}
+De Bondt, W.\ and R.\ Thaler (1985). Does the stock market overreact?
+\emph{Journal of Finance} 40(3), 793--805.
+
+\bibitem[Easley et~al.(2012)]{easley2012}
+Easley, D., M.\ L\'opez de Prado and M.\ O'Hara (2012). Flow toxicity
+and liquidity in a high-frequency world. \emph{Review of Financial
+Studies} 25(5), 1457--1493.
+
+\bibitem[Gatev et~al.(2006)]{gatev2006}
+Gatev, E., W.\ Goetzmann and K.\ Rouwenhorst (2006). Pairs trading:
+performance of a relative-value arbitrage rule. \emph{Review of
+Financial Studies} 19(3), 797--827.
+
+\bibitem[Grossman and Miller(1988)]{grossman1988}
+Grossman, S.\ and M.\ Miller (1988). Liquidity and market structure.
+\emph{Journal of Finance} 43(3), 617--633.
+
+\bibitem[Hasbrouck(1995)]{hasbrouck1995}
+Hasbrouck, J.\ (1995). One security, many markets: determining the
+contributions to price discovery. \emph{Journal of Finance} 50(4),
+1175--1199.
+
+\bibitem[Hong and Stein(1999)]{hong1999}
+Hong, H.\ and J.\ Stein (1999). A unified theory of underreaction,
+momentum trading, and overreaction in asset markets. \emph{Journal of
+Finance} 54(6), 2143--2184.
+
+\bibitem[Hong et~al.(2000)]{hong2000}
+Hong, H., T.\ Lim and J.\ Stein (2000). Bad news travels slowly: size,
+analyst coverage, and the profitability of momentum strategies.
+\emph{Journal of Finance} 55(1), 265--295.
+
+\bibitem[Jegadeesh and Titman(1993)]{jegadeesh1993}
+Jegadeesh, N.\ and S.\ Titman (1993). Returns to buying winners and
+selling losers: implications for stock market efficiency.
+\emph{Journal of Finance} 48(1), 65--91.
+
+\bibitem[Kyle(1985)]{kyle1985}
+Kyle, A.\ (1985). Continuous auctions and insider trading.
+\emph{Econometrica} 53(6), 1315--1335.
+
+\bibitem[Makarov and Schoar(2020)]{makarov2020}
+Makarov, I.\ and A.\ Schoar (2020). Trading and arbitrage in
+cryptocurrency markets. \emph{Journal of Financial Economics} 135(2),
+293--319.
+
+\bibitem[Roll(1984)]{roll1984}
+Roll, R.\ (1984). A simple implicit measure of the effective bid-ask
+spread in an efficient market. \emph{Journal of Finance} 39(4),
+1127--1139.
+
+\end{thebibliography}
+
+\end{document}
