@@ -1591,6 +1591,61 @@ fixed before any real data was read. The planted scenario was family 6's own pre
 
 ---
 
+### 7.18 XS-6/XS-9 re-priced with funding (COST-9 follow-up, 2026-08-12) — **funding costs 1.65× turnover, and it flips a pre-registered criterion**
+
+*COST-9 (§7.16's prerequisite, `657c970`) corrected the interval from 8 h to 1 h and made
+`CostModel` charge funding. It did **not** reach the rotation studies: `xs/rotation.py` uses a
+separate cost path — `Σ(turnover × round_trip_bps)` — with no funding term at all, so XS-6 and
+XS-9 were still priced as though inventory were free to hold. The XS-6 driver said so in its own
+docstring (*"NOT tested here … funding accrual on held inventory"*). This closes that.*
+
+**XS-9, controlled A/B — identical data, 133 pairs × 2198 hourly bars, 84 rebalances:**
+
+| | funding OFF | funding ON | Δ |
+|---|---|---|---|
+| gross_total_pct | 10.394 | 10.394 | — |
+| cost_total_pct (turnover) | 1.111 | 1.111 | — |
+| **funding_total_pct** | 0.000 | **1.828** | +1.828 |
+| net_total_pct | 9.284 | 7.455 | −1.828 |
+| sharpe_net | 2.602 | 2.087 | −0.515 |
+| sharpe_oos | 0.808 | 0.301 | −0.507 |
+| **max_day_share** (criterion d, ≤ 0.30) | **0.249 PASS** | **0.307 FAIL** | +0.058 |
+| criteria passed | 3 / 6 | **2 / 6** | −1 |
+
+**Funding costs 1.65× the entire turnover bill** and takes OOS Sharpe from 0.808 to 0.301.
+
+**It flips criterion (d), and the mechanism is worth naming.** Funding is a *toll on every
+period*, not a per-trade cost, so it shrinks the denominator of `max_day_share` without shrinking
+the best single period's contribution — concentration rises arithmetically. The strategy becomes
+more dependent on its best day precisely because a constant charge is applied to all of them.
+
+**State the fragility plainly: the flip is marginal.** 0.307 against a 0.30 threshold is 0.007
+over the line, and an earlier run on a 130-pair universe gave 0.295 — passing. This is a
+criterion sitting on its threshold, not a decisive refutation; what is robust is the *magnitude*
+(funding > turnover cost), not which side of 0.30 it lands on in a given week.
+
+**The "it cancels on a neutral book" prior was wrong, and the reason is the finding.** A
+market-neutral book with a *uniform* rate does net to ~0 — pinned in
+`tests/test_xs_rotation_funding.py`, along with the mirror case. It pays 1.828 % because the book
+is **beta-neutral, not funding-neutral**: funding is the price of crowding, crowding correlates
+with volatility, and the strategy ranks on volatility, so the vol tilt *is* a funding tilt. Any
+long-short construction on this venue should assume funding is a first-order cost until measured.
+
+**XS-6:** funding 0.56–3.03 % across the twelve configurations, exceeding turnover cost outright
+in the long-short cases (k=10 L/S: funding 3.03 % vs cost 2.83 %). Verdict unchanged at **0 of 6**
+— it was already failing every criterion.
+
+**Two collection defects found and fixed on the way.** (i) Settlements are stamped a few
+*milliseconds* past the hour (`19:00:00.037`) while candle bars sit exactly on it, so an exact
+reindex matched **32 of 2198 rows**: the study would have printed "funding CHARGED" and charged
+almost nothing. A silent near-zero is worse than an obvious zero because it survives review;
+rounding to the hour fixed it (177/177 pairs, 2143/2198 rows) and a test pins it. (ii) The page
+path had no retry — only `fetch_universe`'s one-shot `meta` call wraps itself — and a universe
+sweep at a tight delay lost **75 of 177 coins to HTTP 429**. Transport-only retry with backoff
+(the `fetch_universe` rule) recovered all 75.
+
+---
+
 ## 8. Platform & hypothesis-suite metrics
 
 *Source: project_state_report 2026-06-09.*

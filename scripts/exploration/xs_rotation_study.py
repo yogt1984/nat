@@ -31,9 +31,13 @@ A configuration that clears all six promotes to lifecycle DISCOVERED. Anything e
 recorded in FINDINGS as a negative with the same care as a positive — the §4.6 lesson is
 that unrecorded negatives return as false positives.
 
+Funding accrual on held inventory **is now charged** (COST-9, 2026-08-11) — it was the gap
+this docstring used to declare. Hyperliquid settles hourly, not 8-hourly, and every constant
+in the repo said 8, so the charge was both absent here and 8x understated everywhere it
+appeared. Rates come from `data/funding/` via `data.fetch_funding.load_funding_panel`.
+
 NOT tested here, and not to be claimed: live fills (this crosses the spread at the
-prevailing quote, it does not model queue or impact), funding accrual on held inventory
-(the gap `DOCS_IMPROVEMENT_PLAN` §D.1 flags), and regime breadth — one 90-day window.
+prevailing quote, it does not model queue or impact), and regime breadth — one 90-day window.
 """
 
 from __future__ import annotations
@@ -105,8 +109,16 @@ def _deflated_sharpe_p(sr: float, n: int, n_trials: int, skew=0.0, kurt=3.0) -> 
     return float(1 - stats.norm.cdf(z))
 
 
-def run(k: int, long_short: bool, stress: float, wide, agg, costs, admitted) -> dict:
-    """One configuration: daily top-k rotation on `vol` rank (low vol = long)."""
+def run(k: int, long_short: bool, stress: float, wide, agg, costs, admitted,
+        funding_wide=None) -> dict:
+    """One configuration: daily top-k rotation on `vol` rank (low vol = long).
+
+    `funding_wide` (COST-9) is the per-bar funding RATE panel aligned to `wide`. It was
+    unpriced until 2026-08-11 — the module docstring above declared the gap and this closes
+    it. Note the `long_short=False` configurations are genuinely long-only, so unlike the
+    beta-neutral XS-9 rebuild they take the **full** funding drag rather than a cancelled
+    one; that asymmetry is the point of pricing both.
+    """
     cols = [c for c in wide.columns if c in admitted]
     w = wide[cols]
     hs = agg.loc[cols, "half_spread_bps"]
@@ -140,7 +152,17 @@ def run(k: int, long_short: bool, stress: float, wide, agg, costs, admitted) -> 
         cost = float((turnover * cost_bps.reindex(turnover.index).fillna(
             cost_bps.median())).sum()) * 1e-4
         gross = float((wts * fwd.reindex(wts.index).fillna(0.0)).sum())
-        rows.append({"t": idx[i], "gross": gross, "cost": cost, "net": gross - cost,
+
+        # Funding on inventory held over [i, i+REBALANCE) (COST-9). Signed: a long pays a
+        # positive rate. Missing history is 0 for that cell, never NaN for the period.
+        funding = 0.0
+        if funding_wide is not None and len(funding_wide.columns):
+            fw = funding_wide.iloc[i:i + REBALANCE]
+            rate_sum = fw.reindex(columns=wts.index).sum(axis=0, skipna=True).fillna(0.0)
+            funding = float((wts * rate_sum).sum())
+
+        rows.append({"t": idx[i], "gross": gross, "cost": cost, "funding": funding,
+                     "net": gross - cost - funding,
                      "turnover": float(turnover.sum())})
         prev_wts = wts
 
@@ -159,6 +181,7 @@ def run(k: int, long_short: bool, stress: float, wide, agg, costs, admitted) -> 
         "net_total_pct": round(total * 100, 3),
         "gross_total_pct": round(float(df.gross.sum()) * 100, 3),
         "cost_total_pct": round(float(df.cost.sum()) * 100, 3),
+        "funding_total_pct": round(float(df.funding.sum()) * 100, 3),   # COST-9
         "sharpe_net": round(_sharpe(net), 3),
         "sharpe_is": round(_sharpe(is_r), 3),
         "sharpe_oos": round(_sharpe(oos_r), 3),
@@ -181,19 +204,29 @@ def main() -> int:
     print(f"universe admitted at <= {SPREAD_CEILING} bps: {len(admitted)} pairs")
     from utils.costs import taker_bps as ssot_taker_bps, tier_summary
     print(f"costs (SSOT): taker {ssot_taker_bps()} bps, "
-          f"slippage {costs['hyperliquid']['slippage_bps']} bps, tier {tier_summary()}\n")
+          f"slippage {costs['hyperliquid']['slippage_bps']} bps, tier {tier_summary()}")
+
+    # COST-9: funding on held inventory, previously declared untested in this module's
+    # docstring. An empty panel is reported rather than silently pricing at zero funding.
+    from data.fetch_funding import load_funding_panel
+    funding_wide = load_funding_panel(wide.index, symbols=list(wide.columns))
+    covered = int(funding_wide.notna().any().sum()) if len(funding_wide.columns) else 0
+    print(f"funding (COST-9): {covered}/{len(wide.columns)} pairs with history, "
+          f"{'CHARGED' if covered else 'NOT AVAILABLE — run data/fetch_funding.py'}\n")
 
     results = []
     for k in K_VALUES:
         for ls in (False, True):
             for stress in (1.0, 2.0):
-                r = run(k, ls, stress, wide, agg, costs, admitted)
+                r = run(k, ls, stress, wide, agg, costs, admitted,
+                        funding_wide=funding_wide if covered else None)
                 results.append(r)
                 if r.get("n"):
                     tag = "L/S" if ls else "L  "
                     print(f"k={k:<3} {tag} stress={stress:<4} "
                           f"net {r['net_total_pct']:>8.2f}%  "
-                          f"(gross {r['gross_total_pct']:>7.2f} - cost {r['cost_total_pct']:>6.2f})  "
+                          f"(gross {r['gross_total_pct']:>7.2f} - cost {r['cost_total_pct']:>6.2f}"
+                          f" - fund {r['funding_total_pct']:>6.2f})  "
                           f"SR {r['sharpe_net']:>6.2f}  OOS {r['sharpe_oos']:>6.2f}  "
                           f"pos {r['positive_share']:.2f}  maxday {r['max_day_share']:.2f}  "
                           f"turn {r['mean_turnover']:.2f}")

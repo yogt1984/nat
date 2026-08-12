@@ -20,9 +20,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
+import urllib.error
 from pathlib import Path
 
 import pandas as pd
@@ -46,6 +48,10 @@ SYMBOL_DELAY = 0.5       # seconds between symbols in a universe sweep
 #: SMALLER than this is the last page. Pagination advances startTime past the
 #: newest entry received, so the bound only has to be an upper bound.
 PAGE_LIMIT = 500
+#: Transport-fault retries per page. A universe sweep is ~5 pages x 177 coins; a run at a
+#: tighter delay lost 75/177 coins to HTTP 429 with no retry in the page path.
+RETRIES = 4
+BACKOFF = 2.0
 
 
 def _parse_history(raw: list[dict]) -> pd.DataFrame:
@@ -58,6 +64,33 @@ def _parse_history(raw: list[dict]) -> pd.DataFrame:
         "premium": [float(e.get("premium", "nan")) for e in raw],
     })
     return df.astype({"time": "int64"})
+
+
+def _request_with_backoff(info_fn, payload: dict, retries: int = RETRIES,
+                          backoff: float = BACKOFF):
+    """Retry TRANSPORT faults, never schema faults — the `fetch_universe` rule.
+
+    `_info_request` has no retry of its own; only the one-shot `meta` call in
+    `fetch_universe` wraps itself. A universe sweep issues ~5 pages per coin, so it puts
+    far more requests per second through the endpoint than any other collector here — a
+    run at a 0.15 s delay lost **75 of 177 coins to HTTP 429**. A rate limit is exactly the
+    transient that deserves a wait; a payload whose shape changed deserves to fail once,
+    loudly, rather than be retried into the same wall.
+    """
+    last: Exception | None = None
+    for attempt in range(max(1, retries)):
+        try:
+            return info_fn(payload)
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError,
+                json.JSONDecodeError) as exc:
+            last = exc
+            if attempt + 1 >= max(1, retries):
+                raise
+            wait = backoff * (2 ** attempt)
+            log.warning("funding page failed (%s); retrying in %.1fs", exc, wait)
+            time.sleep(wait)
+    if last is not None:                      # pragma: no cover - defensive
+        raise last
 
 
 def fetch_funding(
@@ -78,7 +111,7 @@ def fetch_funding(
         payload = {"type": "fundingHistory", "coin": symbol, "startTime": cursor}
         if end_ms is not None:
             payload["endTime"] = int(end_ms)
-        raw = info_fn(payload)
+        raw = _request_with_backoff(info_fn, payload)
         if not raw:
             break
         page = _parse_history(raw)
@@ -162,6 +195,51 @@ def backfill_universe(
         if sleep_s and i + 1 < len(symbols):
             time.sleep(SYMBOL_DELAY if sleep_s == RATE_LIMIT_SLEEP else sleep_s)
     return {"ok": ok, "failed": failed}
+
+
+def load_funding_panel(index, symbols=None, data_dir: Path | str = DATA_DIR) -> pd.DataFrame:
+    """Read the archive into a (timestamp x symbol) RATE panel aligned to `index`.
+
+    `index` is a price panel's index, so the result drops straight into
+    `xs.rotation.run_rotation(..., funding_wide=…)`. Rates are fractions per hourly
+    settlement, the same units as a forward return — no bps scaling.
+
+    **Settlements are stamped a few MILLISECONDS past the hour** (`19:00:00.037`) while
+    candle bars sit exactly on it, so the timestamps are rounded to the hour before
+    alignment. Without that, an exact reindex matched **32 of 2198 rows** on the real
+    archive: the study would have reported funding as charged and then charged almost
+    nothing — a silent near-zero, which is worse than an obvious zero because it survives
+    review.
+
+    Missing cells stay **NaN** rather than 0 so a caller can still tell "no funding" from
+    "no data"; the rotation treats NaN as zero-for-that-cell. No forward-fill — an hour
+    with no settlement is not the previous hour's rate. Returns an empty frame when
+    nothing is archived, so a caller can detect that instead of silently pricing at zero.
+    """
+    data_dir = Path(data_dir)
+    if not data_dir.exists():
+        return pd.DataFrame(index=index)
+
+    want = set(symbols) if symbols is not None else None
+    series = {}
+    for p in sorted(data_dir.glob("*.parquet")):
+        symbol = p.stem
+        if want is not None and symbol not in want:
+            continue
+        df = pd.read_parquet(p, columns=["time", "funding_rate"])
+        if df.empty:
+            continue
+        ts = pd.to_datetime(df["time"], unit="ms", utc=True).dt.round("h")
+        s = pd.Series(df["funding_rate"].to_numpy(), index=ts).sort_index()
+        series[symbol] = s[~s.index.duplicated(keep="last")]
+
+    if not series:
+        return pd.DataFrame(index=index)
+
+    idx = pd.DatetimeIndex(index)
+    if idx.tz is None:
+        idx = idx.tz_localize("UTC")
+    return pd.DataFrame(series).reindex(idx)
 
 
 def build_parser() -> argparse.ArgumentParser:
