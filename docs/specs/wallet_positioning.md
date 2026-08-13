@@ -147,7 +147,7 @@ a known short shows negative size.
 information available at time t**.
 
 - `realised_pnl(wallet, t0, t1)` from the snapshot series (position value + uPnL deltas), with
-  deposits/withdrawals flagged as unattributable rather than silently counted as P&L;
+  deposits/withdrawals **read from the venue ledger and subtracted** — see the amendment below;
 - `rank_cohorts(as_of, lookback) -> {top: [...], bottom: [...]}` — ranked on the lookback
   window **ending strictly before `as_of`**;
 - `cohort_net_positioning(snapshots, cohort, coin) -> signed notional`, normalised by cohort
@@ -156,6 +156,25 @@ information available at time t**.
 **The causality rule.** A cohort ranked on a window that includes the evaluation period is the
 A-2 error in new clothing — the combiner's weights were fitted three days *after* the window
 they were scored on and that alone produced its result. Cohorts must be re-ranked walk-forward.
+
+> **Amendment 2026-08-13 — flows are read, not inferred.** This step originally planned to infer
+> deposits/withdrawals from the snapshot residual and flag large jumps as unattributable. Two
+> things came out of the data. First, the residual `Δaccount_value − Δ uPnL` is not separable:
+> across 20,065 real WP-2 intervals its 99th percentile is **0.43 of account value** and **6.6 %
+> of intervals move account value by >2 % net of uPnL**, so flagging would file 6.6 % of the
+> panel as unknown. Second — not known when this spec was written — the venue exposes
+> `userNonFundingLedgerUpdates`, which returns deposits and transfers **explicitly**. So
+> `WP-3` gained a Part B (`scripts/data/fetch_ledger.py`) and realised P&L became
+> `Δaccount_value − Δ uPnL − net_perp_flow`, exact rather than flagged.
+>
+> The flagging discipline moved rather than disappeared: it now applies to **unrecognised ledger
+> delta types**, which raise instead of contributing zero. That earned itself on the first
+> universe backfill — six unknown types appeared, and the most common of them,
+> `accountClassTransfer` (spot↔perp collateral), had **1,574 occurrences**. Zeroed silently it
+> would have corrupted realised P&L for most wallets with no symptom. Three types
+> (`rewardsClaim`, `borrowLend`, `accountActivationGas`) remain deliberately unresolved: their
+> perp effect cannot be established until the position panel is long enough to reconcile an
+> event against its `account_value` step, and a guessed sign is worse than a flag.
 
 **Tests** (`tests/test_cohorts.py`):
 - **the decisive one:** a wallet that is profitable *only after* `as_of` must not appear in the

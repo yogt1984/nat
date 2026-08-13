@@ -19,6 +19,7 @@ def cmd_wallets_help(args=None):
     nat wallets roster        Derive the wallet roster from the venue leaderboard (WP-1)
     nat wallets positions     One position sweep across the roster (WP-2)
     nat wallets panel         Accrual status of the collected panel (WP-2 clock)
+    nat wallets cohorts       Rank wallets on realised P&L, causally (WP-3)
 
   Spec: docs/specs/wallet_positioning.md · Families: research/MECHANISM_FAMILIES.md (5, 7)
 """)
@@ -100,6 +101,52 @@ def cmd_wallets_panel(args):
     return _output(data, args, _human)
 
 
+def cmd_wallets_cohorts(args):
+    """WP-3 — rank wallets on realised P&L over a window ending strictly before `as_of`."""
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import pandas as pd
+    from wallets.cohorts import load_ledger, load_position_panel, rank_cohorts
+
+    panel = load_position_panel()
+    if panel.empty:
+        print("  no position panel — is nat-position-sampler.service running?")
+        return 1
+    ledger = load_ledger()
+
+    as_of = (int(pd.Timestamp(args.as_of, tz="UTC").timestamp() * 1000)
+             if args.as_of else int(panel.ts_ms.max()))
+    lookback_ms = int(args.lookback * 86_400_000)
+    try:
+        out = rank_cohorts(panel, as_of=as_of, lookback_ms=lookback_ms,
+                           k=args.k, ledger=ledger)
+    except ValueError as e:
+        print(f"  refused: {e}")
+        return 1
+
+    w0, w1 = out["window"]
+    data = {"as_of": out["as_of"], "window_utc": [str(pd.Timestamp(w0, unit='ms', tz='UTC')),
+                                                  str(pd.Timestamp(w1, unit='ms', tz='UTC'))],
+            "n_ranked": out["n_ranked"], "n_contaminated": out["n_contaminated"],
+            "top": out["top"], "bottom": out["bottom"],
+            "top_scores": {w: out["scores"][w] for w in out["top"]}}
+
+    def _human(d):
+        print(f"\n  {BOLD}Cohorts{W} — ranked on realised P&L, window ends BEFORE as_of   "
+              f"{Y}[PRELIM]{W}")
+        print(f"    window   : {d['window_utc'][0]}  ->  {d['window_utc'][1]}")
+        print(f"    ranked   : {d['n_ranked']} wallets")
+        if d["n_contaminated"]:
+            print(f"    {Y}contaminated: {d['n_contaminated']} wallets have an unknown "
+                  f"ledger delta type in this window — their P&L is not trustworthy{W}")
+        print(f"\n    {'top cohort':<44}{'realised P&L':>16}")
+        for w in d["top"][:10]:
+            print(f"    {w:<44}{d['top_scores'][w]:>16,.2f}")
+        print(f"\n  Ranking is causal by construction — a wallet that only profits after\n"
+              f"  as_of cannot enter the top cohort. Rank stability (the early kill) needs\n"
+              f"  >=30 days of WP-2 accrual; this is inspection, not a verdict.\n")
+    return _output(data, args, _human)
+
+
 def register(sub):
     p = sub.add_parser('wallets', help='On-chain wallet layer (WP-1..5) [PRELIM]')
     p.set_defaults(func=cmd_wallets_help)
@@ -124,3 +171,11 @@ def register(sub):
     p3 = s.add_parser('panel', help='Accrual status of the position panel (WP-2 clock) [PRELIM]')
     p3.add_argument('--json', action='store_true')
     p3.set_defaults(func=cmd_wallets_panel)
+
+    p4 = s.add_parser('cohorts', help='Rank wallets on realised P&L, causally (WP-3) [PRELIM]')
+    p4.add_argument('--as-of', default=None,
+                    help='UTC timestamp; the ranking window ends strictly BEFORE it')
+    p4.add_argument('--lookback', type=float, default=2.0, help='Ranking window, in days')
+    p4.add_argument('--k', type=int, default=20, help='Cohort size')
+    p4.add_argument('--json', action='store_true')
+    p4.set_defaults(func=cmd_wallets_cohorts)
