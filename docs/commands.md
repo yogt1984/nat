@@ -10,7 +10,7 @@
 > *every* command lands with NAT9. Absence of a tag is not a claim of maturity.
 
 
-**343 commands** across **73 groups**.
+**345 commands** across **73 groups**.
 
 | Group | Commands |
 |---|---|
@@ -85,7 +85,7 @@
 | [`visualize`](#visualize) | 8 |
 | [`viz`](#viz) | 8 |
 | [`viz3d`](#viz3d) | 1 |
-| [`wallets`](#wallets) | 2 |
+| [`wallets`](#wallets) | 4 |
 | [`xs`](#xs) | 7 |
 
 
@@ -783,6 +783,8 @@
 | Command | Description |
 |---|---|
 | `nat wallets` | On-chain wallet layer (WP-1..5) [PRELIM] |
+| `nat wallets panel` | Accrual status of the position panel (WP-2 clock) [PRELIM] |
+| `nat wallets positions` | One position sweep across the roster (WP-2) [PRELIM] |
 | `nat wallets roster` | Derive the wallet roster from the leaderboard (WP-1) [PRELIM] |
 
 ## xs
