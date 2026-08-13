@@ -3420,6 +3420,37 @@
         {
           "help": "show this help message and exit",
           "name": "-h"
+        },
+        {
+          "help": "UTC timestamp; the ranking window ends strictly BEFORE it",
+          "name": "--as-of"
+        },
+        {
+          "default": "2.0",
+          "help": "Ranking window, in days",
+          "name": "--lookback",
+          "type": "float"
+        },
+        {
+          "default": "20",
+          "help": "Cohort size",
+          "name": "--k",
+          "type": "int"
+        },
+        {
+          "default": "False",
+          "help": "",
+          "name": "--json"
+        }
+      ],
+      "help": "Rank wallets on realised P&L, causally (WP-3) [PRELIM]",
+      "name": "wallets cohorts"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
         }
       ],
       "help": "Kill-switch daemon + halt control (T16)",
@@ -6143,5 +6174,5 @@
       "name": "it-engine status"
     }
   ],
-  "count": 345
+  "count": 346
 }

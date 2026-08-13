@@ -85,7 +85,19 @@ POSITION_COLUMNS = [
     "ts_ms", "wallet", "coin", "size", "entry_price", "position_value", "unrealized_pnl",
     "liquidation_price", "leverage", "leverage_type", "max_leverage", "margin_used",
     "return_on_equity", "cum_funding_since_open", "cum_funding_all_time",
-    "account_value", "total_ntl_pos", "total_margin_used", "withdrawable",
+    # `total_raw_usd` — the venue's `marginSummary.totalRawUsd`, added 2026-08-13 for WP-3.
+    # Snapshot-only and unbackfillable, so days 1-4 lack it and every reader must tolerate its
+    # absence (spec §B3).
+    #
+    # **Its semantics are NOT established, and the obvious identity is false.** It was added on
+    # the assumption that `account_value - total_raw_usd ~= sum(unrealized_pnl)`, giving an
+    # independent consistency check. Measured live 2026-08-13 across four rostered accounts,
+    # that is wrong: a flat account has `av - raw == 0`, but an 18-position account gave
+    # `av - raw = -437,517` against `sum uPnL = -377`. Whatever the field decomposes into, it is
+    # not cash-plus-uPnL. It is stored because it is one float, free, and unrecoverable later --
+    # NOT because anything downstream may assume a relation to the other columns. Establish the
+    # semantics before using it for anything.
+    "account_value", "total_raw_usd", "total_ntl_pos", "total_margin_used", "withdrawable",
     "cross_maintenance_margin_used", "venue_time_ms", "status", "error",
 ]
 
@@ -135,6 +147,7 @@ def parse_clearinghouse_state(payload, wallet: str, ts_ms: int | None = None) ->
     margin = payload.get("marginSummary") or {}
     account = {
         "account_value": _f(margin.get("accountValue")),
+        "total_raw_usd": _f(margin.get("totalRawUsd")),
         "total_ntl_pos": _f(margin.get("totalNtlPos")),
         "total_margin_used": _f(margin.get("totalMarginUsed")),
         "withdrawable": _f(payload.get("withdrawable")),

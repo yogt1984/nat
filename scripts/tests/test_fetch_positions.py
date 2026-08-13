@@ -264,3 +264,54 @@ def test_write_snapshot_is_append_only(tmp_path):
 
 def test_empty_rows_writes_nothing(tmp_path):
     assert fp.write_snapshot([], tmp_path) is None
+
+
+# ── total_raw_usd (added 2026-08-13 for WP-3) ────────────────────────────────────
+
+def test_total_raw_usd_is_captured():
+    """The cash figure. Snapshot-only and unbackfillable, so it had to be added early."""
+    rows = fp.parse_clearinghouse_state(_state([_pos()]), LONG)
+    assert rows[0]["total_raw_usd"] == 900.0
+
+
+def test_total_raw_usd_is_passed_through_unmodified():
+    """Stored verbatim — no derived relation to the other columns may be assumed.
+
+    The column was added expecting `account_value - total_raw_usd ~= sum(uPnL)`. Measured live
+    2026-08-13 that identity is FALSE (a flat account gives 0, but an 18-position account gave
+    -437,517 against a uPnL sum of -377). So this pins pass-through only; asserting the identity
+    would encode a venue semantic that does not exist.
+    """
+    rows = fp.parse_clearinghouse_state(
+        _state([_pos(coin="BTC"), _pos(coin="ETH")], account_value="1000.0"), LONG)
+    assert all(r["total_raw_usd"] == 900.0 for r in rows), "value altered or not broadcast"
+
+
+def test_a_flat_account_also_carries_cash():
+    rows = fp.parse_clearinghouse_state(_state([]), FLAT)
+    assert rows[0]["status"] == fp.PositionStatus.EMPTY
+    assert rows[0]["total_raw_usd"] == 900.0
+
+
+def test_readers_tolerate_days_written_before_the_column_existed(tmp_path):
+    """Days 1-4 have 22 columns and later days 23; both must load together.
+
+    Concatenating a pre-column day with a post-column day must not raise and must not
+    silently drop the older rows — the panel WP-3 reads spans the boundary.
+    """
+    import pandas as pd
+
+    rows, _ = fp.sweep_positions(
+        [LONG], fetch_fn=_fetcher({LONG: _state([_pos()])}), delay=0)
+    new_path = fp.write_snapshot(rows, tmp_path, ts_ms=1_700_000_060_000)
+
+    old = pd.read_parquet(new_path).drop(columns=["total_raw_usd"])   # a day-1..4 file
+    old_dir = tmp_path / "1970-01-01"
+    old_dir.mkdir(parents=True, exist_ok=True)
+    old.to_parquet(old_dir / "positions_000000.parquet", index=False)
+
+    both = pd.concat([old, pd.read_parquet(new_path)], ignore_index=True)
+    assert len(both) == 2 * len(old), "a mixed-schema concat dropped rows"
+    assert both["total_raw_usd"].isna().sum() == len(old), \
+        "pre-column rows should be NaN for the new column, not dropped or zero-filled"
+    assert both["account_value"].notna().all(), "shared columns must survive the concat"
