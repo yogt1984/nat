@@ -3378,6 +3378,48 @@
         {
           "help": "show this help message and exit",
           "name": "-h"
+        },
+        {
+          "default": "200",
+          "help": "",
+          "name": "--max-wallets",
+          "type": "int"
+        },
+        {
+          "default": "1000000.0",
+          "help": "",
+          "name": "--min-notional",
+          "type": "float"
+        },
+        {
+          "default": "False",
+          "help": "",
+          "name": "--json"
+        }
+      ],
+      "help": "One position sweep across the roster (WP-2) [PRELIM]",
+      "name": "wallets positions"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
+        },
+        {
+          "default": "False",
+          "help": "",
+          "name": "--json"
+        }
+      ],
+      "help": "Accrual status of the position panel (WP-2 clock) [PRELIM]",
+      "name": "wallets panel"
+    },
+    {
+      "args": [
+        {
+          "help": "show this help message and exit",
+          "name": "-h"
         }
       ],
       "help": "Kill-switch daemon + halt control (T16)",
@@ -6101,5 +6143,5 @@
       "name": "it-engine status"
     }
   ],
-  "count": 343
+  "count": 345
 }
