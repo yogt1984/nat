@@ -65,7 +65,7 @@ in Cryptocurrency Perpetual Futures}}
 \author{Yigit Onat\\
 \textit{Independent Researcher}\\
 \texttt{yionat@gmail.com}}
-\date{May 2026}
+\date{August 2026}
 \maketitle
 
 % ============================================================
@@ -95,7 +95,11 @@ breakout patterns show no predictive power after multiple testing
 correction. Rolling SVD stability analysis confirms that the discovered
 shapes are temporally persistent ($\bar{\rho} > 0.90$ for the strongest
 kernels), supporting their use as real-time features via cosine similarity
-scoring.
+scoring. In walk-forward validation, however, no kernel yet meets the
+out-of-sample robustness threshold and several flip sign out of sample:
+at the current data volume ($\sim$50--70 test-set events per type) the
+discovered shapes are candidate features, not validated signals, and we
+estimate 3--6$\times$ more data is required for a decisive test.
 \end{abstract}
 
 \smallskip
@@ -1074,10 +1078,13 @@ that the data-driven approach captures structures that an analyst would not
 have designed a priori.
 
 The primary limitation is data volume: walk-forward OOS validation does not
-yet confirm robustness at the $\rho_{\mathrm{decay}} \geq 0.50$ threshold.
-This is a data limitation rather than a methodological failure---in-sample
-ICs are strong ($|\mathrm{IC}|$ up to 0.47) and turtle-type kernels show
-partial OOS generalisation. Future work will extend the analysis to
+yet confirm robustness at the $\rho_{\mathrm{decay}} \geq 0.50$ threshold,
+and several kernels flip sign out of sample.
+The event counts are consistent with a data limitation rather than a
+methodological failure---in-sample ICs are strong ($|\mathrm{IC}|$ up to
+0.47) and turtle-type kernels show partial OOS generalisation with
+consistent sign---but until a decisive test is run, the honest status of
+every discovered kernel is \emph{candidate}, not \emph{validated}. Future work will extend the analysis to
 multiple assets and longer time horizons.
 
 % ============================================================
